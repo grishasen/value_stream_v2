@@ -2612,8 +2612,10 @@ Pipelines) live in <a href="../../design/mockups/"><code>design/mockups/</code><
   reference instead of copying it.</li>
 <li>Single-source commands: each command sequence lives in exactly one guide;
   other pages link to it (tutorials may repeat their own runnable steps).</li>
-<li>Tutorials must pass on a clean clone. Only <code>examples/demo</code> (catalog) is
-  checked in; tutorials generate their own data.</li>
+<li>Tutorials must pass on a clean clone and use <code>examples/demo</code>; tutorials
+  generate their own data. Additional catalog-only workspaces may be checked
+  in as migration or configuration showcases, but must validate without data
+  and document their source assumptions next to the example.</li>
 <li>Prefer tables for status, responsibilities, and decision criteria.</li>
 <li>Mark future or deferred capabilities explicitly; current behavior comes
   before roadmap content.</li>

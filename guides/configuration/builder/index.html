@@ -2399,6 +2399,13 @@ dimension selectors extra width beside descriptions, and places related
 kind-specific fields in two- or three-column rows. Long multi-select values
 therefore keep useful space without making every scalar field consume a full
 row.</p>
+<p>Source-field selectors combine the discovered source schema with fields
+referenced by source transforms and processors, including an
+<code>entities.subject</code> field. The resulting choices are listed alphabetically so
+the same field is easy to find in every selector. Recipe-library selectors use
+the same alphabetical ordering for recipes, processors, business fields,
+binding choices, algorithms, populations, and report pages. Funnel stages keep
+their configured order because that sequence defines the funnel.</p>
 <p>The recipe readiness state tells you whether processor inputs are configured,
 need an explicit mapping, or require a new aggregate state. Sketch recipes list
 all processor <code>group_by</code> and configured business fields plus every compatible
