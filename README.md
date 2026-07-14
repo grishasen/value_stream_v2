@@ -46,4 +46,4 @@ uv run mkdocs build --strict
 
 ## License
 
-Proprietary. See repository owner.
+MIT.
