@@ -1,0 +1,3577 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Aggregate-first business intelligence platform">
+      
+      
+      
+      
+        <link rel="prev" href="../architecture-overview/">
+      
+      
+        <link rel="next" href="../domain-model/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Architecture (deep) - Value Stream</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#value-stream-high-level-architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Value Stream" class="md-header__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Value Stream
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture (deep)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/getting-started/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/users/running-reports/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../product-overview/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/cli/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../design/replacement-design/" class="md-tabs__link">
+          
+  
+  
+  Design docs
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Value Stream" class="md-nav__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Value Stream
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/ui-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/distribution-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/lifecycle-and-funnel-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Funnel & lifecycle analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/pega-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pega export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/running-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/chat-with-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/querying-and-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Querying & export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/workspaces-and-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces & catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/ai-config-studio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Configuration Studio
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration & backfill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../product-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../business-functionality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Business functionality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (deep)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (deep)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-mission-and-one-line-description" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Mission and one-line description
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-design-forces-and-quality-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Design forces and quality attributes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-stakeholders-and-use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Stakeholders and use cases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-c4-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. C4 — Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-c4-containers-logical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. C4 — Containers (logical)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-c4-components-inside-the-ingestion-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. C4 — Components inside the ingestion engine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-c4-components-inside-the-query-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. C4 — Components inside the query layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-end-to-end-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. End-to-end data flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-storage-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Storage layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-configuration-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Configuration model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Configuration model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration-authoring-surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration authoring surfaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-technology-stack-and-rationale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Technology stack and rationale
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-concurrency-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Concurrency model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-caching-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Caching strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-failure-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Failure semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-security-and-privacy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Security and privacy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. Observability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17-deployment-topology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. Deployment topology
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#18-lifecycle-of-an-aggregate-row" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        18. Lifecycle of an aggregate row
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#19-cross-cutting-concerns-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        19. Cross-cutting concerns matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#20-boundaries-what-value-stream-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        20. Boundaries — what Value Stream is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domain-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_6" id="__nav_4_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions (ADRs)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Decisions (ADRs)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0001-aggregate-first-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0001 Aggregate-first storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0002-yaml-catalog-as-source-of-behavior/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0002 YAML catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0003-closed-expression-ast/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0003 Closed expression AST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0004-chunk-ledger-idempotency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0004 Chunk-ledger idempotency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/expression-dsl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Expression DSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/readers-and-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers & formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/chart-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chart catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/kpi-recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/catalog-schemas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api-and-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design docs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design docs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/replacement-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Replacement design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/implementation-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/reporting-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipe backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat With Data MLP1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kickoff-prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kickoff prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meta/documentation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-mission-and-one-line-description" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Mission and one-line description
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-design-forces-and-quality-attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Design forces and quality attributes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-stakeholders-and-use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Stakeholders and use cases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-c4-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. C4 — Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-c4-containers-logical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. C4 — Containers (logical)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-c4-components-inside-the-ingestion-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. C4 — Components inside the ingestion engine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-c4-components-inside-the-query-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. C4 — Components inside the query layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-end-to-end-data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. End-to-end data flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-storage-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Storage layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-configuration-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Configuration model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Configuration model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configuration-authoring-surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration authoring surfaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-technology-stack-and-rationale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Technology stack and rationale
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-concurrency-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Concurrency model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-caching-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Caching strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-failure-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Failure semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-security-and-privacy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Security and privacy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-observability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. Observability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17-deployment-topology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. Deployment topology
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#18-lifecycle-of-an-aggregate-row" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        18. Lifecycle of an aggregate row
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#19-cross-cutting-concerns-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        19. Cross-cutting concerns matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#20-boundaries-what-value-stream-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        20. Boundaries — what Value Stream is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="value-stream-high-level-architecture">Value Stream — High-Level Architecture<a class="headerlink" href="#value-stream-high-level-architecture" title="Permanent link">&para;</a></h1>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Document</td>
+<td>Architecture overview</td>
+</tr>
+<tr>
+<td>Companion docs</td>
+<td>design/replacement-design.md (detailed), concepts/domain-model.md, reference/processors.md, reference/algorithms.md, reference/readers-and-formats.md, reference/expression-dsl.md, reference/chart-catalog.md, design/implementation-plan.md, reference/faq.md</td>
+</tr>
+<tr>
+<td>Audience</td>
+<td>Engineers, architects, and senior stakeholders</td>
+</tr>
+<tr>
+<td>Current stack</td>
+<td>Polars · DuckDB · Streamlit · Plotly · Apache DataSketches · PyArrow Parquet</td>
+</tr>
+<tr>
+<td>Current headless surfaces</td>
+<td>Read-only FastAPI HTTP API · local stdio MCP</td>
+</tr>
+<tr>
+<td>Deferred surfaces</td>
+<td>Remote HTTP MCP · OIDC/multi-user service deployment</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="1-mission-and-one-line-description">1. Mission and one-line description<a class="headerlink" href="#1-mission-and-one-line-description" title="Permanent link">&para;</a></h2>
+<p>Value Stream is a configuration-driven, aggregate-first business intelligence platform for marketing, ML, and customer-lifecycle metrics. It ingests batch exports from upstream operational systems (typically Pega CDH Interaction History and Product Holdings), reduces them to small, mergeable sufficient statistics during a single chunk pass, and serves business reports and dashboards from those persisted aggregates — never from raw rows.</p>
+<p>Everything that can be expressed as a small, fixed-size summary per group-by tuple is in scope. Everything that requires raw event histories, exact identity sets across chunks, or per-entity ordered state is out of scope (or is approximated via sketches, or moved to a snapshot processor).</p>
+<h2 id="2-design-forces-and-quality-attributes">2. Design forces and quality attributes<a class="headerlink" href="#2-design-forces-and-quality-attributes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Quality attribute</th>
+<th>What it means here</th>
+<th>How the architecture satisfies it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Aggregate-only at rest</td>
+<td>Raw event rows must not survive the chunk pass</td>
+<td>Each <code>chunk_aggregate</code> produces a sufficient-statistics frame; raw rows are discarded after that</td>
+</tr>
+<tr>
+<td>Configurable</td>
+<td>Non-developers can add metrics, dashboards, and group-by columns</td>
+<td>YAML DSL with JSON-Schema validation; closed expression AST replaces <code>eval</code>-strings</td>
+</tr>
+<tr>
+<td>Deterministic</td>
+<td>Same computation contract + same file fingerprints = same numbers</td>
+<td>computation hash covers workspace defaults, source behavior, and processor semantics; merge ops are associative-commutative</td>
+</tr>
+<tr>
+<td>Idempotent ingestion</td>
+<td>Unchanged chunks are skipped; changed files are reprocessed</td>
+<td><code>(source, chunk, source-computation-hash, file_hash)</code> planning; latest-successful-run-wins reads</td>
+</tr>
+<tr>
+<td>Observability first</td>
+<td>Every number is traceable to a chunk and a config</td>
+<td><code>pipeline_run_id</code>, <code>chunk_id</code>, <code>period</code>, <code>created_at</code>, <code>config_hash</code> columns on every aggregate row</td>
+</tr>
+<tr>
+<td>Multi-grain</td>
+<td>Same metric available at <code>Day</code>, <code>Month</code>, and <code>Summary</code> grains</td>
+<td>Per-(source, processor, grain) physical aggregate; planner picks cheapest grain</td>
+</tr>
+<tr>
+<td>Operates on one node</td>
+<td>Targets ~10–100 GB raw input per workspace</td>
+<td>Polars + DuckDB; chunk-level concurrency; optional shard-by-source</td>
+</tr>
+<tr>
+<td>Friendly defaults</td>
+<td>First-time users get a working dashboard out of the box</td>
+<td>Built-in processor presets, sample workspace, demo dataset, generated dashboards</td>
+</tr>
+<tr>
+<td>Stack continuity</td>
+<td>Reuse Polars, DuckDB, Streamlit, Plotly</td>
+<td>Existing primitives keep their roles; Parquet is the rest format; FastAPI and local MCP reuse the governed query layer</td>
+</tr>
+</tbody>
+</table>
+<p>Non-goals: streaming/CDC, distributed compute, ad-hoc warehouse SQL on raw events, replacing Pega CDH semantics.</p>
+<h2 id="3-stakeholders-and-use-cases">3. Stakeholders and use cases<a class="headerlink" href="#3-stakeholders-and-use-cases" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Marketing analyst</strong> opens <em>Marketing Overview</em> and asks "what was CTR yesterday on Web/Leaderboard for Cards/Loans?" The dashboard tile resolves to a <code>daily</code> engagement aggregate; the planner picks one physical Parquet partition; the answer comes back in milliseconds.</li>
+<li><strong>Data engineer</strong> schedules a daily ingestion run via CLI/cron and monitors freshness in the <em>Ops</em> page.</li>
+<li><strong>Decision scientist</strong> authors a new metric (<code>Cost_per_Impression = Cost / Impressions</code>) by editing <code>metrics.yaml</code>, validates with <code>valuestream validate</code>, and previews it in the Builder UI without touching Python.</li>
+<li><strong>Product owner</strong> opens the <em>Experiments</em> page and reads the chi-square p-value and odds-ratio CI for the latest A/B test.</li>
+<li><strong>LLM agent</strong> answers a question through Chat With Data or the local MCP server by calling aggregate metric tools such as <code>metric_query(metric="CTR", group_by=["Channel"], ...)</code>. Raw data is never exposed.</li>
+<li><strong>Auditor</strong> asks "where did this number on the dashboard come from?" and gets a chunk list + config hash + YAML body in three clicks.</li>
+</ul>
+<h2 id="4-c4-context">4. C4 — Context<a class="headerlink" href="#4-c4-context" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>                                +-------------------------------------+
+                                |          Value Stream Workspace          |
+                                |  (one logical environment, e.g.    |
+                                |   &quot;BDT&quot;, &quot;RBB&quot;, &quot;Demo&quot;)            |
+                                +------------+------------------------+
+                                             ^
+                                             |
++--------------------+    files    +---------+----------+    config    +----------------+
+| Upstream operational| ----------&gt; | Value Stream Platform   | &lt;-----------| Configuration  |
+| systems (Pega CDH,  |             | (this design)      |             | YAML in git    |
+| product holdings,   |             +---------+----------+             +----------------+
+| subscriptions)      |                       ^
++--------------------+                        |
+                                              | reads (UI / SDK / SQL export)
+                              +---------------+----------------+
+                              |                                |
+                       +------+------+                  +------+------+
+                       |  Streamlit  |                  |  Notebook,  |
+                       |  UI         |                  |  SDK, SQL   |
+                       +-------------+                  |  export     |
+                                                        +------+------+
+                                                               |
+                                                 local MCP + read-only HTTP API;
+                                                 remote HTTP MCP deferred
+</code></pre></div>
+<h2 id="5-c4-containers-logical">5. C4 — Containers (logical)<a class="headerlink" href="#5-c4-containers-logical" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>+-------------------------+   +-------------------------+   +-------------------------+
+| 1. Configuration store  |   | 2. Aggregate store      |   | 3. Metadata store       |
+| ----------------------- |   | ----------------------- |   | ----------------------- |
+| YAML files in git or    |   | Parquet files,          |   | DuckDB databases:       |
+| local catalog/ folder.  |   | hive-partitioned by     |   |   chunks, runs,         |
+| JSON-Schema validated.  |   | period under            |   |   config_versions,      |
+| Hashed -&gt; config_hash.  |   | aggregates/&lt;src&gt;/&lt;proc&gt;/|   |   lineage.              |
++-----------+-------------+   |   &lt;grain&gt;/period=...    |   +-----------+-------------+
+            |                 +-----------+-------------+               |
+            |                             |                             |
+            v                             v                             |
++-------------------------+   +-------------------------+                |
+| 4. Ingestion engine     |--&gt;| 5. Query layer          |&lt;---------------+
+| ----------------------- |   | ----------------------- |
+| Discovery, grouping,    |   | Planner picks physical  |
+| chunked Polars pipeline,|   | aggregate; executor     |
+| processor fan-out,      |   | runs metric DSL formulas|
+| compaction, ledger      |   | and sketch queries.     |
+| writes.                 |   +-----------+-------------+
++-----+-------------------+               |
+      ^                                   |
+      |                                   v
+      |                         +-------------------------+
+      |                         | 6. Surfaces             |
+      |                         | ----------------------- |
+      |                         |  - Streamlit UI         |
+      |                         |  - Python SDK           |
+|                         |  - SQL via DuckDB views |
+|                         |  - local MCP tools      |
+|                         |  - read-only HTTP API   |
+|                         |  - remote MCP deferred  |
+      |                         +-------------------------+
+      |
+      |
++-----+-----+
+| 7. CLI    |
+| (valuestream) |
+| run/     |
+| migrate/ |
+| vacuum/  |
+| validate |
++----------+
+</code></pre></div>
+<p>Container responsibilities:</p>
+<ol>
+<li><strong>Configuration store</strong> — YAML files versioned in git: <code>pipelines.yaml</code>, <code>processors.yaml</code>, <code>metrics.yaml</code>, and <code>dashboards.yaml</code>. Loaded at startup, validated, hashed.</li>
+<li><strong>Aggregate store</strong> — file-system-rooted Parquet directories with hive partitioning. The only place persisted business data lives.</li>
+<li><strong>Metadata store</strong> — small DuckDB databases tracking chunks, runs, config versions, lineage. Single-writer per database file; readers can be many.</li>
+<li><strong>Ingestion engine</strong> — turns files into aggregates. Reads files lazily via Polars, applies transforms, fans out to processors, writes Parquet partials, runs compactions, updates the chunks ledger.</li>
+<li><strong>Query layer</strong> — turns metric requests into reads from the aggregate store. Plans, scans Parquet via DuckDB, materializes Polars frames, applies derived metric DSL, returns rows.</li>
+<li><strong>Surfaces</strong> — current read clients on top of the same query layer are Streamlit UI, Python SDK, DuckDB export, Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API. Remote HTTP MCP and multi-user/OIDC deployment are deferred.</li>
+<li><strong>CLI</strong> — operator entry point: <code>run</code>, <code>validate</code>, <code>migrate</code>, <code>backfill</code>, <code>vacuum</code>, <code>serve</code>.</li>
+</ol>
+<p>The Streamlit reports surface reads typed page-filter definitions from
+<code>dashboards.yaml</code>, with a backward-compatible inference fallback over the
+processors that back the page's tiles. Because Value Stream is aggregate-first,
+only persisted processor <code>group_by</code> columns are eligible. Each filter declares
+<code>all_tiles</code> or <code>compatible_tiles</code> coverage. The capability matrix is validated,
+partial coverage is shown on the active chip, and every unsupported tile names
+the active filters it did not apply; filters are never skipped silently.</p>
+<p>Before scanning Parquet, the query executor uses file lineage to select only
+partials whose <code>config_hash</code> matches the current Processor computation hash.
+It never blends files from different Processor schemas or substitutes nulls
+for newly configured aggregate states. If no current-hash partial has been
+published, the query reports the metric as not ready and the Reports UI shows
+<strong>Backfill required</strong> instead of exposing a storage-library exception. Legacy
+imports without file-lineage rows retain the embedded-hash scan fallback.</p>
+<p>Metric display metadata lives in <code>metrics.yaml</code>; page controls, KPI semantics,
+and tile presentation live in <code>dashboards.yaml</code>. Typed presentation properties
+cover labels, units, value formats, favorable direction, explicit KPI-strip
+placement, previous-period/target comparison, sparklines, absolute/index/change
+scales, semantic category colors, goal/reference lines, sorting, and conditional
+colors. These settings are consumed by the query/presentation boundary and do
+not alter persisted aggregate state or metric calculation semantics.</p>
+<p>For external BI tools, <code>valuestream export-duckdb &lt;workspace&gt; --grain &lt;grain&gt;</code>
+creates a materialized DuckDB file with one table per metric at the selected
+grain. Each table is populated through the normal metric query layer using all
+persisted <code>group_by</code> dimensions from the metric's processor, so SQL consumers
+see ordinary metric-output columns rather than serialized sketch state. This is
+an export artifact, not the canonical store; Parquet aggregates remain the
+source of truth.</p>
+<h2 id="6-c4-components-inside-the-ingestion-engine">6. C4 — Components inside the ingestion engine<a class="headerlink" href="#6-c4-components-inside-the-ingestion-engine" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>+--------------------------------------------------------------+
+|                    Ingestion Engine                          |
+|                                                              |
+| +------------+   +-----------+   +-----------+   +---------+ |
+| | Discovery  |--&gt;| Reader    |--&gt;| Transforms|--&gt;|Processor| |
+| | &amp; grouping |   | (parquet, |   | pipeline  |   |fan-out  | |
+| +------------+   |  pega zip,|   +-----------+   +----+----+ |
+|                  |  csv,xlsx)|                        |      |
+|                  +-----------+                        v      |
+|                                              +--------+----+ |
+|                                              | Per-processor| |
+|                                              | chunk        | |
+|                                              | aggregator   | |
+|                                              +--------+----+ |
+|                                                       |      |
+|                                                       v      |
+|                                              +--------+----+ |
+|                                              | Partial      | |
+|                                              | Parquet      | |
+|                                              | writer       | |
+|                                              +--------+----+ |
+|                                                       |      |
+|                                                       v      |
+|                                              +--------+----+ |
+|                                              | Compactor    | |
+|                                              | (daily -&gt;    | |
+|                                              |  monthly -&gt;  | |
+|                                              |  summary)    | |
+|                                              +--------+----+ |
+|                                                       |      |
+|                                                       v      |
+|                                              +--------+----+ |
+|                                              | Chunk ledger | |
+|                                              | + run record | |
+|                                              +--------------+ |
++--------------------------------------------------------------+
+</code></pre></div>
+<h2 id="7-c4-components-inside-the-query-layer">7. C4 — Components inside the query layer<a class="headerlink" href="#7-c4-components-inside-the-query-layer" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>+--------------------------------------------------------------+
+|                       Query Layer                            |
+|                                                              |
+|   +-------------+   +---------+   +----------+   +--------+  |
+|   | Resolver    |--&gt;| Planner |--&gt;| Executor |--&gt;| Metric |  |
+|   | (metric -&gt;  |   | (pick   |   | (DuckDB  |   | DSL    |  |
+|   | processor + |   | grain &amp; |   | scan +   |   | (formula|  |
+|   | states)     |   | filters)|   | Polars)  |   | / curve|  |
+|   +-------------+   +---------+   +----------+   |  / test|  |
+|                                                  |  / RFM)|  |
+|                                                  +--------+  |
+|                                                              |
+|   Cross-cuts: cache (LRU keyed by                            |
+|     metric_id, dim_set, filter_hash, grain, config_hash),    |
+|     freshness reporter, lineage emitter.                     |
++--------------------------------------------------------------+
+</code></pre></div>
+<h2 id="8-end-to-end-data-flow">8. End-to-end data flow<a class="headerlink" href="#8-end-to-end-data-flow" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>[Files in source folder]
+      |
+      v
+[Discovery]  -- glob + group_by_filename pattern --&gt; chunk_id
+      |
+      v
+[Reader]     -- pega_ds_export | parquet | csv | xlsx --&gt; Polars LazyFrame
+      |
+      v
+[Transforms] -- rename_capitalize, parse_datetime, derive_calendar,
+                derive_action_id, filter (AST), dedup, defaults
+      |
+      v
+[For each processor bound to this source:]
+      |
+      v
+   [Processor.chunk_aggregate]
+      |    -- group_by(group_by columns + time_grain)
+      |    -- aggregate states (counts, sums, mins, maxes, sketches)
+      v
+   [Base chunk aggregate state]
+      |
+      v
+[For each configured grain: processor.compact(base state)]
+      |    -- remove finer calendar keys
+      |    -- merge states by state-type rule, without rereading raw rows
+      v
+[Immutable run/chunk parquet partials written atomically]
+      |
+      v
+[Chunk ledger row written]  -- meta/chunks.duckdb
+      |
+      v
+=== ingestion done ===
+
+=== query path begins ===
+
+[Tile / SDK call: metric=CTR, grain=Day, fields=[Day,Channel,Group], time=2024-08]
+      |
+      v
+[Resolver] -- CTR -&gt; processor=engagement, states=[Positives,Negatives]
+      |
+      v
+[Planner]  -- pick aggregates/ih/engagement/daily, period in [2024-08]
+      |
+      v
+[Executor] -- DuckDB read_parquet(...) + compatible tile/page filters
+      |
+      v
+[Polars frame]
+      |
+      v
+[Metric DSL apply] -- CTR = Positives / (Positives + Negatives)
+      |
+      v
+[Return rows + query provenance (stored grain, catalog/computation hashes,
+ run IDs, chunk IDs, aggregate scan count, latest created_at)]
+</code></pre></div>
+<h2 id="9-storage-layout">9. Storage layout<a class="headerlink" href="#9-storage-layout" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>&lt;workspace&gt;/
+├── catalog/                # versioned YAML configs
+│   ├── pipelines.yaml
+│   ├── processors.yaml
+│   ├── metrics.yaml
+│   └── dashboards.yaml
+├── aggregates/             # the only place business data lives
+│   └── &lt;source_id&gt;/
+│       └── &lt;processor_id&gt;/
+│           └── &lt;grain&gt;/
+│               └── period=YYYY-MM/part-&lt;run&gt;-&lt;chunk&gt;.parquet
+├── meta/                   # metadata DBs (DuckDB)
+│   ├── chunks.duckdb
+│   ├── pipeline_runs.duckdb
+│   ├── config_versions.duckdb
+│   ├── lineage.duckdb
+│   └── aggregate_views.duckdb  # governed views over successful aggregates
+</code></pre></div>
+<p>The same workspace layout is used for every variant (BDT, RBB, NBS, Demo, …). Variants are <strong>separate workspaces</strong>; there is no commingling of variants inside one workspace.</p>
+<h2 id="10-configuration-model">10. Configuration model<a class="headerlink" href="#10-configuration-model" title="Permanent link">&para;</a></h2>
+<p>Four YAML files form the catalog; each has a published JSON Schema in <code>schemas/</code>.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>What it defines</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pipelines.yaml</code></td>
+<td>Sources (where files come from) + readers + transforms + defaults</td>
+</tr>
+<tr>
+<td><code>processors.yaml</code></td>
+<td>Processors bound to sources, with <code>group_by</code>, <code>time.grains</code>, states, outcome rules</td>
+</tr>
+<tr>
+<td><code>metrics.yaml</code></td>
+<td>Derived metric definitions (formula, sketch query, variant compare, contingency test, …)</td>
+</tr>
+<tr>
+<td><code>dashboards.yaml</code></td>
+<td>Dashboards, pages, tiles; tiles bind to metrics, not processors</td>
+</tr>
+</tbody>
+</table>
+<p>The full DSL is specified in design/replacement-design.md §7 and concepts/domain-model.md §3. Expression semantics are in reference/expression-dsl.md.</p>
+<p>Three related hashes serve different boundaries:</p>
+<ul>
+<li>the <strong>catalog hash</strong> identifies the complete authored catalog for audit;</li>
+<li>the <strong>source computation hash</strong> covers workspace defaults, the source
+  reader/schema/transforms/defaults, and all processors bound to that source,
+  and controls chunk skip/reprocess decisions;</li>
+<li>the <strong>processor computation hash</strong> covers workspace defaults, source
+  behavior, and one processor, and is persisted as aggregate <code>config_hash</code>.</li>
+</ul>
+<p>Presentation-only descriptions, dashboards, and metric prose do not invalidate
+ingestion. Canonical payloads for all three identities are inserted into
+<code>meta/config_versions.duckdb</code>; each emitted aggregate file is recorded in
+<code>meta/lineage.duckdb</code> with its run, chunk, processor, grain, period, hash, row
+count, and path.</p>
+<h3 id="configuration-authoring-surfaces">Configuration authoring surfaces<a class="headerlink" href="#configuration-authoring-surfaces" title="Permanent link">&para;</a></h3>
+<p>Value Stream has two Streamlit authoring paths over the same YAML catalog:</p>
+<ul>
+<li><strong>Configuration Builder</strong> is the catalog-first, validation-first editor for the active workspace. It has one main builder flow with steps for workspace health, sources, processors, dimensions, metrics, reports/tiles, chat review, settings, and save/export. Source steps edit reader runtime settings, schema keys, defaults, dataset filters, and calculated fields. Filters are authored either as rule rows (<code>field</code>, <code>operator</code>, <code>value</code>, <code>enabled</code>) or raw expression-AST YAML; calculated fields become <code>derive_column</code> transforms with typed AST expressions. Processor steps edit group-by dimensions, grains, states, and optional processor filters. Metric and report steps edit display metadata, page filters/time presets, KPI behavior, descriptions, and scales in addition to chart fields. Page-settings writes merge into the existing page and preserve its tiles, dashboard layout, and theme. Chat review shows which aggregate metrics will be available to Chat With Data and edits chat-only LLM prompt/description guidance in <code>ai.yaml</code>; settings edit workspace defaults plus dashboard theme.</li>
+<li><strong>AI Configuration Studio</strong> is the sample-driven, model-assisted draft workflow. It starts from an uploaded sample, detects reader/runtime defaults, maps required identity/time/outcome fields, applies defaults, compiles filter rules/raw AST, applies calculated fields, derives calendar fields, and asks the user to approve the working field catalog. Its schema dictionary, generation/repair prompts, deterministic report generator, and review controls understand the same metric-display, page-filter, KPI, and scale properties. Applying a draft validates and writes sources, processors, metrics, dashboards, and <code>ai.yaml</code> inside one rollback boundary, preserving theme, layout, page, tile, and chat-guidance properties. Deterministic generation remains available as a baseline/review fallback inside the same draft boundary.</li>
+</ul>
+<p>Both metric steps also expose one shared, versioned KPI recipe library. The
+packaged recipe YAML is an inert authoring artifact: it describes business
+questions, aggregate capability requirements, metric templates, method
+accuracy, and report recommendations. A deterministic resolver reports
+<code>ready</code>, <code>mapping_required</code>, or <code>backfill_required</code>; only an explicit install
+materializes ordinary metric/tile YAML. AI Studio installs into its draft,
+while Configuration Builder installs into the active catalog. See the
+<a href="../../reference/kpi-recipes/">KPI recipe reference</a>.</p>
+<p>Recipe mapping is business-facing: sketch-backed metrics select a
+processor-owned field and any algorithm declared compatible by the recipe;
+paired digests select one score field, and funnels select stages/populations.
+State IDs and sketch parameters are technical detail. A missing
+field/algorithm state becomes a deterministic processor-state proposal. Before
+installation, both Studios show the exact generated YAML patch plus the named
+source, fields, states, and current/proposed processor computation hashes.
+Configuration Builder applies and post-validates the multi-file patch inside a
+rollback boundary. The changed processor requires the first ingestion run for
+a new workspace or replay/backfill for existing aggregates; recipe
+installation never starts that data operation or converts one stored sketch
+family into another.</p>
+<p>Both surfaces use structured YAML parsing and the closed expression AST. Neither writes free-form Python or mutates the workspace until the user presses an explicit apply action; every apply re-runs catalog validation.</p>
+<h2 id="11-technology-stack-and-rationale">11. Technology stack and rationale<a class="headerlink" href="#11-technology-stack-and-rationale" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Technology</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Programming language</td>
+<td>Python 3.11+</td>
+<td>Mature data tooling; team familiarity; rich sketch/Polars/Plotly ecosystem</td>
+</tr>
+<tr>
+<td>Vectorized execution</td>
+<td>Polars &gt;= 1.x</td>
+<td>Lazy frames, streaming engine, expressive groupby + custom map_groups</td>
+</tr>
+<tr>
+<td>Persistent aggregates</td>
+<td>Apache Parquet (PyArrow writer)</td>
+<td>Columnar, hive-partitioned, portable, compact</td>
+</tr>
+<tr>
+<td>SQL surface</td>
+<td>DuckDB</td>
+<td>Read-Parquet TVF, fast aggregation, easy views, single-file metadata DBs</td>
+</tr>
+<tr>
+<td>BI export</td>
+<td>DuckDB tables</td>
+<td>Optional materialized metric tables for Superset/SQL tools</td>
+</tr>
+<tr>
+<td>Distribution sketches</td>
+<td>Apache DataSketches (Python <code>datasketches</code>)</td>
+<td>t-digest, KLL, CPC, HLL, Theta, Frequent-Items</td>
+</tr>
+<tr>
+<td>Statistics</td>
+<td>SciPy</td>
+<td>Chi-square / G-test / odds ratios / CIs</td>
+</tr>
+<tr>
+<td>ML helpers</td>
+<td>scikit-learn (FeatureHasher, cosine_similarity), polars_ds</td>
+<td>Personalization, weighted mean</td>
+</tr>
+<tr>
+<td>UI framework</td>
+<td>Streamlit</td>
+<td>Quickest path to interactive dashboards in Python</td>
+</tr>
+<tr>
+<td>Plotting</td>
+<td>Plotly</td>
+<td>Interactive charts the existing user base already knows</td>
+</tr>
+<tr>
+<td>Read-only API</td>
+<td>FastAPI + Pydantic v2</td>
+<td>Typed metric/chart/freshness/chat endpoints with OpenAPI</td>
+</tr>
+<tr>
+<td>Schema validation</td>
+<td>jsonschema (Draft 2020-12)</td>
+<td>Validate YAML config against a stable schema</td>
+</tr>
+<tr>
+<td>Config templating</td>
+<td>Jinja2 (optional, for variants)</td>
+<td>Workspace-specific overrides</td>
+</tr>
+<tr>
+<td>Packaging</td>
+<td><code>uv</code> + <code>pyproject.toml</code></td>
+<td>Already used in the current repo</td>
+</tr>
+<tr>
+<td>Quality gates</td>
+<td>Local <code>uv</code> commands</td>
+<td>Lint, format, type-check, test, docs build, schema-validate sample configs</td>
+</tr>
+</tbody>
+</table>
+<p>Optional/future:
+- Apache Arrow IPC for very large in-process transfers between SDK and notebook clients.
+- ConnectorX / ADBC for upstream operational DB ingestion (today the upstream is files only).</p>
+<h2 id="12-concurrency-model">12. Concurrency model<a class="headerlink" href="#12-concurrency-model" title="Permanent link">&para;</a></h2>
+<ul>
+<li>One <strong>pipeline run</strong> at a time per source, enforced by a file-system advisory lock at <code>meta/source_&lt;id&gt;.lock</code>.</li>
+<li>A <strong>clean rebuild</strong> acquires all selected source locks in deterministic order and holds them through forced ingestion, coverage validation, scoped cleanup, and aggregate-view refresh. This prevents a concurrent run from publishing files that cleanup could mistake for superseded output.</li>
+<li>Inside a run, <strong>chunks are processed sequentially by default</strong> (predictable memory profile, simpler error semantics). The <code>--parallel &lt;N&gt;</code> flag runs chunks in a process pool of N workers: partial parquet part files are per-chunk so worker writes never collide, and all ledger writes stay in the parent process (the DuckDB metadata files are single-writer). Worker processes sidestep the GIL held by Python sketch building, so the initial load scales with cores.</li>
+<li>Inside a chunk, <strong>processors fan out through one batched <code>pl.collect_all</code></strong>: every processor's <code>chunk_aggregate</code> plan collects in a single pass (sharing the scan via common-subplan elimination), with a logged sequential fallback if the batch fails.</li>
+<li>The <strong>query layer is read-only</strong>, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. A partial becomes visible only after both its successful chunk row and successful/partial run row exist; until then readers retain the previous successful version.</li>
+</ul>
+<h2 id="13-caching-strategy">13. Caching strategy<a class="headerlink" href="#13-caching-strategy" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Reader cache</strong> (per-chunk): if the same chunk is read by multiple processors, the source LazyFrame is collected once and aliased.</li>
+<li><strong>UI metric cache</strong> (Streamlit <code>st.cache_data</code>, in <code>ui/data.py</code>): query results are memoized keyed by workspace, metric, group-by, filters, grain, date range, and a signature derived from the catalog, the processor config hash, the aggregate files' (count, mtime, size), and the ledger DBs' (mtime, size). Any ingestion run therefore invalidates the cache automatically. This cache lives in the Streamlit surface only.</li>
+<li><strong>Query layer</strong> (<code>query/</code>): the executor itself is intentionally <strong>stateless</strong> — SDK, MCP, and CLI callers always read live aggregates. Predicate pushdown (config-hash filter and <code>period</code> partition pruning) keeps the per-call cost low, and DuckDB/Parquet plus the OS page cache absorb repeated reads. A process-level LRU at this layer is a possible future addition but is deliberately not present today, so headless callers never serve stale numbers.</li>
+</ul>
+<p>There is <strong>no cache below the storage layer</strong> (no in-memory copy of the aggregate store) — Parquet + the OS page cache do that work.</p>
+<h2 id="14-failure-semantics">14. Failure semantics<a class="headerlink" href="#14-failure-semantics" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Detection</th>
+<th>Effect</th>
+<th>Recovery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Reader can't open a file</td>
+<td>I/O exception inside chunk loop</td>
+<td>That chunk fails; run continues with next chunk</td>
+<td>Operator fixes file; re-run the source; only failed chunks process</td>
+</tr>
+<tr>
+<td>Processor exception</td>
+<td>Exception inside <code>chunk_aggregate</code></td>
+<td>The chunk fails and none of that run's partials become query-visible; the previous successful chunk version remains visible</td>
+<td>Operator fixes config or code; re-run the source</td>
+</tr>
+<tr>
+<td>Partial Parquet write incomplete</td>
+<td>Write done atomically (write-then-rename)</td>
+<td>Incomplete file never visible to readers</td>
+<td>None needed</td>
+</tr>
+<tr>
+<td>Grain materialization fails</td>
+<td>Exception while deriving a configured grain</td>
+<td>The chunk remains unpublished at every grain; previous successful data remains visible</td>
+<td>Fix the cause and re-run the source</td>
+</tr>
+<tr>
+<td>Config validation fails on load</td>
+<td>JSON-Schema error</td>
+<td>Engine refuses to start; CLI prints actionable error</td>
+<td>Operator fixes YAML</td>
+</tr>
+<tr>
+<td>Clean rebuild safety check fails</td>
+<td>Empty discovery, incomplete source run, missing published path, or catalog hash change</td>
+<td>Scoped cleanup does not start; prior aggregate files and audit metadata remain</td>
+<td>Fix discovery/config/run failure and retry the clean rebuild</td>
+</tr>
+<tr>
+<td>Query layer error</td>
+<td>Exception during plan/execute</td>
+<td>UI/CLI surface returns a structured error; API returns a governed 4xx/5xx</td>
+<td>Operator inspects logs</td>
+</tr>
+</tbody>
+</table>
+<p>A <code>chunk</code> is the unit of recovery; a <code>run</code> is the unit of reporting. Successful chunks within a partially-failed run are kept, marked, and re-used on the next run.</p>
+<h2 id="15-security-and-privacy">15. Security and privacy<a class="headerlink" href="#15-security-and-privacy" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Posture</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Raw PII</td>
+<td>Never persisted; only aggregate state lives at rest</td>
+</tr>
+<tr>
+<td>Identity sketches</td>
+<td>CPC is the distinct-count default; HLL remains supported; Theta can answer distinct count and is preferred when the same state also needs set algebra. Sketches are not a cryptographic anonymization boundary, so identifiers should be tokenized/HMACed upstream when required.</td>
+</tr>
+<tr>
+<td>Code-injection via config</td>
+<td>No <code>eval</code>; only the closed expression AST</td>
+</tr>
+<tr>
+<td>HTTP API auth</td>
+<td>Optional bearer token on loopback; CLI requires one for non-loopback binds; OIDC remains deferred</td>
+</tr>
+<tr>
+<td>Multi-tenancy</td>
+<td>One workspace per tenant/variant; filesystem permissions enforce isolation</td>
+</tr>
+<tr>
+<td>Audit</td>
+<td>Every aggregate row and every query response carries <code>config_hash</code> and lineage pointers</td>
+</tr>
+<tr>
+<td>Logs</td>
+<td>Structured JSON; sensitive fields scrubbed before logging</td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td>Read from environment; never in YAML; <code>.env</code> files excluded from git</td>
+</tr>
+<tr>
+<td>Governed SQL</td>
+<td>Disabled by default for API/MCP; when enabled, only allowlisted aggregate/export paths are accessible and DuckDB external access/extension loading is locked down</td>
+</tr>
+</tbody>
+</table>
+<h2 id="16-observability">16. Observability<a class="headerlink" href="#16-observability" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Logs</strong> (structured JSON): every chunk start/end, processor timing, row counts, memory snapshots.</li>
+<li><strong>Metrics</strong>: <code>valuestream_chunk_seconds</code>, <code>valuestream_chunk_rows_in/out</code>, <code>valuestream_run_status</code>, <code>valuestream_aggregate_size_bytes</code>, <code>valuestream_query_seconds</code>, <code>valuestream_query_rows_scanned</code>. Prometheus <code>/metrics</code> is reserved for the deferred service surface.</li>
+<li><strong>Tracing</strong> (OpenTelemetry, optional): one span per run, child spans per chunk, child spans per processor, attributes for <code>config_hash</code>, <code>chunk_id</code>, and group-by columns.</li>
+<li><strong>Health</strong>: the Streamlit Ops page and CLI validation expose operational health; the read-only API exposes <code>GET /health</code>.</li>
+<li><strong>Freshness and provenance</strong>: Streamlit exposes freshness, while API/MCP metric queries return the selected physical grain, config hashes, contributing runs/chunks, scan count, and latest aggregate timestamp.</li>
+</ul>
+<h2 id="17-deployment-topology">17. Deployment topology<a class="headerlink" href="#17-deployment-topology" title="Permanent link">&para;</a></h2>
+<p>Value Stream runs as one process per workspace by default:</p>
+<div class="highlight"><pre><span></span><code>+-------------------------------------------+
+|  Host (VM / container / laptop)           |
+|                                           |
+|   valuestream serve --workspace bdt           |
+|                                           |
+|   ├── Streamlit on :8501                 |
+|   ├── ingestion runner (CLI / cron)      |
+|   ├── optional local stdio MCP           |
+|   ├── optional read-only FastAPI         |
+|   └── deferred: remote HTTP MCP/OIDC     |
+|                                           |
+|   $WORKSPACE_DIR -&gt; /data/valuestream/bdt    |
++-------------------------------------------+
+</code></pre></div>
+<p>For multiple workspaces, run multiple processes — each has its own working directory, ports, and configuration. A reverse proxy (Traefik / nginx) routes by hostname.</p>
+<p>For local development everything runs from a single <code>valuestream serve</code> command pointed at a local workspace directory.</p>
+<h2 id="18-lifecycle-of-an-aggregate-row">18. Lifecycle of an aggregate row<a class="headerlink" href="#18-lifecycle-of-an-aggregate-row" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>        +-------------------+    file group    +---------------------+
+        |  source folder    | ---------------&gt; | discovery &amp; grouping|
+        +-------------------+                  +---------+-----------+
+                                                          |
+                                                          v
+                                +-------------------+--------+
+                                | reader -&gt; Polars LazyFrame |
+                                +---------+------------------+
+                                          |
+                                          v
+                              +-----------+-----------+
+                              | transforms (typed AST)|
+                              +-----------+-----------+
+                                          |
+                                          v
+                              +-----------+-----------+
+                              | processor.chunk_agg() |
+                              +-----------+-----------+
+                                          |
+                                          v
+                              +-----------+-----------+
+                              | partial parquet write |
+                              +-----------+-----------+
+                                          |
+                                          v
+                              +-----------+-----------+
+                              | (later) compaction    |
+                              | daily -&gt; monthly -&gt;   |
+                              | summary               |
+                              +-----------+-----------+
+                                          |
+                                          v
+                              +-----------+-----------+
+                              | served by query layer |
+                              +-----------+-----------+
+                                          |
+                                  (config change?)
+                                          |
+                                  +-------+-------+
+                                  |               |
+                                  v               v
+                       +----------+--+   +--------+----------+
+                       | re-process  |   | leave on disk     |
+                       | (new run,   |   | until vacuum,     |
+                       |  new hash)  |   | served as legacy  |
+                       +-------------+   +-------------------+
+</code></pre></div>
+<h2 id="19-cross-cutting-concerns-matrix">19. Cross-cutting concerns matrix<a class="headerlink" href="#19-cross-cutting-concerns-matrix" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Where handled</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Schema validation</td>
+<td>Config loader (jsonschema) at startup and on <code>validate</code> CLI</td>
+</tr>
+<tr>
+<td>Time grains</td>
+<td>Source transforms (<code>derive_calendar</code>); processor <code>time.grains</code>; planner</td>
+</tr>
+<tr>
+<td>Sketch parameters</td>
+<td>State spec in <code>processors.yaml</code> (<code>type, lg_k, k, …</code>)</td>
+</tr>
+<tr>
+<td>Filtering</td>
+<td>Two layers: source-wide transform filters; per-processor <code>filter</code> AST</td>
+</tr>
+<tr>
+<td>Default values</td>
+<td><code>sources.&lt;id&gt;.defaults</code> map</td>
+</tr>
+<tr>
+<td>Renaming / casing</td>
+<td>Built-in <code>rename_capitalize</code> transform</td>
+</tr>
+<tr>
+<td>Holiday/business calendars</td>
+<td>Optional <code>calendar</code> block under <code>defaults</code>; future <code>derive_calendar</code> extension</td>
+</tr>
+<tr>
+<td>Reproducibility</td>
+<td><code>config_hash</code> + chunk ledger</td>
+</tr>
+<tr>
+<td>Dataset evolution</td>
+<td>Workspace migrations table tracks YAML changes over time</td>
+</tr>
+<tr>
+<td>Retention</td>
+<td><code>vacuum</code> CLI prunes superseded chunk partials and older <code>config_hash</code> aggregates; Data Load clean rebuild retains only the newly verified run files within its selected source scope</td>
+</tr>
+<tr>
+<td>Backfill</td>
+<td><code>valuestream backfill --source X --from YYYY-MM-DD</code> re-runs all chunks in window</td>
+</tr>
+<tr>
+<td>Disaster recovery</td>
+<td>Aggregate store + metadata is everything; tar it up, ship it, untar</td>
+</tr>
+</tbody>
+</table>
+<h2 id="20-boundaries-what-value-stream-is-not">20. Boundaries — what Value Stream is <em>not</em><a class="headerlink" href="#20-boundaries-what-value-stream-is-not" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Not an ETL platform — there is no transform graph, no joins of arbitrary sources, no schedule across sources.</li>
+<li>Not a warehouse — there is no <code>SELECT *</code> on raw events.</li>
+<li>Not a streaming platform — micro-batch is feasible, true streaming is out of scope.</li>
+<li>Not a feature store — the score-distribution processor exists for ML monitoring, not feature serving.</li>
+<li>Not a CDP — entity resolution beyond approximate distinct counting is not provided.</li>
+</ul>
+<p>These boundaries keep the platform small enough to build, operate, and reason about. Anything outside the boundary is delegated to the upstream operational system or a downstream specialized tool.</p>
+<hr />
+<p><strong>Reading order for a new engineer</strong></p>
+<ol>
+<li>This document.</li>
+<li>concepts/domain-model.md — concepts and their relationships.</li>
+<li>design/replacement-design.md — full DSL, schemas, APIs, migration.</li>
+<li>reference/processors.md — per-processor algorithms.</li>
+<li>reference/algorithms.md — sketches and statistical tests.</li>
+<li>reference/expression-dsl.md — formal grammar for the AST.</li>
+<li>reference/readers-and-formats.md — file format specs.</li>
+<li>reference/chart-catalog.md — Plotly chart bindings.</li>
+<li>reference/faq.md — common questions; check this when stuck.</li>
+<li>design/implementation-plan.md — phased build plan.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,3870 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Aggregate-first business intelligence platform">
+      
+      
+      
+      
+        <link rel="prev" href="../algorithms/">
+      
+      
+        <link rel="next" href="../chart-catalog/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Readers & formats - Value Stream</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#value-stream-readers-and-transforms" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Value Stream" class="md-header__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Value Stream
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Readers & formats
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/getting-started/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/users/running-reports/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../concepts/product-overview/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../cli/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../design/replacement-design/" class="md-tabs__link">
+          
+  
+  
+  Design docs
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Value Stream" class="md-nav__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Value Stream
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/ui-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/distribution-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/lifecycle-and-funnel-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Funnel & lifecycle analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/pega-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pega export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/running-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/chat-with-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/querying-and-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Querying & export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/workspaces-and-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces & catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/ai-config-studio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Configuration Studio
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration & backfill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/product-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/business-functionality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Business functionality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (deep)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/domain-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_6" id="__nav_4_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions (ADRs)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Decisions (ADRs)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0001-aggregate-first-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0001 Aggregate-first storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0002-yaml-catalog-as-source-of-behavior/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0002 YAML catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0003-closed-expression-ast/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0003 Closed expression AST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0004-chunk-ledger-idempotency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0004 Chunk-ledger idempotency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../expression-dsl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Expression DSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers & formats
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers & formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-source-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Source lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-discovery-and-chunk-grouping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Discovery and chunk grouping
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Discovery and chunk grouping">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-inputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Inputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-algorithm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Algorithm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-skip-already-processed-chunks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Skip already processed chunks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-chunk-granularity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Chunk granularity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-failure-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 Failure modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-reader-pega_ds_export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Reader: pega_ds_export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Reader: pega_ds_export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-accepted-file-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Accepted file extensions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-concatenation-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Concatenation rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-schema-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Schema discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-exit-time-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Exit-time cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-reader-parquet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Reader: parquet
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Reader: parquet">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-reader-csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Reader: csv
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Reader: csv">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-delimiter-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Delimiter detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-reader-xlsx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Reader: xlsx
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Reader: xlsx">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-source-defaults-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Source defaults block
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-transforms-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Transforms catalog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Transforms catalog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-rename_capitalize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 rename_capitalize
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-parse_datetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 parse_datetime
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-derive_calendar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 derive_calendar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84-derive_action_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 derive_action_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85-derive_column" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.5 derive_column
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#86-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.6 filter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#87-dedup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.7 dedup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#88-cast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.8 cast
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#89-drop_columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.9 drop_columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#810-coalesce" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.10 coalesce
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-schema-invariants-at-processor-entry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Schema invariants at processor entry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-memory-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Memory budget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Logging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-reader-extensibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Reader extensibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#131-pega-cdh-ih" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.1 Pega CDH IH
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#132-product-holdings-json-exports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.2 Product Holdings (JSON exports)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#133-internal-csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.3 Internal CSV
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#134-hive-partitioned-parquet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.4 Hive-partitioned Parquet
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-sanity-checklist-for-new-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Sanity checklist for new sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chart-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chart catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kpi-recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-schemas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-and-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design docs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design docs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/replacement-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Replacement design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/implementation-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/reporting-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipe backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat With Data MLP1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kickoff-prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kickoff prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meta/documentation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-source-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Source lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-discovery-and-chunk-grouping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Discovery and chunk grouping
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Discovery and chunk grouping">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-inputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Inputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-algorithm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Algorithm
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-skip-already-processed-chunks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Skip already processed chunks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-chunk-granularity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Chunk granularity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-failure-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 Failure modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-reader-pega_ds_export" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Reader: pega_ds_export
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Reader: pega_ds_export">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-accepted-file-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Accepted file extensions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-concatenation-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Concatenation rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-schema-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Schema discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-exit-time-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Exit-time cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-reader-parquet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Reader: parquet
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Reader: parquet">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-reader-csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Reader: csv
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Reader: csv">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-delimiter-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Delimiter detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-reader-xlsx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Reader: xlsx
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Reader: xlsx">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-source-defaults-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Source defaults block
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-transforms-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Transforms catalog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Transforms catalog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-rename_capitalize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 rename_capitalize
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-parse_datetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 parse_datetime
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-derive_calendar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 derive_calendar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84-derive_action_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 derive_action_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85-derive_column" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.5 derive_column
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#86-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.6 filter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#87-dedup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.7 dedup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#88-cast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.8 cast
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#89-drop_columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.9 drop_columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#810-coalesce" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.10 coalesce
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-schema-invariants-at-processor-entry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Schema invariants at processor entry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-memory-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Memory budget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Logging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-reader-extensibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Reader extensibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#131-pega-cdh-ih" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.1 Pega CDH IH
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#132-product-holdings-json-exports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.2 Product Holdings (JSON exports)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#133-internal-csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.3 Internal CSV
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#134-hive-partitioned-parquet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13.4 Hive-partitioned Parquet
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-sanity-checklist-for-new-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Sanity checklist for new sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="value-stream-readers-and-transforms">Value Stream — Readers and Transforms<a class="headerlink" href="#value-stream-readers-and-transforms" title="Permanent link">&para;</a></h1>
+<p>This doc specifies how files turn into a Polars LazyFrame ready for processors. It covers:</p>
+<ul>
+<li>the file-discovery and chunk-grouping rules,</li>
+<li>every built-in reader (Pega DS export, Parquet, CSV, XLSX) with format details and parameters,</li>
+<li>every built-in transform that runs between the reader and the processor fan-out,</li>
+<li>the source's <code>defaults</code> map and how it relates to transforms,</li>
+<li>expected schema invariants by the time the data reaches a processor.</li>
+</ul>
+<p>Companion docs:</p>
+<ul>
+<li>concepts/domain-model.md — Source / Reader / Transform definitions.</li>
+<li>reference/expression-dsl.md — AST for <code>filter</code> and <code>derive_column</code> transforms.</li>
+<li>reference/processors.md — what processors expect to see in the resulting frame.</li>
+</ul>
+<hr />
+<h2 id="1-source-lifecycle">1. Source lifecycle<a class="headerlink" href="#1-source-lifecycle" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>files in folder
+   │
+   ▼
+[ Discovery &amp; grouping ]    ← reader.file_pattern, reader.group_by_filename
+   │
+   ▼
+[ Reader ]                   ← reader.kind: parquet | pega_ds_export | csv | xlsx
+   │
+   ▼
+[ Transforms (ordered) ]     ← source.transforms[]
+   │
+   ▼
+LazyFrame ready for processor.chunk_aggregate
+</code></pre></div>
+<p>A new <code>(chunk_id, files_in_chunk)</code> pair travels through this pipeline once per ingestion run.</p>
+<hr />
+<h2 id="2-discovery-and-chunk-grouping">2. Discovery and chunk grouping<a class="headerlink" href="#2-discovery-and-chunk-grouping" title="Permanent link">&para;</a></h2>
+<h3 id="21-inputs">2.1 Inputs<a class="headerlink" href="#21-inputs" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
+<span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pega_ds_export</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.zip&quot;</span>
+<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;\d{8}(?=\d{6}_)&#39;</span>
+<span class="w">      </span><span class="nt">hive_partitioning</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">      </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<h3 id="22-algorithm">2.2 Algorithm<a class="headerlink" href="#22-algorithm" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>files = sorted( glob(folder, file_pattern, recursive=true) )
+if files is empty:
+    fallback_pattern = &#39;**/*.json&#39;                   # convention
+    files = glob(folder, fallback_pattern, recursive=true)
+    reader.kind = &#39;pega_ds_export&#39;                   # auto-promote
+
+groups = defaultdict(set)
+for f in files:
+    if hive_partitioning:
+        # the path&#39;s parent (a partition directory) is the file unit
+        unit = parent(f)
+    else:
+        unit = f
+    try:
+        chunk_id = re.findall(group_by_filename, abspath(f))[0]
+    except IndexError:
+        chunk_id = basename(f)                       # one-file chunk
+    groups[chunk_id].add(unit)
+
+groups = sort_desc_by_chunk_id(groups)               # newest first
+</code></pre></div>
+<h3 id="23-skip-already-processed-chunks">2.3 Skip already processed chunks<a class="headerlink" href="#23-skip-already-processed-chunks" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>ledger = read_chunks_ledger(source_id)
+for chunk_id in groups:
+    fingerprint = sha256(sorted(path, mtime_ns, size for path in chunk.files))
+    if (source_id, chunk_id, source_computation_hash, fingerprint) in ledger and not force:
+        skip
+</code></pre></div>
+<p>The effective idempotency key is <code>(source_id, chunk_id,
+source_computation_hash, file_hash)</code>. The source computation hash covers
+workspace defaults, source behavior, and all bound processors. <code>file_hash</code>
+covers sorted absolute paths, nanosecond mtimes, and sizes. Unchanged inputs are
+skipped; changed files or behavior are reprocessed without invalidating the
+previous successful aggregate until the new run commits.</p>
+<h3 id="24-chunk-granularity">2.4 Chunk granularity<a class="headerlink" href="#24-chunk-granularity" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Daily file groups</strong> are the recommended default for IH-shaped sources. The regex <code>\d{8}(?=\d{6}_)</code> captures <code>YYYYMMDD</code> from filenames like <code>interaction-XYZ-20240821000000_001.json.zip</code>.</li>
+<li><strong>One file per chunk</strong> is fine for smaller sources; the regex falls back to the basename.</li>
+<li><strong>Hive-partitioned datasets</strong> (e.g. monthly-partitioned Parquet folders) put one <em>partition directory</em> per chunk; the reader scans the whole directory at once.</li>
+</ul>
+<h3 id="25-failure-modes">2.5 Failure modes<a class="headerlink" href="#25-failure-modes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Folder doesn't exist</td>
+<td>misconfiguration</td>
+<td>engine refuses to start; CLI shows the path</td>
+</tr>
+<tr>
+<td>Pattern matches no files</td>
+<td>empty source</td>
+<td>run finishes with <code>chunks_total=0</code>, status <code>ok</code></td>
+</tr>
+<tr>
+<td>Regex never matches</td>
+<td>wrong <code>group_by_filename</code></td>
+<td>engine logs <code>chunk_id=basename(file)</code>; processed but not date-grouped</td>
+</tr>
+<tr>
+<td>Two files belong to different chunks but share a name</td>
+<td>rare; would collide</td>
+<td>engine raises and aborts the run before processing</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-reader-pega_ds_export">3. Reader: <code>pega_ds_export</code><a class="headerlink" href="#3-reader-pega_ds_export" title="Permanent link">&para;</a></h2>
+<p>Pega CDH "Dataset Export" files are gzipped or zipped JSON/NDJSON archives. Value Stream normalizes them to a single NDJSON stream, then <code>polars.scan_ndjson</code>s it.</p>
+<h3 id="31-accepted-file-extensions">3.1 Accepted file extensions<a class="headerlink" href="#31-accepted-file-extensions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Extension</th>
+<th>Treatment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.zip</code></td>
+<td>extract all <code>.json</code> and <code>.ndjson</code> members in alphabetical order; concatenate into one NDJSON stream</td>
+</tr>
+<tr>
+<td><code>.tar.gz</code>, <code>.tgz</code></td>
+<td>extract <code>.json</code>/<code>.ndjson</code> members from the tar; same concatenation</td>
+</tr>
+<tr>
+<td><code>.gz</code>, <code>.gzip</code></td>
+<td>gunzip in-place; expect a single JSON or NDJSON file</td>
+</tr>
+<tr>
+<td><code>.json</code>, <code>.ndjson</code></td>
+<td>read directly</td>
+</tr>
+</tbody>
+</table>
+<p>Each archive becomes one normalized NDJSON file in the OS temp directory; the temp directory is cleaned up at process exit.</p>
+<h3 id="32-concatenation-rules">3.2 Concatenation rules<a class="headerlink" href="#32-concatenation-rules" title="Permanent link">&para;</a></h3>
+<p>When concatenating multiple JSON/NDJSON members, the reader appends a newline if the previous member did not end in one. This guarantees <code>polars.scan_ndjson</code> sees one record per line across boundaries.</p>
+<h3 id="33-schema-discovery">3.3 Schema discovery<a class="headerlink" href="#33-schema-discovery" title="Permanent link">&para;</a></h3>
+<p><code>scan_ndjson(infer_schema_length=100_000)</code> reads the first 100 K records to infer types. This is sufficient for IH exports up to billions of rows because Pega CDH exports use a stable per-tenant schema.</p>
+<h3 id="34-parameters">3.4 Parameters<a class="headerlink" href="#34-parameters" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pega_ds_export</span>
+<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.zip&quot;</span>
+<span class="w">  </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;\d{8}(?=\d{6}_)&#39;</span>
+<span class="w">  </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                  </span><span class="c1"># use Polars streaming engine on collect</span>
+<span class="w">  </span><span class="nt">infer_schema_length</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000</span><span class="w">      </span><span class="c1"># optional, default 100000</span>
+<span class="w">  </span><span class="nt">archive_temp_dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/tmp/valuestream</span><span class="w">   </span><span class="c1"># optional, default OS tempdir</span>
+</code></pre></div>
+<h3 id="35-exit-time-cleanup">3.5 Exit-time cleanup<a class="headerlink" href="#35-exit-time-cleanup" title="Permanent link">&para;</a></h3>
+<p>Every chunk creates one temp directory with the prefix <code>dataset_export_</code>. An <code>atexit</code> hook removes them on process shutdown. A janitor command (<code>valuestream vacuum --tmp</code>) removes orphans from prior crashes.</p>
+<hr />
+<h2 id="4-reader-parquet">4. Reader: <code>parquet</code><a class="headerlink" href="#4-reader-parquet" title="Permanent link">&para;</a></h2>
+<h3 id="41-parameters">4.1 Parameters<a class="headerlink" href="#41-parameters" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parquet</span>
+<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.parquet&quot;</span>
+<span class="w">  </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;(\d{4}-\d{2}-\d{2})&#39;</span><span class="w">   </span><span class="c1"># optional</span>
+<span class="w">  </span><span class="nt">hive_partitioning</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                    </span><span class="c1"># if directory layout uses hive partitions</span>
+<span class="w">  </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">missing_columns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">insert</span><span class="w">                    </span><span class="c1"># behavior when a chunk&#39;s file lacks a known column</span>
+<span class="w">  </span><span class="nt">extra_columns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ignore</span><span class="w">                      </span><span class="c1"># behavior when a chunk&#39;s file has extra columns</span>
+</code></pre></div>
+<h3 id="42-implementation">4.2 Implementation<a class="headerlink" href="#42-implementation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>ih = pl.scan_parquet(
+    files,
+    cache=False,
+    hive_partitioning=hive_partitioning,
+    missing_columns=&quot;insert&quot;,
+    extra_columns=&quot;ignore&quot;,
+)
+</code></pre></div>
+<h3 id="43-notes">4.3 Notes<a class="headerlink" href="#43-notes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Value Stream expects upstream Parquet to be tabular and timezone-aware where applicable.</li>
+<li>Hive partition columns become regular columns in the LazyFrame, available to transforms.</li>
+</ul>
+<hr />
+<h2 id="5-reader-csv">5. Reader: <code>csv</code><a class="headerlink" href="#5-reader-csv" title="Permanent link">&para;</a></h2>
+<h3 id="51-parameters">5.1 Parameters<a class="headerlink" href="#51-parameters" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
+<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.csv&quot;</span>
+<span class="w">  </span><span class="nt">separator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">              </span><span class="c1"># auto | &quot;,&quot; | &quot;;&quot; | &quot;\t&quot; | &quot;|&quot; | &quot;:&quot;</span>
+<span class="w">  </span><span class="nt">infer_schema_length</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10000</span>
+<span class="w">  </span><span class="nt">try_parse_dates</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</code></pre></div>
+<h3 id="52-delimiter-detection">5.2 Delimiter detection<a class="headerlink" href="#52-delimiter-detection" title="Permanent link">&para;</a></h3>
+<p>When <code>separator: auto</code>, the reader peeks at the first 2 lines and tries delimiters in this order:
+<code>,  ;  \t  (space)  |  :</code>. The first delimiter that parses both lines into the same number of fields wins; otherwise it defaults to <code>,</code>.</p>
+<h3 id="53-implementation">5.3 Implementation<a class="headerlink" href="#53-implementation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>ih = pl.scan_csv(
+    file,
+    separator=separator,
+    infer_schema_length=infer_schema_length,
+    try_parse_dates=try_parse_dates,
+    cache=False,
+)
+</code></pre></div>
+<hr />
+<h2 id="6-reader-xlsx">6. Reader: <code>xlsx</code><a class="headerlink" href="#6-reader-xlsx" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">xlsx</span>
+<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.xlsx&quot;</span>
+<span class="w">  </span><span class="nt">sheet</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span><span class="w">           </span><span class="c1"># int index or sheet name</span>
+</code></pre></div>
+<h3 id="61-notes">6.1 Notes<a class="headerlink" href="#61-notes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>XLSX is read eagerly via <code>polars.read_excel(...)</code> and immediately converted to a LazyFrame.</li>
+<li>Multi-sheet workbooks must be expanded into one Source per sheet; Value Stream does not auto-fan-out.</li>
+</ul>
+<hr />
+<h2 id="7-source-defaults-block">7. Source <code>defaults</code> block<a class="headerlink" href="#7-source-defaults-block" title="Permanent link">&para;</a></h2>
+<p>Defaults run after the reader, before transforms (or as the first transform — implementation-equivalent). Two behaviors:</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Column doesn't exist in the LazyFrame</td>
+<td>add it as a literal with the default value</td>
+</tr>
+<tr>
+<td>Column exists but has nulls</td>
+<td><code>fill_null(default)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Type promotion: if the default value parses as a float, it becomes Float64; otherwise it stays a string.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
+<span class="w">    </span><span class="nt">defaults</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">ModelControlGroup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Test</span>
+<span class="w">      </span><span class="nt">PlacementType</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">ExperimentName</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">ExperimentGroup</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">FinalPropensity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">      </span><span class="nt">Priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-10</span>
+<span class="w">      </span><span class="nt">Revenue</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">      </span><span class="nt">ConversionEventID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+</code></pre></div>
+<hr />
+<h2 id="8-transforms-catalog">8. Transforms catalog<a class="headerlink" href="#8-transforms-catalog" title="Permanent link">&para;</a></h2>
+<p>A Source's <code>transforms</code> list is processed in order. Each transform is a typed dictionary <code>{kind: &lt;name&gt;, ...params}</code>. The full set:</p>
+<h3 id="81-rename_capitalize">8.1 <code>rename_capitalize</code><a class="headerlink" href="#81-rename_capitalize" title="Permanent link">&para;</a></h3>
+<p>Renames every column to its <code>Capitalized</code> form. The legacy app does this so Pega's <code>pyName</code> becomes <code>Name</code>, <code>pxFirstName</code> becomes <code>Pxfirstname</code>, etc. The transform also drops a configurable list of non-essential columns first.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rename_capitalize</span>
+<span class="w">  </span><span class="nt">drop_columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pxObjClass</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pxApplication</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pxOutboundChannelInfo</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># optional</span>
+</code></pre></div>
+<h3 id="82-parse_datetime">8.2 <code>parse_datetime</code><a class="headerlink" href="#82-parse_datetime" title="Permanent link">&para;</a></h3>
+<p>Parses string columns into <code>Datetime</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parse_datetime</span>
+<span class="w">  </span><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">OutcomeTime</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DecisionTime</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z&quot;</span><span class="w">   </span><span class="c1"># strptime format</span>
+<span class="w">  </span><span class="nt">utc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                         </span><span class="c1"># convert to UTC</span>
+</code></pre></div>
+<h3 id="83-derive_calendar">8.3 <code>derive_calendar</code><a class="headerlink" href="#83-derive_calendar" title="Permanent link">&para;</a></h3>
+<p>Adds calendar columns from a timestamp.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">derive_calendar</span>
+<span class="w">  </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
+<span class="w">  </span><span class="nt">outputs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">]</span><span class="w">    </span><span class="c1"># any subset</span>
+<span class="w">  </span><span class="nt">week_iso</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">                          </span><span class="c1"># also compute &quot;Week&quot;</span>
+</code></pre></div>
+<p>Output columns: <code>Day</code> (date), <code>Month</code> (string <code>YYYY-MM</code>), <code>Year</code> (Int16), <code>Quarter</code> (string <code>YYYY_Qn</code>), optional <code>Week</code> (string <code>YYYY-Www</code>).</p>
+<h3 id="84-derive_action_id">8.4 <code>derive_action_id</code><a class="headerlink" href="#84-derive_action_id" title="Permanent link">&para;</a></h3>
+<p>Concatenates business-key parts into a single <code>ActionID</code>. Mirrors Pega's <code>Issue/Group/Name</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">derive_action_id</span>
+<span class="w">  </span><span class="nt">parts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">sep</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/&quot;</span>
+<span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ActionID</span>
+</code></pre></div>
+<h3 id="85-derive_column">8.5 <code>derive_column</code><a class="headerlink" href="#85-derive_column" title="Permanent link">&para;</a></h3>
+<p>Adds a derived column from an AST expression.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">derive_column</span>
+<span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ResponseTime</span>
+<span class="w">  </span><span class="nt">expression</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">date_diff</span>
+<span class="w">    </span><span class="nt">unit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">seconds</span>
+<span class="w">    </span><span class="nt">end</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">OutcomeTime</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">start</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">DecisionTime</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<h3 id="86-filter">8.6 <code>filter</code><a class="headerlink" href="#86-filter" title="Permanent link">&para;</a></h3>
+<p>Restricts rows by an AST predicate.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">filter</span>
+<span class="w">  </span><span class="nt">expression</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">and</span>
+<span class="w">    </span><span class="nt">args</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">not_null</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Channel</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">in</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">,</span><span class="nt"> values</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Impression</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Clicked</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Pending</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Conversion</span><span class="p p-Indicator">]}</span>
+</code></pre></div>
+<h3 id="87-dedup">8.7 <code>dedup</code><a class="headerlink" href="#87-dedup" title="Permanent link">&para;</a></h3>
+<p>Deduplicates by a key set, optionally keeping the row with the maximum of a column.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dedup</span>
+<span class="w">  </span><span class="nt">keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">InteractionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ActionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Rank</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">keep</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">first</span><span class="w">                 </span><span class="c1"># first | last | max | min</span>
+<span class="w">  </span><span class="nt">on_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Outcome_Binary</span><span class="w">    </span><span class="c1"># only required if keep ∈ {max, min}</span>
+</code></pre></div>
+<h3 id="88-cast">8.8 <code>cast</code><a class="headerlink" href="#88-cast" title="Permanent link">&para;</a></h3>
+<p>Casts columns to a target dtype. Useful when the reader infers a wrong type.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cast</span>
+<span class="w">  </span><span class="nt">columns</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">Propensity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Float64</span>
+<span class="w">    </span><span class="nt">Priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Float64</span>
+</code></pre></div>
+<h3 id="89-drop_columns">8.9 <code>drop_columns</code><a class="headerlink" href="#89-drop_columns" title="Permanent link">&para;</a></h3>
+<p>Removes columns explicitly.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">drop_columns</span>
+<span class="w">  </span><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pxOutboundChannelInfo</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pxOutboundCampaignInfo</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<h3 id="810-coalesce">8.10 <code>coalesce</code><a class="headerlink" href="#810-coalesce" title="Permanent link">&para;</a></h3>
+<p>Replaces nulls in <code>target</code> with the first non-null among <code>from</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">coalesce</span>
+<span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ConversionEventID</span>
+<span class="w">  </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>(Pega's interaction history uses this pattern: when <code>ConversionEventID</code> is empty, use <code>Name</code>.)</p>
+<hr />
+<h2 id="9-schema-invariants-at-processor-entry">9. Schema invariants at processor entry<a class="headerlink" href="#9-schema-invariants-at-processor-entry" title="Permanent link">&para;</a></h2>
+<p>By the time a chunk's LazyFrame reaches <code>processor.chunk_aggregate</code>, it must satisfy:</p>
+<ol>
+<li><strong>Required group-by columns exist</strong> — every transformed column referenced by <code>processor.group_by</code>.</li>
+<li><strong>Required outcome / score / key columns exist</strong> — for <code>binary_outcome</code>: <code>outcome.column</code>; for <code>score_distribution</code>: every selected <code>score_properties</code> column.</li>
+<li><strong>Configured processor time input exists</strong> — <code>processor.time.column</code>, when set; calendar output columns needed for physical grains are derived by transforms/grain handling.</li>
+<li><strong>Timestamps are tz-aware</strong> — UTC.</li>
+<li><strong>Natural-key columns exist</strong> if <code>dedup_keys</code> is set.</li>
+<li><strong>No <code>eval</code>-derived columns remain</strong> — all transforms ran in a typed AST.</li>
+</ol>
+<p>The engine checks authored group-by, time, outcome, score/property, lifecycle,
+entity, milestone, dedup, and explicit state-source columns against the
+transformed LazyFrame schema before any processor writes. Missing inputs fail
+the chunk with one grouped, actionable error rather than silently dropping a
+dimension or state.</p>
+<hr />
+<h2 id="10-memory-budget">10. Memory budget<a class="headerlink" href="#10-memory-budget" title="Permanent link">&para;</a></h2>
+<p>The engine measures memory pressure between chunks (<code>psutil.Process.memory_info().rss</code>) and:</p>
+<ul>
+<li>if <code>RSS &gt; 0.7 × machine_total</code>, it spills the source's collected DataFrame to a temporary Parquet and re-scans for each processor (one extra disk pass for safety).</li>
+<li>if <code>RSS &gt; 0.9 × machine_total</code>, it pauses processing and waits for memory to free.</li>
+</ul>
+<p>These thresholds are configurable in <code>pipelines.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">defaults</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">memory</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">spill_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.7</span>
+<span class="w">    </span><span class="nt">pause_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.9</span>
+<span class="w">    </span><span class="nt">rss_log_every_chunks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">31</span><span class="w">    </span><span class="c1"># debug RSS log every Nth chunk</span>
+</code></pre></div>
+<hr />
+<h2 id="11-logging">11. Logging<a class="headerlink" href="#11-logging" title="Permanent link">&para;</a></h2>
+<p>For each chunk, the reader emits structured log lines:</p>
+<div class="highlight"><pre><span></span><code>{&quot;event&quot;:&quot;chunk_start&quot;, &quot;source&quot;:&quot;ih&quot;, &quot;chunk_id&quot;:&quot;20240821&quot;, &quot;files&quot;:2}
+{&quot;event&quot;:&quot;reader_done&quot;,  &quot;source&quot;:&quot;ih&quot;, &quot;chunk_id&quot;:&quot;20240821&quot;, &quot;rows_in&quot;:12_345_678, &quot;ms&quot;:4321}
+{&quot;event&quot;:&quot;transforms_done&quot;,&quot;source&quot;:&quot;ih&quot;,&quot;chunk_id&quot;:&quot;20240821&quot;, &quot;rows_kept&quot;:12_300_000, &quot;ms&quot;:250}
+{&quot;event&quot;:&quot;chunk_done&quot;,   &quot;source&quot;:&quot;ih&quot;, &quot;chunk_id&quot;:&quot;20240821&quot;, &quot;ms&quot;:12_500}
+</code></pre></div>
+<p>These are correlated by <code>pipeline_run_id</code> for trace assembly.</p>
+<hr />
+<h2 id="12-reader-extensibility">12. Reader extensibility<a class="headerlink" href="#12-reader-extensibility" title="Permanent link">&para;</a></h2>
+<p>A new reader implements:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Reader</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+    <span class="n">kind</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">discover</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">folder</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return chunk_id -&gt; list of file paths.&quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">read_chunk</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">files</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">],</span> <span class="n">params</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">LazyFrame</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a Polars LazyFrame for one chunk.&quot;&quot;&quot;</span>
+</code></pre></div>
+<p>Plug it into the registry:</p>
+<div class="highlight"><pre><span></span><code><span class="n">register_reader</span><span class="p">(</span><span class="s2">&quot;oracle_table&quot;</span><span class="p">,</span> <span class="n">OracleTableReader</span><span class="p">)</span>
+</code></pre></div>
+<p>The new kind is then usable from YAML:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">oracle_table</span>
+<span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${env.ORACLE_DSN}</span>
+<span class="w">  </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SELECT</span><span class="nv"> </span><span class="s">...</span><span class="nv"> </span><span class="s">WHERE</span><span class="nv"> </span><span class="s">created_at</span><span class="nv"> </span><span class="s">&gt;=</span><span class="nv"> </span><span class="s">:since&quot;</span>
+<span class="w">  </span><span class="nt">group_by_value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">created_at_date</span>
+</code></pre></div>
+<p>Built-in readers ship in <code>valuestream.readers.builtin</code>; community readers may live in plugins.</p>
+<hr />
+<h2 id="13-examples">13. Examples<a class="headerlink" href="#13-examples" title="Permanent link">&para;</a></h2>
+<h3 id="131-pega-cdh-ih">13.1 Pega CDH IH<a class="headerlink" href="#131-pega-cdh-ih" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
+<span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pega_ds_export</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.zip&quot;</span>
+<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;\d{8}(?=\d{6}_)&#39;</span>
+<span class="w">      </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">schema</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">timestamp_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
+<span class="w">      </span><span class="nt">natural_key</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">InteractionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ActionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Rank</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">transforms</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">rename_capitalize</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">parse_datetime</span><span class="p p-Indicator">,</span><span class="nt"> columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">OutcomeTime</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DecisionTime</span><span class="p p-Indicator">],</span><span class="nt"> format</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_calendar</span><span class="p p-Indicator">,</span><span class="nt"> from</span><span class="p">:</span><span class="w"> </span><span class="nv">OutcomeTime</span><span class="p p-Indicator">,</span><span class="nt"> outputs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">]}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_action_id</span><span class="p p-Indicator">,</span><span class="nt"> parts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">],</span><span class="nt"> sep</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/&quot;</span><span class="p p-Indicator">,</span><span class="nt"> output</span><span class="p">:</span><span class="w"> </span><span class="nv">ActionID</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_column</span><span class="p p-Indicator">,</span><span class="nt"> output</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">,</span><span class="nt"> expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">date_diff</span><span class="p p-Indicator">,</span><span class="nt"> unit</span><span class="p">:</span><span class="w"> </span><span class="nv">seconds</span><span class="p p-Indicator">,</span><span class="nt"> end</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">OutcomeTime</span><span class="p p-Indicator">},</span><span class="nt"> start</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">DecisionTime</span><span class="p p-Indicator">}}}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">filter</span><span class="p p-Indicator">,</span><span class="nt"> expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">not_null</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Channel</span><span class="p p-Indicator">}}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">coalesce</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="nt"> from</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">]}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">dedup</span><span class="p p-Indicator">,</span><span class="nt"> keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">InteractionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ActionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Rank</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">]}</span>
+<span class="w">    </span><span class="nt">defaults</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">ModelControlGroup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Test</span>
+<span class="w">      </span><span class="nt">PlacementType</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">ExperimentName</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">ExperimentGroup</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">FinalPropensity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">      </span><span class="nt">Priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-10</span>
+<span class="w">      </span><span class="nt">Revenue</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
+<span class="w">      </span><span class="nt">ConversionEventID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+</code></pre></div>
+<h3 id="132-product-holdings-json-exports">13.2 Product Holdings (JSON exports)<a class="headerlink" href="#132-product-holdings-json-exports" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">holdings</span>
+<span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pega_ds_export</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.json&quot;</span>
+<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;(.*)&#39;</span>
+<span class="w">      </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">    </span><span class="nt">transforms</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">rename_capitalize</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">parse_datetime</span><span class="p p-Indicator">,</span><span class="nt"> columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">PurchasedDate</span><span class="p p-Indicator">],</span><span class="nt"> format</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_column</span><span class="p p-Indicator">,</span><span class="nt"> output</span><span class="p">:</span><span class="w"> </span><span class="nv">PurchasedDateTime</span><span class="p p-Indicator">,</span><span class="nt"> expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">PurchasedDate</span><span class="p p-Indicator">}}</span>
+<span class="w">    </span><span class="nt">defaults</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">Channel</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+</code></pre></div>
+<h3 id="133-internal-csv">13.3 Internal CSV<a class="headerlink" href="#133-internal-csv" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">subscriptions</span>
+<span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.csv&quot;</span>
+<span class="w">      </span><span class="nt">separator</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;,&quot;</span>
+<span class="w">      </span><span class="nt">try_parse_dates</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">transforms</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">cast</span><span class="p p-Indicator">,</span><span class="nt"> columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">monthly_recurring</span><span class="p">:</span><span class="w"> </span><span class="nv">Float64</span><span class="p p-Indicator">,</span><span class="nt"> plan_id</span><span class="p">:</span><span class="w"> </span><span class="nv">Int32</span><span class="p p-Indicator">}}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_calendar</span><span class="p p-Indicator">,</span><span class="nt"> from</span><span class="p">:</span><span class="w"> </span><span class="nv">created_at</span><span class="p p-Indicator">,</span><span class="nt"> outputs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">]}</span>
+</code></pre></div>
+<h3 id="134-hive-partitioned-parquet">13.4 Hive-partitioned Parquet<a class="headerlink" href="#134-hive-partitioned-parquet" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">events</span>
+<span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parquet</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.parquet&quot;</span>
+<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;(\d{4}-\d{2}-\d{2})&#39;</span>
+<span class="w">      </span><span class="nt">hive_partitioning</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">      </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">transforms</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">parse_datetime</span><span class="p p-Indicator">,</span><span class="nt"> columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">event_ts</span><span class="p p-Indicator">]}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_calendar</span><span class="p p-Indicator">,</span><span class="nt"> from</span><span class="p">:</span><span class="w"> </span><span class="nv">event_ts</span><span class="p p-Indicator">,</span><span class="nt"> outputs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">]}</span>
+</code></pre></div>
+<hr />
+<h2 id="14-sanity-checklist-for-new-sources">14. Sanity checklist for new sources<a class="headerlink" href="#14-sanity-checklist-for-new-sources" title="Permanent link">&para;</a></h2>
+<p>Before binding a Processor to a new Source:</p>
+<ul>
+<li>[ ] <code>valuestream validate</code> passes against <code>pipelines.yaml</code>.</li>
+<li>[ ] <code>valuestream probe --source &lt;id&gt;</code> produces:</li>
+<li>the inferred schema (column names + dtypes),</li>
+<li>a 10-row sample after all transforms,</li>
+<li>the calendar columns derived,</li>
+<li>the count of distinct <code>chunk_id</code>s discovered.</li>
+<li>[ ] All processor <code>group_by</code> entries resolve to existing transformed columns.</li>
+<li>[ ] All processor outcome/score/key columns exist.</li>
+<li>[ ] No transform raised a warning about silently filling NULLs in a column the processor relies on.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

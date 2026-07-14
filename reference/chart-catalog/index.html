@@ -1,0 +1,3901 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Aggregate-first business intelligence platform">
+      
+      
+      
+      
+        <link rel="prev" href="../readers-and-formats/">
+      
+      
+        <link rel="next" href="../kpi-recipes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Chart catalog - Value Stream</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#value-stream-chart-catalog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Value Stream" class="md-header__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Value Stream
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Chart catalog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/getting-started/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/users/running-reports/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../concepts/product-overview/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../cli/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../design/replacement-design/" class="md-tabs__link">
+          
+  
+  
+  Design docs
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Value Stream" class="md-nav__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Value Stream
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/ui-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/distribution-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/lifecycle-and-funnel-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Funnel & lifecycle analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/pega-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pega export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/running-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/chat-with-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/querying-and-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Querying & export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/workspaces-and-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces & catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/ai-config-studio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Configuration Studio
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration & backfill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/product-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/business-functionality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Business functionality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (deep)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/domain-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_6" id="__nav_4_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions (ADRs)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Decisions (ADRs)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0001-aggregate-first-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0001 Aggregate-first storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0002-yaml-catalog-as-source-of-behavior/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0002 YAML catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0003-closed-expression-ast/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0003 Closed expression AST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0004-chunk-ledger-idempotency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0004 Chunk-ledger idempotency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../expression-dsl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Expression DSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readers-and-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers & formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chart catalog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chart catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-tile-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Tile model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-common-tile-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Common Tile fields
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-chart-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Chart catalog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Chart catalog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#30-kpi_card" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.0 kpi_card
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#31-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 line
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-bar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 bar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-treemap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 treemap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-heatmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 heatmap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-scatter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 scatter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-bar_polar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 bar_polar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-gauge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 gauge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-funnel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 funnel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-boxplot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 boxplot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#310-histogram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.10 histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#311-calibration_curve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.11 calibration_curve
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#312-ml-score-curves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.12 ML score curves
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#313-rfm_density" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.13 rfm_density
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#314-exposure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.14 exposure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#315-corr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.15 corr
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#316-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.16 model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#317-descriptive_line-descriptive_boxplot-descriptive_histogram-descriptive_heatmap-descriptive_funnel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.17 descriptive_line / descriptive_boxplot / descriptive_histogram / descriptive_heatmap / descriptive_funnel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#318-experiment_z_score-experiment_odds_ratio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.18 experiment_z_score / experiment_odds_ratio
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#319-clv_treemap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.19 clv_treemap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#320-marketing-dashboard-chart-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.20 Marketing dashboard chart set
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-recipe-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Recipe metadata
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-theming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Theming
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-presentation-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Presentation settings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-streaming-specific-concerns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Streaming-specific concerns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-accessibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Accessibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-adding-a-new-chart-kind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Adding a new chart kind
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kpi-recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-schemas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-and-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design docs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design docs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/replacement-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Replacement design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/implementation-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/reporting-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipe backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat With Data MLP1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kickoff-prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kickoff prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meta/documentation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-tile-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Tile model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-common-tile-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Common Tile fields
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-chart-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Chart catalog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Chart catalog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#30-kpi_card" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.0 kpi_card
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#31-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 line
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-bar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 bar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-treemap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 treemap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-heatmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 heatmap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-scatter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 scatter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-bar_polar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 bar_polar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-gauge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 gauge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-funnel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 funnel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-boxplot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 boxplot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#310-histogram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.10 histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#311-calibration_curve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.11 calibration_curve
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#312-ml-score-curves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.12 ML score curves
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#313-rfm_density" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.13 rfm_density
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#314-exposure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.14 exposure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#315-corr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.15 corr
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#316-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.16 model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#317-descriptive_line-descriptive_boxplot-descriptive_histogram-descriptive_heatmap-descriptive_funnel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.17 descriptive_line / descriptive_boxplot / descriptive_histogram / descriptive_heatmap / descriptive_funnel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#318-experiment_z_score-experiment_odds_ratio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.18 experiment_z_score / experiment_odds_ratio
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#319-clv_treemap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.19 clv_treemap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#320-marketing-dashboard-chart-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.20 Marketing dashboard chart set
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-recipe-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Recipe metadata
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-theming" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Theming
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-presentation-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Presentation settings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-streaming-specific-concerns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Streaming-specific concerns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-accessibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Accessibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-adding-a-new-chart-kind" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Adding a new chart kind
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="value-stream-chart-catalog">Value Stream — Chart Catalog<a class="headerlink" href="#value-stream-chart-catalog" title="Permanent link">&para;</a></h1>
+<p>This doc specifies the presentation surface: every chart kind a Tile can use, the Tile fields it requires, the Plotly API calls used to render it, and how the chart consumes a metric's output. Implementers build the chart-factory registry from this doc directly.</p>
+<p>Companion docs:</p>
+<ul>
+<li>concepts/domain-model.md (Tile / Dashboard).</li>
+<li>reference/processors.md / reference/algorithms.md (what data shape each chart receives).</li>
+</ul>
+<hr />
+<h2 id="1-tile-model">1. Tile model<a class="headerlink" href="#1-tile-model" title="Permanent link">&para;</a></h2>
+<p>Dashboard pages may author aggregate-backed controls before their tiles:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">filters</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">field</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
+<span class="w">    </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
+<span class="w">    </span><span class="nt">display</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">primary</span><span class="w">            </span><span class="c1"># primary | secondary</span>
+<span class="w">    </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">all_tiles</span><span class="w">            </span><span class="c1"># all_tiles | compatible_tiles</span>
+<span class="w">    </span><span class="nt">control</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">multiselect</span><span class="w">        </span><span class="c1"># multiselect | selectbox | text</span>
+<span class="nt">time_filter</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">all_time</span>
+<span class="w">  </span><span class="nt">presets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">last_30_days</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">last_90_days</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">year_to_date</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">custom</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">all_time</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>The validator checks filter coverage against every tile processor. Older pages
+without these blocks retain an inference fallback.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">tiles</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;snake_case&gt;</span>
+<span class="w">    </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;string&gt;</span>
+<span class="w">    </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;metric id&gt;</span><span class="w">          </span><span class="c1"># required</span>
+<span class="w">    </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;chart kind&gt;</span><span class="w">          </span><span class="c1"># required (key in this catalog)</span>
+<span class="w">    </span><span class="c1"># chart-specific fields below ...</span>
+<span class="w">    </span><span class="nt">time_range</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> last</span><span class="p">:</span><span class="w"> </span><span class="nv">30d</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">    </span><span class="c1"># optional, overrides dashboard default</span>
+<span class="w">    </span><span class="nt">filters</span><span class="p">:</span><span class="w">                     </span><span class="c1"># optional, AND-ed with dashboard filters</span>
+<span class="w">      </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;Web&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;Mobile&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;string&gt;</span><span class="w">        </span><span class="c1"># optional</span>
+<span class="w">    </span><span class="nt">placement</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">content</span><span class="w">           </span><span class="c1"># content | kpi_strip</span>
+<span class="w">    </span><span class="nt">scale_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">absolute</span><span class="w">         </span><span class="c1"># absolute | index_100 | percent_change</span>
+</code></pre></div>
+<p>Tile-level filters are passed straight to the metric query as <code>filters</code>.</p>
+<p>The chart factory receives <code>(rows: pl.DataFrame, tile: dict, plan: PlanInfo)</code> and returns a <code>plotly.graph_objects.Figure</code>.</p>
+<hr />
+<h2 id="2-common-tile-fields">2. Common Tile fields<a class="headerlink" href="#2-common-tile-fields" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Used by</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>x</code></td>
+<td>str</td>
+<td>most</td>
+<td>column name on x axis</td>
+</tr>
+<tr>
+<td><code>y</code></td>
+<td>str / list[str]</td>
+<td>most</td>
+<td>column name(s) on y axis</td>
+</tr>
+<tr>
+<td><code>color</code></td>
+<td>str</td>
+<td>most</td>
+<td>column name to map to color</td>
+</tr>
+<tr>
+<td><code>size</code></td>
+<td>str</td>
+<td>scatter</td>
+<td>column name for marker size</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td>list[str]</td>
+<td>treemap</td>
+<td>hierarchy of group-by columns</td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td>str</td>
+<td>gauge</td>
+<td>scalar column to display</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str</td>
+<td>any</td>
+<td>plain-language context; falls back to metric description</td>
+</tr>
+<tr>
+<td><code>placement</code></td>
+<td>str</td>
+<td>kpi_card</td>
+<td><code>content</code> or explicit <code>kpi_strip</code> placement</td>
+</tr>
+<tr>
+<td><code>kpi</code></td>
+<td>dict</td>
+<td>kpi_card</td>
+<td>comparison period, target, sparkline grain/points</td>
+</tr>
+<tr>
+<td><code>scale_mode</code></td>
+<td>str</td>
+<td>line, stacked_area</td>
+<td><code>absolute</code>, <code>index_100</code>, or <code>percent_change</code></td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>str</td>
+<td>bar_polar</td>
+<td>radius column</td>
+</tr>
+<tr>
+<td><code>theta</code></td>
+<td>str</td>
+<td>bar_polar</td>
+<td>angle column</td>
+</tr>
+<tr>
+<td><code>facet_row</code></td>
+<td>str</td>
+<td>most</td>
+<td>column for facet rows</td>
+</tr>
+<tr>
+<td><code>facet_col</code></td>
+<td>str</td>
+<td>most</td>
+<td>column for facet columns</td>
+</tr>
+<tr>
+<td><code>facets</code></td>
+<td>dict</td>
+<td>most</td>
+<td>shorthand: <code>{row: x, col: y}</code></td>
+</tr>
+<tr>
+<td><code>animation_frame</code></td>
+<td>str</td>
+<td>scatter</td>
+<td>column for play axis</td>
+</tr>
+<tr>
+<td><code>animation_group</code></td>
+<td>str</td>
+<td>scatter</td>
+<td>column to group across frames</td>
+</tr>
+<tr>
+<td><code>log_x</code> / <code>log_y</code></td>
+<td>bool</td>
+<td>line, scatter</td>
+<td>log axis toggle</td>
+</tr>
+<tr>
+<td><code>reference</code></td>
+<td>number</td>
+<td>gauge</td>
+<td>scalar reference level for all gauges</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td>dict</td>
+<td>gauge</td>
+<td>reference levels per (row's join-key)</td>
+</tr>
+<tr>
+<td><code>stages</code></td>
+<td>list[str]</td>
+<td>funnel</td>
+<td>ordered stage names</td>
+</tr>
+<tr>
+<td><code>property</code></td>
+<td>str</td>
+<td>descriptive_*</td>
+<td>numeric property column</td>
+</tr>
+<tr>
+<td><code>score</code></td>
+<td>str</td>
+<td>descriptive_line</td>
+<td>which score (Mean/Median/p95/…) to plot</td>
+</tr>
+<tr>
+<td><code>showlegend</code></td>
+<td>bool</td>
+<td>any</td>
+<td>Plotly <code>showlegend</code></td>
+</tr>
+<tr>
+<td><code>value_format</code></td>
+<td>str</td>
+<td>most</td>
+<td>display format: <code>percent</code>, <code>integer</code>, <code>number</code>, or <code>currency</code></td>
+</tr>
+<tr>
+<td><code>goal_line</code></td>
+<td>number / dict</td>
+<td>cartesian charts</td>
+<td>horizontal reference line, e.g. <code>{value: 0.12, label: Target}</code></td>
+</tr>
+<tr>
+<td><code>show_trend_delta</code></td>
+<td>bool</td>
+<td>line, bar</td>
+<td>show latest-vs-first delta annotation</td>
+</tr>
+<tr>
+<td><code>sort_by</code></td>
+<td>str</td>
+<td>bar</td>
+<td>column used to sort bars; defaults to <code>y</code></td>
+</tr>
+<tr>
+<td><code>sort_direction</code></td>
+<td>str</td>
+<td>bar</td>
+<td><code>asc</code> or <code>desc</code></td>
+</tr>
+<tr>
+<td><code>top_n</code></td>
+<td>int</td>
+<td>bar</td>
+<td>keep the top N rows after sorting</td>
+</tr>
+<tr>
+<td><code>barmode</code></td>
+<td>str</td>
+<td>bar</td>
+<td><code>group</code>, <code>stack</code>, <code>relative</code>, or <code>percent</code> / <code>stacked_percent</code></td>
+</tr>
+<tr>
+<td><code>conditional_formatting</code></td>
+<td>list[dict]</td>
+<td>bar, scatter</td>
+<td>per-row colors when no explicit <code>color</code> field is set</td>
+</tr>
+<tr>
+<td><code>error_y_lower</code> / <code>error_y_upper</code></td>
+<td>str</td>
+<td>interval</td>
+<td>absolute lower/upper confidence-bound columns</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-chart-catalog">3. Chart catalog<a class="headerlink" href="#3-chart-catalog" title="Permanent link">&para;</a></h2>
+<p>For each chart: required Tile fields, expected metric output shape, and an outline of the Plotly construction.</p>
+<h3 id="30-kpi_card">3.0 <code>kpi_card</code><a class="headerlink" href="#30-kpi_card" title="Permanent link">&para;</a></h3>
+<p>Required: <code>value</code>. An ungrouped card becomes part of the responsive KPI strip
+only when <code>placement: kpi_strip</code> is explicit. The <code>kpi</code> mapping supports:</p>
+<ul>
+<li><code>comparison</code>: <code>none</code> or <code>previous_period</code>;</li>
+<li><code>comparison_period</code>: <code>day</code>, <code>week</code>, <code>month</code>, <code>quarter</code>, or <code>year</code>;</li>
+<li><code>sparkline_grain</code>: <code>daily</code>, <code>weekly</code>, <code>monthly</code>, or omitted;</li>
+<li><code>sparkline_points</code>: 2–366;</li>
+<li><code>target</code>: optional numeric target.</li>
+</ul>
+<p>The current scalar and comparison scalar are separate <code>grain: summary</code> queries
+with identical aggregate filters. When the page has no selected dates, the
+latest available aggregate period anchors the current calendar period. The
+reference window has the same number of days. A card that returns zero/multiple
+rows or a non-numeric value displays <code>n/a</code>; report code never invents a reducer.</p>
+<h3 id="31-line">3.1 <code>line</code><a class="headerlink" href="#31-line" title="Permanent link">&para;</a></h3>
+<p>Required: <code>x, y</code>. Optional: <code>color, facet_row, facet_col, log_x, log_y</code>.</p>
+<p>Metric shape: a Polars frame with <code>x, y</code> and the group-by columns referenced by <code>color/facets</code>.</p>
+<p>Construction:</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">line</span><span class="p">(</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
+    <span class="n">x</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">y</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">],</span>
+    <span class="n">color</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;color&quot;</span><span class="p">),</span>
+    <span class="n">facet_row</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;facet_row&quot;</span><span class="p">),</span>
+    <span class="n">facet_col</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;facet_col&quot;</span><span class="p">),</span>
+    <span class="n">log_x</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;log_x&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="n">log_y</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;log_y&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="n">title</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;title&quot;</span><span class="p">),</span>
+<span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">update_layout</span><span class="p">(</span><span class="n">showlegend</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;showlegend&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">))</span>
+<span class="k">return</span> <span class="n">fig</span>
+</code></pre></div>
+<p>If <code>x</code> is categorical (a non-temporal string column) the factory falls back to <code>px.bar</code> with <code>barmode="group"</code>.</p>
+<h3 id="32-bar">3.2 <code>bar</code><a class="headerlink" href="#32-bar" title="Permanent link">&para;</a></h3>
+<p>Same as <code>line</code> but always renders as bars. Optional: <code>barmode ∈ {group, stack, relative}</code>.</p>
+<p>For 100% stacked bars, set <code>barmode: percent</code> or <code>barmode: stacked_percent</code>.
+The chart factory renders a stacked bar chart with Plotly <code>barnorm="percent"</code>.
+Bars can also be sorted and capped:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bar</span>
+<span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
+<span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CTR</span>
+<span class="nt">sort_by</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CTR</span>
+<span class="nt">sort_direction</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">desc</span>
+<span class="nt">top_n</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+</code></pre></div>
+<p>For simple conditional color rules, omit the <code>color</code> field and provide rules:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">conditional_formatting</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CTR</span>
+<span class="w">    </span><span class="nt">operator</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&gt;=&quot;</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.12</span>
+<span class="w">    </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#2e7d32&quot;</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CTR</span>
+<span class="w">    </span><span class="nt">operator</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;&quot;</span>
+<span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.12</span>
+<span class="w">    </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#c62828&quot;</span>
+</code></pre></div>
+<h3 id="33-treemap">3.3 <code>treemap</code><a class="headerlink" href="#33-treemap" title="Permanent link">&para;</a></h3>
+<p>Required: <code>path: list[str], color: str</code>.</p>
+<p>Metric shape: aggregated to <code>path[0], path[1], …, color</code>. Typically the metric's <code>summary</code> grain.</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">treemap</span><span class="p">(</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
+    <span class="n">path</span><span class="o">=</span><span class="p">[</span><span class="n">px</span><span class="o">.</span><span class="n">Constant</span><span class="p">(</span><span class="s2">&quot;All&quot;</span><span class="p">)]</span> <span class="o">+</span> <span class="n">tile</span><span class="p">[</span><span class="s2">&quot;path&quot;</span><span class="p">],</span>
+    <span class="n">color</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;color&quot;</span><span class="p">],</span>
+    <span class="n">color_continuous_scale</span><span class="o">=</span><span class="s2">&quot;Viridis&quot;</span><span class="p">,</span>
+    <span class="n">title</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;title&quot;</span><span class="p">],</span>
+<span class="p">)</span>
+</code></pre></div>
+<h3 id="34-heatmap">3.4 <code>heatmap</code><a class="headerlink" href="#34-heatmap" title="Permanent link">&para;</a></h3>
+<p>Required: <code>x, y, color</code>. The frame is pivoted: <code>x</code> × <code>y</code> matrix with <code>color</code> as the value.</p>
+<div class="highlight"><pre><span></span><code><span class="n">matrix</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">pivot</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">],</span> <span class="n">columns</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">values</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;color&quot;</span><span class="p">])</span>
+<span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span>
+    <span class="n">matrix</span><span class="p">,</span>
+    <span class="n">color_continuous_scale</span><span class="o">=</span><span class="s2">&quot;Viridis&quot;</span><span class="p">,</span>
+    <span class="n">title</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;title&quot;</span><span class="p">],</span>
+    <span class="n">aspect</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+<h3 id="35-scatter">3.5 <code>scatter</code><a class="headerlink" href="#35-scatter" title="Permanent link">&para;</a></h3>
+<p>Required: <code>x, y</code>. Optional: <code>color, size, animation_frame, animation_group, facet_row, facet_col, log_x, log_y</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
+    <span class="n">x</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">y</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">],</span>
+    <span class="n">color</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;color&quot;</span><span class="p">),</span>
+    <span class="n">size</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;size&quot;</span><span class="p">),</span>
+    <span class="n">animation_frame</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;animation_frame&quot;</span><span class="p">),</span>
+    <span class="n">animation_group</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;animation_group&quot;</span><span class="p">),</span>
+    <span class="n">facet_row</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;facet_row&quot;</span><span class="p">),</span>
+    <span class="n">facet_col</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;facet_col&quot;</span><span class="p">),</span>
+    <span class="n">log_x</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;log_x&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+    <span class="n">log_y</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;log_y&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+<span class="p">)</span>
+</code></pre></div>
+<h3 id="36-bar_polar">3.6 <code>bar_polar</code><a class="headerlink" href="#36-bar_polar" title="Permanent link">&para;</a></h3>
+<p>Required: <code>r, theta, color</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">bar_polar</span><span class="p">(</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
+    <span class="n">r</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;r&quot;</span><span class="p">],</span> <span class="n">theta</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;theta&quot;</span><span class="p">],</span>
+    <span class="n">color</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;color&quot;</span><span class="p">],</span>
+    <span class="n">title</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;title&quot;</span><span class="p">],</span>
+<span class="p">)</span>
+</code></pre></div>
+<h3 id="37-gauge">3.7 <code>gauge</code><a class="headerlink" href="#37-gauge" title="Permanent link">&para;</a></h3>
+<p>Required: <code>value</code> (a scalar column from the metric).</p>
+<p>Optional: <code>reference</code> (scalar reference for every gauge) or <code>references</code> (dict of <code>key -&gt; reference_value</code>). The Tile uses the row whose <code>(facet_row, facet_col)</code> value matches a key in <code>references</code> for the threshold rings.</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">(</span><span class="n">go</span><span class="o">.</span><span class="n">Indicator</span><span class="p">(</span>
+    <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;gauge+number+delta&quot;</span><span class="p">,</span>
+    <span class="n">value</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;value&quot;</span><span class="p">]],</span>
+    <span class="n">delta</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;reference&quot;</span><span class="p">:</span> <span class="n">references</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="mi">0</span><span class="p">)},</span>
+    <span class="n">gauge</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;axis&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range&quot;</span><span class="p">:</span> <span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="nb">max</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;value&quot;</span><span class="p">]]</span> <span class="o">*</span> <span class="mf">1.5</span><span class="p">,</span> <span class="n">references_max</span><span class="p">)]},</span>
+        <span class="s2">&quot;threshold&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;line&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;color&quot;</span><span class="p">:</span> <span class="s2">&quot;red&quot;</span><span class="p">},</span> <span class="s2">&quot;value&quot;</span><span class="p">:</span> <span class="n">references</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="mi">0</span><span class="p">)},</span>
+    <span class="p">},</span>
+    <span class="n">title</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">title</span><span class="p">},</span>
+<span class="p">))</span>
+</code></pre></div>
+<p>A grid of gauges is rendered when there are multiple <code>(facet_row, facet_col)</code> keys.</p>
+<h3 id="38-funnel">3.8 <code>funnel</code><a class="headerlink" href="#38-funnel" title="Permanent link">&para;</a></h3>
+<p>Required: <code>stages: list[str], color</code>.</p>
+<p>Metric shape: one row per <code>(stage_name, color, …)</code> with <code>Count</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">funnel</span><span class="p">(</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
+    <span class="n">x</span><span class="o">=</span><span class="s2">&quot;Count&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;stage&quot;</span><span class="p">,</span>
+    <span class="n">color</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;color&quot;</span><span class="p">],</span>
+    <span class="n">title</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;title&quot;</span><span class="p">],</span>
+<span class="p">)</span>
+</code></pre></div>
+<h3 id="39-boxplot">3.9 <code>boxplot</code><a class="headerlink" href="#39-boxplot" title="Permanent link">&para;</a></h3>
+<p>Required: <code>x, y</code>. Optional: <code>color, facet_row, facet_col</code>.</p>
+<p>Boxplots are reconstructed from <code>&lt;prop&gt;_p25, &lt;prop&gt;_Median, &lt;prop&gt;_p75, &lt;prop&gt;_Min, &lt;prop&gt;_Max</code> (or t-digest quantiles) — the metric output already exposes those.</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">group</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">partition_by</span><span class="p">(</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;color&quot;</span><span class="p">),</span> <span class="n">as_dict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="n">fig</span><span class="o">.</span><span class="n">add_trace</span><span class="p">(</span><span class="n">go</span><span class="o">.</span><span class="n">Box</span><span class="p">(</span>
+        <span class="n">x</span><span class="o">=</span><span class="n">sub</span><span class="p">[</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">]],</span> <span class="n">q1</span><span class="o">=</span><span class="n">sub</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prop</span><span class="si">}</span><span class="s2">_p25&quot;</span><span class="p">],</span> <span class="n">median</span><span class="o">=</span><span class="n">sub</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prop</span><span class="si">}</span><span class="s2">_Median&quot;</span><span class="p">],</span>
+        <span class="n">q3</span><span class="o">=</span><span class="n">sub</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prop</span><span class="si">}</span><span class="s2">_p75&quot;</span><span class="p">],</span> <span class="n">lowerfence</span><span class="o">=</span><span class="n">sub</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prop</span><span class="si">}</span><span class="s2">_Min&quot;</span><span class="p">],</span> <span class="n">upperfence</span><span class="o">=</span><span class="n">sub</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prop</span><span class="si">}</span><span class="s2">_Max&quot;</span><span class="p">],</span>
+        <span class="n">name</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">group</span><span class="p">),</span>
+    <span class="p">))</span>
+</code></pre></div>
+<h3 id="310-histogram">3.10 <code>histogram</code><a class="headerlink" href="#310-histogram" title="Permanent link">&para;</a></h3>
+<p>Required: <code>property</code>.</p>
+<p>For numeric_distribution metrics, the histogram is reconstructed from the t-digest:</p>
+<div class="highlight"><pre><span></span><code><span class="n">edges</span><span class="p">,</span> <span class="n">masses</span> <span class="o">=</span> <span class="n">digest_to_histogram</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;&lt;property&gt;_tdigest&quot;</span><span class="p">],</span> <span class="n">bins</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+<span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">(</span><span class="n">go</span><span class="o">.</span><span class="n">Bar</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="p">(</span><span class="n">edges</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">+</span><span class="n">edges</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="n">masses</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="n">edges</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span><span class="o">-</span><span class="n">edges</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
+</code></pre></div>
+<p>For CLV (entity_lifecycle metrics), the histogram is over <code>frequency</code>, <code>monetary_value</code>, etc.; the metric DSL emits already-binned data.</p>
+<h3 id="311-calibration_curve">3.11 <code>calibration_curve</code><a class="headerlink" href="#311-calibration_curve" title="Permanent link">&para;</a></h3>
+<p>Used with metric <code>Calibration</code> (calibration_from_digests). Metric output: per row <code>calibration_bin</code>, <code>calibration_proba</code>, <code>calibration_rate</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">([</span>
+    <span class="n">go</span><span class="o">.</span><span class="n">Scatter</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;calibration_proba&quot;</span><span class="p">],</span> <span class="n">y</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;calibration_rate&quot;</span><span class="p">],</span>
+               <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;lines+markers&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;Observed&quot;</span><span class="p">),</span>
+    <span class="n">go</span><span class="o">.</span><span class="n">Scatter</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span> <span class="n">y</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">],</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;lines&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;Ideal&quot;</span><span class="p">,</span> <span class="n">line</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span><span class="n">dash</span><span class="o">=</span><span class="s2">&quot;dash&quot;</span><span class="p">)),</span>
+<span class="p">])</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">update_xaxes</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s2">&quot;Predicted propensity&quot;</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">])</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">update_yaxes</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s2">&quot;Observed rate&quot;</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">])</span>
+</code></pre></div>
+<h3 id="312-ml-score-curves">3.12 ML score curves<a class="headerlink" href="#312-ml-score-curves" title="Permanent link">&para;</a></h3>
+<p>Used with <code>curve_from_digests</code> metrics. The query layer returns scalar
+<code>roc_auc</code> / <code>average_precision</code> plus list-valued curve columns: <code>fpr</code>, <code>tpr</code>,
+<code>precision</code>, <code>recall</code>, and <code>pos_fraction</code>.</p>
+<p>Chart kinds:</p>
+<ul>
+<li><code>roc_curve</code>: x = <code>fpr</code>, y = <code>tpr</code>, with an <code>y = x</code> random-model reference.</li>
+<li><code>precision_recall_curve</code>: x = <code>recall</code>, y = <code>precision</code>.</li>
+<li><code>gain_curve</code>: x = <code>sample_fraction</code>, y = <code>tpr</code>; <code>sample_fraction = pos_fraction * tpr + (1 - pos_fraction) * fpr</code>.</li>
+<li><code>lift_curve</code>: x = <code>sample_fraction</code>, y = <code>gain / sample_fraction</code>, with an <code>y = 1</code> baseline.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">roc_curve</span>
+<span class="w">  </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ROC Curve</span>
+<span class="w">  </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MIL_ROC_AUC</span>
+<span class="w">  </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">roc_curve</span>
+<span class="w">  </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">placement_type</span>
+<span class="w">  </span><span class="nt">value_format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">percent</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">line</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">explode</span><span class="p">([</span><span class="s2">&quot;fpr&quot;</span><span class="p">,</span> <span class="s2">&quot;tpr&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">x</span><span class="o">=</span><span class="s2">&quot;fpr&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;tpr&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;placement_type&quot;</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">add_shape</span><span class="p">(</span><span class="nb">type</span><span class="o">=</span><span class="s2">&quot;line&quot;</span><span class="p">,</span> <span class="n">x0</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">y0</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">x1</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">y1</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">line</span><span class="o">=</span><span class="nb">dict</span><span class="p">(</span><span class="n">dash</span><span class="o">=</span><span class="s2">&quot;dash&quot;</span><span class="p">))</span>
+</code></pre></div>
+<h3 id="313-rfm_density">3.13 <code>rfm_density</code><a class="headerlink" href="#313-rfm_density" title="Permanent link">&para;</a></h3>
+<p>Used with metric <code>CLV_Summary</code>. Renders a 2D or 3D density plot over <code>(recency, frequency, monetary_value)</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># 2D variant</span>
+<span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">density_heatmap</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">x</span><span class="o">=</span><span class="s2">&quot;recency&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;frequency&quot;</span><span class="p">,</span> <span class="n">marginal_x</span><span class="o">=</span><span class="s2">&quot;histogram&quot;</span><span class="p">,</span> <span class="n">marginal_y</span><span class="o">=</span><span class="s2">&quot;histogram&quot;</span><span class="p">)</span>
+<span class="c1"># 3D variant</span>
+<span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">density_contour</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">x</span><span class="o">=</span><span class="s2">&quot;recency&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;frequency&quot;</span><span class="p">,</span> <span class="n">z</span><span class="o">=</span><span class="s2">&quot;monetary_value&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="314-exposure">3.14 <code>exposure</code><a class="headerlink" href="#314-exposure" title="Permanent link">&para;</a></h3>
+<p>Customer Exposure curve from <code>CLV_Summary</code>. The x-axis is cumulative customer count (sorted by <code>lifetime_value</code> desc); the y-axis is cumulative <code>lifetime_value</code> share.</p>
+<div class="highlight"><pre><span></span><code><span class="n">sorted_df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="s2">&quot;lifetime_value&quot;</span><span class="p">,</span> <span class="n">descending</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">sorted_df</span> <span class="o">=</span> <span class="n">sorted_df</span><span class="o">.</span><span class="n">with_columns</span><span class="p">(</span>
+    <span class="n">cum_customers</span> <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;customers_count&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">cum_sum</span><span class="p">()</span> <span class="o">/</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;customers_count&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(),</span>
+    <span class="n">cum_lv</span>        <span class="o">=</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;lifetime_value&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">cum_sum</span><span class="p">()</span> <span class="o">/</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;lifetime_value&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(),</span>
+<span class="p">)</span>
+<span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">line</span><span class="p">(</span><span class="n">sorted_df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">x</span><span class="o">=</span><span class="s2">&quot;cum_customers&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;cum_lv&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="315-corr">3.15 <code>corr</code><a class="headerlink" href="#315-corr" title="Permanent link">&para;</a></h3>
+<p>Correlation chart for two CLV variables (typically <code>frequency</code> vs <code>monetary_value</code>).</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">x</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">y</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">],</span> <span class="n">trendline</span><span class="o">=</span><span class="s2">&quot;ols&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="316-model">3.16 <code>model</code><a class="headerlink" href="#316-model" title="Permanent link">&para;</a></h3>
+<p>CLV prediction overlay using <code>lifetimes</code> (or equivalent) BG/NBD or Pareto/NBD models fit at query time.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">lifetimes</span>
+<span class="n">bgnbd</span> <span class="o">=</span> <span class="n">lifetimes</span><span class="o">.</span><span class="n">BetaGeoFitter</span><span class="p">()</span>
+<span class="n">bgnbd</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;frequency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;recency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;tenure&quot;</span><span class="p">])</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">with_columns</span><span class="p">(</span><span class="n">predicted_purchases</span> <span class="o">=</span> <span class="n">bgnbd</span><span class="o">.</span><span class="n">conditional_expected_number_of_purchases_up_to_time</span><span class="p">(</span>
+    <span class="n">horizon</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;frequency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;recency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;tenure&quot;</span><span class="p">]))</span>
+<span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">x</span><span class="o">=</span><span class="s2">&quot;frequency&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;predicted_purchases&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;rfm_segment&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="317-descriptive_line-descriptive_boxplot-descriptive_histogram-descriptive_heatmap-descriptive_funnel">3.17 <code>descriptive_line</code> / <code>descriptive_boxplot</code> / <code>descriptive_histogram</code> / <code>descriptive_heatmap</code> / <code>descriptive_funnel</code><a class="headerlink" href="#317-descriptive_line-descriptive_boxplot-descriptive_histogram-descriptive_heatmap-descriptive_funnel" title="Permanent link">&para;</a></h3>
+<p>Specializations for <code>numeric_distribution</code> metrics. Required Tile fields differ:</p>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>descriptive_line</code></td>
+<td><code>x, property, score</code> (e.g. <code>score: Mean</code>)</td>
+</tr>
+<tr>
+<td><code>descriptive_boxplot</code></td>
+<td><code>x, property</code></td>
+</tr>
+<tr>
+<td><code>descriptive_histogram</code></td>
+<td><code>property</code></td>
+</tr>
+<tr>
+<td><code>descriptive_heatmap</code></td>
+<td><code>x, y, property, score</code></td>
+</tr>
+<tr>
+<td><code>descriptive_funnel</code></td>
+<td><code>x, color, stages</code></td>
+</tr>
+</tbody>
+</table>
+<p>The chart factory pulls <code>&lt;property&gt;_&lt;score&gt;</code> from the metric output; see reference/processors.md §4 for the column naming convention.</p>
+<h3 id="318-experiment_z_score-experiment_odds_ratio">3.18 <code>experiment_z_score</code> / <code>experiment_odds_ratio</code><a class="headerlink" href="#318-experiment_z_score-experiment_odds_ratio" title="Permanent link">&para;</a></h3>
+<p>Specializations for <code>experiment</code> metrics. The Tile picks which experiment statistic to plot:</p>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Required</th>
+<th>y axis</th>
+<th>x axis</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>experiment_z_score</code></td>
+<td><code>y</code></td>
+<td><code>ExperimentName</code></td>
+<td><code>z_score</code></td>
+</tr>
+<tr>
+<td><code>experiment_odds_ratio</code></td>
+<td><code>x, y</code></td>
+<td><code>ExperimentName</code></td>
+<td>one of <code>g_odds_ratio_stat</code>, <code>chi2_odds_ratio_stat</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="319-clv_treemap">3.19 <code>clv_treemap</code><a class="headerlink" href="#319-clv_treemap" title="Permanent link">&para;</a></h3>
+<p>Treemap of RFM segments by lifetime value.</p>
+<p>Required: none (uses <code>rfm_segment, lifetime_value</code> from <code>CLV_Summary</code>).</p>
+<div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">treemap</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">path</span><span class="o">=</span><span class="p">[</span><span class="n">px</span><span class="o">.</span><span class="n">Constant</span><span class="p">(</span><span class="s2">&quot;All&quot;</span><span class="p">),</span> <span class="s2">&quot;rfm_segment&quot;</span><span class="p">],</span> <span class="n">values</span><span class="o">=</span><span class="s2">&quot;lifetime_value&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="320-marketing-dashboard-chart-set">3.20 Marketing dashboard chart set<a class="headerlink" href="#320-marketing-dashboard-chart-set" title="Permanent link">&para;</a></h3>
+<p>These chart kinds cover common marketing reporting needs and are implemented
+with Plotly primitives:</p>
+<table>
+<thead>
+<tr>
+<th>Chart kind</th>
+<th>Required fields</th>
+<th>Primary use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kpi_card</code></td>
+<td><code>value</code></td>
+<td>Executive scorecard metric with optional delta reference</td>
+</tr>
+<tr>
+<td><code>stacked_area</code></td>
+<td><code>x, y, color</code></td>
+<td>Channel/campaign mix over time</td>
+</tr>
+<tr>
+<td><code>waterfall</code></td>
+<td><code>x, y</code></td>
+<td>Contribution or change decomposition</td>
+</tr>
+<tr>
+<td><code>pareto</code></td>
+<td><code>x, y</code></td>
+<td>Top campaigns/offers plus cumulative share</td>
+</tr>
+<tr>
+<td><code>cohort_heatmap</code></td>
+<td><code>x, y, color</code></td>
+<td>Cohort or retention matrix</td>
+</tr>
+<tr>
+<td><code>sankey</code></td>
+<td><code>source, target, value</code></td>
+<td>Journey/path flow between stages or channels</td>
+</tr>
+<tr>
+<td><code>combo</code></td>
+<td><code>x, y, y2</code></td>
+<td>Bar + line dual-axis comparisons, e.g. spend vs revenue</td>
+</tr>
+<tr>
+<td><code>interval</code></td>
+<td><code>x, y</code> plus optional <code>error_y</code></td>
+<td>Lift/estimate with uncertainty interval</td>
+</tr>
+<tr>
+<td><code>donut</code></td>
+<td><code>names, values</code></td>
+<td>Simple share-of-total for small category sets</td>
+</tr>
+<tr>
+<td><code>geo_map</code></td>
+<td><code>locations, value</code> or <code>lat, lon, value</code></td>
+<td>Country/region/city performance</td>
+</tr>
+<tr>
+<td><code>table</code></td>
+<td>optional <code>columns</code></td>
+<td>Ranked operational table with optional conditional formatting</td>
+</tr>
+<tr>
+<td><code>calendar_heatmap</code></td>
+<td><code>date, value</code></td>
+<td>Daily seasonality and campaign activity</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">campaign_pareto</span>
+<span class="w">  </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Revenue Pareto</span>
+<span class="w">  </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Revenue</span>
+<span class="w">  </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pareto</span>
+<span class="w">  </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Campaign</span>
+<span class="w">  </span><span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Revenue</span>
+<span class="w">  </span><span class="nt">top_n</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12</span>
+</code></pre></div>
+<hr />
+<h2 id="4-recipe-metadata">4. Recipe metadata<a class="headerlink" href="#4-recipe-metadata" title="Permanent link">&para;</a></h2>
+<p>The Builder UI uses the following metadata table to filter chart kinds by the metric's underlying processor and to default required fields:</p>
+<table>
+<thead>
+<tr>
+<th>Chart kind</th>
+<th>Allowed processor kinds</th>
+<th>Default x</th>
+<th>Default y</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>line</code></td>
+<td>binary_outcome, score_distribution, conversion, snapshot</td>
+<td>first time-grain dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>stacked_area</code></td>
+<td>binary_outcome, score_distribution, snapshot</td>
+<td>first time-grain dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>bar</code></td>
+<td>binary_outcome, snapshot</td>
+<td>first non-time dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>kpi_card</code></td>
+<td>aggregate metrics</td>
+<td>—</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>waterfall</code></td>
+<td>aggregate metrics</td>
+<td>first non-time dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>pareto</code></td>
+<td>aggregate metrics</td>
+<td>first non-time dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>treemap</code></td>
+<td>binary_outcome, score_distribution</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>heatmap</code></td>
+<td>binary_outcome, score_distribution</td>
+<td>first dim</td>
+<td>second dim</td>
+</tr>
+<tr>
+<td><code>cohort_heatmap</code></td>
+<td>binary_outcome, snapshot</td>
+<td>time/cohort dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>scatter</code></td>
+<td>binary_outcome, score_distribution</td>
+<td>metric.outputs[0]</td>
+<td>metric.outputs[1]</td>
+</tr>
+<tr>
+<td><code>combo</code></td>
+<td>aggregate metrics</td>
+<td>first time-grain dim</td>
+<td>metric.outputs[0] + metric.outputs[1]</td>
+</tr>
+<tr>
+<td><code>interval</code></td>
+<td>aggregate metrics</td>
+<td>first dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>donut</code></td>
+<td>aggregate metrics</td>
+<td>first dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>geo_map</code></td>
+<td>binary_outcome, score_distribution, snapshot</td>
+<td>location dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>table</code></td>
+<td>aggregate metrics</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>calendar_heatmap</code></td>
+<td>binary_outcome, score_distribution, snapshot</td>
+<td>date dim</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>bar_polar</code></td>
+<td>binary_outcome</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>sankey</code></td>
+<td>aggregate metrics</td>
+<td>source/target dims</td>
+<td>metric.outputs[0]</td>
+</tr>
+<tr>
+<td><code>gauge</code></td>
+<td>binary_outcome, snapshot</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>funnel</code></td>
+<td>funnel</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>boxplot</code></td>
+<td>numeric_distribution</td>
+<td>first time-grain dim</td>
+<td>property</td>
+</tr>
+<tr>
+<td><code>histogram</code></td>
+<td>numeric_distribution</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>calibration_curve</code></td>
+<td>score_distribution (Calibration metric)</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>roc_curve</code></td>
+<td>score_distribution (<code>curve_from_digests</code>)</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>precision_recall_curve</code></td>
+<td>score_distribution (<code>curve_from_digests</code>)</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>gain_curve</code></td>
+<td>score_distribution (<code>curve_from_digests</code>)</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>lift_curve</code></td>
+<td>score_distribution (<code>curve_from_digests</code>)</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>rfm_density</code></td>
+<td>entity_lifecycle (CLV_Summary)</td>
+<td>recency</td>
+<td>frequency</td>
+</tr>
+<tr>
+<td><code>exposure</code></td>
+<td>entity_lifecycle</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>corr</code></td>
+<td>entity_lifecycle</td>
+<td>frequency</td>
+<td>monetary_value</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>entity_lifecycle</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>descriptive_*</code></td>
+<td>numeric_distribution</td>
+<td>varies</td>
+<td>varies</td>
+</tr>
+<tr>
+<td><code>experiment_*</code></td>
+<td>binary_outcome with experiment</td>
+<td>varies</td>
+<td>varies</td>
+</tr>
+</tbody>
+</table>
+<p>This table is also encoded in <code>valuestream.charts.recipes</code> and queried by the Builder UI.</p>
+<hr />
+<h2 id="5-theming">5. Theming<a class="headerlink" href="#5-theming" title="Permanent link">&para;</a></h2>
+<p>A workspace-level theme block in <code>dashboards.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">theme</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">template</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;valuestream&quot;</span><span class="w">           </span><span class="c1"># app-matching default; any Plotly template name</span>
+<span class="w">  </span><span class="nt">paper_bgcolor</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#f5f3ee&quot;</span><span class="w">          </span><span class="c1"># defaults to the app background</span>
+<span class="w">  </span><span class="nt">plot_bgcolor</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#f5f3ee&quot;</span><span class="w">           </span><span class="c1"># defaults to the app background</span>
+<span class="w">  </span><span class="nt">font</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> family</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Inter&quot;</span><span class="p p-Indicator">,</span><span class="nt"> size</span><span class="p">:</span><span class="w"> </span><span class="nv">14</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">margins</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> l</span><span class="p">:</span><span class="w"> </span><span class="nv">32</span><span class="p p-Indicator">,</span><span class="nt"> r</span><span class="p">:</span><span class="w"> </span><span class="nv">16</span><span class="p p-Indicator">,</span><span class="nt"> t</span><span class="p">:</span><span class="w"> </span><span class="nv">48</span><span class="p p-Indicator">,</span><span class="nt"> b</span><span class="p">:</span><span class="w"> </span><span class="nv">32</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">legend</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> orientation</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;h&quot;</span><span class="p p-Indicator">,</span><span class="nt"> y</span><span class="p">:</span><span class="w"> </span><span class="nv">-0.2</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">color_continuous_scale</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Viridis&quot;</span>
+<span class="w">  </span><span class="nt">qualitative_palette</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Set2&quot;</span>
+<span class="w">  </span><span class="nt">category_colors</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">Channel</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">Web</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#2563EB&quot;</span>
+<span class="w">      </span><span class="nt">Mobile</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#14B8A6&quot;</span>
+</code></pre></div>
+<p>The application initializes a built-in <code>valuestream</code> Plotly template before
+dashboard rendering. Its <code>paper_bgcolor</code> and <code>plot_bgcolor</code> match the app
+background token (<code>#f5f3ee</code> in light mode, <code>#020203</code> in dark mode) so Plotly
+figures blend into the Streamlit shell instead of rendering white panels. The
+default dashboard theme also passes those colors explicitly, so a workspace or
+tile that overrides only <code>template</code> still keeps the app-matched background.</p>
+<p>The chart factory applies the theme via <code>fig.update_layout(template=...)</code> etc. Per-tile overrides are allowed:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">tiles</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hot_metric</span>
+<span class="w">    </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">line</span>
+<span class="w">    </span><span class="nt">theme</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">template</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;plotly_dark&quot;</span>
+</code></pre></div>
+<h2 id="6-presentation-settings">6. Presentation settings<a class="headerlink" href="#6-presentation-settings" title="Permanent link">&para;</a></h2>
+<p>Presentation settings are optional Tile fields. They are intentionally limited
+to common BI refinements so report authors can improve clarity without adding
+new chart kinds.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">tiles</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily_ctr</span>
+<span class="w">    </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Daily CTR</span>
+<span class="w">    </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CTR</span>
+<span class="w">    </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">line</span>
+<span class="w">    </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Day</span>
+<span class="w">    </span><span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CTR</span>
+<span class="w">    </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
+<span class="w">    </span><span class="nt">value_format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">percent</span>
+<span class="w">    </span><span class="nt">show_trend_delta</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">goal_line</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.12</span>
+<span class="w">      </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Target CTR</span>
+<span class="w">      </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#475569&quot;</span>
+</code></pre></div>
+<p>Supported values:</p>
+<ul>
+<li><code>value_format</code>: <code>percent</code>, <code>integer</code>, <code>number</code>, or <code>currency</code>.</li>
+<li><code>goal_line</code>: a number or mapping with <code>value</code>, optional <code>label</code>, <code>color</code>,
+  <code>dash</code>, and <code>axis</code>. The default axis is <code>y</code>.</li>
+<li><code>show_trend_delta</code>: adds an annotation comparing the first and last plotted
+  value in the chosen metric column.</li>
+<li><code>sort_by</code>, <code>sort_direction</code>, <code>top_n</code>: currently apply to bar charts.</li>
+<li><code>conditional_formatting</code>: list of <code>{column, operator, value, color}</code> rules.
+  Operators are <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>==</code>, and <code>!=</code>. The first matching rule
+  wins. Conditional colors apply to bar and scatter charts when the tile does
+  not already use a <code>color</code> dimension.</li>
+<li><code>scale_mode</code>: <code>index_100</code> divides each series by its first non-zero value and
+  multiplies by 100; <code>percent_change</code> subtracts one after the same partitioned
+  normalization. Partitions are defined by color and facet dimensions. A zero
+  or empty baseline yields null display values rather than infinity.</li>
+<li><code>labels</code>, metric <code>display.label</code>, and metric <code>display.unit</code> resolve axis,
+  legend, hover, KPI, and table labels centrally. Tile overrides win.</li>
+<li><code>theme.category_colors</code> maps dimension values to stable colors across result
+  order, filters, and reruns. Conditional formatting and experiment-role colors
+  retain precedence.</li>
+</ul>
+<hr />
+<h2 id="7-streaming-specific-concerns">7. Streaming-specific concerns<a class="headerlink" href="#7-streaming-specific-concerns" title="Permanent link">&para;</a></h2>
+<p>For Tiles whose metric covers a long time range, the chart factory may receive a frame too large to serialize to Plotly cleanly. The factory enforces a soft cap (<code>max_points = 50_000</code>) and:</p>
+<ul>
+<li>downsamples line plots via LTTB (largest-triangle-three-buckets) if <code>len(rows) &gt; max_points</code>,</li>
+<li>raises a <code>RowLimitExceeded</code> warning and renders the cap if downsampling is not supported (<code>scatter</code> with <code>animation_frame</code>).</li>
+</ul>
+<p>The downsampling implementation is in <code>valuestream.charts.lttb</code>.</p>
+<hr />
+<h2 id="8-accessibility">8. Accessibility<a class="headerlink" href="#8-accessibility" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Color choices respect color-blind-safe defaults (<code>Set2</code>/<code>Viridis</code>).</li>
+<li>All charts include a <code>title</code> and <code>description</code> (used as <code>hovertemplate</code> and screen-reader summary).</li>
+<li>Number formatting respects locale; defaults to en-US with thousands separators.</li>
+</ul>
+<hr />
+<h2 id="9-adding-a-new-chart-kind">9. Adding a new chart kind<a class="headerlink" href="#9-adding-a-new-chart-kind" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Add a section to this doc with required fields and a Plotly outline.</li>
+<li>Add the kind to <code>valuestream.charts.recipes</code>.</li>
+<li>Implement <code>valuestream.charts.kinds.&lt;kind&gt;.render(rows, tile) -&gt; Figure</code>.</li>
+<li>Add a unit test with a synthetic frame and a saved PNG snapshot for visual regression (Plotly figure JSON also accepted).</li>
+<li>Update reference/chart-catalog.md (§4 table) so the Builder UI offers the new kind.</li>
+</ol>
+<p>The chart layer is intentionally decoupled from the storage and query layers: a tile is just <code>(metric, chart, fields)</code> and the render path is pure given those plus the metric's output.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

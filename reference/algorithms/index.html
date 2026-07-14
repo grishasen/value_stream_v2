@@ -1,0 +1,4076 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Aggregate-first business intelligence platform">
+      
+      
+      
+      
+        <link rel="prev" href="../processors/">
+      
+      
+        <link rel="next" href="../readers-and-formats/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Algorithms - Value Stream</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#value-stream-algorithms-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Value Stream" class="md-header__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Value Stream
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Algorithms
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/getting-started/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/users/running-reports/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../concepts/product-overview/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../cli/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../design/replacement-design/" class="md-tabs__link">
+          
+  
+  
+  Design docs
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Value Stream" class="md-nav__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Value Stream
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/ui-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/distribution-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/lifecycle-and-funnel-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Funnel & lifecycle analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/pega-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pega export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/running-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/chat-with-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/querying-and-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Querying & export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/workspaces-and-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces & catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/ai-config-studio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Configuration Studio
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration & backfill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/product-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/business-functionality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Business functionality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (deep)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/domain-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_6" id="__nav_4_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions (ADRs)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Decisions (ADRs)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0001-aggregate-first-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0001 Aggregate-first storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0002-yaml-catalog-as-source-of-behavior/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0002 YAML catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0003-closed-expression-ast/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0003 Closed expression AST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0004-chunk-ledger-idempotency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0004 Chunk-ledger idempotency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../expression-dsl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Expression DSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithms
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-mergeable-state-algebra" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Mergeable state algebra
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-numeric-distribution-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Numeric distribution algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Numeric distribution algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-counts-and-sums" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Counts and sums
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-weighted-pooled-mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Weighted (pooled) mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-pooled-variance-welford-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Pooled variance — Welford merge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-t-digest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 t-digest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-kll-sketch-alternative-for-stronger-error-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 KLL sketch (alternative for stronger error guarantees)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-variant-comparison-and-proportions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Variant comparison and proportions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Variant comparison and proportions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-click-through-rate-per-variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Click-through rate per variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-lift" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Lift
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-confidence-interval-for-the-absolute-rate-difference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Confidence interval for the absolute rate difference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-standard-error-of-a-proportion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Standard error of a proportion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-two-proportion-z-test-proportion-z-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Two-proportion z-test (proportion z-test)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-curves-from-t-digests-roc-ap-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Curves from t-digests (ROC, AP, calibration)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Curves from t-digests (ROC, AP, calibration)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-roc-auc-and-average-precision-from-t-digests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 ROC AUC and average precision from t-digests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-gain-and-lift-curves-from-reconstructed-roc-arrays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Gain and lift curves from reconstructed ROC arrays
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-calibration-from-t-digests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Calibration from t-digests
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-ml-helpers-personalization-and-novelty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. ML helpers — personalization and novelty
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. ML helpers — personalization and novelty">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-personalization-cosine-similarity-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Personalization (cosine-similarity proxy)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-novelty-information-theoretic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Novelty (information-theoretic)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-approximate-set-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Approximate-set algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Approximate-set algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-cpc-default-distinct-count-sketch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 CPC (default distinct-count sketch)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-hll-hyperloglog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 HLL (HyperLogLog++)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-theta-sketch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Theta sketch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-frequent-items-top-k" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Frequent-items (top-K)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-rfm-segmentation-entity_lifecycle-derive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. RFM segmentation (entity_lifecycle derive)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. RFM segmentation (entity_lifecycle derive)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-computing-r-f-m-from-lifecycle-aggregates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Computing R, F, M from lifecycle aggregates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-quartile-labeling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Quartile labeling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-segment-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Segment code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-segment-dictionaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Segment dictionaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-rfm-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 RFM score
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-statistical-tests-for-experiment-processors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Statistical tests for experiment processors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Statistical tests for experiment processors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-two-sample-z-test-on-proportions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 Two-sample z-test on proportions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-pearson-chi-square-test-of-homogeneity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 Pearson chi-square test of homogeneity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-g-test-log-likelihood-ratio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 G-test (log-likelihood ratio)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84-single-degree-of-freedom-g-test-variant-proportion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 Single-degree-of-freedom G-test (variant proportion)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85-defaults" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.5 Defaults
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-calendar-derivations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Calendar derivations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Calendar derivations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-default-calendar-derive_calendar-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 Default calendar (derive_calendar transform)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-iso-week-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 ISO week (optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-period-partition-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 Period partition values
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-time-zone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 Time zone
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-numeric-robustness-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Numeric robustness checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-test-fixtures-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Test fixtures (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-numerical-equivalence-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Numerical-equivalence rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readers-and-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers & formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chart-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chart catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kpi-recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-schemas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-and-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design docs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design docs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/replacement-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Replacement design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/implementation-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/reporting-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipe backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat With Data MLP1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kickoff-prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kickoff prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meta/documentation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-mergeable-state-algebra" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Mergeable state algebra
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-numeric-distribution-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Numeric distribution algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Numeric distribution algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-counts-and-sums" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Counts and sums
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-weighted-pooled-mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Weighted (pooled) mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-pooled-variance-welford-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Pooled variance — Welford merge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-t-digest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 t-digest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-kll-sketch-alternative-for-stronger-error-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 KLL sketch (alternative for stronger error guarantees)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-variant-comparison-and-proportions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Variant comparison and proportions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Variant comparison and proportions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-click-through-rate-per-variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Click-through rate per variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-lift" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Lift
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-confidence-interval-for-the-absolute-rate-difference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Confidence interval for the absolute rate difference
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-standard-error-of-a-proportion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Standard error of a proportion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-two-proportion-z-test-proportion-z-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Two-proportion z-test (proportion z-test)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-curves-from-t-digests-roc-ap-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Curves from t-digests (ROC, AP, calibration)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Curves from t-digests (ROC, AP, calibration)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-roc-auc-and-average-precision-from-t-digests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 ROC AUC and average precision from t-digests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-gain-and-lift-curves-from-reconstructed-roc-arrays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Gain and lift curves from reconstructed ROC arrays
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-calibration-from-t-digests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Calibration from t-digests
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-ml-helpers-personalization-and-novelty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. ML helpers — personalization and novelty
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. ML helpers — personalization and novelty">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-personalization-cosine-similarity-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Personalization (cosine-similarity proxy)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-novelty-information-theoretic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Novelty (information-theoretic)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-approximate-set-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Approximate-set algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Approximate-set algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-cpc-default-distinct-count-sketch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 CPC (default distinct-count sketch)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-hll-hyperloglog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 HLL (HyperLogLog++)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-theta-sketch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Theta sketch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-frequent-items-top-k" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Frequent-items (top-K)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-rfm-segmentation-entity_lifecycle-derive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. RFM segmentation (entity_lifecycle derive)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. RFM segmentation (entity_lifecycle derive)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-computing-r-f-m-from-lifecycle-aggregates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Computing R, F, M from lifecycle aggregates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-quartile-labeling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Quartile labeling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-segment-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Segment code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-segment-dictionaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Segment dictionaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-rfm-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 RFM score
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-statistical-tests-for-experiment-processors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Statistical tests for experiment processors
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Statistical tests for experiment processors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-two-sample-z-test-on-proportions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 Two-sample z-test on proportions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-pearson-chi-square-test-of-homogeneity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 Pearson chi-square test of homogeneity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-g-test-log-likelihood-ratio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 G-test (log-likelihood ratio)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84-single-degree-of-freedom-g-test-variant-proportion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 Single-degree-of-freedom G-test (variant proportion)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85-defaults" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.5 Defaults
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-calendar-derivations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Calendar derivations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Calendar derivations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-default-calendar-derive_calendar-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 Default calendar (derive_calendar transform)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-iso-week-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 ISO week (optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-period-partition-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 Period partition values
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-time-zone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 Time zone
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-numeric-robustness-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Numeric robustness checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-test-fixtures-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Test fixtures (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-numerical-equivalence-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Numerical-equivalence rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="value-stream-algorithms-reference">Value Stream — Algorithms Reference<a class="headerlink" href="#value-stream-algorithms-reference" title="Permanent link">&para;</a></h1>
+<p>This document is the math contract. Every formula, sketch parameter, and statistical test that Value Stream relies on is specified here in enough detail that an implementer can write it from scratch and a reviewer can verify correctness from the doc alone.</p>
+<p>Companion docs:</p>
+<ul>
+<li>reference/processors.md — which algorithms each Processor uses.</li>
+<li>reference/expression-dsl.md — the AST grammar for filters and formulas.</li>
+</ul>
+<p>Conventions used below:</p>
+<ul>
+<li>All log functions are natural log (<code>ln</code>) unless explicitly stated <code>log2</code>.</li>
+<li>"RSE" = relative standard error.</li>
+<li>All sketch types refer to the Apache DataSketches Python bindings (<code>datasketches</code> package), with explicit parameters.</li>
+</ul>
+<hr />
+<h2 id="1-mergeable-state-algebra">1. Mergeable state algebra<a class="headerlink" href="#1-mergeable-state-algebra" title="Permanent link">&para;</a></h2>
+<p>A state is <strong>mergeable</strong> iff there exists a binary operator <code>⊕</code> such that:</p>
+<div class="highlight"><pre><span></span><code>merge({a, b}) = a ⊕ b
+merge({a, b, c}) = a ⊕ b ⊕ c = (a ⊕ b) ⊕ c    (associative)
+                                = a ⊕ (b ⊕ c)
+                                = (b ⊕ a) ⊕ c   (commutative across rows)
+</code></pre></div>
+<p>All Value Stream state types satisfy this. The state catalog and merge rules:</p>
+<table>
+<thead>
+<tr>
+<th>State type</th>
+<th>Merge <code>⊕</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>count</code></td>
+<td><code>a + b</code></td>
+</tr>
+<tr>
+<td><code>value_sum</code></td>
+<td><code>a + b</code></td>
+</tr>
+<tr>
+<td><code>min</code></td>
+<td><code>min(a, b)</code></td>
+</tr>
+<tr>
+<td><code>max</code></td>
+<td><code>max(a, b)</code></td>
+</tr>
+<tr>
+<td><code>pooled_mean</code></td>
+<td>weighted mean (§2.2)</td>
+</tr>
+<tr>
+<td><code>pooled_variance</code></td>
+<td>Welford-merge (§2.3)</td>
+</tr>
+<tr>
+<td><code>tdigest</code></td>
+<td>digest-merge (§2.4)</td>
+</tr>
+<tr>
+<td><code>kll</code></td>
+<td>KLL-merge (§2.5)</td>
+</tr>
+<tr>
+<td><code>cpc</code></td>
+<td>union (§6.1)</td>
+</tr>
+<tr>
+<td><code>hll</code></td>
+<td>union (§6.2)</td>
+</tr>
+<tr>
+<td><code>theta</code></td>
+<td>union/intersect/diff (§6.3)</td>
+</tr>
+<tr>
+<td><code>topk</code></td>
+<td>frequent-items merge (§6.4)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-numeric-distribution-algorithms">2. Numeric distribution algorithms<a class="headerlink" href="#2-numeric-distribution-algorithms" title="Permanent link">&para;</a></h2>
+<h3 id="21-counts-and-sums">2.1 Counts and sums<a class="headerlink" href="#21-counts-and-sums" title="Permanent link">&para;</a></h3>
+<p>Trivial. <code>Count = Σ count_i</code>, <code>Sum = Σ sum_i</code>.</p>
+<h3 id="22-weighted-pooled-mean">2.2 Weighted (pooled) mean<a class="headerlink" href="#22-weighted-pooled-mean" title="Permanent link">&para;</a></h3>
+<p>For groups with counts <code>n_i</code> and means <code>m_i</code>:</p>
+<div class="highlight"><pre><span></span><code>global_mean = Σ (n_i · m_i) / Σ n_i
+</code></pre></div>
+<p>Implementation: store <code>Mean</code> and <code>Count</code> per row; in merge, compute <code>weighted_mean(Mean, Count)</code> (Polars-DS <code>weighted_mean(value_col, weight_col)</code> does this in one expression).</p>
+<h3 id="23-pooled-variance-welford-merge">2.3 Pooled variance — Welford merge<a class="headerlink" href="#23-pooled-variance-welford-merge" title="Permanent link">&para;</a></h3>
+<p>Given groups with <code>n_i</code>, <code>m_i</code>, <code>v_i</code> (sample variance, ddof=1):</p>
+<p>Step 1 — global mean:
+<div class="highlight"><pre><span></span><code>N = Σ n_i
+GroupMean = Σ (n_i · m_i) / N
+</code></pre></div></p>
+<p>Step 2 — sum of squares within and between:
+<div class="highlight"><pre><span></span><code>SS_within   = Σ ( (n_i − 1) · v_i )
+SS_between  = Σ ( n_i · (m_i − GroupMean)² )
+</code></pre></div></p>
+<p>Step 3 — pooled variance:
+<div class="highlight"><pre><span></span><code>Var = (SS_within + SS_between) / (N − 1)
+</code></pre></div></p>
+<p>This is <strong>exact</strong> (assuming each <code>v_i</code> was computed with <code>ddof=1</code>) and associative under repeated merging.</p>
+<p>Reference implementation pattern (in pseudocode close to Polars):</p>
+<div class="highlight"><pre><span></span><code># Inputs: a frame F with columns Count, Mean, Var per group.
+# Step 1: compute GroupMean per merge group.
+GM = F.group_by(group_keys).agg(weighted_mean(Mean, Count).alias(&quot;GroupMean&quot;))
+F  = F.join(GM, on=group_keys)
+# Step 2: compute the two helper columns per row.
+F  = F.with_columns(
+    n_minus1_variance = (Count - 1) * Var,
+    n_mean_diff_sq    = Count * (Mean - GroupMean) ** 2,
+)
+# Step 3: re-aggregate.
+M = F.group_by(group_keys).agg(
+    Count.sum(),
+    weighted_mean(Mean, Count).alias(&quot;Mean&quot;),
+    n_minus1_variance.sum().alias(&quot;ssw&quot;),
+    n_mean_diff_sq.sum().alias(&quot;ssb&quot;),
+)
+M = M.with_columns(Var = (ssw + ssb) / (Count - 1))
+</code></pre></div>
+<p>Numerical caveat: when <code>Count = 1</code>, <code>Var = 0</code> produces <code>NaN</code> after division. Guard with <code>pl.when(Count &gt; 1).then(...).otherwise(NULL)</code>.</p>
+<h3 id="24-t-digest">2.4 t-digest<a class="headerlink" href="#24-t-digest" title="Permanent link">&para;</a></h3>
+<p><strong>Library</strong>: <code>datasketches.tdigest_double</code> with compression parameter <code>k</code>.</p>
+<p><strong>Default</strong>: <code>k = 500</code>. This gives a digest of ~32 KB serialized; quantile error ≤ 0.3% at the median, ≤ 0.05% at p99.</p>
+<p><strong>Build (per group)</strong>:
+<div class="highlight"><pre><span></span><code>sketch = tdigest_double(k=500)
+sketch.update(values_array)            # bulk update with NumPy array
+return sketch.serialize()              # bytes
+</code></pre></div></p>
+<p>The bulk-update path with NumPy is essential for performance — per-element update is ~30× slower at chunk sizes.</p>
+<p><strong>Merge</strong>:
+<div class="highlight"><pre><span></span><code>merged = tdigest_double.deserialize(blobs[0])
+for b in blobs[1:]:
+    merged.merge(tdigest_double.deserialize(b))
+return merged.serialize()
+</code></pre></div></p>
+<p><strong>Edge case — empty input</strong>:
+If a group has zero values for a property, the engine writes a digest containing a single dummy <code>0.0</code> (and a zero count, recorded separately) so the column dtype stays <code>Binary</code> and downstream merges don't break. Quantile queries against an empty group return <code>0.0</code>.</p>
+<p><strong>Quantile query</strong>:
+<div class="highlight"><pre><span></span><code>sk = tdigest_double.deserialize(blob)
+return sk.get_quantile(q)
+</code></pre></div></p>
+<p><strong>Histogram from digest</strong> (used by descriptive_histogram chart):
+<div class="highlight"><pre><span></span><code>sk = tdigest_double.deserialize(blob)
+edges = linspace(value_range[0], value_range[1], bins + 1)
+masses = [ sk.get_cdf([right])[0] - sk.get_cdf([left])[0]
+           for left, right in zip(edges[:-1], edges[1:]) ]
+return edges, masses
+</code></pre></div></p>
+<h3 id="25-kll-sketch-alternative-for-stronger-error-guarantees">2.5 KLL sketch (alternative for stronger error guarantees)<a class="headerlink" href="#25-kll-sketch-alternative-for-stronger-error-guarantees" title="Permanent link">&para;</a></h3>
+<p><strong>Library</strong>: <code>datasketches.kll_floats_sketch(k=200)</code>.
+<strong>Default</strong>: <code>k = 200</code> (≈ 1.65% normalized rank error two-sided at 0.5).
+KLL is mergeable, has stronger formal error guarantees than t-digest, and serializes to ~1.5 KB.</p>
+<p>Use KLL where SLA-bound percentile errors matter; use t-digest where compactness and per-quantile speed matter.</p>
+<p>Build / merge / quantile mirror t-digest with <code>k=200</code>.</p>
+<hr />
+<h2 id="3-variant-comparison-and-proportions">3. Variant comparison and proportions<a class="headerlink" href="#3-variant-comparison-and-proportions" title="Permanent link">&para;</a></h2>
+<p>Variant comparison is a derived metric of <code>binary_outcome</code> processors with <code>variant_column</code> set. Inputs per group: <code>Positives_T, Negatives_T, Count_T, Positives_C, Negatives_C, Count_C</code> (T = test, C = control).</p>
+<h3 id="31-click-through-rate-per-variant">3.1 Click-through rate per variant<a class="headerlink" href="#31-click-through-rate-per-variant" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>CTR = Positives / (Positives + Negatives)
+</code></pre></div>
+<h3 id="32-lift">3.2 Lift<a class="headerlink" href="#32-lift" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>Lift = (TestCTR - ControlCTR) / ControlCTR
+</code></pre></div>
+<p>NaN/Inf-safe: replace <code>Inf</code> with <code>0.0</code>, NaN with <code>0.0</code> (no control = no lift to display).</p>
+<p>The same metric also returns <code>TestSampleSize</code>, <code>ControlSampleSize</code>, and the
+absolute rate effect:</p>
+<div class="highlight"><pre><span></span><code>AbsoluteRateDifference = TestCTR - ControlCTR
+</code></pre></div>
+<h3 id="33-confidence-interval-for-the-absolute-rate-difference">3.3 Confidence interval for the absolute rate difference<a class="headerlink" href="#33-confidence-interval-for-the-absolute-rate-difference" title="Permanent link">&para;</a></h3>
+<p><code>variant_compare.confidence_level</code> defaults to <code>0.95</code>. For each arm, compute a
+two-sided Wilson score interval at that confidence level. If the test interval
+is <code>[L_T, U_T]</code> and the control interval is <code>[L_C, U_C]</code>, the deterministic
+Newcombe-Wilson difference interval is:</p>
+<div class="highlight"><pre><span></span><code>AbsoluteRateDifference_CI_Low  = L_T - U_C
+AbsoluteRateDifference_CI_High = U_T - L_C
+</code></pre></div>
+<p>This interval uses only persisted <code>Positives</code> and <code>Negatives</code>; it never needs
+raw assignments. The implementation reports the historical <code>Lift</code>, z-score,
+p-value, <code>CTR</code>, and <code>StdErr</code> outputs unchanged for compatibility.</p>
+<h3 id="34-standard-error-of-a-proportion">3.4 Standard error of a proportion<a class="headerlink" href="#34-standard-error-of-a-proportion" title="Permanent link">&para;</a></h3>
+<p>For one variant with <code>n = Positives + Negatives</code>:
+<div class="highlight"><pre><span></span><code>StdErr = sqrt( CTR · (1 − CTR) / n )
+</code></pre></div></p>
+<h3 id="35-two-proportion-z-test-proportion-z-test">3.5 Two-proportion z-test (proportion z-test)<a class="headerlink" href="#35-two-proportion-z-test-proportion-z-test" title="Permanent link">&para;</a></h3>
+<p>Given <code>c_T, c_C</code> successes, <code>n_T, n_C</code> total per variant:</p>
+<div class="highlight"><pre><span></span><code>if any of c_T, c_C, n_T, n_C is 0:
+    return { z_score: 0, z_p_val: 0 }
+
+p_pool = (c_T + c_C) / (n_T + n_C)
+z = (c_T/n_T − c_C/n_C) / sqrt( p_pool · (1 − p_pool) · (1/n_T + 1/n_C) )
+p_one_tail = norm.cdf(−|z|)
+p_two_tail = 2 · p_one_tail
+return { z_score: z, z_p_val: p_two_tail }     # default two-tailed
+</code></pre></div>
+<p>Notation: <code>n</code> here is "successes + failures" — i.e. <code>Positives + Negatives</code> (rows we count for the rate). This matches how the engine stores <code>Count</code> after dedup (since outcomes outside positive ∪ negative are filtered out).</p>
+<hr />
+<h2 id="4-curves-from-t-digests-roc-ap-calibration">4. Curves from t-digests (ROC, AP, calibration)<a class="headerlink" href="#4-curves-from-t-digests-roc-ap-calibration" title="Permanent link">&para;</a></h2>
+<p>These derive metrics for the <code>score_distribution</code> processor.</p>
+<h3 id="41-roc-auc-and-average-precision-from-t-digests">4.1 ROC AUC and average precision from t-digests<a class="headerlink" href="#41-roc-auc-and-average-precision-from-t-digests" title="Permanent link">&para;</a></h3>
+<p>Inputs per group:
+- <code>tdigest_pos</code> — digest of scores where outcome was positive,
+- <code>tdigest_neg</code> — digest of scores where outcome was negative.</p>
+<p>Procedure:</p>
+<div class="highlight"><pre><span></span><code>thresholds = linspace(0, 1, 101)        # 101 evenly spaced thresholds
+
+pos_sk = tdigest.deserialize(tdigest_pos)
+neg_sk = tdigest.deserialize(tdigest_neg)
+
+if pos_sk.is_empty() or neg_sk.is_empty():
+    return { roc_auc: 0, average_precision: 0,
+             tpr: [0], fpr: [0], precision: [0], recall: [0],
+             pos_fraction: 0 }
+
+P = pos_sk.get_total_weight()
+N = neg_sk.get_total_weight()
+
+cdf_p = array(pos_sk.get_cdf(thresholds))
+cdf_n = array(neg_sk.get_cdf(thresholds))
+
+tpr = 1.0 - cdf_p
+fpr = 1.0 - cdf_n
+
+# Sort by FPR ascending for trapezoidal integration.
+idx = argsort(fpr)
+fpr_s = fpr[idx]; tpr_s = tpr[idx]
+roc_auc = trapz(tpr_s, fpr_s)
+
+# Precision–recall reconstruction.
+recall    = tpr[::-1]            # threshold descending
+fpr_desc  = fpr[::-1]
+TP        = P * recall
+FP        = N * fpr_desc
+precision = TP / (TP + FP + 1e-10)
+
+# Make precision monotone non-increasing in recall (interp-AP).
+precision = max_accumulate(precision[::-1])[::-1]
+
+# Anchor the PR curve at recall=0 / precision=1.
+if recall[0] != 0.0:
+    recall    = [0.0] ++ recall
+    precision = [1.0] ++ precision
+
+dr = recall[1:] - recall[:-1]
+average_precision = sum(dr * precision[1:])
+
+pos_fraction = P / (P + N)
+return { roc_auc, average_precision, tpr_s, fpr_s, precision, recall, pos_fraction }
+</code></pre></div>
+<p>Why 101 thresholds? Empirically a sweet spot — closer than that yields no meaningful gain on <code>k=500</code> digests, but doubles compute. The number is parameterizable in the YAML (<code>metrics.&lt;name&gt;.curve_resolution</code>).</p>
+<h3 id="42-gain-and-lift-curves-from-reconstructed-roc-arrays">4.2 Gain and lift curves from reconstructed ROC arrays<a class="headerlink" href="#42-gain-and-lift-curves-from-reconstructed-roc-arrays" title="Permanent link">&para;</a></h3>
+<p>The chart layer derives gain and lift from the same <code>fpr</code>, <code>tpr</code>, and
+<code>pos_fraction</code> arrays returned by <code>curve_from_digests</code>:</p>
+<div class="highlight"><pre><span></span><code>sample_fraction = pos_fraction * tpr + (1 - pos_fraction) * fpr
+gain = tpr
+lift = gain / sample_fraction       # 0 when sample_fraction is effectively 0
+</code></pre></div>
+<p>The gain chart compares <code>gain</code> to the random baseline <code>y = x</code>; the lift chart
+compares <code>lift</code> to the random baseline <code>y = 1</code>.</p>
+<h3 id="43-calibration-from-t-digests">4.3 Calibration from t-digests<a class="headerlink" href="#43-calibration-from-t-digests" title="Permanent link">&para;</a></h3>
+<p>Inputs: <code>tdigest_pos</code>, <code>tdigest_neg</code> (typically of <code>FinalPropensity</code>, the calibrated score).</p>
+<p>Procedure (mirrors the canonical Pega calibration view):</p>
+<div class="highlight"><pre><span></span><code># Bins: denser at low scores where most of the mass lives.
+edges = linspace(0.0, 0.1, 10) ++ linspace(0.1, 1.0, 17)    # 26 edges, 25 bins (deduped)
+
+P = pos_sk.get_total_weight()
+N = neg_sk.get_total_weight()
+
+cdf_p = pos_sk.get_cdf(edges)
+cdf_n = neg_sk.get_cdf(edges)
+
+delta_p = diff(cdf_p)            # mass per bin (positive)
+delta_n = diff(cdf_n)            # mass per bin (negative)
+
+pos_in_bin   = P * delta_p
+neg_in_bin   = N * delta_n
+total_in_bin = pos_in_bin + neg_in_bin
+positives_rate = pos_in_bin / total_in_bin
+
+# Mean predicted propensity per bin: weighted mean of bin-internal quantiles
+# from positive and negative digests.
+for each bin i (left=edges[i], right=edges[i+1]):
+    if cdf_b_pos == cdf_a_pos and cdf_b_neg == cdf_a_neg:
+        mean_propensity = (left + right) / 2
+    else:
+        # Sample 10 quantiles inside the bin from each digest.
+        q_pos = linspace(cdf_a_pos, cdf_b_pos, 10, endpoint=False)
+        pos_vals = [pos_sk.get_quantile(q) for q in q_pos]
+        pos_bin_mean = mean(pos_vals)
+        # ...same for neg...
+        if total_in_bin[i] &gt; 0:
+            mean_propensity = (pos_bin_mean*pos_in_bin[i] + neg_bin_mean*neg_in_bin[i]) / total_in_bin[i]
+        else:
+            mean_propensity = (left + right) / 2
+    output:
+       calibration_bin[i]   = (left + right) / 2
+       calibration_proba[i] = mean_propensity
+       calibration_rate[i]  = positives_rate[i]   if total_in_bin[i] &gt; 0 else 0
+</code></pre></div>
+<p>The calibration plot then draws <code>y = calibration_rate vs. x = calibration_proba</code>; a perfectly calibrated model lies on <code>y = x</code>.</p>
+<hr />
+<h2 id="5-ml-helpers-personalization-and-novelty">5. ML helpers — personalization and novelty<a class="headerlink" href="#5-ml-helpers-personalization-and-novelty" title="Permanent link">&para;</a></h2>
+<h3 id="51-personalization-cosine-similarity-proxy">5.1 Personalization (cosine-similarity proxy)<a class="headerlink" href="#51-personalization-cosine-similarity-proxy" title="Permanent link">&para;</a></h3>
+<p>Definition (after Statisticianinstilettos's <code>recmetrics</code>):</p>
+<div class="highlight"><pre><span></span><code>1 − mean( cosine_sim(rec_i, rec_j) over all pairs i ≠ j )
+</code></pre></div>
+<p>Direct computation is <code>O(N²)</code>. Value Stream uses a hashed-feature trick to compute it in <code>O(N)</code>:</p>
+<div class="highlight"><pre><span></span><code># Inputs: per-customer list of action names within the group.
+# Step 1: build a sparse 2^16 hashed-feature matrix R, rows = customers.
+hasher = FeatureHasher(input_type=&quot;string&quot;, n_features=2^16)
+R_sparse = hasher.transform(per_customer_action_lists)
+
+# Step 2: L2-normalize rows.
+R_norm   = sklearn.preprocessing.normalize(R_sparse, norm=&quot;l2&quot;, axis=1)
+
+# Step 3: total similarity sum = || sum(R_norm, axis=0) ||²
+s = R_norm.sum(axis=0)                # 1 × 2^16
+total_sim = sum(s_i²)
+
+# Step 4: subtract diagonals (each customer with themselves contributes 1.0).
+off_diag_sum = total_sim − N
+
+# Step 5: average off-diagonal similarity.
+avg_sim = off_diag_sum / (N · (N − 1))    # for N &gt; 1, else 0
+
+return 1 − avg_sim
+</code></pre></div>
+<p>Returns 0 if <code>N &lt;= 1</code>.</p>
+<p><strong>Subsampling rules</strong> (preserve representativeness while bounding compute):
+- <code>N &lt; 50_000</code> → use full sample.
+- <code>50_000 ≤ N &lt; 100_000</code> → use the second half of rows.
+- <code>N ≥ 100_000</code> → use a 50_000-row middle slice.</p>
+<p>(The legacy app uses <code>5_000</code>-step thresholds; the new defaults of <code>50_000</code> reflect the larger workspaces seen in production.)</p>
+<h3 id="52-novelty-information-theoretic">5.2 Novelty (information-theoretic)<a class="headerlink" href="#52-novelty-information-theoretic" title="Permanent link">&para;</a></h3>
+<p>For a group with action counts <code>c_a</code>:</p>
+<div class="highlight"><pre><span></span><code>unique_users   = n_distinct(CustomerID)
+total_self_info = Σ_a [ c_a · −log2( c_a / unique_users + 1e-10 ) ]
+max_rec_length  = max over interactions of len(actions in that interaction)
+novelty = total_self_info / (unique_users · max_rec_length)
+</code></pre></div>
+<p>Returns 0 if <code>unique_users == 0</code> or <code>max_rec_length == 0</code>. Subsampling rules same as personalization.</p>
+<p>Both metrics are stored as <code>pooled_mean</code> states with <code>Count</code> as the weight, so cross-chunk merging is just a weighted mean.</p>
+<hr />
+<h2 id="6-approximate-set-algorithms">6. Approximate-set algorithms<a class="headerlink" href="#6-approximate-set-algorithms" title="Permanent link">&para;</a></h2>
+<h3 id="61-cpc-default-distinct-count-sketch">6.1 CPC (default distinct-count sketch)<a class="headerlink" href="#61-cpc-default-distinct-count-sketch" title="Permanent link">&para;</a></h3>
+<p><strong>Library</strong>: <code>datasketches.cpc_sketch(lg_k)</code> and <code>datasketches.cpc_union(lg_k)</code>.</p>
+<p><strong>Default</strong>: <code>lg_k = 11</code>. CPC is the default for newly generated unique-count
+states because it provides compact serialized state at accuracy comparable to
+the previous HLL default. Existing HLL states remain supported and readable.</p>
+<p><strong>Build (per group)</strong>:
+<div class="highlight"><pre><span></span><code>sketch = cpc_sketch(lg_k=11)
+for v in column.drop_nulls():
+    sketch.update(str(v))     # always feed a stable string representation
+return sketch.serialize()     # bytes
+</code></pre></div></p>
+<p><strong>Union (merge)</strong>:
+<div class="highlight"><pre><span></span><code>union = cpc_union(lg_k=11)
+for blob in blobs:
+    union.update(cpc_sketch.deserialize(blob))
+return union.get_result().serialize()
+</code></pre></div></p>
+<p><strong>Estimate and bounds</strong>:
+<div class="highlight"><pre><span></span><code>sk = cpc_sketch.deserialize(blob)
+estimate = sk.get_estimate()
+lower = sk.get_lower_bound(kappa=2)
+upper = sk.get_upper_bound(kappa=2)
+</code></pre></div></p>
+<p>CPC supports union, but not intersection or difference. Use Theta when a KPI
+requires set algebra. Every blob in a state must use the same <code>lg_k</code>; changing
+<code>lg_k</code> or switching among CPC, HLL, and Theta requires replay from raw chunks.</p>
+<h3 id="62-hll-hyperloglog">6.2 HLL (HyperLogLog++)<a class="headerlink" href="#62-hll-hyperloglog" title="Permanent link">&para;</a></h3>
+<p><strong>Library</strong>: <code>datasketches.hll_sketch(lg_k, tgt_type)</code>.</p>
+<p><strong>Defaults</strong>:
+- <code>lg_k = 12</code> → 4096 buckets, ~4 KB sketch, ±1.6% RSE at 1σ.
+- <code>tgt_type = HLL_8</code> (one byte per bucket; HLL_4 halves the size with the same RSE but higher CPU on merges).</p>
+<p><strong>Build (per group)</strong>:
+<div class="highlight"><pre><span></span><code>sketch = hll_sketch(lg_k=12, tgt_type=HLL_8)
+for v in column.drop_nulls():
+    sketch.update(str(v))     # always feed a stable string representation
+return sketch.serialize_compact()    # bytes
+</code></pre></div></p>
+<p><strong>Union (merge)</strong>:
+<div class="highlight"><pre><span></span><code>union = hll_union(lg_k=12)
+for blob in blobs:
+    union.update(hll_sketch.deserialize(blob))
+return union.get_result(tgt_type=HLL_8).serialize_compact()
+</code></pre></div></p>
+<p><strong>Estimate</strong>:
+<div class="highlight"><pre><span></span><code>sk = hll_sketch.deserialize(blob)
+return sk.get_estimate()
+</code></pre></div></p>
+<p><strong>Invariant</strong>: every blob participating in a union must have the same <code>lg_k</code>. The engine validates this at write time (raises a helpful error otherwise).</p>
+<p>HLL remains a supported opt-in state type for existing catalogs and workloads
+that prioritize HLL serialization/deserialization speed over compact CPC state.
+It is no longer the generated default for unique counts.</p>
+<h3 id="63-theta-sketch">6.3 Theta sketch<a class="headerlink" href="#63-theta-sketch" title="Permanent link">&para;</a></h3>
+<p><strong>Library</strong>: <code>datasketches.update_theta_sketch(lg_k=12)</code>; for unions/intersections use <code>theta_union</code>, <code>theta_intersection</code>, <code>theta_a_not_b</code>.</p>
+<p><strong>Use case</strong>: when we need set algebra, not just unique counts.</p>
+<p><strong>Cardinality query</strong>: a compact Theta sketch exposes <code>get_estimate()</code> and is
+therefore also a valid <code>approx_distinct_count</code> input. CPC remains the generated
+default for count-only KPIs; choose Theta when the persisted state will be
+reused for union, intersection, or difference.</p>
+<p><strong>Build / Union</strong>: analogous to the cardinality-sketch procedures above.</p>
+<p><strong>Cohort retention example</strong> (in metric DSL):
+<div class="highlight"><pre><span></span><code><span class="nt">RetainedUsers_30d</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unique_users</span>
+<span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">set_op</span>
+<span class="w">  </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">intersection</span>
+<span class="w">  </span><span class="nt">operands</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="nv">ActiveUsers_theta</span><span class="p p-Indicator">,</span><span class="nt"> time_window</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">last</span><span class="p">:</span><span class="w"> </span><span class="nv">1d</span><span class="p p-Indicator">}}</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="nv">ActiveUsers_theta</span><span class="p p-Indicator">,</span><span class="nt"> time_window</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">between</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">-30d</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">-1d</span><span class="p p-Indicator">]}}</span>
+<span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">count</span>
+</code></pre></div></p>
+<p>The planner reads two theta blobs, runs <code>theta_intersection</code>, and reports <code>get_estimate()</code>.
+The implemented planner resolves relative windows against the explicit query
+end date or, when absent, the latest available daily aggregate date. <code>last</code> and
+<code>between</code> bounds are inclusive and accept day/week durations. Windowed set
+operations currently return summary-grain results and require a daily physical
+aggregate.</p>
+<h3 id="64-frequent-items-top-k">6.4 Frequent-items (top-K)<a class="headerlink" href="#64-frequent-items-top-k" title="Permanent link">&para;</a></h3>
+<p><strong>Library</strong>: <code>datasketches.frequent_strings_sketch(lg_max_map_size=10)</code>.</p>
+<p>Optional state for "top campaigns by count" style metrics. Merge: built-in. Output: list of <code>(item, estimate, lower_bound, upper_bound)</code> tuples.</p>
+<hr />
+<h2 id="7-rfm-segmentation-entity_lifecycle-derive">7. RFM segmentation (entity_lifecycle derive)<a class="headerlink" href="#7-rfm-segmentation-entity_lifecycle-derive" title="Permanent link">&para;</a></h2>
+<h3 id="71-computing-r-f-m-from-lifecycle-aggregates">7.1 Computing R, F, M from lifecycle aggregates<a class="headerlink" href="#71-computing-r-f-m-from-lifecycle-aggregates" title="Permanent link">&para;</a></h3>
+<p>Per (entity = customer_id, optional group-by columns):</p>
+<div class="highlight"><pre><span></span><code>unique_holdings   = number of distinct orders by this customer
+lifetime_value    = sum of monetary values
+MinPurchasedDate  = earliest purchase
+MaxPurchasedDate  = latest purchase
+
+frequency      = unique_holdings − 1            # repeat purchases
+tenure         = (observation_period_end − MinPurchasedDate).days
+recency_raw    = (MaxPurchasedDate − MinPurchasedDate).days
+recency        = tenure − recency_raw            # so larger = &quot;more recently active&quot;
+monetary_value = lifetime_value / unique_holdings
+                 (set to 0 when frequency == 0)
+</code></pre></div>
+<p><code>observation_period_end</code> is <code>max(MaxPurchasedDate)</code> across the entire summary frame (after compaction).</p>
+<h3 id="72-quartile-labeling">7.2 Quartile labeling<a class="headerlink" href="#72-quartile-labeling" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>F: f_quartile in {1,2,3,4}             # higher = more frequent
+M: m_quartile in {1,2,3,4}             # higher = more monetary
+R: r_quartile in {1,2,3,4}             # higher = MORE RECENT
+                                         (use reversed labels in qcut)
+</code></pre></div>
+<p>Polars helper: <code>pl.col(x).qcut(4, labels=labels, allow_duplicates=true)</code>.</p>
+<h3 id="73-segment-code">7.3 Segment code<a class="headerlink" href="#73-segment-code" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>rfm_seg = concat(r_quartile, f_quartile, m_quartile)    # e.g. &quot;344&quot;
+</code></pre></div>
+<h3 id="74-segment-dictionaries">7.4 Segment dictionaries<a class="headerlink" href="#74-segment-dictionaries" title="Permanent link">&para;</a></h3>
+<p>A segment dictionary maps <code>rfm_seg</code> → segment name. Defaults:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">default</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">Premium Customer</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="s">&quot;334&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;443&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;444&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;344&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;434&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;433&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;343&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;333&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Repeat Customer</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">[</span><span class="s">&quot;244&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;234&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;232&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;332&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;143&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;233&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;243&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;242&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Top Spender</span><span class="p">:</span><span class="w">       </span><span class="p p-Indicator">[</span><span class="s">&quot;424&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;414&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;144&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;314&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;324&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;124&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;224&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;423&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;413&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;133&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;323&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;313&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;134&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">At Risk Customer</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="s">&quot;422&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;223&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;212&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;122&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;222&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;132&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;322&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;312&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;412&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;123&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;214&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Inactive Customer</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;411&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;111&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;113&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;114&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;112&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;211&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;311&quot;</span><span class="p p-Indicator">]</span>
+
+<span class="nt">retail_banking</span><span class="p">:</span>
+<span class="w">  </span><span class="c1"># tuned for retail-banking patterns; same shape, different mapping</span>
+<span class="w">  </span><span class="nt">Premium Customer</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="s">&quot;334&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;443&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;444&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;344&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;434&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;433&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;343&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;333&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Repeat Customer</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">[</span><span class="s">&quot;244&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;234&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;232&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;332&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;143&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;233&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;243&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;242&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">...</span>
+</code></pre></div>
+<p>The engine ships <code>default</code>, <code>retail_banking</code>, <code>telco</code>, <code>e_commerce</code>. A workspace can override with a literal dict.</p>
+<h3 id="75-rfm-score">7.5 RFM score<a class="headerlink" href="#75-rfm-score" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>rfm_score = round( mean(r_quartile, f_quartile, m_quartile) , 2 )
+</code></pre></div>
+<p>with each quartile cast to decimal.</p>
+<hr />
+<h2 id="8-statistical-tests-for-experiment-processors">8. Statistical tests for experiment processors<a class="headerlink" href="#8-statistical-tests-for-experiment-processors" title="Permanent link">&para;</a></h2>
+<p>These derive metrics for <code>binary_outcome</code> processors with <code>variant_column</code> set or the experiment columns included in <code>group_by</code>.</p>
+<h3 id="81-two-sample-z-test-on-proportions">8.1 Two-sample z-test on proportions<a class="headerlink" href="#81-two-sample-z-test-on-proportions" title="Permanent link">&para;</a></h3>
+<p>Defined in §3.5. Used by <code>proportion_test</code> metric kind on a 2-row contingency.</p>
+<h3 id="82-pearson-chi-square-test-of-homogeneity">8.2 Pearson chi-square test of homogeneity<a class="headerlink" href="#82-pearson-chi-square-test-of-homogeneity" title="Permanent link">&para;</a></h3>
+<p>Inputs: a 2D contingency table (variants × {Positives, Negatives}).</p>
+<div class="highlight"><pre><span></span><code>g, p, dof, expected = scipy.stats.chi2_contingency(table, correction=False)
+return { chi2_stat: g, chi2_dof: dof, chi2_p_val: p }
+</code></pre></div>
+<p>For a <code>2 × 2</code> table, also compute the sample odds ratio and 95% CI:</p>
+<div class="highlight"><pre><span></span><code>res = scipy.stats.contingency.odds_ratio(table, kind=&quot;sample&quot;)
+return {
+    chi2_odds_ratio_stat:  res.statistic,
+    chi2_odds_ratio_ci_low,
+    chi2_odds_ratio_ci_high  # = res.confidence_interval(confidence_level=0.95)
+}
+</code></pre></div>
+<h3 id="83-g-test-log-likelihood-ratio">8.3 G-test (log-likelihood ratio)<a class="headerlink" href="#83-g-test-log-likelihood-ratio" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>g, p, dof, expected = scipy.stats.chi2_contingency(table, lambda_=&quot;log-likelihood&quot;, correction=False)
+return { g_stat: g, g_dof: dof, g_p_val: p, g_odds_ratio_*: ... }
+</code></pre></div>
+<h3 id="84-single-degree-of-freedom-g-test-variant-proportion">8.4 Single-degree-of-freedom G-test (variant proportion)<a class="headerlink" href="#84-single-degree-of-freedom-g-test-variant-proportion" title="Permanent link">&para;</a></h3>
+<p>For a 2×2 contingency <code>[[c_T, n_T − c_T], [c_C, n_C − c_C]]</code>:</p>
+<div class="highlight"><pre><span></span><code>expected_T_succ = n_T * (c_T + c_C) / (n_T + n_C)
+expected_T_fail = n_T * ((n_T − c_T) + (n_C − c_C)) / (n_T + n_C)
+expected_C_succ = n_C * (c_T + c_C) / (n_T + n_C)
+expected_C_fail = n_C * ((n_T − c_T) + (n_C − c_C)) / (n_T + n_C)
+
+G = 2 · (
+    c_T · ln(c_T / expected_T_succ) +
+    (n_T − c_T) · ln((n_T − c_T) / expected_T_fail) +
+    c_C · ln(c_C / expected_C_succ) +
+    (n_C − c_C) · ln((n_C − c_C) / expected_C_fail)
+)
+p = 1 − chi2.cdf(G, df=1)
+return { g_test_stat: G, g_p_val: p }
+</code></pre></div>
+<h3 id="85-defaults">8.5 Defaults<a class="headerlink" href="#85-defaults" title="Permanent link">&para;</a></h3>
+<ul>
+<li>All tests are two-sided unless stated otherwise.</li>
+<li>No Yates correction.</li>
+<li>Sample odds ratio (not unconditional MLE) is reported; CI uses Fisher's noncentral hypergeometric (<code>scipy</code>'s <code>kind="sample"</code>).</li>
+</ul>
+<hr />
+<h2 id="9-calendar-derivations">9. Calendar derivations<a class="headerlink" href="#9-calendar-derivations" title="Permanent link">&para;</a></h2>
+<h3 id="91-default-calendar-derive_calendar-transform">9.1 Default calendar (<code>derive_calendar</code> transform)<a class="headerlink" href="#91-default-calendar-derive_calendar-transform" title="Permanent link">&para;</a></h3>
+<p>From a timestamp column <code>ts</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Output column</th>
+<th>Polars expression</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Day</code></td>
+<td><code>ts.dt.date()</code></td>
+<td><code>2024-08-21</code></td>
+</tr>
+<tr>
+<td><code>Month</code></td>
+<td><code>ts.dt.strftime("%Y-%m")</code></td>
+<td><code>"2024-08"</code></td>
+</tr>
+<tr>
+<td><code>Year</code></td>
+<td><code>ts.dt.year().cast(Int16)</code></td>
+<td><code>2024</code></td>
+</tr>
+<tr>
+<td><code>Quarter</code></td>
+<td><code>ts.dt.year().cast(Utf8) + "_Q" + ts.dt.quarter().cast(Utf8)</code></td>
+<td><code>"2024_Q3"</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="92-iso-week-optional">9.2 ISO week (optional)<a class="headerlink" href="#92-iso-week-optional" title="Permanent link">&para;</a></h3>
+<p>| <code>Week</code> | <code>ts.dt.strftime("%G-W%V")</code> | <code>"2024-W34"</code> |</p>
+<h3 id="93-period-partition-values">9.3 Period partition values<a class="headerlink" href="#93-period-partition-values" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Grain</th>
+<th>Period</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>daily</code></td>
+<td><code>Day.dt.strftime("%Y-%m")</code> (the file partitions monthly)</td>
+</tr>
+<tr>
+<td><code>monthly</code></td>
+<td><code>Month</code></td>
+</tr>
+<tr>
+<td><code>quarterly</code></td>
+<td><code>Quarter</code></td>
+</tr>
+<tr>
+<td><code>yearly</code></td>
+<td><code>Year</code> (as string)</td>
+</tr>
+<tr>
+<td><code>summary</code></td>
+<td>default <code>Month</code>; configurable to <code>Quarter</code> or <code>Year</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="94-time-zone">9.4 Time zone<a class="headerlink" href="#94-time-zone" title="Permanent link">&para;</a></h3>
+<p>All timestamps are normalized to UTC at ingestion. Display-time-zone conversion is a presentation concern, applied at query time.</p>
+<hr />
+<h2 id="10-numeric-robustness-checklist">10. Numeric robustness checklist<a class="headerlink" href="#10-numeric-robustness-checklist" title="Permanent link">&para;</a></h2>
+<p>Implementers should add tests for these edge cases per algorithm:</p>
+<table>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th>Edge case</th>
+<th>Expected behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pooled variance</td>
+<td><code>Count == 1</code></td>
+<td>NaN/NULL, not crash</td>
+</tr>
+<tr>
+<td>t-digest curve</td>
+<td>empty pos or neg</td>
+<td><code>roc_auc=0, ap=0</code>, arrays <code>[0]</code></td>
+</tr>
+<tr>
+<td>CPC/HLL/Theta distinct</td>
+<td>empty input</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td>Theta intersect</td>
+<td>disjoint operands</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td>Personalization</td>
+<td><code>N &lt; 2</code></td>
+<td><code>0.0</code></td>
+</tr>
+<tr>
+<td>Novelty</td>
+<td><code>unique_users == 0</code></td>
+<td><code>0.0</code></td>
+</tr>
+<tr>
+<td>Lift</td>
+<td><code>ControlCTR == 0</code></td>
+<td><code>Lift = 0</code>, <code>Lift_P_Val</code> from z-test</td>
+</tr>
+<tr>
+<td>Z-test proportions</td>
+<td>any zero count</td>
+<td><code>{z_score: 0, z_p_val: 0}</code></td>
+</tr>
+<tr>
+<td>Skew (Bowley)</td>
+<td><code>p75 == p25</code></td>
+<td>NULL</td>
+</tr>
+<tr>
+<td>qcut</td>
+<td>all values equal</td>
+<td><code>allow_duplicates=true</code>, fewer buckets</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="11-test-fixtures-recommended">11. Test fixtures (recommended)<a class="headerlink" href="#11-test-fixtures-recommended" title="Permanent link">&para;</a></h2>
+<p>For reproducibility tests, ship these fixtures in <code>tests/fixtures/</code>:</p>
+<ol>
+<li><code>imdb_small.parquet</code> (2 MB) — synthetic Pega-shaped IH with 200 K rows, three channels, three placements, five issues, deterministic seed; expected <code>CTR, ROC AUC, ConversionRate</code> printed to <code>expected.json</code>.</li>
+<li><code>holdings_small.parquet</code> (200 KB) — synthetic holdings with three customer cohorts, one year of data; expected RFM segment counts in <code>expected_rfm.json</code>.</li>
+<li><code>binary_outcome_property_suite.json</code> — 1 K randomly generated <code>(positives, negatives)</code> matrices across three variants with computed expected <code>lift / z-test / chi2 / g</code>. Used as parametric tests.</li>
+<li><code>tdigest_property_suite.json</code> — 100 random distributions (uniform, exponential, mixture-of-Gaussians) with their <code>roc_auc</code> from <code>sklearn.metrics.roc_auc_score</code>. Used as parametric tests for <code>curve_from_digests</code>.</li>
+</ol>
+<hr />
+<h2 id="12-numerical-equivalence-rules">12. Numerical-equivalence rules<a class="headerlink" href="#12-numerical-equivalence-rules" title="Permanent link">&para;</a></h2>
+<p>Whenever Value Stream claims a number is "exact":
+- Counts and sums are exact.
+- Pooled variance is exact (assuming <code>ddof=1</code> per group).
+- Min/max are exact.
+- Lift, CTR, conversion rate, revenue are exact.</p>
+<p>Whenever Value Stream claims a number is "approximate":
+- Quantiles via t-digest: error ≤ 0.3% at the median, ≤ 0.05% at p99 with <code>k=500</code>.
+- Quantiles via KLL: error ≤ 1.65% normalized rank with <code>k=200</code>.
+- Distinct counts via CPC: report the sketch's lower/upper bounds; generated states use <code>lg_k=11</code>.
+- Distinct counts via legacy/opt-in HLL: ±1.6% RSE with <code>lg_k=12</code>.
+- Set operations via Theta: as above.
+- ROC AUC reconstructed from digests: typically within 1e-2 of the exact value at <code>n ≥ 1000</code> per group.</p>
+<p>These bounds drive parameter defaults and inform the warnings the engine emits when a group is too small for a sketch to be reliable (e.g. <code>Count &lt; 100</code> for t-digest curves emits a "low-support" warning that the UI surfaces on the tile).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

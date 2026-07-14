@@ -1,0 +1,3140 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Aggregate-first business intelligence platform">
+      
+      
+      
+      
+        <link rel="prev" href="../chat-with-data-mlp1/">
+      
+      
+        <link rel="next" href="../../meta/documentation-guide/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Kickoff prompt - Value Stream</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#value-stream-implementation-kick-off-prompt" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Value Stream" class="md-header__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Value Stream
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Kickoff prompt
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/getting-started/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/users/running-reports/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../concepts/product-overview/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/cli/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../replacement-design/" class="md-tabs__link">
+          
+  
+  
+  Design docs
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Value Stream" class="md-nav__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Value Stream
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/ui-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/distribution-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/lifecycle-and-funnel-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Funnel & lifecycle analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/pega-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pega export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/running-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/chat-with-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/querying-and-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Querying & export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/workspaces-and-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces & catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/ai-config-studio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Configuration Studio
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration & backfill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/product-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/business-functionality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Business functionality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (deep)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/domain-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_6" id="__nav_4_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions (ADRs)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Decisions (ADRs)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0001-aggregate-first-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0001 Aggregate-first storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0002-yaml-catalog-as-source-of-behavior/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0002 YAML catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0003-closed-expression-ast/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0003 Closed expression AST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0004-chunk-ledger-idempotency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0004 Chunk-ledger idempotency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/expression-dsl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Expression DSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/readers-and-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers & formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/chart-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chart catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/kpi-recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/catalog-schemas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api-and-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design docs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design docs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../replacement-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Replacement design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../implementation-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reporting-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kpi-recipe-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipe backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat-with-data-mlp1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat With Data MLP1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kickoff prompt
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kickoff prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#0-who-you-are-and-what-you-are-doing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Who you are and what you are doing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-target-folder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Target folder
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-read-these-specs-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Read these specs first
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-phase-0-scope-what-you-will-build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Phase 0 scope — what you will build
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Phase 0 scope — what you will build">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-repository-skeleton" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Repository skeleton
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-tooling-and-dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Tooling and dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-the-expression-dsl-the-centerpiece-of-phase-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 The expression DSL — the centerpiece of Phase 0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-configuration-loader-and-canonicalization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Configuration loader and canonicalization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-metadata-schemas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Metadata schemas
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-cli-the-only-phase-0-entry-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 CLI — the only Phase 0 entry point
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-example-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 Example workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 Tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-local-quality-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 Local quality gates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#310-docs-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.10 Docs site
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-coding-standards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Coding standards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-quality-gates-and-definition-of-done-for-phase-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Quality gates and Definition of Done for Phase 0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-explicit-non-goals-for-phase-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Explicit non-goals for Phase 0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-suggested-day-by-day-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Suggested day-by-day order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-when-to-ask-for-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. When to ask for help
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-operator-hand-off-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Operator hand-off checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-references-full-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. References (full paths)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-begin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Begin
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meta/documentation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#0-who-you-are-and-what-you-are-doing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Who you are and what you are doing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-target-folder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Target folder
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-read-these-specs-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Read these specs first
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-phase-0-scope-what-you-will-build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Phase 0 scope — what you will build
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Phase 0 scope — what you will build">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-repository-skeleton" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Repository skeleton
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-tooling-and-dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Tooling and dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-the-expression-dsl-the-centerpiece-of-phase-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 The expression DSL — the centerpiece of Phase 0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-configuration-loader-and-canonicalization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Configuration loader and canonicalization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-metadata-schemas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Metadata schemas
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-cli-the-only-phase-0-entry-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 CLI — the only Phase 0 entry point
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-example-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 Example workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 Tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-local-quality-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 Local quality gates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#310-docs-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.10 Docs site
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-coding-standards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Coding standards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-quality-gates-and-definition-of-done-for-phase-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Quality gates and Definition of Done for Phase 0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-explicit-non-goals-for-phase-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Explicit non-goals for Phase 0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-suggested-day-by-day-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Suggested day-by-day order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-when-to-ask-for-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. When to ask for help
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-operator-hand-off-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Operator hand-off checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-references-full-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. References (full paths)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-begin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Begin
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="value-stream-implementation-kick-off-prompt">Value Stream — Implementation Kick-off Prompt<a class="headerlink" href="#value-stream-implementation-kick-off-prompt" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Paste this entire document into a fresh agent session (or hand it to a new engineer) to start building Value Stream. It is self-contained: every reference is a path, every deliverable has acceptance criteria, every constraint is explicit.</p>
+</blockquote>
+<hr />
+<h2 id="0-who-you-are-and-what-you-are-doing">0. Who you are and what you are doing<a class="headerlink" href="#0-who-you-are-and-what-you-are-doing" title="Permanent link">&para;</a></h2>
+<p>You are an engineer (or coding agent) tasked with building a new application called <strong>Value Stream</strong>. Value Stream is a configuration-driven, aggregate-first business intelligence platform — it ingests file-based exports, reduces them to small mergeable sufficient statistics during one chunk pass, and serves business reports and dashboards from those persisted aggregates. Raw event rows are never stored.</p>
+<p>The full specification already exists. <strong>Do not invent design choices.</strong> When in doubt, read the spec, then act. When the spec is silent, ask before deciding.</p>
+<p>You will be working in a <strong>separate folder</strong> dedicated to Value Stream. The spec docs live somewhere else (see §2) and stay read-only. Your code goes in the new folder.</p>
+<p>This prompt covers <strong>Phase 0 only</strong> (Foundations, ~1–2 weeks). After Phase 0 ships, follow the phased plan in <code>design/implementation-plan.md</code> for what's next.</p>
+<hr />
+<h2 id="1-target-folder">1. Target folder<a class="headerlink" href="#1-target-folder" title="Permanent link">&para;</a></h2>
+<p>Create a new folder for the project. Default suggestion (adjust if your environment differs):</p>
+<div class="highlight"><pre><span></span><code>TARGET_DIR = /sessions/cool-practical-fermat/mnt/proof_of_value/valuestream
+</code></pre></div>
+<p>If this path is not writeable in your environment, ask the operator for an alternative path before creating files. <strong>Do not pollute the spec folder</strong> at <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>.</p>
+<p>Initialize an empty git repo at <code>TARGET_DIR</code> and commit your work as you go. First commit message: <code>chore: scaffold repository</code>.</p>
+<hr />
+<h2 id="2-read-these-specs-first">2. Read these specs first<a class="headerlink" href="#2-read-these-specs-first" title="Permanent link">&para;</a></h2>
+<p>The complete specification for Value Stream is in <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>. Read in this order before writing any code:</p>
+<ol>
+<li><code>docs/meta/documentation-guide.md</code> — reading order and a doc-completeness checklist.</li>
+<li><code>docs/concepts/architecture.md</code> — high-level architecture, NFRs, deployment.</li>
+<li><code>docs/concepts/domain-model.md</code> — glossary; <strong>memorize the vocabulary</strong> before reading further.</li>
+<li><code>docs/design/replacement-design.md</code> — master design with storage layout, YAML DSL, APIs, migration.</li>
+<li><code>docs/design/implementation-plan.md</code> — repo layout, dependency pins, testing strategy, <strong>Phase 0 §5</strong>.</li>
+<li><code>docs/reference/expression-dsl.md</code> — the AST grammar you will be implementing in Phase 0.</li>
+<li><code>docs/reference/processors.md</code> — context for what the AST will eventually feed (you will not implement processors in Phase 0).</li>
+<li><code>docs/reference/readers-and-formats.md</code> — context only.</li>
+<li><code>docs/reference/algorithms.md</code> — context only.</li>
+<li><code>docs/reference/chart-catalog.md</code> — context only.</li>
+<li><code>docs/reference/faq.md</code> — keep open; refer when stuck.</li>
+</ol>
+<p>The visual mockups in <code>docs/mockups/</code> are useful for orientation but not required reading for Phase 0.</p>
+<p><strong>You may not modify any file under <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code></strong> unless the operator explicitly asks. Treat it as read-only.</p>
+<hr />
+<h2 id="3-phase-0-scope-what-you-will-build">3. Phase 0 scope — what you will build<a class="headerlink" href="#3-phase-0-scope-what-you-will-build" title="Permanent link">&para;</a></h2>
+<p>Phase 0 lays the foundations: the repo, the tooling, the configuration loader, the expression DSL, and the metadata schema. <strong>You will not build any processor, reader, or chart yet.</strong> Resist scope creep.</p>
+<p>Concretely, by the end of Phase 0 the repo must contain:</p>
+<h3 id="31-repository-skeleton">3.1 Repository skeleton<a class="headerlink" href="#31-repository-skeleton" title="Permanent link">&para;</a></h3>
+<p>Match the layout in <code>design/implementation-plan.md §1</code>. For Phase 0 you need at minimum:</p>
+<div class="highlight"><pre><span></span><code>valuestream/
+├── README.md
+├── pyproject.toml
+├── uv.lock                          (generated by `uv sync`)
+├── ruff.toml
+├── mypy.ini
+├── .pre-commit-config.yaml
+├── .gitignore
+├── schemas/
+│   ├── catalog.json
+│   ├── pipelines.json
+│   ├── processors.json
+│   ├── metrics.json
+│   ├── dashboards.json
+│   └── expr.json
+├── src/valuestream/
+│   ├── __init__.py
+│   ├── cli.py
+│   ├── config/
+│   │   ├── __init__.py
+│   │   ├── loader.py
+│   │   ├── canonical.py
+│   │   ├── model.py
+│   │   └── (no migration.py yet)
+│   ├── expr/
+│   │   ├── __init__.py
+│   │   ├── ast.py
+│   │   ├── parser.py
+│   │   ├── validator.py
+│   │   └── translator.py
+│   ├── store/
+│   │   ├── __init__.py
+│   │   └── meta.py                   (DuckDB schemas only)
+│   └── utils/
+│       ├── __init__.py
+│       ├── logger.py
+│       ├── hashing.py
+│       ├── ids.py
+│       └── time.py
+├── tests/
+│   ├── unit/
+│   │   ├── test_expr_parser.py
+│   │   ├── test_expr_validator.py
+│   │   ├── test_expr_translator.py
+│   │   ├── test_config_loader.py
+│   │   ├── test_config_canonical.py
+│   │   └── test_store_meta.py
+│   ├── property/
+│   │   └── test_expr_roundtrip.py
+│   └── fixtures/
+│       └── workspace_demo/           (a hand-written valid example catalog)
+├── examples/
+│   └── workspace_demo/
+│       └── catalog/
+│           ├── pipelines.yaml
+│           ├── processors.yaml
+│           ├── metrics.yaml
+│           ├── dashboards.yaml
+│           └── dashboards.yaml
+└── mkdocs.yml
+</code></pre></div>
+<h3 id="32-tooling-and-dependencies">3.2 Tooling and dependencies<a class="headerlink" href="#32-tooling-and-dependencies" title="Permanent link">&para;</a></h3>
+<p>Use <code>uv</code> for environment management. The dependency block in <code>pyproject.toml</code> must match <code>design/implementation-plan.md §3</code>. For Phase 0 you only need a subset; install the others lazily later. Phase 0 minimal dependencies:</p>
+<div class="highlight"><pre><span></span><code><span class="k">[project]</span>
+<span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;valuestream&quot;</span>
+<span class="n">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;0.1.0&quot;</span>
+<span class="n">requires-python</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&gt;=3.11&quot;</span>
+<span class="n">dependencies</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">&quot;polars&gt;=1.16,&lt;2&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;duckdb&gt;=1.1,&lt;2&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;pyarrow&gt;=18,&lt;19&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;pydantic&gt;=2.7,&lt;3&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;jsonschema&gt;=4.22,&lt;5&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;pyyaml&gt;=6.0,&lt;7&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;click&gt;=8.1,&lt;9&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;rich&gt;=13.7,&lt;14&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;structlog&gt;=24.4,&lt;25&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+<span class="k">[project.optional-dependencies]</span>
+<span class="n">dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">&quot;pytest&gt;=8.3&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;pytest-asyncio&gt;=0.24&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;hypothesis&gt;=6.112&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;ruff&gt;=0.7&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;mypy&gt;=1.13&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;mkdocs&gt;=1.6&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;mkdocs-material&gt;=9.5&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;pre-commit&gt;=4.0&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+</code></pre></div>
+<p>Add <code>datasketches</code>, <code>scipy</code>, <code>scikit-learn</code>, <code>polars-ds</code>, <code>fastapi</code>, <code>uvicorn</code>, <code>streamlit</code>, <code>plotly</code>, etc. <strong>only when Phase 1+ requires them</strong>.</p>
+<h3 id="33-the-expression-dsl-the-centerpiece-of-phase-0">3.3 The expression DSL — the centerpiece of Phase 0<a class="headerlink" href="#33-the-expression-dsl-the-centerpiece-of-phase-0" title="Permanent link">&para;</a></h3>
+<p>Implement the closed AST grammar in <code>docs/reference/expression-dsl.md</code> end-to-end. Required modules:</p>
+<ul>
+<li><strong><code>valuestream.expr.ast</code></strong> — Pydantic v2 model classes for every node kind (<code>atom</code>, <code>unary</code>, <code>nary</code>, <code>predicate</code>, <code>conditional</code>, <code>datetime</code>). Use a discriminated union on the <code>op</code> field.</li>
+<li><strong><code>valuestream.expr.parser</code></strong> — turn a YAML/JSON dict into an AST instance. Tolerant of YAML idiosyncrasies (e.g. <code>{op: in, column: c, values: [...]}</code> is valid).</li>
+<li><strong><code>valuestream.expr.validator</code></strong> — type-check the AST against a column-name → dtype map (provided by the config). Implements <code>docs/reference/expression-dsl.md</code> §3` (type rules) and §6 (validation rules). Errors carry the AST path.</li>
+<li><strong><code>valuestream.expr.translator</code></strong> — turn an AST into a <code>polars.Expr</code>. Implements every row in <code>docs/reference/expression-dsl.md</code> §4<code>(mapping table). One Polars expression per node — never</code>eval`.</li>
+</ul>
+<p>JSON Schema for the AST goes at <code>schemas/expr.json</code> (Draft 2020-12).</p>
+<h3 id="34-configuration-loader-and-canonicalization">3.4 Configuration loader and canonicalization<a class="headerlink" href="#34-configuration-loader-and-canonicalization" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>valuestream.config.model</code></strong> — Pydantic models for <code>Catalog</code>, <code>Pipeline</code>, <code>Source</code>, <code>Reader</code>, <code>Transform</code>, <code>Processor</code>, <code>Metric</code>, <code>Dashboard</code>, <code>Tile</code>, <code>Dimension</code>. Map exactly to the YAML shapes in <code>design/replacement-design.md §7</code> and <code>docs/reference/processors.md</code>.</li>
+<li><strong><code>valuestream.config.loader</code></strong> — read the five YAML files from a catalog directory, validate each against its JSON Schema, instantiate the typed model. Returns a <code>Catalog</code> object.</li>
+<li><strong><code>valuestream.config.canonical</code></strong> — produce a canonical YAML body for hashing per <code>docs/reference/expression-dsl.md</code> §7<code>. Output sha256 hex string. **Two YAMLs that parse to the same AST must produce the same</code>config_hash`.**</li>
+</ul>
+<h3 id="35-metadata-schemas">3.5 Metadata schemas<a class="headerlink" href="#35-metadata-schemas" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>valuestream.store.meta</code></strong> — DDL for <code>meta/chunks.duckdb</code>, <code>meta/pipeline_runs.duckdb</code>, <code>meta/config_versions.duckdb</code>, <code>meta/lineage.duckdb</code>. Schemas exactly as in <code>design/replacement-design.md §6.4</code> and <code>docs/concepts/architecture.md</code> §6.1<code>. Provide</code>init_meta_dbs(workspace_path)` that creates the four DBs idempotently. <strong>No data writes yet</strong> — just the schemas.</li>
+</ul>
+<h3 id="36-cli-the-only-phase-0-entry-point">3.6 CLI — the only Phase 0 entry point<a class="headerlink" href="#36-cli-the-only-phase-0-entry-point" title="Permanent link">&para;</a></h3>
+<p>Implement one CLI command using Click:</p>
+<div class="highlight"><pre><span></span><code>valuestream<span class="w"> </span>validate<span class="w"> </span>&lt;workspace_dir&gt;
+</code></pre></div>
+<p>It loads the catalog from <code>&lt;workspace_dir&gt;/catalog/</code>, validates each YAML against its JSON Schema, type-checks every expression in transforms / processors / metrics, and prints structured success or errors. Exit code 0 on success, 1 on failure.</p>
+<p>Other CLI commands (<code>run</code>, <code>vacuum</code>, <code>serve</code>, <code>migrate</code>, <code>backfill</code>, <code>probe</code>) come in later phases. Stub them as <code>NotImplementedError</code> if you want, but do not implement them.</p>
+<h3 id="37-example-workspace">3.7 Example workspace<a class="headerlink" href="#37-example-workspace" title="Permanent link">&para;</a></h3>
+<p>Hand-write <code>examples/workspace_demo/catalog/</code> so it covers every operator in reference/expression-dsl.md and every processor kind in reference/processors.md (configs only — no actual data needed). Use this as a smoke-test target for <code>valuestream validate</code>.</p>
+<h3 id="38-tests">3.8 Tests<a class="headerlink" href="#38-tests" title="Permanent link">&para;</a></h3>
+<p>Required unit tests for Phase 0:</p>
+<ul>
+<li><code>tests/unit/test_expr_parser.py</code> — round-trip parse for every operator in reference/expression-dsl.md §2.</li>
+<li><code>tests/unit/test_expr_validator.py</code> — happy path + at least one failing case per error type in §6.</li>
+<li><code>tests/unit/test_expr_translator.py</code> — for each AST node kind, build a tiny Polars LazyFrame, run the translated expression, assert the result.</li>
+<li><code>tests/unit/test_config_loader.py</code> — load <code>examples/workspace_demo/catalog/</code>; assert the typed <code>Catalog</code> matches expectations.</li>
+<li><code>tests/unit/test_config_canonical.py</code> — two YAMLs that differ only in key order / whitespace produce the same <code>config_hash</code>. A meaningful change produces a different hash.</li>
+<li><code>tests/unit/test_store_meta.py</code> — <code>init_meta_dbs</code> creates all four DBs with the expected tables; idempotent on re-run.</li>
+<li><code>tests/property/test_expr_roundtrip.py</code> — Hypothesis property test: for any randomly generated AST that passes the validator, parsing → canonicalizing → re-parsing yields an equivalent AST.</li>
+</ul>
+<p>Coverage gate: ≥ 90% on <code>valuestream.expr</code> and <code>valuestream.config</code>.</p>
+<h3 id="39-local-quality-gates">3.9 Local quality gates<a class="headerlink" href="#39-local-quality-gates" title="Permanent link">&para;</a></h3>
+<p>This repository intentionally has no checked-in GitHub Actions workflow. Run local gates before hand-off:</p>
+<ol>
+<li><code>uv sync --all-extras</code></li>
+<li><code>uv run ruff check .</code></li>
+<li><code>uv run ruff format --check .</code></li>
+<li><code>uv run mypy src</code></li>
+<li><code>uv run pytest -m "not bench and not slow"</code></li>
+<li><code>uv run valuestream validate examples/workspace_demo</code></li>
+<li><code>uv run mkdocs build --strict</code></li>
+</ol>
+<h3 id="310-docs-site">3.10 Docs site<a class="headerlink" href="#310-docs-site" title="Permanent link">&para;</a></h3>
+<p><code>mkdocs.yml</code> building the docs from <code>docs/</code> (the spec folder, mounted read-only or symlinked into the Value Stream repo's <code>docs/</code> directory). The local <code>mkdocs serve</code> and <code>mkdocs build --strict</code> commands must work.</p>
+<hr />
+<h2 id="4-coding-standards">4. Coding standards<a class="headerlink" href="#4-coding-standards" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Python 3.11+</strong>, type hints everywhere, no <code>from __future__ import</code> clutter.</li>
+<li><code>mypy --strict</code> for <code>valuestream.config</code>, <code>valuestream.expr</code>, <code>valuestream.store</code>. Other modules: <code>--check-untyped-defs</code>.</li>
+<li><strong>Ruff format</strong> before committing; the pre-commit hook enforces this.</li>
+<li><strong>No <code>eval</code>, no <code>exec</code>, no <code>getattr</code>-by-string, no dynamic imports.</strong> The whole point of the AST is to avoid these.</li>
+<li><strong>No silent failures.</strong> Every error path raises a typed exception and is tested.</li>
+<li><strong>Docstrings on every public function and class.</strong> Use Google style.</li>
+<li><strong>Sentence case</strong> in all user-facing strings (CLI messages, errors, doc strings, headings). No Title Case, no ALL CAPS.</li>
+<li><strong>Logs are structured JSON via <code>structlog</code>.</strong> <code>pipeline_run_id</code> and <code>chunk_id</code> are reserved keys.</li>
+<li><strong>Commits follow Conventional Commits</strong> (<code>feat:</code>, <code>fix:</code>, <code>chore:</code>, <code>test:</code>, <code>docs:</code>, <code>refactor:</code>).</li>
+</ul>
+<hr />
+<h2 id="5-quality-gates-and-definition-of-done-for-phase-0">5. Quality gates and Definition of Done for Phase 0<a class="headerlink" href="#5-quality-gates-and-definition-of-done-for-phase-0" title="Permanent link">&para;</a></h2>
+<p>Phase 0 is done when <strong>all</strong> of these pass:</p>
+<ol>
+<li><code>uv sync</code> succeeds; <code>valuestream --help</code> prints the CLI banner.</li>
+<li><code>ruff check .</code> and <code>ruff format --check .</code> are clean.</li>
+<li><code>mypy src/</code> is clean.</li>
+<li><code>pytest -m "not bench and not slow"</code> is green; coverage ≥ 90% on <code>valuestream.expr</code> and <code>valuestream.config</code>.</li>
+<li><code>valuestream validate examples/workspace_demo</code> exits 0.</li>
+<li>The Hypothesis property test in <code>test_expr_roundtrip.py</code> runs ≥ 200 examples without flakiness.</li>
+<li>Local quality gates pass.</li>
+<li><code>mkdocs serve</code> renders the docs site without errors.</li>
+<li>The repo has at least 5 commits with conventional messages and a clear history.</li>
+<li>A short <code>README.md</code> at the repo root explains: what Value Stream is, how to set up the env, how to run the validator, where the spec lives.</li>
+</ol>
+<p>When all 10 are true, tag the commit <code>v0.1.0-phase0</code> and stop. Do not start Phase 1 without operator confirmation.</p>
+<hr />
+<h2 id="6-explicit-non-goals-for-phase-0">6. Explicit non-goals for Phase 0<a class="headerlink" href="#6-explicit-non-goals-for-phase-0" title="Permanent link">&para;</a></h2>
+<p>Do <strong>not</strong> do any of these in Phase 0. They are Phase 1+:</p>
+<ul>
+<li>Any reader (<code>pega_ds_export</code>, <code>parquet</code>, <code>csv</code>, <code>xlsx</code>).</li>
+<li>Any transform (<code>rename_capitalize</code>, <code>parse_datetime</code>, <code>derive_calendar</code>, <code>derive_action_id</code>, <code>filter</code>, <code>dedup</code>, <code>defaults</code>, <code>cast</code>, <code>drop_columns</code>, <code>coalesce</code>).</li>
+<li>Any processor (<code>binary_outcome</code>, <code>numeric_distribution</code>, <code>score_distribution</code>, <code>entity_lifecycle</code>, <code>entity_set</code>, <code>funnel</code>, <code>snapshot</code>).</li>
+<li>Any state type beyond schema declarations (no <code>count</code>, <code>tdigest</code>, <code>hll</code>, etc. computation).</li>
+<li>Any chart kind, Plotly figure, or Streamlit page.</li>
+<li>Any FastAPI route or MCP server.</li>
+<li>The <code>valuestream run</code>, <code>valuestream vacuum</code>, <code>valuestream migrate</code>, <code>valuestream backfill</code>, or <code>valuestream serve</code> CLI commands.</li>
+<li>The legacy → Value Stream migration tool.</li>
+</ul>
+<p>If you find yourself reaching for any of these, stop and re-read this section.</p>
+<hr />
+<h2 id="7-suggested-day-by-day-order">7. Suggested day-by-day order<a class="headerlink" href="#7-suggested-day-by-day-order" title="Permanent link">&para;</a></h2>
+<p>A reasonable ten working days for Phase 0 (one engineer, full-time). Adjust as you wish, but do not skip steps.</p>
+<table>
+<thead>
+<tr>
+<th>Day</th>
+<th>Focus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Repo skeleton, <code>pyproject.toml</code>, <code>uv sync</code>, ruff/mypy/pre-commit baseline, first commit.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>valuestream.expr.ast</code> types; <code>schemas/expr.json</code> first draft; round-trip parse for atoms + comparisons.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>valuestream.expr.parser</code> for arithmetic + nary + conditional + datetime nodes.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>valuestream.expr.validator</code> (type + column-existence + per-rule from §6).</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>valuestream.expr.translator</code> covering every entry in §4 mapping table.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>valuestream.config.model</code> + <code>valuestream.config.loader</code> + per-file JSON Schemas.</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>valuestream.config.canonical</code> + hashing; two-different-YAMLs-same-hash test.</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>valuestream.store.meta</code> DuckDB DDL; <code>init_meta_dbs</code> + idempotency tests.</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>valuestream validate</code> CLI; example workspace; integration test.</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Property test (Hypothesis) for AST round-trip; local gate run; tag <code>v0.1.0-phase0</code>.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-when-to-ask-for-help">8. When to ask for help<a class="headerlink" href="#8-when-to-ask-for-help" title="Permanent link">&para;</a></h2>
+<p>Stop and ask the operator before:</p>
+<ul>
+<li>Choosing a file path different from this prompt's defaults.</li>
+<li>Adding a dependency not in §3.2 or <code>design/implementation-plan.md §3</code>.</li>
+<li>Diverging from any algorithm, schema, or DSL grammar in the spec.</li>
+<li>Inventing a new operator, state type, or processor kind.</li>
+<li>Modifying any file under <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>.</li>
+</ul>
+<p>If the spec is silent on a question, <em>call it out</em> — propose two options with trade-offs, and let the operator choose. Do not silently default.</p>
+<hr />
+<h2 id="9-operator-hand-off-checklist">9. Operator hand-off checklist<a class="headerlink" href="#9-operator-hand-off-checklist" title="Permanent link">&para;</a></h2>
+<p>When you believe Phase 0 is complete, post a single message to the operator with:</p>
+<ol>
+<li>The path to the new repo.</li>
+<li>The output of <code>valuestream validate examples/workspace_demo</code>.</li>
+<li>The output of <code>pytest --cov=valuestream</code>.</li>
+<li>The local quality-gate command outputs.</li>
+<li>A two-paragraph summary of any decisions you made where the spec was silent.</li>
+<li>The git log (one line per commit).</li>
+</ol>
+<p>Do not start Phase 1 work; wait for explicit confirmation.</p>
+<hr />
+<h2 id="10-references-full-paths">10. References (full paths)<a class="headerlink" href="#10-references-full-paths" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Spec root: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code></li>
+<li>Index: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/meta/documentation-guide.md`</li>
+<li>Master design: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/REPLACEMENT_DESIGN.md</code></li>
+<li>Architecture: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/concepts/architecture.md`</li>
+<li>Domain model: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/concepts/domain-model.md`</li>
+<li>Implementation plan: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/design/implementation-plan.md`</li>
+<li>Expression DSL: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/reference/expression-dsl.md`</li>
+<li>Processor specs: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/reference/processors.md`</li>
+<li>Algorithms: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/reference/algorithms.md`</li>
+<li>Readers / formats: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/reference/readers-and-formats.md`</li>
+<li>Chart catalog: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/reference/chart-catalog.md`</li>
+<li>Q&amp;A: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/</code>docs/reference/faq.md`</li>
+<li>Mockups: <code>/sessions/cool-practical-fermat/mnt/proof_of_value/docs/mockups/index.html</code></li>
+</ul>
+<hr />
+<h2 id="11-begin">11. Begin<a class="headerlink" href="#11-begin" title="Permanent link">&para;</a></h2>
+<p>Confirm you have read this prompt. Then:</p>
+<ol>
+<li>Create <code>TARGET_DIR</code> (or ask for an alternative path).</li>
+<li>Read the four required spec docs (INDEX, ARCHITECTURE, DOMAIN_MODEL, IMPLEMENTATION_PLAN), then EXPRESSION_DSL in depth.</li>
+<li>Start with day 1: repo skeleton + <code>pyproject.toml</code> + tooling. Commit with message <code>chore: scaffold repository</code>.</li>
+<li>Proceed through the day-by-day order in §7 unless you have a strong reason to deviate.</li>
+</ol>
+<p>When in doubt: read the spec, then act. When the spec is silent: ask.</p>
+<p>Good building.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

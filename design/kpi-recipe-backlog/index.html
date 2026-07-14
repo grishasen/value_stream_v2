@@ -1,0 +1,3330 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Aggregate-first business intelligence platform">
+      
+      
+      
+      
+        <link rel="prev" href="../reporting-backlog/">
+      
+      
+        <link rel="next" href="../chat-with-data-mlp1/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>KPI recipe backlog - Value Stream</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#kpi-recipe-library-and-workflow-backlog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Value Stream" class="md-header__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Value Stream
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              KPI recipe backlog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/getting-started/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/users/running-reports/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../concepts/product-overview/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/cli/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../replacement-design/" class="md-tabs__link">
+          
+  
+  
+  Design docs
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Value Stream" class="md-nav__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Value Stream
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/ui-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/distribution-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/lifecycle-and-funnel-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Funnel & lifecycle analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/pega-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pega export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/running-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/chat-with-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/querying-and-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Querying & export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/workspaces-and-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces & catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/ai-config-studio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Configuration Studio
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration & backfill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/product-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/business-functionality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Business functionality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (deep)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/domain-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_6" id="__nav_4_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions (ADRs)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Decisions (ADRs)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0001-aggregate-first-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0001 Aggregate-first storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0002-yaml-catalog-as-source-of-behavior/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0002 YAML catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0003-closed-expression-ast/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0003 Closed expression AST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0004-chunk-ledger-idempotency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0004 Chunk-ledger idempotency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/expression-dsl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Expression DSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/readers-and-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers & formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/chart-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chart catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/kpi-recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/catalog-schemas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api-and-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design docs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design docs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../replacement-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Replacement design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../implementation-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reporting-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipe backlog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipe backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#product-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product Principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow-state-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow State Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delivery-slices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery Slices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-a-shared-foundation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment A — Shared Foundation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Increment A — Shared Foundation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#increment-a-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment A Acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-b-preview-and-transactional-installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment B — Preview and Transactional Installation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Increment B — Preview and Transactional Installation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#increment-b-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment B Acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-c-missing-state-and-backfill-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment C — Missing State and Backfill Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Increment C — Missing State and Backfill Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#increment-c-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment C Acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-d-governance-and-recipe-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment D — Governance and Recipe Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-e-business-catalog-and-report-packs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment E — Business Catalog and Report Packs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-f-ai-recommendation-and-composition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment F — AI Recommendation and Composition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-g-release-qualification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment G — Release Qualification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#definition-of-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Definition of Done
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat-with-data-mlp1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat With Data MLP1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kickoff-prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kickoff prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meta/documentation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#product-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Product Principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow-state-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow State Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delivery-slices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery Slices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-a-shared-foundation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment A — Shared Foundation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Increment A — Shared Foundation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#increment-a-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment A Acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-b-preview-and-transactional-installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment B — Preview and Transactional Installation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Increment B — Preview and Transactional Installation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#increment-b-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment B Acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-c-missing-state-and-backfill-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment C — Missing State and Backfill Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Increment C — Missing State and Backfill Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#increment-c-acceptance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment C Acceptance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-d-governance-and-recipe-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment D — Governance and Recipe Lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-e-business-catalog-and-report-packs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment E — Business Catalog and Report Packs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-f-ai-recommendation-and-composition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment F — AI Recommendation and Composition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#increment-g-release-qualification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Increment G — Release Qualification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#definition-of-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Definition of Done
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="kpi-recipe-library-and-workflow-backlog">KPI Recipe Library and Workflow Backlog<a class="headerlink" href="#kpi-recipe-library-and-workflow-backlog" title="Permanent link">&para;</a></h1>
+<p>This backlog turns metric algorithms into a governed, searchable business KPI
+catalog. The target experience is: find a business question, understand the
+calculation and confidence, see whether current aggregates support it, map
+inputs, preview the generated YAML and result, then add it to the metric
+catalog and one or more reports.</p>
+<p>The library is an authoring layer, not a second runtime catalog. Installed
+metrics and tiles are ordinary YAML; processors, aggregates, query planning,
+and reports continue to obey the aggregate-first architecture.</p>
+<h2 id="product-principles">Product Principles<a class="headerlink" href="#product-principles" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Business question first.</strong> Search results lead with decision intent, not
+   metric-kind or sketch names.</li>
+<li><strong>Calculation is inspectable.</strong> Every recipe shows its formula, aggregate
+   inputs, accuracy class, algorithm, and caveats before installation.</li>
+<li><strong>No hidden data work.</strong> <code>ready</code>, <code>mapping_required</code>, and
+   <code>backfill_required</code> are explicit; the author chooses before any mutation or
+   ingestion run.</li>
+<li><strong>One artifact, two studios.</strong> Configuration Builder and AI Configuration
+   Studio use the same recipe file, validation model, compatibility resolver,
+   and instantiator.</li>
+<li><strong>YAML remains authoritative.</strong> A recipe only proposes artifacts. Runtime
+   behavior begins after validated <code>processors.yaml</code>, <code>metrics.yaml</code>, and
+   <code>dashboards.yaml</code> changes are applied.</li>
+<li><strong>Versions are auditable.</strong> Installed metrics retain recipe ID/version;
+   upgrades are reviewable diffs, never implicit rewrites.</li>
+</ol>
+<h2 id="workflow-state-model">Workflow State Model<a class="headerlink" href="#workflow-state-model" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>User outcome</th>
+<th>System evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Discover</td>
+<td>Find by domain, KPI, question, tag, or algorithm</td>
+<td>Searchable recipe metadata</td>
+</tr>
+<tr>
+<td>Understand</td>
+<td>Read business meaning and method</td>
+<td>Calculation, accuracy, caveat, examples</td>
+</tr>
+<tr>
+<td>Assess</td>
+<td>Know whether the workspace can support it</td>
+<td>Processor capability/readiness result</td>
+</tr>
+<tr>
+<td>Map</td>
+<td>Resolve business roles to aggregate states/stages</td>
+<td>Explicit input bindings</td>
+</tr>
+<tr>
+<td>Preview</td>
+<td>See YAML, sample aggregate result, and report form</td>
+<td>Valid metric/tile draft plus query preview</td>
+</tr>
+<tr>
+<td>Install</td>
+<td>Add reviewed artifacts to catalog or AI draft</td>
+<td>Recipe provenance and validation result</td>
+</tr>
+<tr>
+<td>Materialize</td>
+<td>Populate newly required aggregate state when approved</td>
+<td>Change plan, run/backfill, lineage/config hash</td>
+</tr>
+<tr>
+<td>Govern</td>
+<td>Certify, deprecate, compare, or upgrade</td>
+<td>Owner, version, review history, usage impact</td>
+</tr>
+</tbody>
+</table>
+<h2 id="delivery-slices">Delivery Slices<a class="headerlink" href="#delivery-slices" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Increment</th>
+<th>Outcome</th>
+<th>Backlog range</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td>Shared artifact foundation and both Studio entry points</td>
+<td>KPR-001–KPR-008</td>
+</tr>
+<tr>
+<td>B</td>
+<td>Trustworthy preview and transactional installation</td>
+<td>KPR-101–KPR-108</td>
+</tr>
+<tr>
+<td>C</td>
+<td>Missing-state and backfill planning</td>
+<td>KPR-201–KPR-207</td>
+</tr>
+<tr>
+<td>D</td>
+<td>Governance, workspace recipes, and lifecycle</td>
+<td>KPR-301–KPR-310</td>
+</tr>
+<tr>
+<td>E</td>
+<td>Business catalog and report packs</td>
+<td>KPR-401–KPR-410</td>
+</tr>
+<tr>
+<td>F</td>
+<td>AI recommendation and guided composition</td>
+<td>KPR-501–KPR-508</td>
+</tr>
+<tr>
+<td>G</td>
+<td>Release qualification and operating model</td>
+<td>KPR-901–KPR-906</td>
+</tr>
+</tbody>
+</table>
+<h2 id="increment-a-shared-foundation">Increment A — Shared Foundation<a class="headerlink" href="#increment-a-shared-foundation" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Status</th>
+<th style="text-align: right;">Priority</th>
+<th style="text-align: right;">Size</th>
+<th>Backlog item</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KPR-001</td>
+<td>Done</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Define a strict, versioned KPI recipe model with business metadata, processor capabilities, input roles, metric template, method/accuracy, and report recommendation.</td>
+</tr>
+<tr>
+<td>KPR-002</td>
+<td>Done</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Ship a checked-in YAML library and JSON Schema with parity tests. Keep it outside the active workspace catalog until installation.</td>
+</tr>
+<tr>
+<td>KPR-003</td>
+<td>Done</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Implement deterministic readiness: compatible processor kind, required/absent state metadata, strict business roles, preferred algorithms, paired inputs, ambiguity, and missing-state detection.</td>
+</tr>
+<tr>
+<td>KPR-004</td>
+<td>Done</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Materialize and validate normal metric definitions through the typed metric model; attach recipe ID/version provenance.</td>
+</tr>
+<tr>
+<td>KPR-005</td>
+<td>Done</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">S</td>
+<td>Materialize and validate recommended report tiles, with deterministic collision-safe IDs.</td>
+</tr>
+<tr>
+<td>KPR-006</td>
+<td>Done</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Add the shared searchable browser, business/method detail, field/algorithm and stage/population mappings, hidden technical state bindings, and optional report placement to Configuration Builder.</td>
+</tr>
+<tr>
+<td>KPR-007</td>
+<td>Done</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Reuse the same browser and instantiator in AI Configuration Studio; mutations remain session-local until draft apply.</td>
+</tr>
+<tr>
+<td>KPR-008</td>
+<td>Done</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Seed reviewed recipes for engagement, audience/CPC-HLL distinct count, quantiles, ROC AUC, funnel, lifecycle, and Top-K, with focused tests and documentation.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="increment-a-acceptance">Increment A Acceptance<a class="headerlink" href="#increment-a-acceptance" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Both Studios render the same recipe count, versions, descriptions, and
+  compatibility outcomes.</li>
+<li>Installing the same recipe with the same bindings yields the same metric
+  definition in both surfaces.</li>
+<li>CPC is preferred for built-in unique-count mappings; existing HLL states are
+  accepted without cross-family merging.</li>
+<li>Every processor-owned field and recipe-compatible algorithm can be selected
+  before the first load; missing combinations become deterministic processor
+  state definitions and are marked as requiring a first run/backfill.</li>
+<li>No recipe browse or install path reads raw event rows or starts ingestion.</li>
+</ul>
+<h2 id="increment-b-preview-and-transactional-installation">Increment B — Preview and Transactional Installation<a class="headerlink" href="#increment-b-preview-and-transactional-installation" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th style="text-align: right;">Priority</th>
+<th style="text-align: right;">Size</th>
+<th>Backlog item</th>
+<th>Dependencies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KPR-101</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td><strong>Partial:</strong> show the exact generated processor, metric, and dashboard YAML patches, including recipe provenance and generated IDs, before installation. Full surrounding-file diff remains open.</td>
+<td>A</td>
+</tr>
+<tr>
+<td>KPR-102</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">L</td>
+<td>Add aggregate-query preview using the selected processor, bindings, grain, date window, and compatible dimensions. Route only through the query layer and show provenance/freshness.</td>
+<td>KPR-101</td>
+</tr>
+<tr>
+<td>KPR-103</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Present result-shape and format validation: scalar KPI, multi-output table, empty result, non-numeric result, and unsupported grouping.</td>
+<td>KPR-102</td>
+</tr>
+<tr>
+<td>KPR-104</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td><strong>Done:</strong> recipe installs run inside <code>builder.catalog_transaction</code>; write failures and post-write catalog validation restore every catalog file. AI draft apply uses the same rollback semantics across all catalog files plus <code>ai.yaml</code>. Audit events remain open.</td>
+<td>KPR-101</td>
+</tr>
+<tr>
+<td>KPR-105</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">S</td>
+<td>Add metric-only, existing-page, and create-new-page placement choices without inventing page semantics.</td>
+<td>KPR-104</td>
+</tr>
+<tr>
+<td>KPR-106</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Suggest compatible alternative chart types and required mappings using the chart catalog; preserve the recipe default as the reviewed choice.</td>
+<td>KPR-103</td>
+</tr>
+<tr>
+<td>KPR-107</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Detect near-duplicate installed metrics by normalized calculation/source/bindings and offer reuse instead of duplicate creation.</td>
+<td>KPR-101</td>
+</tr>
+<tr>
+<td>KPR-108</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">S</td>
+<td>Add undo for the latest recipe transaction when no dependent catalog edit has occurred.</td>
+<td>KPR-104</td>
+</tr>
+</tbody>
+</table>
+<h3 id="increment-b-acceptance">Increment B Acceptance<a class="headerlink" href="#increment-b-acceptance" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The user sees exact file-level changes before apply.</li>
+<li>Preview and installed report values use identical query semantics.</li>
+<li>A failed two-file install leaves both catalog files unchanged.</li>
+<li>Duplicate/reuse advice never replaces an explicit user choice.</li>
+</ul>
+<h2 id="increment-c-missing-state-and-backfill-workflow">Increment C — Missing State and Backfill Workflow<a class="headerlink" href="#increment-c-missing-state-and-backfill-workflow" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th style="text-align: right;">Priority</th>
+<th style="text-align: right;">Size</th>
+<th>Backlog item</th>
+<th>Dependencies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KPR-201</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td><strong>Partial:</strong> the preview names processor fields/states, source, and current/proposed processor computation hashes, and the installed-metric handoff links to Data Load. Earliest usable date and date-window planning remain open.</td>
+<td>A</td>
+</tr>
+<tr>
+<td>KPR-202</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">L</td>
+<td><strong>Done (configuration):</strong> add safe processor-state proposals for CPC, HLL compatibility, t-digest/KLL, Theta, and Top-K with source-column mapping and deterministic parameters. Detailed replay classification remains KPR-201/203.</td>
+<td>A</td>
+</tr>
+<tr>
+<td>KPR-203</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Classify the proposal using catalog compatibility rules: no replay, forward-only materialization, raw replay, or impossible without a new source field.</td>
+<td>KPR-201</td>
+</tr>
+<tr>
+<td>KPR-204</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Show storage/time estimates and selected date range before run/backfill approval.</td>
+<td>KPR-203</td>
+</tr>
+<tr>
+<td>KPR-205</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">L</td>
+<td>Apply approved processor change, validate, run/backfill, and install the waiting recipe only after aggregate success. Preserve run/config lineage.</td>
+<td>KPR-202–KPR-204</td>
+</tr>
+<tr>
+<td>KPR-206</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Support resumable waiting recipes when a run fails or an operator completes backfill outside the Studio.</td>
+<td>KPR-205</td>
+</tr>
+<tr>
+<td>KPR-207</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Add parameter guidance and incompatible-sketch checks, especially CPC/HLL <code>lg_k</code>, KLL <code>k</code>, t-digest compression, Theta nominal entries, and Top-K capacity.</td>
+<td>KPR-202</td>
+</tr>
+</tbody>
+</table>
+<h3 id="increment-c-acceptance">Increment C Acceptance<a class="headerlink" href="#increment-c-acceptance" title="Permanent link">&para;</a></h3>
+<ul>
+<li>No processor mutation or ingestion starts without explicit approval.</li>
+<li>Raw rows still disappear after chunk processing and are never stored by the
+  recipe workflow.</li>
+<li>A metric may be configured before its first aggregate exists. Query/report
+  readiness must distinguish that state until aggregates with the matching
+  processor computation hash have been materialized.</li>
+</ul>
+<h2 id="increment-d-governance-and-recipe-lifecycle">Increment D — Governance and Recipe Lifecycle<a class="headerlink" href="#increment-d-governance-and-recipe-lifecycle" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th style="text-align: right;">Priority</th>
+<th style="text-align: right;">Size</th>
+<th>Backlog item</th>
+<th>Dependencies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KPR-301</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Define owner, steward, review date, source/reference links, applicability, and certification evidence.</td>
+<td>A</td>
+</tr>
+<tr>
+<td>KPR-302</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Enforce immutable published versions and semantic-version rules for calculation, inputs, display, or prose-only changes.</td>
+<td>KPR-301</td>
+</tr>
+<tr>
+<td>KPR-303</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Show installed version, latest version, field-level diff, affected reports, and compatibility before upgrade.</td>
+<td>KPR-302, KPR-101</td>
+</tr>
+<tr>
+<td>KPR-304</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Support deprecation, replacement recipe, end-of-support date, and non-destructive warnings for installed metrics.</td>
+<td>KPR-302</td>
+</tr>
+<tr>
+<td>KPR-305</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">L</td>
+<td>Load workspace-owned recipe libraries from a governed directory with schema validation and deterministic precedence.</td>
+<td>KPR-302</td>
+</tr>
+<tr>
+<td>KPR-306</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Add import/export bundles with recipe YAML, JSON Schema version, tests, examples, and signed provenance metadata.</td>
+<td>KPR-305</td>
+</tr>
+<tr>
+<td>KPR-307</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Add role-based approval hooks for <code>reviewed</code> and <code>certified</code> transitions when multi-user identity exists.</td>
+<td>KPR-301</td>
+</tr>
+<tr>
+<td>KPR-308</td>
+<td style="text-align: right;">P2</td>
+<td style="text-align: right;">M</td>
+<td>Record install/upgrade/deprecate audit events without storing metric result data.</td>
+<td>KPR-303</td>
+</tr>
+<tr>
+<td>KPR-309</td>
+<td style="text-align: right;">P2</td>
+<td style="text-align: right;">M</td>
+<td>Show usage impact: installed metrics, tiles, dashboards, chat exposure, and API consumers.</td>
+<td>KPR-303</td>
+</tr>
+<tr>
+<td>KPR-310</td>
+<td style="text-align: right;">P2</td>
+<td style="text-align: right;">S</td>
+<td>Add recipe ownership and review-health operations views.</td>
+<td>KPR-307–KPR-309</td>
+</tr>
+</tbody>
+</table>
+<h2 id="increment-e-business-catalog-and-report-packs">Increment E — Business Catalog and Report Packs<a class="headerlink" href="#increment-e-business-catalog-and-report-packs" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th style="text-align: right;">Priority</th>
+<th style="text-align: right;">Size</th>
+<th>Backlog item</th>
+<th>Dependencies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KPR-401</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Add glossary terms, KPI synonyms, decision owner, business process, leading/lagging indicator, and numerator/denominator semantics.</td>
+<td>KPR-301</td>
+</tr>
+<tr>
+<td>KPR-402</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Add faceted discovery by domain, source type, processor capability, accuracy, maturity, owner, and readiness.</td>
+<td>KPR-401</td>
+</tr>
+<tr>
+<td>KPR-403</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Add “available now” and “requires backfill” saved views per workspace.</td>
+<td>KPR-402, C</td>
+</tr>
+<tr>
+<td>KPR-404</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">L</td>
+<td>Define recipe packs that install several related metrics, page filters, and a report page as one reviewed unit.</td>
+<td>B, KPR-401</td>
+</tr>
+<tr>
+<td>KPR-405</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Ship an Engagement &amp; Reach pack: interactions, positive/negative outcomes, engagement rate, CPC reach, frequency, and period change.</td>
+<td>KPR-404</td>
+</tr>
+<tr>
+<td>KPR-406</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Ship a Funnel Health pack: stage volumes, conversion/drop-off, bottleneck ranking, and trend.</td>
+<td>KPR-404</td>
+</tr>
+<tr>
+<td>KPR-407</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Ship a Model Quality pack: ROC AUC, average precision, calibration, score quantiles, and experiment context.</td>
+<td>KPR-404</td>
+</tr>
+<tr>
+<td>KPR-408</td>
+<td style="text-align: right;">P2</td>
+<td style="text-align: right;">M</td>
+<td>Ship Distribution/Service, Lifecycle/RFM, Set/Cohort, and Category Concentration packs as aggregate capabilities mature.</td>
+<td>KPR-404</td>
+</tr>
+<tr>
+<td>KPR-409</td>
+<td style="text-align: right;">P2</td>
+<td style="text-align: right;">M</td>
+<td>Add localized titles/descriptions while preserving invariant IDs and calculations.</td>
+<td>KPR-401</td>
+</tr>
+<tr>
+<td>KPR-410</td>
+<td style="text-align: right;">P2</td>
+<td style="text-align: right;">M</td>
+<td>Add catalog export for documentation portals and read-only API consumers.</td>
+<td>KPR-401, KPR-306</td>
+</tr>
+</tbody>
+</table>
+<h2 id="increment-f-ai-recommendation-and-composition">Increment F — AI Recommendation and Composition<a class="headerlink" href="#increment-f-ai-recommendation-and-composition" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th style="text-align: right;">Priority</th>
+<th style="text-align: right;">Size</th>
+<th>Backlog item</th>
+<th>Dependencies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KPR-501</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Give the AI planner the same read-only recipe inventory and readiness results; prohibit invented recipe IDs or unsupported inputs.</td>
+<td>D, E</td>
+</tr>
+<tr>
+<td>KPR-502</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Rank recommendations from approved fields, processor capabilities, existing metrics, and business goal; show deterministic evidence for every suggestion.</td>
+<td>KPR-501</td>
+</tr>
+<tr>
+<td>KPR-503</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Ask for missing business intent only when it changes numerator, denominator, entity, stage, direction, target, or approximation choice.</td>
+<td>KPR-502</td>
+</tr>
+<tr>
+<td>KPR-504</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Produce an editable install plan, not direct catalog mutation; reuse the shared preview/diff/apply path.</td>
+<td>KPR-101, KPR-502</td>
+</tr>
+<tr>
+<td>KPR-505</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Let users request “build an executive engagement page” and compose only reviewed recipe-pack artifacts plus explicit mappings.</td>
+<td>KPR-404, KPR-504</td>
+</tr>
+<tr>
+<td>KPR-506</td>
+<td style="text-align: right;">P2</td>
+<td style="text-align: right;">M</td>
+<td>Explain why a recipe was not recommended: unavailable field, incompatible processor, ambiguous mapping, missing state, duplicate metric, or governance policy.</td>
+<td>KPR-502</td>
+</tr>
+<tr>
+<td>KPR-507</td>
+<td style="text-align: right;">P2</td>
+<td style="text-align: right;">M</td>
+<td>Use privacy-safe aggregate usage signals to improve ranking; never send raw rows or unrestricted sample values.</td>
+<td>KPR-502</td>
+</tr>
+<tr>
+<td>KPR-508</td>
+<td style="text-align: right;">P2</td>
+<td style="text-align: right;">M</td>
+<td>Add offline recommendation evaluation for relevance, validity, duplicate rate, and unsupported/backfill error rate.</td>
+<td>KPR-502–KPR-507</td>
+</tr>
+</tbody>
+</table>
+<h2 id="increment-g-release-qualification">Increment G — Release Qualification<a class="headerlink" href="#increment-g-release-qualification" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th style="text-align: right;">Priority</th>
+<th style="text-align: right;">Size</th>
+<th>Backlog item</th>
+<th>Dependencies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KPR-901</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Add schema parity, recipe fixture, instantiation, invalid-template, paired-input, version, and compatibility tests.</td>
+<td>Every increment</td>
+</tr>
+<tr>
+<td>KPR-902</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Add both-Studio component tests proving identical artifacts and validation outcomes.</td>
+<td>A, B</td>
+</tr>
+<tr>
+<td>KPR-903</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Add end-to-end ready/mapping/backfill scenarios for demo, Interaction History, lifecycle, set, and snapshot workspaces.</td>
+<td>B, C, E</td>
+</tr>
+<tr>
+<td>KPR-904</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">M</td>
+<td>Add accessibility and narrow-layout checks for search, method detail, mapping forms, diff, and error states.</td>
+<td>B</td>
+</tr>
+<tr>
+<td>KPR-905</td>
+<td style="text-align: right;">P0</td>
+<td style="text-align: right;">S</td>
+<td>Document operator runbooks, recipe author checklist, certification checklist, and upgrade/deprecation policy.</td>
+<td>C, D</td>
+</tr>
+<tr>
+<td>KPR-906</td>
+<td style="text-align: right;">P1</td>
+<td style="text-align: right;">M</td>
+<td>Establish outcome measures: discovery success, install completion, reuse ratio, preview failures, backfill abandonment, and stale-version count.</td>
+<td>D</td>
+</tr>
+</tbody>
+</table>
+<h2 id="definition-of-done">Definition of Done<a class="headerlink" href="#definition-of-done" title="Permanent link">&para;</a></h2>
+<p>A recipe or workflow story is complete only when:</p>
+<ol>
+<li>the reusable artifact validates against its typed model and checked-in JSON
+   Schema;</li>
+<li>Configuration Builder and AI Configuration Studio use the same core logic;</li>
+<li>installed behavior is represented entirely by validated catalog YAML;</li>
+<li>compatibility/readiness is deterministic and covered by reference fixtures;</li>
+<li>aggregate/query paths remain the only source of metric preview and report
+   data;</li>
+<li>state additions preserve config hashes, lineage, idempotency, and raw-row
+   disposal invariants;</li>
+<li>business definition, calculation, method, accuracy, caveat, and governance
+   metadata are visible before apply; and</li>
+<li>current reference, guide, architecture, and migration/backfill documentation
+   changes ship with the behavior.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2880 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Aggregate-first business intelligence platform">
+      
+      
+      
+      
+        <link rel="prev" href="../api-and-mcp/">
+      
+      
+        <link rel="next" href="../../design/replacement-design/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>FAQ - Value Stream</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#value-stream-qa" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Value Stream" class="md-header__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Value Stream
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              FAQ
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/getting-started/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/users/running-reports/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../concepts/product-overview/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../cli/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../design/replacement-design/" class="md-tabs__link">
+          
+  
+  
+  Design docs
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Value Stream" class="md-nav__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Value Stream
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/ui-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/distribution-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/lifecycle-and-funnel-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Funnel & lifecycle analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/pega-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pega export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/running-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/chat-with-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/querying-and-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Querying & export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/workspaces-and-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces & catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/ai-config-studio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Configuration Studio
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration & backfill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/product-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/business-functionality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Business functionality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (deep)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/domain-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_6" id="__nav_4_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions (ADRs)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Decisions (ADRs)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0001-aggregate-first-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0001 Aggregate-first storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0002-yaml-catalog-as-source-of-behavior/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0002 YAML catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0003-closed-expression-ast/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0003 Closed expression AST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0004-chunk-ledger-idempotency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0004 Chunk-ledger idempotency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../expression-dsl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Expression DSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readers-and-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers & formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chart-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chart catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kpi-recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../catalog-schemas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-and-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#a-architecture-and-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. Architecture and storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c-ingestion-and-freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C. Ingestion and freshness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d-querying-and-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        D. Querying and metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        E. Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f-security-and-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F. Security and compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#g-performance-and-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        G. Performance and limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h-roadmap-and-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H. Roadmap and limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#i-migration-cookbook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        I. Migration cookbook
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#j-when-the-docs-dont-cover-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        J. When the docs don't cover it
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design docs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design docs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/replacement-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Replacement design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/implementation-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/reporting-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipe backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat With Data MLP1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kickoff-prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kickoff prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meta/documentation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#a-architecture-and-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. Architecture and storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c-ingestion-and-freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C. Ingestion and freshness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d-querying-and-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        D. Querying and metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#e-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        E. Operations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#f-security-and-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        F. Security and compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#g-performance-and-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        G. Performance and limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#h-roadmap-and-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        H. Roadmap and limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#i-migration-cookbook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        I. Migration cookbook
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#j-when-the-docs-dont-cover-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        J. When the docs don't cover it
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="value-stream-qa">Value Stream — Q&amp;A<a class="headerlink" href="#value-stream-qa" title="Permanent link">&para;</a></h1>
+<p>A short, opinionated FAQ for engineers and stakeholders. Each entry is one question with one direct answer plus an example. Skim the headings; jump to the entries that match what you're trying to solve.</p>
+<p>If a question feels load-bearing and isn't here, open a doc PR — these entries should be the most common questions, not an aspirational catalog.</p>
+<hr />
+<h2 id="a-architecture-and-storage">A. Architecture and storage<a class="headerlink" href="#a-architecture-and-storage" title="Permanent link">&para;</a></h2>
+<p><strong>A1. Why aggregates first? Why not just persist raw events and aggregate on read?</strong>
+Persisting raw events is expensive (storage, PII risk, retention legislation) and forces every dashboard to do the heavy lifting. Value Stream's premise is that 95% of business questions can be answered from small, mergeable summaries; the other 5% needs a different tool. Once you accept that, throwing away rows after the chunk pass is a feature, not a limitation.</p>
+<p><strong>A2. Why DuckDB tables alongside Parquet — what does each one do?</strong>
+Parquet is the resting form of every aggregate (one directory per <code>source/processor/grain</code>, hive-partitioned by <code>period</code>). DuckDB does three jobs that Parquet alone can't: it serves a SQL surface to ad-hoc users (<code>read_parquet(...)</code>), it hosts the small metadata DBs (<code>chunks</code>, <code>pipeline_runs</code>, <code>config_versions</code>, <code>lineage</code>), and it provides workspace-level views named identically to logical metrics (so power users can <code>SELECT * FROM v_metric_ctr_daily</code> without learning the file layout). Inside the engine, frames are still Polars.</p>
+<p><strong>A3. Why not keep Polars DataFrames in memory and skip persistence?</strong>
+Process-bound DataFrames die on Streamlit reload, can't be shared across the API and the UI, and force the system to re-aggregate from raw on every restart. The current app already discovered this and bolted on a DuckDB-backed cache; Value Stream makes the persistence explicit and uniform.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># in-memory only — wrong</span>
+<span class="nd">@st</span><span class="o">.</span><span class="n">cache_data</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">load</span><span class="p">():</span> <span class="k">return</span> <span class="n">run_pipeline</span><span class="p">(</span><span class="n">files</span><span class="p">)</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">load</span><span class="p">()</span>  <span class="c1"># gone on next deploy</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="c1"># Value Stream — right</span>
+<span class="c1"># aggregates persist as Parquet partitions; the SDK reads them on demand</span>
+<span class="l l-Scalar l-Scalar-Plain">ws.metric(&quot;CTR&quot;).by(&quot;day&quot;, &quot;channel&quot;).to_polars()</span>
+</code></pre></div>
+<p><strong>A4. Are the aggregate tables dynamic?</strong>
+Append-only by run, with logical replacement: yes. Each chunk writes an immutable run-specific Parquet partial under its <code>period</code> partition; latest-successful-run-wins reads surface the freshest committed one. Schema-mutating without an explicit reprocess: no. The schema is determined by the Processor's computation contract; changing group-by columns or states is a behavior change, not a runtime mutation.</p>
+<p><strong>A5. What happens when I change a Processor's config?</strong>
+The planner classifies the change against the existing store (concepts/domain-model.md §5):</p>
+<ul>
+<li><em>Compatible widening</em> (add a derived metric or new processor) → no invalidation.</li>
+<li><em>Compatible narrowing</em> (drop a group-by column, coarsen a grain) → re-compact directly from existing aggregates.</li>
+<li><em>Incompatible</em> (add a group-by column that was not materialized, change a filter, change positive/negative outcomes, change CPC/HLL <code>lg_k</code>, switch sketch type) → re-run from chunks.</li>
+</ul>
+<p>Aggregate <code>config_hash</code> is the processor computation hash: workspace defaults,
+source reader/schema/transforms/defaults, and processor semantics. A source
+computation hash additionally covers every processor bound to the source and
+controls ingestion skip decisions. Presentation-only descriptions, metrics,
+and dashboards do not trigger reprocessing. Old and new aggregate hashes
+coexist until <code>valuestream vacuum</code>, or until a confirmed Data Load clean
+rebuild completes successfully for that source scope. Clean rebuild retains
+the audit databases under <code>meta/</code>.</p>
+<p><strong>A6. How big does the aggregate store get compared to raw input?</strong>
+For Pega-shaped IH at typical cardinality, expect the daily aggregate to be ~0.1–1% of the raw row volume; with CPC/t-digest blobs included, plan for a low-single-digit percentage. Actual size depends on cardinality, grouping density, and sketch parameters, so measure it on representative data.</p>
+<hr />
+<h2 id="b-configuration">B. Configuration<a class="headerlink" href="#b-configuration" title="Permanent link">&para;</a></h2>
+<p><strong>B1. Is YAML actually editable by non-developers?</strong>
+Yes — the Builder UI generates YAML, validates it, and writes it back. Power users can edit YAML directly in git. The grammar (design/replacement-design.md §7, reference/expression-dsl.md) is small enough to learn in an afternoon.</p>
+<p><strong>B2. How do I add a new metric?</strong>
+Edit <code>metrics.yaml</code> and run <code>valuestream validate</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">metrics</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">Cost_per_Click</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">conversion</span><span class="w">        </span><span class="c1"># any binary_outcome processor</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">formula</span>
+<span class="w">    </span><span class="nt">expression</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">safe_div</span>
+<span class="w">      </span><span class="nt">num</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Cost</span><span class="p p-Indicator">}</span><span class="w">        </span><span class="c1"># add a `value_aggs` Cost state in the processor first</span>
+<span class="w">      </span><span class="nt">den</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Positives</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p><strong>B3. How do I add a new dashboard tile?</strong>
+Edit <code>dashboards.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cost_per_click</span>
+<span class="w">  </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cost per click</span>
+<span class="w">  </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cost_per_Click</span>
+<span class="w">  </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">line</span>
+<span class="w">  </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Day</span>
+<span class="w">  </span><span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cost_per_Click</span>
+<span class="w">  </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
+</code></pre></div>
+<p>Save, hit Refresh in Streamlit. No restart needed.</p>
+<p><strong>B4. How do I add a new group-by column?</strong>
+Create or normalize the column in <code>pipelines.yaml</code> if needed:</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">derive_column</span>
+<span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DeviceType</span>
+<span class="w">  </span><span class="nt">expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">RawDeviceType</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>Then add it to the processors that should partition by it:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">processors</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DeviceType</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Adding a group-by column is an <em>incompatible</em> change (A5) — the engine re-runs the affected chunks under a new <code>config_hash</code>.</p>
+<p><strong>B5. How do I roll back a bad config?</strong>
+Revert the YAML and re-run. The previous <code>config_hash</code>'s aggregates are still on disk (until you <code>vacuum</code>), so the dashboards immediately serve the old numbers. Any chunks that ran under the bad config are quarantined with <code>status='partial'</code> until vacuumed.</p>
+<p><strong>B6. Can I share configs across workspaces?</strong>
+Yes — split optional column metadata, <code>dashboards.yaml</code>, and the common <code>metrics.yaml</code> into a shared module and import via Jinja2 includes:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># bdt/catalog/dashboards.yaml</span>
+<span class="p p-Indicator">{</span><span class="err">%</span><span class="w"> </span><span class="nv">include &quot;../shared/dashboards/marketing_overview.yaml&quot; %</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>Workspace-specific overrides live alongside the include.</p>
+<hr />
+<h2 id="c-ingestion-and-freshness">C. Ingestion and freshness<a class="headerlink" href="#c-ingestion-and-freshness" title="Permanent link">&para;</a></h2>
+<p><strong>C1. How fresh is the data on a tile?</strong>
+Every tile shows the latest <code>period</code> covered and the time since the last successful run. Future API responses should return the same freshness object (<code>plan + freshness + config_hash</code>).</p>
+<p><strong>C2. How do I trigger an ingestion?</strong>
+Three ways:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># CLI (cron-friendly)</span>
+valuestream<span class="w"> </span>run<span class="w"> </span>--workspace<span class="w"> </span>bdt<span class="w"> </span>--source<span class="w"> </span>ih
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="c1"># SDK</span>
+<span class="n">ws</span><span class="o">.</span><span class="n">run_source</span><span class="p">(</span><span class="s2">&quot;ih&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>Both surfaces are idempotent: a chunk is skipped only when the source computation hash and current input-file fingerprint match a successful prior run. Pass <code>--force</code> to re-process. The read-only HTTP API does not trigger ingestion.</p>
+<p><strong>C3. What happens when the same chunk is re-run?</strong>
+The new partial Parquet writes alongside the old one with a new <code>pipeline_run_id</code>. It becomes visible only after its successful chunk row and successful/partial run row are committed. If replacement fails, readers keep the previous successful partial. <code>valuestream vacuum</code> deletes superseded or orphaned partials.</p>
+<p><strong>C4. What if a file is corrupted mid-run?</strong>
+That chunk fails (<code>status='failed'</code> in <code>meta/chunks.duckdb</code>). The other chunks finish. The run status becomes <code>partial</code>. The operator fixes or removes the bad file and re-runs; only failed/missing chunks are processed.</p>
+<p><strong>C5. Can multiple ingestions run at the same time?</strong>
+Per-source: no — a filesystem advisory lock at <code>meta/source_&lt;id&gt;.lock</code> enforces one run per source. Different sources can run in parallel. Inside one run, processors fan out concurrently.</p>
+<p><strong>C6. Late-arriving files for a past chunk?</strong>
+Drop them into the source folder and re-run. The <code>chunk_id</code> extraction puts them into the right chunk; the engine notices the chunk's <code>file_hash</code> changed and re-processes it.</p>
+<p><strong>C7. What about back-filling a new processor against old chunks?</strong>
+<code>valuestream backfill --workspace bdt --source ih --processor engagement_v2 --from 2024-01-01</code>. The chunks for that range are re-read and only the new processor runs against them. Existing processors' aggregates are untouched.</p>
+<hr />
+<h2 id="d-querying-and-metrics">D. Querying and metrics<a class="headerlink" href="#d-querying-and-metrics" title="Permanent link">&para;</a></h2>
+<p><strong>D1. How does the planner pick a physical aggregate?</strong>
+Three rules: (1) the grain must be ≥ the requested grain, (2) the group-by column set must include all requested report fields, (3) the states must cover the metric's needs. The smallest matching aggregate wins. If no aggregate matches, the planner errors with the specific gap (e.g., "no monthly aggregate covers <code>DeviceType</code>").</p>
+<p><strong>D2. Why are the same numbers slightly different across grains?</strong>
+For exact metrics (count-based, sum-based, pooled mean/variance) — they're identical to floating-point precision. For sketch-based metrics (CPC/HLL/Theta distinct, t-digest quantiles) daily and monthly answers can differ within the sketch error bound. CPC exposes lower/upper bounds directly; legacy HLL <code>lg_k=12</code> has approximately ±1.6% RSE. The UI should surface the applicable bound and sketch parameters.</p>
+<p><strong>D3. Can I get exact distinct counts?</strong>
+Not at the aggregate-store layer. Value Stream's contract is "no raw rows," so distincts use CPC by default, HLL by explicit configuration, or Theta when set algebra is required. A snapshot can preserve one aggregate row per entity when its grain permits an exact query, but a CPC/HLL/Theta state remains approximate.</p>
+<p><strong>D4. How do I handle joins?</strong>
+Two patterns. (1) Fold the foreign key into the source schema upstream or with a transform so it becomes a group-by column. (2) Use snapshot processors with shared group-by columns, then join in the metric DSL via <code>join</code> (planned post-MVP). Value Stream deliberately makes ad-hoc joins inconvenient because they undermine pre-aggregation.</p>
+<p><strong>D5. Can I query Value Stream with SQL?</strong>
+Yes. There are two SQL surfaces:</p>
+<ul>
+<li><code>meta/aggregate_views.duckdb</code> contains views over the canonical aggregate
+  Parquet files, one per source/processor/grain. These expose aggregate state,
+  not raw data.</li>
+<li><code>valuestream export-duckdb &lt;workspace&gt; --grain Summary</code> creates a materialized
+  DuckDB file with one table per metric at the selected grain. Tables are named
+  <code>metric_&lt;metric_id&gt;_&lt;grain&gt;</code> and are better suited for Superset or similar BI
+  tools because formula and sketch-derived metrics have already been evaluated.</li>
+<li><code>valuestream serve-api &lt;workspace&gt; --enable-sql</code> and
+  <code>valuestream serve-mcp &lt;workspace&gt; --enable-sql</code> expose the same governed
+  views only when SQL is explicitly enabled. DuckDB is locked to allowlisted
+  aggregate/export paths; external file access and extension loading are
+  disabled before user SQL runs.</li>
+</ul>
+<p><strong>D6. How do I A/B test?</strong>
+Use a <code>binary_outcome</code> processor with <code>variant_column</code> set, a <code>variant_compare</code> metric for lift, and a <code>contingency_test</code> metric for significance:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">processors</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
+<span class="w">    </span><span class="nt">variant_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ModelControlGroup</span>
+<span class="w">    </span><span class="nt">variant_role_map</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">Test</span><span class="p">:</span><span class="w"> </span><span class="nv">Test</span><span class="p p-Indicator">,</span><span class="nt"> Control</span><span class="p">:</span><span class="w"> </span><span class="nv">Control</span><span class="p p-Indicator">}</span>
+
+<span class="nt">metrics</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">Lift</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variant_compare</span>
+<span class="w">    </span><span class="nt">variant_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ModelControlGroup</span>
+<span class="w">    </span><span class="nt">test_role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Test</span>
+<span class="w">    </span><span class="nt">control_role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Control</span>
+<span class="w">  </span><span class="nt">Lift_Significance</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">contingency_test</span>
+<span class="w">    </span><span class="nt">tests</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">chi2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">z</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>A tile with <code>metric: Lift</code> gets <code>TestCTR, ControlCTR, Lift, Lift_Z_Score, Lift_P_Val, StdErr</code> per group. reference/algorithms.md §3 has the math.</p>
+<p><strong>D7. How do I do a multi-variant experiment?</strong>
+Use the <code>experiment</code> flavor of <code>binary_outcome</code>: include <code>ExperimentName</code> and <code>ExperimentGroup</code> in <code>group_by</code>, set <code>variant_column = ExperimentGroup</code>, and add a <code>filter</code> restricting to in-experiment rows. The <code>Experiment_Significance</code> metric runs chi-square, G-test, and z-test on the contingency.</p>
+<p><strong>D8. How do percentiles work for descriptive stats?</strong>
+Each numeric property gets a t-digest state (<code>&lt;prop&gt;_tdigest</code>). Percentiles are derived metrics:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">metrics</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">Median_ResponseTime</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">descriptive</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tdigest_quantile</span>
+<span class="w">    </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ResponseTime_tdigest</span>
+<span class="w">    </span><span class="nt">quantile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+<span class="w">  </span><span class="nt">p95_ResponseTime</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">descriptive</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tdigest_quantile</span>
+<span class="w">    </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ResponseTime_tdigest</span>
+<span class="w">    </span><span class="nt">quantile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
+</code></pre></div>
+<p><strong>D9. How do I see ROC AUC over time?</strong>
+A <code>score_distribution</code> processor at <code>Day</code> grain stores <code>Propensity_tdigest_positives</code> and <code>Propensity_tdigest_negatives</code> per day for the selected score property. The <code>ROC_AUC</code> metric (kind <code>curve_from_digests</code>) reconstructs AUC at query time. A <code>line</code> chart with <code>x: Day, y: ROC_AUC, color: Channel</code> plots the trend.</p>
+<p>For the actual model curves, use the same <code>curve_from_digests</code> metric with one
+of the curve chart kinds:</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">roc_curve</span>
+<span class="w">  </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ROC Curve</span>
+<span class="w">  </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ROC_AUC</span>
+<span class="w">  </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">roc_curve</span>
+<span class="w">  </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
+<span class="w">  </span><span class="nt">value_format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">percent</span>
+</code></pre></div>
+<p><code>precision_recall_curve</code> plots the average-precision curve, while <code>gain_curve</code>
+and <code>lift_curve</code> derive gain/lift from the reconstructed <code>tpr</code>, <code>fpr</code>, and
+<code>pos_fraction</code> arrays.</p>
+<hr />
+<h2 id="e-operations">E. Operations<a class="headerlink" href="#e-operations" title="Permanent link">&para;</a></h2>
+<p><strong>E1. How do I deploy?</strong>
+One process per workspace.</p>
+<div class="highlight"><pre><span></span><code>valuestream<span class="w"> </span>serve<span class="w"> </span>--workspace<span class="w"> </span>bdt
+<span class="c1"># starts Streamlit :8501 for the current product</span>
+<span class="c1"># optional: local stdio MCP through valuestream serve-mcp</span>
+<span class="c1"># optional: read-only FastAPI through valuestream serve-api</span>
+<span class="c1"># deferred: remote HTTP MCP and OIDC/multi-user deployment</span>
+<span class="c1"># pointed at /data/valuestream/bdt</span>
+</code></pre></div>
+<p>A reverse proxy routes by hostname for multiple workspaces.</p>
+<p><strong>E2. How do I do disaster recovery?</strong>
+The aggregate store + metadata is everything. Tar <code>&lt;workspace&gt;/</code>, ship to safe storage, untar to restore.</p>
+<div class="highlight"><pre><span></span><code>tar<span class="w"> </span>-C<span class="w"> </span>/data/valuestream<span class="w"> </span>-czf<span class="w"> </span>/backup/bdt-<span class="k">$(</span>date<span class="w"> </span>+%F<span class="k">)</span>.tar.gz<span class="w"> </span>bdt/
+</code></pre></div>
+<p><strong>E3. How do I monitor?</strong>
+The Streamlit <em>Ops</em> page shows freshness and recent runs, and logs are structured JSON. Prometheus <code>/metrics</code> is reserved for the deferred service surface.</p>
+<p><strong>E4. How big a machine do I need?</strong>
+Indicative numbers (Polars + DuckDB on a single 8-core / 32 GB host):</p>
+<table>
+<thead>
+<tr>
+<th>Workspace size</th>
+<th>Raw input / day</th>
+<th>Chunk processing time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small (Demo)</td>
+<td>&lt; 1 GB</td>
+<td>seconds</td>
+</tr>
+<tr>
+<td>Medium (NBS)</td>
+<td>5–20 GB</td>
+<td>minutes</td>
+</tr>
+<tr>
+<td>Large (BDT, RBB)</td>
+<td>50–200 GB</td>
+<td>tens of minutes</td>
+</tr>
+</tbody>
+</table>
+<p>Memory pressure is bounded by <code>streaming: true</code> on readers. For very large workspaces, run multiple processes against the same store with <code>--shard &lt;hash&gt;</code>.</p>
+<p><strong>E5. Can I run Value Stream against a remote object store?</strong>
+Yes — the workspace path can be <code>s3://...</code> or <code>gs://...</code>. Polars and DuckDB read Parquet from object stores natively. The metadata DBs need to be local (DuckDB's WAL doesn't live well on S3) — typically mounted from a local volume.</p>
+<p><strong>E6. How do I migrate from the current app?</strong>
+<code>valuestream migrate --from value_dashboard/config/&lt;variant&gt;.toml --to valuestream/&lt;variant&gt;/catalog/</code>. The migration tool translates legacy TOML, identifies expressions that need hand-conversion (and refuses to silently drop them), and emits a <code>migration_report.md</code>. Then <code>valuestream backfill</code> re-uses the existing DuckDB tables to populate the new aggregate store without recomputing from raw.</p>
+<p><strong>E7. Can the legacy app and Value Stream coexist during migration?</strong>
+Yes — they read from disjoint locations (<code>db/pov_data_&lt;variant&gt;.duckdb</code> vs <code>&lt;workspace&gt;/aggregates/</code>). Run them side-by-side; pin a banner in the legacy UI pointing to Value Stream.</p>
+<hr />
+<h2 id="f-security-and-compliance">F. Security and compliance<a class="headerlink" href="#f-security-and-compliance" title="Permanent link">&para;</a></h2>
+<p><strong>F1. Is PII safe?</strong>
+Raw rows never leave a chunk's process. Only state columns are persisted: counts, sums, sketches. CPC/HLL/Theta store hashed sketch state, but sketches are not a cryptographic anonymization boundary; tokenize or HMAC identifiers upstream where required. There is no <code>eval</code>, so config injection isn't a vector. Per-row provenance lets an auditor reconstruct the exact config that produced any number.</p>
+<p><strong>F2. How does authentication work?</strong>
+Current product: SDK and local stdio MCP run under the host process identity; UI auth is handled by Streamlit/basic auth or an upstream proxy; per-workspace filesystem permissions enforce hard isolation. The read-only HTTP API supports a single bearer token and the CLI refuses non-loopback binding without one. Remote HTTP MCP and OIDC/multi-user auth remain deferred.</p>
+<p><strong>F3. How do I redact a customer?</strong>
+Drop the chunk that contained the customer's events and re-run the pipeline; the customer's contribution to all aggregates is removed because state types are associative. CPC/HLL/Theta states must be rebuilt from the remaining chunks; scalar states are recomputed through the same deterministic replay.</p>
+<p><strong>F4. Can I disable a sketch type for compliance reasons?</strong>
+Yes — <code>processors.&lt;id&gt;.states</code> is explicit, so a workspace can omit any <code>cpc</code>, <code>hll</code>, or <code>theta</code> state. The corresponding metrics simply aren't available; downstream tiles that depend on them error out at validate time, not at runtime.</p>
+<hr />
+<h2 id="g-performance-and-limits">G. Performance and limits<a class="headerlink" href="#g-performance-and-limits" title="Permanent link">&para;</a></h2>
+<p><strong>G1. What's the chunk size sweet spot?</strong>
+For Pega IH, 1 chunk per day works well. Smaller (per hour) chunks pay extra fixed cost; larger (per month) chunks bloat memory. The grouping regex is the lever.</p>
+<p><strong>G2. What's the largest chunk Value Stream can handle?</strong>
+With <code>streaming: true</code> and one processor, ~10 GB of input on a 32 GB box is comfortable. With 6 processors fanning out, ~3 GB. Beyond that, split the chunk grouping (per hour) or shard processing.</p>
+<p><strong>G3. What's the largest aggregate store Value Stream can serve?</strong>
+DuckDB scans Parquet at multi-GB/s on local SSD. Aggregate stores up to a few hundred GB serve interactive dashboards comfortably; beyond that, increase the <code>monthly</code> grain's coverage and rely on summary aggregates for high-cardinality tiles.</p>
+<p><strong>G4. Why is my dashboard slow?</strong>
+Three usual suspects:</p>
+<ol>
+<li>The metric resolves to <code>daily</code> when <code>monthly</code> would do — fix by adding a <code>time_range</code> to the tile.</li>
+<li>The metric pulls a big sketch column (<code>&lt;prop&gt;_tdigest</code> ~32 KB) for many groups — fix by adding a more selective <code>filters</code> block.</li>
+<li>A facet has too many categories — fix by reducing <code>facet_row</code> cardinality or pre-aggregating to <code>monthly</code>.</li>
+</ol>
+<p><code>query_metric_result</code>, SDK <code>to_result()</code>, and API/MCP metric queries identify the selected physical aggregate grain, catalog/computation hashes, contributing runs/chunks, scanned aggregate-row count, and latest aggregate timestamp.</p>
+<p><strong>G5. How does Value Stream handle high-cardinality group-by columns?</strong>
+A processor with cardinality &gt; 1M tuples per day at the <code>Day</code> grain is expensive. Recommendations: (1) bin the group-by column upstream (e.g., truncate timestamps), (2) drop the column from <code>Day</code> and keep it only at <code>Month</code>, (3) replace it with a CPC distinct-count state if the question is "how many."</p>
+<hr />
+<h2 id="h-roadmap-and-limits">H. Roadmap and limits<a class="headerlink" href="#h-roadmap-and-limits" title="Permanent link">&para;</a></h2>
+<p><strong>H1. What's not in v1?</strong>
+Listed explicitly in concepts/architecture.md §20: streaming/CDC, distributed compute, raw-event SQL, feature serving, full CDP. Anything outside the boundary is the upstream system's job.</p>
+<p><strong>H2. Will Value Stream ever do streaming?</strong>
+Maybe — incremental view maintenance is on the long-term roadmap, gated on real demand for sub-minute freshness.</p>
+<p><strong>H3. Will the engine support Spark / Ray / Dask backends?</strong>
+No — Value Stream is single-node by design. Horizontal scaling is "shard by source" via multiple processes against one workspace; the file-based store + advisory locks make this safe.</p>
+<p><strong>H4. Is Value Stream open source?</strong>
+TBD — the design assumes an internal release first; nothing in the architecture prevents an open-source release later.</p>
+<p><strong>H5. What if I need a metric that doesn't fit any built-in processor?</strong>
+Two options. (1) Plug in a custom processor — implement the <code>Processor</code> protocol and register the kind. (2) Pre-aggregate upstream and ingest the result as a <code>snapshot</code> source — i.e. delegate the difficult part to a system that has raw rows.</p>
+<hr />
+<h2 id="i-migration-cookbook">I. Migration cookbook<a class="headerlink" href="#i-migration-cookbook" title="Permanent link">&para;</a></h2>
+<p><strong>I1. Translating legacy <code>[metrics.engagement]</code> to Value Stream.</strong>
+Before:</p>
+<div class="highlight"><pre><span></span><code><span class="k">[metrics.engagement]</span>
+<span class="n">group_by</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;Day&#39;</span><span class="p">,</span><span class="s1">&#39;Month&#39;</span><span class="p">,</span><span class="s1">&#39;Year&#39;</span><span class="p">,</span><span class="s1">&#39;Quarter&#39;</span><span class="p">,</span><span class="s1">&#39;Channel&#39;</span><span class="p">,</span><span class="s1">&#39;PlacementType&#39;</span><span class="p">,</span><span class="s1">&#39;PropensitySource&#39;</span><span class="p">,</span><span class="s1">&#39;Issue&#39;</span><span class="p">,</span><span class="s1">&#39;Group&#39;</span><span class="p">]</span>
+<span class="n">filter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;&quot;&quot;&quot;&quot;</span>
+<span class="n">scores</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;CTR&#39;</span><span class="p">,</span><span class="s1">&#39;Lift&#39;</span><span class="p">,</span><span class="s1">&#39;Lift_Z_Score&#39;</span><span class="p">,</span><span class="s1">&#39;Lift_P_Val&#39;</span><span class="p">,</span><span class="s1">&#39;Positives&#39;</span><span class="p">,</span><span class="s1">&#39;Negatives&#39;</span><span class="p">,</span><span class="s1">&#39;Count&#39;</span><span class="p">]</span>
+<span class="n">positive_model_response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;Clicked&#39;</span><span class="p">]</span>
+<span class="n">negative_model_response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;Impression&#39;</span><span class="p">,</span><span class="s1">&#39;Pending&#39;</span><span class="p">]</span>
+</code></pre></div>
+<p>After (minus sugar — full form in design/replacement-design.md):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">processors</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
+<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">binary_outcome</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PropensitySource</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">time</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
+<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">outcome</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Outcome</span>
+<span class="w">      </span><span class="nt">positive_values</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Clicked</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">negative_values</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Impression</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Pending</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">variant_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ModelControlGroup</span>
+<span class="w">    </span><span class="nt">variant_role_map</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">Test</span><span class="p">:</span><span class="w"> </span><span class="nv">Test</span><span class="p p-Indicator">,</span><span class="nt"> Control</span><span class="p">:</span><span class="w"> </span><span class="nv">Control</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">states</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">Count</span><span class="p">:</span><span class="w">     </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">Positives</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">Negatives</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
+
+<span class="nt">metrics</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">CTR</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="nv">engagement</span><span class="p p-Indicator">,</span><span class="nt"> kind</span><span class="p">:</span><span class="w"> </span><span class="nv">formula</span><span class="p p-Indicator">,</span><span class="nt"> expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">safe_div</span><span class="p p-Indicator">,</span><span class="nt"> num</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Positives</span><span class="p p-Indicator">},</span><span class="nt"> den</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">add</span><span class="p p-Indicator">,</span><span class="nt"> args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Positives</span><span class="p p-Indicator">},</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Negatives</span><span class="p p-Indicator">}]}}}</span>
+<span class="w">  </span><span class="nt">Lift</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="nv">engagement</span><span class="p p-Indicator">,</span><span class="nt"> kind</span><span class="p">:</span><span class="w"> </span><span class="nv">variant_compare</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p><strong>I2. Translating a <code>pl.col(...).is_in(...)</code> filter to AST.</strong>
+Before: <code>filter = "(pl.col(\"ModelControlGroup\").is_in([\"Test\",\"Control\"]))"</code>
+After:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">filter</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">in</span>
+<span class="w">  </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ModelControlGroup</span>
+<span class="w">  </span><span class="nt">values</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Test</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Control</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><strong>I3. Translating a derived column.</strong>
+Before: <code>columns = "[pl.when(pl.col('ConversionEventID') != '').then(pl.col('ConversionEventID')).otherwise(pl.col('Name')).alias('ConversionEventID')]"</code>
+After:</p>
+<div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">derive_column</span>
+<span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ConversionEventID</span>
+<span class="w">  </span><span class="nt">expression</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">case</span>
+<span class="w">    </span><span class="nt">when</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">cond</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">ne</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="nt">then</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">else</span><span class="p">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<hr />
+<h2 id="j-when-the-docs-dont-cover-it">J. When the docs don't cover it<a class="headerlink" href="#j-when-the-docs-dont-cover-it" title="Permanent link">&para;</a></h2>
+<p>If you hit a gap:</p>
+<ol>
+<li>Search this Q&amp;A for the closest entry.</li>
+<li>Read concepts/domain-model.md for vocabulary.</li>
+<li>Read reference/processors.md for the relevant processor.</li>
+<li>Read reference/algorithms.md for the math.</li>
+<li>Read design/replacement-design.md for the broader DSL.</li>
+<li>If still stuck, file a doc bug — the answer should be in here.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

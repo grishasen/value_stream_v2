@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Value Stream — Pipelines</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="_theme.css" />
+</head>
+<body>
+<div class="valuestream-frame">
+  <nav class="crumbs"><a href="index.html">← Mockups</a></nav>
+  <h1>Pipelines / Ops mockup</h1>
+  <p class="lede">Sources, recent runs, chunks ledger, and the freshness grid.</p>
+
+<div>
+  <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px;">
+    <div>
+      <div style="font-size: 22px; font-weight: 500;">Pipelines</div>
+      <div style="font-size: 13px; color: var(--color-text-secondary);">Sources, runs, chunks, freshness — everything you need to ship a clean dashboard.</div>
+    </div>
+    <div style="background: var(--color-background-info); color: var(--color-text-info); padding: 6px 12px; border-radius: var(--border-radius-md); font-size: 13px; font-weight: 500;">+ trigger run</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+    <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <div style="font-size: 14px; font-weight: 500;">ih</div>
+        <span style="font-size: 11px; color: var(--color-text-success); background: var(--color-background-success); padding: 2px 8px; border-radius: var(--border-radius-md);">ok</span>
+      </div>
+      <div style="font-size: 12px; color: var(--color-text-tertiary); margin-top: 2px;">pega_ds_export · 1142 chunks</div>
+      <div style="font-size: 12px; color: var(--color-text-secondary); margin-top: 6px;">last run: <strong style="color: var(--color-text-primary);">12 min ago</strong> · 3 chunks · 4.2 GB</div>
+      <div style="height: 4px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); margin-top: 8px; overflow: hidden;"><div style="height: 100%; width: 100%; background: var(--color-text-success);"></div></div>
+    </div>
+    <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <div style="font-size: 14px; font-weight: 500;">holdings</div>
+        <span style="font-size: 11px; color: var(--color-text-success); background: var(--color-background-success); padding: 2px 8px; border-radius: var(--border-radius-md);">ok</span>
+      </div>
+      <div style="font-size: 12px; color: var(--color-text-tertiary); margin-top: 2px;">pega_ds_export · 8 chunks</div>
+      <div style="font-size: 12px; color: var(--color-text-secondary); margin-top: 6px;">last run: <strong style="color: var(--color-text-primary);">2 h ago</strong> · 1 chunk · 240 MB</div>
+      <div style="height: 4px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); margin-top: 8px; overflow: hidden;"><div style="height: 100%; width: 100%; background: var(--color-text-success);"></div></div>
+    </div>
+    <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <div style="font-size: 14px; font-weight: 500;">subscriptions</div>
+        <span style="font-size: 11px; color: var(--color-text-warning); background: var(--color-background-warning); padding: 2px 8px; border-radius: var(--border-radius-md);">partial</span>
+      </div>
+      <div style="font-size: 12px; color: var(--color-text-tertiary); margin-top: 2px;">csv · 91 chunks</div>
+      <div style="font-size: 12px; color: var(--color-text-secondary); margin-top: 6px;">last run: <strong style="color: var(--color-text-primary);">31 min ago</strong> · 2 of 3 chunks ok</div>
+      <div style="height: 4px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); margin-top: 8px; overflow: hidden; display: flex;">
+        <div style="height: 100%; width: 67%; background: var(--color-text-success);"></div>
+        <div style="height: 100%; width: 33%; background: var(--color-text-warning);"></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1.1fr 1fr; gap: 12px; margin-top: 16px;">
+    <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px;">
+        <div style="font-size: 14px; font-weight: 500;">Recent runs · ih</div>
+        <span style="font-size: 12px; color: var(--color-text-tertiary);">last 24h</span>
+      </div>
+      <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+        <thead><tr style="color: var(--color-text-tertiary); text-align: left;">
+          <th style="font-weight: 400; padding: 4px 6px;">run id</th>
+          <th style="font-weight: 400; padding: 4px 6px;">started</th>
+          <th style="font-weight: 400; padding: 4px 6px; text-align: right;">chunks</th>
+          <th style="font-weight: 400; padding: 4px 6px; text-align: right;">duration</th>
+          <th style="font-weight: 400; padding: 4px 6px;">status</th>
+        </tr></thead>
+        <tbody>
+          <tr style="background: var(--color-background-info);">
+            <td style="padding: 6px; font-family: var(--font-mono); color: var(--color-text-info);">8a32fa3d</td><td style="padding: 6px;">12 min ago</td><td style="padding: 6px; text-align: right;">3 / 3</td><td style="padding: 6px; text-align: right;">2m 14s</td><td style="padding: 6px;"><span style="color: var(--color-text-success);">●</span> ok</td>
+          </tr>
+          <tr><td style="padding: 6px; font-family: var(--font-mono); color: var(--color-text-secondary);">7c11e220</td><td style="padding: 6px;">12 h ago</td><td style="padding: 6px; text-align: right;">2 / 2</td><td style="padding: 6px; text-align: right;">1m 48s</td><td style="padding: 6px;"><span style="color: var(--color-text-success);">●</span> ok</td></tr>
+          <tr><td style="padding: 6px; font-family: var(--font-mono); color: var(--color-text-secondary);">3f9bc041</td><td style="padding: 6px;">yesterday</td><td style="padding: 6px; text-align: right;">5 / 6</td><td style="padding: 6px; text-align: right;">5m 20s</td><td style="padding: 6px;"><span style="color: var(--color-text-warning);">●</span> partial</td></tr>
+          <tr><td style="padding: 6px; font-family: var(--font-mono); color: var(--color-text-secondary);">d8104ab1</td><td style="padding: 6px;">2 days ago</td><td style="padding: 6px; text-align: right;">4 / 4</td><td style="padding: 6px; text-align: right;">3m 02s</td><td style="padding: 6px;"><span style="color: var(--color-text-success);">●</span> ok</td></tr>
+          <tr><td style="padding: 6px; font-family: var(--font-mono); color: var(--color-text-secondary);">e51237fe</td><td style="padding: 6px;">3 days ago</td><td style="padding: 6px; text-align: right;">4 / 4</td><td style="padding: 6px; text-align: right;">3m 41s</td><td style="padding: 6px;"><span style="color: var(--color-text-success);">●</span> ok</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px;">
+        <div>
+          <div style="font-size: 14px; font-weight: 500;">Chunks · run 8a32fa3d</div>
+          <div style="font-size: 11px; color: var(--color-text-tertiary);">click a chunk to drill into lineage</div>
+        </div>
+        <span style="font-size: 11px; color: var(--color-text-success); background: var(--color-background-success); padding: 2px 8px; border-radius: var(--border-radius-md);">3 ok</span>
+      </div>
+      <div style="font-size: 12px;">
+        <div style="display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; padding: 6px 0; border-bottom: 0.5px dashed var(--color-border-tertiary);">
+          <div><span style="font-family: var(--font-mono);">2026-05-07</span><span style="color: var(--color-text-tertiary); margin-left: 8px;">2 files · 4.1M rows</span></div>
+          <div style="color: var(--color-text-tertiary);">38 s</div><div style="color: var(--color-text-success);">●</div><div style="color: var(--color-text-info);">re-run</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; padding: 6px 0; border-bottom: 0.5px dashed var(--color-border-tertiary);">
+          <div><span style="font-family: var(--font-mono);">2026-05-06</span><span style="color: var(--color-text-tertiary); margin-left: 8px;">2 files · 3.9M rows</span></div>
+          <div style="color: var(--color-text-tertiary);">42 s</div><div style="color: var(--color-text-success);">●</div><div style="color: var(--color-text-info);">re-run</div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; padding: 6px 0;">
+          <div><span style="font-family: var(--font-mono);">2026-05-05</span><span style="color: var(--color-text-tertiary); margin-left: 8px;">1 file · 1.8M rows</span></div>
+          <div style="color: var(--color-text-tertiary);">54 s</div><div style="color: var(--color-text-success);">●</div><div style="color: var(--color-text-info);">re-run</div>
+        </div>
+      </div>
+
+      <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 10px; margin-top: 12px; font-size: 12px;">
+        <div style="font-weight: 500; margin-bottom: 4px;">Selected: 2026-05-07</div>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr><td style="color: var(--color-text-secondary); padding: 2px 0;">file_hash</td><td style="text-align: right; font-family: var(--font-mono);">b18a … e3</td></tr>
+          <tr><td style="color: var(--color-text-secondary); padding: 2px 0;">processors fanned out</td><td style="text-align: right;">6</td></tr>
+          <tr><td style="color: var(--color-text-secondary); padding: 2px 0;">rows in / kept</td><td style="text-align: right;">4 088 219 / 3 974 102</td></tr>
+          <tr><td style="color: var(--color-text-secondary); padding: 2px 0;">aggregate rows written</td><td style="text-align: right;">12 463</td></tr>
+          <tr><td style="color: var(--color-text-secondary); padding: 2px 0;">peak rss</td><td style="text-align: right;">3.4 GB</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px; margin-top: 16px;">
+    <div style="font-size: 14px; font-weight: 500; margin-bottom: 10px;">Freshness · per source × processor × grain</div>
+    <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+      <thead><tr style="color: var(--color-text-tertiary); text-align: left;">
+        <th style="font-weight: 400; padding: 4px 8px;">source / processor</th><th style="font-weight: 400; padding: 4px 8px;">daily</th><th style="font-weight: 400; padding: 4px 8px;">monthly</th><th style="font-weight: 400; padding: 4px 8px;">summary</th><th style="font-weight: 400; padding: 4px 8px;">storage</th>
+      </tr></thead>
+      <tbody>
+        <tr><td style="padding: 6px 8px;">ih / engagement</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 12m</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 12m</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 12m</td><td style="padding: 6px 8px; color: var(--color-text-secondary);">812 MB</td></tr>
+        <tr><td style="padding: 6px 8px;">ih / conversion</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 12m</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 12m</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 12m</td><td style="padding: 6px 8px; color: var(--color-text-secondary);">418 MB</td></tr>
+        <tr><td style="padding: 6px 8px;">ih / model_ml_scores</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 12m</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 12m</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 12m</td><td style="padding: 6px 8px; color: var(--color-text-secondary);">1.4 GB</td></tr>
+        <tr><td style="padding: 6px 8px;">holdings / clv</td><td style="padding: 6px 8px; color: var(--color-text-tertiary);">—</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 2h</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-success);">●</span> 2h</td><td style="padding: 6px 8px; color: var(--color-text-secondary);">204 MB</td></tr>
+        <tr><td style="padding: 6px 8px;">subscriptions / state</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-warning);">●</span> 31m · partial</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-warning);">●</span> 31m</td><td style="padding: 6px 8px;"><span style="color: var(--color-text-warning);">●</span> 31m</td><td style="padding: 6px 8px; color: var(--color-text-secondary);">96 MB</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

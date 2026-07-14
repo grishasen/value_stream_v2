@@ -1,0 +1,4158 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Aggregate-first business intelligence platform">
+      
+      
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../adr/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Domain model - Value Stream</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#value-stream-domain-model-and-glossary" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Value Stream" class="md-header__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Value Stream
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Domain model
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/getting-started/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/users/running-reports/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../product-overview/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/cli/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../design/replacement-design/" class="md-tabs__link">
+          
+  
+  
+  Design docs
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Value Stream" class="md-nav__button md-logo" aria-label="Value Stream" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Value Stream
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/ui-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/distribution-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/lifecycle-and-funnel-analytics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Funnel & lifecycle analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/pega-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pega export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/running-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/chat-with-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/querying-and-export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Querying & export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/workspaces-and-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workspaces & catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/builder/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Builder
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/configuration/ai-config-studio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Configuration Studio
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration & backfill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../product-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Product overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../business-functionality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Business functionality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (deep)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain model
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-big-picture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Big picture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-term-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Term graph
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-definitions-alphabetical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Definitions (alphabetical)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Definitions (alphabetical)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#aggregate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#aggregate-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregate Store
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ast-abstract-syntax-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AST (Abstract Syntax Tree)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#backfill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backfill
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#calendar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calendar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chart
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chunk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chunk-ledger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chunk ledger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-hash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config hash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#derived-metric" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Derived metric
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-by-column" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Group-by column
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#expression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Expression
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#grain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cpc-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPC state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hll-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HLL state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ingestion-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ingestion engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kll-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KLL state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lineage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mergeable-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mergeable state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#metric" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metric
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#partial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Partial
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#period" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Period
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#processor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Processor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reader
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kpi-recipe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KPI Recipe
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snapshot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#t-digest-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        t-digest state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#theta-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Theta state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#page-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Page filter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#time-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time filter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#time-grain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time grain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-identity-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Identity rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-compatibility-classes-for-config-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Compatibility classes for config changes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-source-chunk-aggregate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Source → Chunk → Aggregate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-metric-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Metric resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-state-catalog-snippet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 State catalog snippet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-group-by-and-time-binding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Group-by and Time Binding
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-concept-relationships-one-big-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Concept relationships (one big table)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_6" id="__nav_4_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions (ADRs)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Decisions (ADRs)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0001-aggregate-first-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0001 Aggregate-first storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0002-yaml-catalog-as-source-of-behavior/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0002 YAML catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0003-closed-expression-ast/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0003 Closed expression AST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0004-chunk-ledger-idempotency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0004 Chunk-ledger idempotency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/expression-dsl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Expression DSL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/readers-and-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers & formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/chart-catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chart catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/kpi-recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/catalog-schemas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api-and-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API & MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design docs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design docs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/replacement-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Replacement design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/implementation-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/reporting-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KPI recipe backlog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat With Data MLP1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../design/kickoff-prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kickoff prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meta/documentation-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-big-picture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Big picture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-term-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Term graph
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-definitions-alphabetical" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Definitions (alphabetical)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Definitions (alphabetical)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#aggregate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#aggregate-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregate Store
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ast-abstract-syntax-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AST (Abstract Syntax Tree)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#backfill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backfill
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#calendar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calendar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chart" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chart
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chunk
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chunk-ledger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chunk ledger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-hash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config hash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#derived-metric" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Derived metric
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-by-column" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Group-by column
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#expression" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Expression
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#grain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cpc-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPC state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hll-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HLL state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ingestion-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ingestion engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kll-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KLL state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lineage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mergeable-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mergeable state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#metric" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metric
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#partial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Partial
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#period" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Period
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pipeline run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plan
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#processor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Processor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reader
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kpi-recipe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        KPI Recipe
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snapshot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#t-digest-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        t-digest state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#theta-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Theta state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#page-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Page filter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#time-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time filter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#time-grain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time grain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-identity-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Identity rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-compatibility-classes-for-config-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Compatibility classes for config changes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-source-chunk-aggregate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Source → Chunk → Aggregate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-metric-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Metric resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-state-catalog-snippet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 State catalog snippet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-group-by-and-time-binding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Group-by and Time Binding
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-concept-relationships-one-big-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Concept relationships (one big table)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="value-stream-domain-model-and-glossary">Value Stream — Domain Model and Glossary<a class="headerlink" href="#value-stream-domain-model-and-glossary" title="Permanent link">&para;</a></h1>
+<p>This document fixes the vocabulary used everywhere else in Value Stream docs and code. Every term that has a specific meaning in the platform appears here exactly once, with a definition, key relationships, and a small example.</p>
+<p>A reader who works through this document and the reference/expression-dsl.md grammar should be able to read every other Value Stream doc unambiguously.</p>
+<hr />
+<h2 id="1-big-picture">1. Big picture<a class="headerlink" href="#1-big-picture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>            Workspace
+               |
+               v
+   +-------------------------------+
+   |   Catalog (YAML)              |
+   |   - Sources                   |
+   |   - Dimensions                |
+   |   - Processors                |
+   |   - Metrics                   |
+   |   - Dashboards                |
+   +-------------------------------+
+               |
+               | drives
+               v
+   +-------------------------------+
+   |   Ingestion                   |
+   |   - File   -&gt; Chunk          |
+   |   - Chunk  -&gt; Partial agg.    |
+   |   - Partial-&gt; Compacted agg.  |
+   +-------------------------------+
+               |
+               | persisted in
+               v
+   +-------------------------------+
+   |   Aggregate Store             |
+   |   (Parquet, hive-partitioned) |
+   +-------------------------------+
+               |
+               | read by
+               v
+   +-------------------------------+
+   |   Query Layer                 |
+   |   - Resolve metric -&gt; processor + states
+   |   - Plan -&gt; physical aggregate
+   |   - Execute -&gt; Polars frame
+   |   - Apply derive (DSL)
+   +-------------------------------+
+               |
+               | rendered as
+               v
+   +-------------------------------+
+   |   Surfaces                    |
+   |   - Tile in Dashboard         |
+   |   - REST response             |
+   |   - SDK return value          |
+   +-------------------------------+
+</code></pre></div>
+<h2 id="2-term-graph">2. Term graph<a class="headerlink" href="#2-term-graph" title="Permanent link">&para;</a></h2>
+<p>Lines mean "is composed of" or "refers to."</p>
+<div class="highlight"><pre><span></span><code>Workspace ─── Catalog ─── { Source, Dimension, Processor, Metric, Dashboard }
+                           │
+                           ▼
+                     Source ── Reader ── ChunkPolicy
+                          \─── Transform[]
+                          \─── Defaults
+                          \─── Schema (timestamp_col, natural_key, ...)
+                           │
+                           ▼
+                     Processor ── Source (FK)
+                                \── Dimension[] (FK)
+                                \── Grain[]
+                                \── State[]
+                                \── (kind-specific) outcome / variant / properties / keys
+                                │
+                                ▼
+                            Metric ── Processor (FK)
+                                  \── kind ∈ { formula, approx_distinct_count,
+                                              tdigest_quantile, variant_compare,
+                                              proportion_test, contingency_test,
+                                              curve_from_digests,
+                                              calibration_from_digests,
+                                              lifecycle_summary }
+                                  \── Expression (AST)
+                                  \── outputs[]
+                                  │
+                                  ▼
+                              Tile ── Metric (FK)
+                                  \── Chart (kind)
+                                  \── x / y / color / facets / etc.
+                                  │
+                                  ▼
+                          DashboardPage
+                                  │
+                                  ▼
+                            Dashboard
+</code></pre></div>
+<h2 id="3-definitions-alphabetical">3. Definitions (alphabetical)<a class="headerlink" href="#3-definitions-alphabetical" title="Permanent link">&para;</a></h2>
+<h3 id="aggregate">Aggregate<a class="headerlink" href="#aggregate" title="Permanent link">&para;</a></h3>
+<p>A row in a physical aggregate table, produced by a Processor. It contains group-by column values, state values, and provenance columns (<code>pipeline_run_id</code>, <code>chunk_id</code>, <code>period</code>, <code>created_at</code>, <code>config_hash</code>).</p>
+<p>Aggregates are <strong>never raw rows.</strong> A row in <code>aggregates/ih/engagement/daily/period=2024-08/part-00.parquet</code> represents one <code>(Day, Channel, PlacementType, Issue, Group, CustomerType, ModelControlGroup)</code> tuple — never a single Pega interaction.</p>
+<h3 id="aggregate-store">Aggregate Store<a class="headerlink" href="#aggregate-store" title="Permanent link">&para;</a></h3>
+<p>The directory tree under <code>&lt;workspace&gt;/aggregates/</code> holding all physical aggregate Parquet files. The only place persisted business data lives.</p>
+<h3 id="ast-abstract-syntax-tree">AST (Abstract Syntax Tree)<a class="headerlink" href="#ast-abstract-syntax-tree" title="Permanent link">&para;</a></h3>
+<p>The internal representation of an expression in the closed expression DSL. AST nodes are JSON-shaped (e.g. <code>{op: safe_div, num: {col: P}, den: {col: N}}</code>). The evaluator turns an AST into a Polars expression. See reference/expression-dsl.md.</p>
+<h3 id="backfill">Backfill<a class="headerlink" href="#backfill" title="Permanent link">&para;</a></h3>
+<p>A one-shot operation that re-runs a Source's chunks within a time window, typically after a compatible-narrowing config change or to populate a new processor against historical chunks.</p>
+<h3 id="calendar">Calendar<a class="headerlink" href="#calendar" title="Permanent link">&para;</a></h3>
+<p>A built-in time-grain helper. The default calendar emits <code>Day, Month (YYYY-MM), Year (Int16), Quarter (YYYY_Q#)</code> from a timestamp column. Custom calendars can add <code>Week (ISO YYYY-Www)</code> or <code>FiscalQuarter</code>.</p>
+<h3 id="catalog">Catalog<a class="headerlink" href="#catalog" title="Permanent link">&para;</a></h3>
+<p>The set of YAML files in <code>&lt;workspace&gt;/catalog/</code> that define everything declarative about the workspace: <code>pipelines.yaml</code>, <code>processors.yaml</code>, <code>metrics.yaml</code>, and <code>dashboards.yaml</code>. Loaded once at startup, validated, and hashed into a single <code>config_hash</code>.</p>
+<h3 id="chart">Chart<a class="headerlink" href="#chart" title="Permanent link">&para;</a></h3>
+<p>A presentation-layer artifact bound to a Tile. Each chart has a <code>kind</code> (<code>line, stacked_area, bar, kpi_card, waterfall, pareto, treemap, heatmap, cohort_heatmap, scatter, combo, interval, donut, geo_map, table, calendar_heatmap, bar_polar, sankey, gauge, funnel, boxplot, histogram, calibration_curve, roc_curve, precision_recall_curve, gain_curve, lift_curve, rfm_density, exposure, corr, model</code>) and required Tile fields (<code>x, y, color, facets, …</code>). See reference/chart-catalog.md.</p>
+<h3 id="chunk">Chunk<a class="headerlink" href="#chunk" title="Permanent link">&para;</a></h3>
+<p>The unit of idempotent work in the ingestion engine. A chunk consists of:
+- a <code>chunk_id</code> (typically derived from a filename pattern, e.g. <code>2024-08-21</code>),
+- one or more file paths whose contents combine to form the chunk's input,
+- a <code>pipeline_run_id</code> recording which run processed it,
+- a status (<code>ok | failed | skipped</code>).</p>
+<p>A chunk is processed end-to-end (read → transform → fan out to all processors → write all partials) before the next chunk starts.</p>
+<h3 id="chunk-ledger">Chunk ledger<a class="headerlink" href="#chunk-ledger" title="Permanent link">&para;</a></h3>
+<p>The DuckDB table at <code>meta/chunks.duckdb</code> recording every chunk processed by every run.</p>
+<h3 id="compaction">Compaction<a class="headerlink" href="#compaction" title="Permanent link">&para;</a></h3>
+<p>The process of reducing finer-grained aggregates into coarser-grained aggregates by <code>groupby + state-merge</code>. Compaction is a pure file operation and never touches raw data. Standard chain: <code>Day → Month → Summary</code>, stored internally as <code>daily → monthly → summary</code>.</p>
+<h3 id="config-hash">Config hash<a class="headerlink" href="#config-hash" title="Permanent link">&para;</a></h3>
+<p>The sha256 of the canonicalized YAML for a Processor (or for the whole catalog, depending on context). Recorded on every aggregate row and returned by query surfaces where available. Used to:
+- detect when an aggregate was produced under a different config,
+- partition the aggregate store across coexisting configs,
+- reproduce or audit results.</p>
+<h3 id="derived-metric">Derived metric<a class="headerlink" href="#derived-metric" title="Permanent link">&para;</a></h3>
+<p>A metric whose value is computed at query time from a Processor's persisted state. Examples: <code>CTR = Positives / (Positives + Negatives)</code>, <code>ROC_AUC = curve_from_digests(Propensity_tdigest_positives, Propensity_tdigest_negatives)</code>. Derived metrics are <em>not</em> stored; they live only in the metric DSL.</p>
+<h3 id="group-by-column">Group-by column<a class="headerlink" href="#group-by-column" title="Permanent link">&para;</a></h3>
+<p>A transformed source column that a Processor preserves as a business grouping/filtering axis. Processors declare these directly with <code>group_by: [Channel, PlacementType]</code>; if a user-facing name should differ from the incoming source field, create that column in the pipeline transforms and use the transformed column name here.</p>
+<h3 id="discovery">Discovery<a class="headerlink" href="#discovery" title="Permanent link">&para;</a></h3>
+<p>The phase of a pipeline run where the engine globs the Source's input folder, applies <code>group_by_filename</code> to assign each file to a <code>chunk_id</code>, and consults the chunk ledger to skip already-processed chunks.</p>
+<h3 id="expression">Expression<a class="headerlink" href="#expression" title="Permanent link">&para;</a></h3>
+<p>A node in the AST that evaluates to a column or a scalar at query time. Used in: <code>transforms[*].filter</code>, <code>transforms[*].derive_column</code>, <code>processors.&lt;id&gt;.filter</code>, and <code>metrics.&lt;id&gt;.expression</code> (when <code>kind: formula</code>).</p>
+<h3 id="freshness">Freshness<a class="headerlink" href="#freshness" title="Permanent link">&para;</a></h3>
+<p>The minimum gap between "the latest available chunk from upstream" and "the latest aggregate row served by the query layer," for a given <code>(source, processor, grain)</code>. Surfaced on every dashboard tile and in the <code>/api/v1/workspace</code> response.</p>
+<h3 id="grain">Grain<a class="headerlink" href="#grain" title="Permanent link">&para;</a></h3>
+<p>A time resolution at which a Processor materializes aggregates. User-facing configs use calendar names such as <code>Day</code>, <code>Month</code>, <code>Quarter</code>, <code>Year</code>, and <code>Summary</code>; the storage layer normalizes currently implemented grains to <code>daily</code>, <code>monthly</code>, and <code>summary</code>.</p>
+<h3 id="cpc-state">CPC state<a class="headerlink" href="#cpc-state" title="Permanent link">&para;</a></h3>
+<p>A binary state (Apache DataSketches CPC sketch) used by default to estimate
+distinct counts. Generated states use <code>lg_k=11</code>; merge rule: union. CPC exposes
+estimate bounds but does not support intersection or difference. See
+reference/algorithms.md.</p>
+<h3 id="hll-state">HLL state<a class="headerlink" href="#hll-state" title="Permanent link">&para;</a></h3>
+<p>A binary state (Apache DataSketches HLL_4 or HLL_8 sketch) retained for
+backward compatibility and opt-in distinct counts. Merge rule: union. See
+reference/algorithms.md.</p>
+<h3 id="ingestion-engine">Ingestion engine<a class="headerlink" href="#ingestion-engine" title="Permanent link">&para;</a></h3>
+<p>The component that turns files into aggregates. Implemented as a sequence of phases: discovery → reader → transforms → processor fan-out → partial write → compaction → ledger update.</p>
+<h3 id="kll-state">KLL state<a class="headerlink" href="#kll-state" title="Permanent link">&para;</a></h3>
+<p>A binary state (Apache DataSketches KLL sketch) used for quantile estimation with strong error guarantees. Merge rule: KLL merge. Alternative to t-digest where guaranteed error matters.</p>
+<h3 id="lineage">Lineage<a class="headerlink" href="#lineage" title="Permanent link">&para;</a></h3>
+<p>The mapping from each aggregate row to the chunks and config that produced it. Stored in <code>meta/lineage.duckdb</code>. Surfaced in the Ops UI.</p>
+<h3 id="mergeable-state">Mergeable state<a class="headerlink" href="#mergeable-state" title="Permanent link">&para;</a></h3>
+<p>A state column whose values can be combined under a deterministic, associative-commutative rule across rows. The state catalog defines:
+- <code>count</code> → SUM
+- <code>value_sum</code> → SUM
+- <code>min</code>, <code>max</code> → MIN/MAX
+- <code>pooled_mean</code> → SUM-of-(value*count) / SUM-of-count
+- <code>pooled_variance</code> → Welford-merge
+- <code>tdigest</code>, <code>kll</code> → sketch merge
+- <code>cpc</code>, <code>hll</code>, <code>theta</code> → sketch union (intersect/diff for theta only)
+- <code>topk</code> → frequent-items merge</p>
+<h3 id="metric">Metric<a class="headerlink" href="#metric" title="Permanent link">&para;</a></h3>
+<p>A <em>derived</em> business measurement bound to a Processor. A metric has a <code>kind</code> and inputs from the Processor's state. Examples: <code>CTR (formula)</code>, <code>ROC_AUC (curve_from_digests)</code>, <code>Lift (variant_compare)</code>, <code>Median_ResponseTime (tdigest_quantile)</code>, <code>UniqueCustomers (approx_distinct_count)</code>, <code>Experiment_Significance (contingency_test)</code>, <code>CLV_Summary (lifecycle_summary)</code>.</p>
+<p>Every metric may also carry <code>display</code> metadata: a friendly <code>label</code>, <code>unit</code>,
+default <code>value_format</code>, and <code>direction</code> (<code>higher_is_better</code>,
+<code>lower_is_better</code>, or <code>neutral</code>). Display metadata never changes the formula,
+processor computation hash, or stored aggregate state.</p>
+<p>A metric installed from a KPI Recipe may carry <code>recipe: {id, version}</code>
+provenance. The installed metric remains authoritative and does not track
+future recipe edits automatically.</p>
+<h3 id="partial">Partial<a class="headerlink" href="#partial" title="Permanent link">&para;</a></h3>
+<p>A Parquet file produced by one Processor processing one chunk. Lives at <code>aggregates/&lt;src&gt;/&lt;proc&gt;/daily/period=YYYY-MM/part-&lt;pipeline_run_id&gt;.parquet</code>. A "partial" is conceptually the smallest unit of write; compaction merges multiple partials into one.</p>
+<h3 id="period">Period<a class="headerlink" href="#period" title="Permanent link">&para;</a></h3>
+<p>The hive partition key used inside an aggregate directory. For <code>daily</code>, <code>monthly</code>, and the default <code>summary</code> materialization, <code>period = YYYY-MM</code>. <code>time.aggregation_levels</code> can coarsen summary storage to quarter or year. For optional grains the convention is the smallest "obviously coarser" string (<code>weekly_iso → YYYY-MM-Www</code>, <code>hourly → YYYY-MM-DD</code>).</p>
+<h3 id="pipeline-run">Pipeline run<a class="headerlink" href="#pipeline-run" title="Permanent link">&para;</a></h3>
+<p>One end-to-end execution of an ingestion against a Source. Has an id (UUID), a config hash, a status (<code>running | ok | failed | partial</code>), counts of total / ok / failed chunks, and start/end timestamps. Recorded in <code>meta/pipeline_runs.duckdb</code>.</p>
+<h3 id="plan">Plan<a class="headerlink" href="#plan" title="Permanent link">&para;</a></h3>
+<p>The result of the Query Layer's planner: which physical aggregate to scan, what predicates to push down, what columns to read, what derive function to apply. Deterministic for a given input + config_hash.</p>
+<h3 id="processor">Processor<a class="headerlink" href="#processor" title="Permanent link">&para;</a></h3>
+<p>The most important concept in Value Stream. A Processor is a typed function <code>(Source, config) → Aggregate(s) at one or more Grains</code>. Built-in kinds:
+- <code>binary_outcome</code> — counts and rates from positive/negative outcomes (engagement, conversion, experiments)
+- <code>numeric_distribution</code> — moments, min/max, t-digest of numeric properties (descriptive)
+- <code>score_distribution</code> — score-vs-outcome distributions, ROC/AP/calibration (model_ml_scores)
+- <code>entity_lifecycle</code> — order/holding aggregates per entity for CLV/RFM
+- <code>entity_set</code> — CPC/HLL/Theta distinct-count sketches, with Theta also supporting set algebra
+- <code>funnel</code> — per-stage counts for funnel KPIs
+- <code>snapshot</code> — periodic / accumulating snapshots for state KPIs</p>
+<p>Processors implement the interface in reference/processors.md §1.</p>
+<h3 id="reader">Reader<a class="headerlink" href="#reader" title="Permanent link">&para;</a></h3>
+<p>A built-in component that turns a list of file paths into a Polars LazyFrame. Built-in readers:
+- <code>parquet</code>
+- <code>pega_ds_export</code> (zip/tar.gz/gz containing JSON or NDJSON)
+- <code>csv</code> (with delimiter auto-detection)
+- <code>xlsx</code></p>
+<p>See reference/readers-and-formats.md.</p>
+<h3 id="kpi-recipe">KPI Recipe<a class="headerlink" href="#kpi-recipe" title="Permanent link">&para;</a></h3>
+<p>A versioned, inert authoring artifact that connects a business question to
+required Processor capabilities, a metric template, calculation/method
+guidance, and recommended report presentation. It is not part of a workspace
+Catalog and cannot execute. An explicit install maps its roles to persisted
+aggregate states/stages and materializes ordinary Metric and optional Tile
+YAML. See reference/kpi-recipes.md.</p>
+<h3 id="run">Run<a class="headerlink" href="#run" title="Permanent link">&para;</a></h3>
+<p>Shorthand for a pipeline run.</p>
+<h3 id="snapshot">Snapshot<a class="headerlink" href="#snapshot" title="Permanent link">&para;</a></h3>
+<p>A row representing the <em>state</em> of a business entity at a given <code>as_of_date</code>. Two flavors:
+- <code>periodic</code>: written daily/weekly/monthly; one row per <code>(as_of, dim_tuple)</code>.
+- <code>accumulating</code>: one row per business-entity, updated through milestones.</p>
+<p>Snapshots live under <code>&lt;workspace&gt;/snapshots/&lt;id&gt;/as_of=YYYY-MM-DD/snapshot.parquet</code>.</p>
+<h3 id="source">Source<a class="headerlink" href="#source" title="Permanent link">&para;</a></h3>
+<p>A logical input to Value Stream. Each Source has an <code>id</code>, a <code>description</code>, a <code>reader</code>, a <code>transforms</code> list, a <code>defaults</code> map, and a <code>schema</code> block (timestamp column, natural key, columns to drop). Multiple Processors can be bound to the same Source.</p>
+<p>Concrete Sources in the canonical workspace: <code>ih</code> (Pega CDH Interaction History), <code>holdings</code> (Product Holdings), and any number of optional Sources (<code>subscriptions</code>, <code>tickets</code>, …) for snapshot processors.</p>
+<h3 id="state">State<a class="headerlink" href="#state" title="Permanent link">&para;</a></h3>
+<p>A column on a Processor's aggregate output, with a declared <strong>state type</strong>. State types determine the merge rule. Examples: <code>Count {type: count}</code>, <code>Propensity_tdigest_positives {type: tdigest}</code>, <code>UniqueCustomers_cpc {type: cpc, lg_k: 11}</code>.</p>
+<h3 id="state-type">State type<a class="headerlink" href="#state-type" title="Permanent link">&para;</a></h3>
+<p>The catalog of mergeable kinds: <code>count, value_sum, min, max, pooled_mean, pooled_variance, tdigest, kll, cpc, hll, theta, topk</code>. See §3 of design/replacement-design.md and reference/algorithms.md.</p>
+<h3 id="t-digest-state">t-digest state<a class="headerlink" href="#t-digest-state" title="Permanent link">&para;</a></h3>
+<p>A binary state holding a serialized <code>datasketches.tdigest_double</code> (compression <code>k=500</code> by default). Used for quantiles, ROC/AP, calibration. Merge rule: deserialize-merge-reserialize.</p>
+<h3 id="theta-state">Theta state<a class="headerlink" href="#theta-state" title="Permanent link">&para;</a></h3>
+<p>A binary state holding a Theta sketch from Apache DataSketches. Used when set algebra (intersection / difference) is required, e.g. cohort retention, audience overlap.</p>
+<h3 id="tile">Tile<a class="headerlink" href="#tile" title="Permanent link">&para;</a></h3>
+<p>A single chart on a Dashboard page, bound to one metric and one chart kind. Required fields depend on the chart kind (e.g. <code>line</code> requires <code>x, y</code>; <code>treemap</code> requires <code>path, color</code>). Typed common fields include <code>description</code>, <code>placement</code>, <code>kpi</code>, <code>scale_mode</code>, and <code>value_format</code>; chart-specific extras remain permissive. <code>placement: kpi_strip</code> is valid only for an ungrouped <code>kpi_card</code>. A KPI query must resolve to one numeric scalar and can request a target, an equal-length previous period, and an aggregate time-series sparkline. <code>scale_mode</code> is presentation-only and supports <code>absolute</code>, <code>index_100</code>, and <code>percent_change</code> for line/stacked-area charts.</p>
+<h3 id="page-filter">Page filter<a class="headerlink" href="#page-filter" title="Permanent link">&para;</a></h3>
+<p>An interactive Reports-page control authored under <code>page.filters</code>, with a safe
+inference fallback for older catalogs. Each filter declares its aggregate field,
+label, primary/secondary placement, control type, and either <code>all_tiles</code> or
+<code>compatible_tiles</code> scope. Validation proves the declared coverage against each
+tile's processor. Partial filters remain usable, but the Reports UI identifies
+unsupported tiles instead of silently skipping the filter. Adding a filter over
+an already-persisted <code>group_by</code> column is presentation-compatible; adding a new
+processor <code>group_by</code> column still requires raw replay.</p>
+<h3 id="time-filter">Time filter<a class="headerlink" href="#time-filter" title="Permanent link">&para;</a></h3>
+<p>A page-level list of supported date presets plus one default preset. Time
+selection becomes query-layer <code>start</code>/<code>end</code> bounds and never bypasses aggregate
+routing. <code>all_time</code> is the backward-compatible default.</p>
+<h3 id="time-grain">Time grain<a class="headerlink" href="#time-grain" title="Permanent link">&para;</a></h3>
+<p>The Processor-level storage contract declared under <code>time.grains</code>. Calendar columns like <code>Day</code>, <code>Month</code>, <code>Quarter</code>, and <code>Year</code> are generated by transforms and can be used in reports, but they are not ordinary business group-by columns.</p>
+<h3 id="transform">Transform<a class="headerlink" href="#transform" title="Permanent link">&para;</a></h3>
+<p>A typed step in the Source's <code>transforms</code> list. Each transform takes a Polars LazyFrame and returns a LazyFrame. Built-in transforms: <code>rename_capitalize, parse_datetime, derive_calendar, derive_action_id, filter, dedup, defaults, derive_column, cast, drop_columns</code>. Transforms operate <strong>before</strong> processors fan out, so they affect every Processor bound to the Source.</p>
+<h3 id="variant">Variant<a class="headerlink" href="#variant" title="Permanent link">&para;</a></h3>
+<p>Two distinct meanings; context disambiguates:
+1. <strong>A/B test variant</strong> — the <code>Test</code> / <code>Control</code> arm of an experiment, defined by the Processor's <code>variant_column</code> and <code>variant_role_map</code>.
+2. <strong>Workspace variant</strong> — a separate workspace for a different deployment (e.g. <code>BDT</code>, <code>RBB</code>, <code>NBS</code>, <code>Demo</code>). Each variant is its own filesystem root and its own catalog.</p>
+<h3 id="workspace">Workspace<a class="headerlink" href="#workspace" title="Permanent link">&para;</a></h3>
+<p>A self-contained Value Stream environment. Has its own:
+- <code>catalog/</code> (YAML),
+- <code>aggregates/</code> (Parquet),
+- <code>snapshots/</code> (Parquet),
+- <code>meta/</code> (DuckDB metadata),
+- <code>duckdb/valuestream.duckdb</code> (views).</p>
+<p>A workspace is the unit of deployment, security boundary, and backup.</p>
+<hr />
+<h2 id="4-identity-rules">4. Identity rules<a class="headerlink" href="#4-identity-rules" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Where</th>
+<th>Format</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>workspace</code></td>
+<td>top-level YAML</td>
+<td><code>[a-z][a-z0-9_-]+</code></td>
+<td><code>bdt</code></td>
+</tr>
+<tr>
+<td><code>source.id</code></td>
+<td><code>pipelines.yaml</code></td>
+<td>snake_case</td>
+<td><code>ih</code>, <code>holdings</code></td>
+</tr>
+<tr>
+<td><code>group_by</code> column</td>
+<td><code>processors.yaml</code></td>
+<td>transformed column name</td>
+<td><code>Channel</code>, <code>CustomerType</code></td>
+</tr>
+<tr>
+<td><code>processor.id</code></td>
+<td><code>processors.yaml</code></td>
+<td>snake_case; recommended same as legacy family for migration</td>
+<td><code>engagement</code>, <code>model_ml_scores</code></td>
+</tr>
+<tr>
+<td><code>metric key</code></td>
+<td><code>metrics.yaml</code></td>
+<td>PascalCase or snake_case, free</td>
+<td><code>CTR</code>, <code>ROC_AUC</code>, <code>CLV_Summary</code></td>
+</tr>
+<tr>
+<td><code>dashboard.id</code>, <code>page.id</code>, <code>tile.id</code></td>
+<td><code>dashboards.yaml</code></td>
+<td>snake_case</td>
+<td><code>marketing_overview</code>, <code>engagement</code>, <code>daily_ctr</code></td>
+</tr>
+<tr>
+<td><code>chunk_id</code></td>
+<td>derived from filename</td>
+<td>string</td>
+<td><code>2024-08-21</code></td>
+</tr>
+<tr>
+<td><code>pipeline_run_id</code></td>
+<td>UUIDv4</td>
+<td>hex</td>
+<td><code>8a32fa3d-…</code></td>
+</tr>
+<tr>
+<td><code>config_hash</code></td>
+<td>sha256 of canonical YAML</td>
+<td>64-char hex</td>
+<td><code>f1c2…</code></td>
+</tr>
+</tbody>
+</table>
+<p>Reserved IDs (do not use as user identifiers): <code>__all__</code> (planner placeholder), <code>_manifest</code> (filesystem reserved), <code>period</code>, <code>pipeline_run_id</code>, <code>chunk_id</code>, <code>created_at</code>, <code>config_hash</code>.</p>
+<h2 id="5-compatibility-classes-for-config-changes">5. Compatibility classes for config changes<a class="headerlink" href="#5-compatibility-classes-for-config-changes" title="Permanent link">&para;</a></h2>
+<p>When the Catalog changes, the planner classifies the change against the existing aggregate store:</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Examples</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Compatible widening</strong></td>
+<td>Add a new Processor; add a new Metric; add a new finer Grain</td>
+<td>New aggregates are populated forward; optional backfill; nothing invalidated</td>
+</tr>
+<tr>
+<td><strong>Compatible narrowing</strong></td>
+<td>Remove a group-by column; coarsen a Grain; remove a State</td>
+<td>Existing aggregates can be re-compacted directly; no raw replay needed</td>
+</tr>
+<tr>
+<td><strong>Incompatible</strong></td>
+<td>Add a group-by column; change a filter; change <code>positive_values</code>; change CPC/HLL <code>lg_k</code>; switch sketch type</td>
+<td>Re-process from raw; old aggregates remain readable under their <code>config_hash</code> until vacuumed</td>
+</tr>
+</tbody>
+</table>
+<p>Metric display metadata, dashboard/page/tile presentation, KPI comparison
+settings, and filters over existing aggregate dimensions are compatible changes
+and do not require reprocessing.</p>
+<p>Adding a State to an existing Processor changes its computation hash. Queries
+under the updated Catalog read only aggregate partials carrying that new hash;
+older files remain available for the older Catalog version but are never mixed
+with the new schema. Until ingestion publishes the new contract, report tiles
+show that a first run or backfill is required. Optional backfill for a widening
+therefore refers to historical coverage, not permission to derive a missing
+state from old aggregate files.</p>
+<p>The migration tool (<code>valuestream migrate</code>) classifies each change automatically and reports the action required.</p>
+<h2 id="6-examples">6. Examples<a class="headerlink" href="#6-examples" title="Permanent link">&para;</a></h2>
+<h3 id="61-source-chunk-aggregate">6.1 Source → Chunk → Aggregate<a class="headerlink" href="#61-source-chunk-aggregate" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>Files in folder:
+  /data/ih/2024-08-21/interaction-XYZ-20240821000000_001.json.zip
+  /data/ih/2024-08-21/interaction-XYZ-20240821000000_002.json.zip
+  /data/ih/2024-08-22/interaction-XYZ-20240822000000_001.json.zip
+
+group_by_filename: &#39;\d{8}(?=\d{6}_)&#39;
+
+Chunks:
+  20240821 -&gt; [2 files]
+  20240822 -&gt; [1 file]
+
+Run: 8a32fa3d-...
+
+Per chunk, for processor &#39;engagement&#39;:
+  -&gt; aggregates/ih/engagement/daily/period=2024-08/part-8a32fa3d.parquet (rows for both days)
+
+After compaction:
+  -&gt; aggregates/ih/engagement/monthly/period=2024-08/part-8a32fa3d.parquet
+  -&gt; aggregates/ih/engagement/summary/period=2024-08/part-8a32fa3d.parquet
+</code></pre></div>
+<h3 id="62-metric-resolution">6.2 Metric resolution<a class="headerlink" href="#62-metric-resolution" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>User asks: tile.metric = &quot;CTR&quot;
+
+Resolver:
+  CTR -&gt; processor=engagement, kind=formula, expression=safe_div(Positives, Positives+Negatives)
+
+Planner:
+  tile fields = {grain: Day, x: Day, color: Channel}; tile.time_range = 2024-08
+  -&gt; aggregates/ih/engagement/daily, period=2024-08
+
+Executor:
+  read Positives, Negatives by (Day, Channel)
+  -&gt; Polars DataFrame
+
+Derive (formula):
+  CTR = safe_div(Positives, Positives + Negatives)
+
+Return: rows + plan + freshness + config_hash
+</code></pre></div>
+<h3 id="63-state-catalog-snippet">6.3 State catalog snippet<a class="headerlink" href="#63-state-catalog-snippet" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>States produced by &#39;engagement&#39; processor:
+
+  Count               type=count            (sum-merge)
+  Positives           type=count            (sum-merge)
+  Negatives           type=count            (sum-merge)
+  UniqueCustomers_cpc type=cpc, lg_k=11     (cpc-union merge)
+  UniqueActions_cpc   type=cpc, lg_k=11     (cpc-union merge)
+</code></pre></div>
+<h3 id="64-group-by-and-time-binding">6.4 Group-by and Time Binding<a class="headerlink" href="#64-group-by-and-time-binding" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>processors.yaml:
+  engagement:
+    group_by: [Channel, PlacementType, ...]
+    time:
+      column: OutcomeTime
+      grains: [Day, Month, Summary]
+
+dashboards.yaml:
+  daily_ctr:
+    grain: Day
+    x: Day
+    color: Channel
+</code></pre></div>
+<p>Transforms define the user-facing schema. If a nicer business name is needed, create it in the pipeline with <code>rename_capitalize</code> or <code>derive_column</code>, then use that column everywhere: processors, reports, filters, and CLI queries.</p>
+<hr />
+<h2 id="7-concept-relationships-one-big-table">7. Concept relationships (one big table)<a class="headerlink" href="#7-concept-relationships-one-big-table" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>From</th>
+<th>To</th>
+<th>Relationship</th>
+<th>Cardinality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Workspace</td>
+<td>Catalog</td>
+<td>has-one</td>
+<td>1 : 1</td>
+</tr>
+<tr>
+<td>Workspace</td>
+<td>Aggregate store</td>
+<td>has-one</td>
+<td>1 : 1</td>
+</tr>
+<tr>
+<td>Catalog</td>
+<td>Source</td>
+<td>contains</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Catalog</td>
+<td>Dimension</td>
+<td>contains</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Catalog</td>
+<td>Processor</td>
+<td>contains</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Catalog</td>
+<td>Metric</td>
+<td>contains</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Catalog</td>
+<td>Dashboard</td>
+<td>contains</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>KPI recipe library</td>
+<td>KPI Recipe</td>
+<td>contains</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>KPI Recipe</td>
+<td>Metric</td>
+<td>materializes on explicit install</td>
+<td>1 : 1</td>
+</tr>
+<tr>
+<td>KPI Recipe</td>
+<td>Tile</td>
+<td>recommends on explicit install</td>
+<td>1 : 0..1</td>
+</tr>
+<tr>
+<td>KPI Recipe</td>
+<td>State</td>
+<td>proposes when selected field/algorithm is not configured</td>
+<td>1 : 0..N</td>
+</tr>
+<tr>
+<td>Source</td>
+<td>Reader</td>
+<td>uses</td>
+<td>1 : 1</td>
+</tr>
+<tr>
+<td>Source</td>
+<td>Transform</td>
+<td>applies</td>
+<td>1 : N (ordered)</td>
+</tr>
+<tr>
+<td>Source</td>
+<td>Processor</td>
+<td>feeds</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Processor</td>
+<td>Dimension</td>
+<td>groups by</td>
+<td>N : N</td>
+</tr>
+<tr>
+<td>Processor</td>
+<td>State</td>
+<td>produces</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Processor</td>
+<td>Grain</td>
+<td>materializes at</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Processor</td>
+<td>Metric</td>
+<td>sourced by</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Metric</td>
+<td>Tile</td>
+<td>bound to</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Tile</td>
+<td>Dashboard</td>
+<td>belongs to</td>
+<td>N : 1</td>
+</tr>
+<tr>
+<td>Tile</td>
+<td>Chart</td>
+<td>uses</td>
+<td>1 : 1</td>
+</tr>
+<tr>
+<td>Run</td>
+<td>Chunk</td>
+<td>processes</td>
+<td>1 : N</td>
+</tr>
+<tr>
+<td>Chunk</td>
+<td>Aggregate (partial)</td>
+<td>produces</td>
+<td>1 : N (one per processor)</td>
+</tr>
+<tr>
+<td>Aggregate</td>
+<td>Run</td>
+<td>tagged with</td>
+<td>N : 1</td>
+</tr>
+</tbody>
+</table>
+<p>This table is the contract between docs and code: any data structure or API must respect these cardinalities.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
