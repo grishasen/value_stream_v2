@@ -550,9 +550,10 @@ def test_report_filter_chip_labels_summarize_active_context() -> None:
         {"Channel": ["Web", "Mobile", "Email", "Branch"], "Plan": "Premium"},
         dt.date(2026, 5, 1),
         dt.date(2026, 5, 31),
+        time_preset="last_30_days",
     )
 
-    assert "Time: 2026-05-01 to 2026-05-31" in labels
+    assert "Last 30 days · May 1\N{EN DASH}31, 2026" in labels
     assert "Channel: Web, Mobile, Email +1" in labels
     assert "Plan: Premium" in labels
 
@@ -592,6 +593,68 @@ def test_report_filter_chip_deselection_clears_filter_state() -> None:
     chips.set_value([]).run()
     assert at.multiselect[0].value == []
     assert not at.get("button_group")
+    assert [caption.value for caption in at.caption] == ["All time · no filters"]
+    assert not at.exception
+
+
+@pytest.mark.unit
+def test_report_time_chip_names_preset_and_clears_via_callback() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 — test-only dependency
+
+    def app() -> None:
+        import datetime as dt  # noqa: PLC0415
+
+        import streamlit as st  # noqa: PLC0415
+
+        from valuestream.ui.pages import reports  # noqa: PLC0415
+
+        class FakeTimeFilter:
+            default = "last_90_days"
+            presets = ("last_90_days", "all_time")
+
+        class FakePage:
+            id = "exec_summary"
+            time_filter = FakeTimeFilter()
+
+        class OtherPage:
+            id = "conversion"
+            time_filter = FakeTimeFilter()
+
+        key = "reports_time_preset_exec_summary"
+        other_key = "reports_time_preset_conversion"
+        st.session_state.setdefault(key, "last_90_days")
+        st.session_state.setdefault(other_key, "last_90_days")
+        preset = st.segmented_control(
+            "Time range",
+            FakePage.time_filter.presets,
+            key=key,
+            format_func=reports._time_preset_label,
+        )
+        if preset == "last_90_days":
+            reports._filter_chips(
+                FakePage(),
+                {},
+                dt.date(2026, 4, 16),
+                dt.date(2026, 7, 14),
+                report_pages=(FakePage(), OtherPage()),
+            )
+        else:
+            reports._filter_chips(
+                FakePage(),
+                {},
+                None,
+                None,
+                report_pages=(FakePage(), OtherPage()),
+            )
+
+    at = AppTest.from_function(app)
+    at.run()
+    assert at.button[0].label == "Last 90 days · Apr 16\N{EN DASH}Jul 14, 2026"
+
+    at.button[0].click().run()
+
+    assert at.get("button_group")[0].value == "all_time"
+    assert at.session_state["reports_time_preset_conversion"] == "all_time"
     assert [caption.value for caption in at.caption] == ["All time · no filters"]
     assert not at.exception
 

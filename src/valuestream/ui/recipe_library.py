@@ -94,7 +94,7 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
             placeholder="Search KPI, question, tag, or calculation",
             help=config_help.field_help("recipe.search"),
         )
-        domains = sorted({recipe.domain for recipe in library.recipes}, key=str.casefold)
+        domains = sorted({recipe.domain for recipe in library.recipes}, key=_text_sort_key)
         domain = st.selectbox(
             "Business domain",
             ["All domains", *domains],
@@ -109,10 +109,20 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
         if not recipes:
             st.info("No recipes match the current search and domain filter.")
             return None
+        default_recipe = recipes[0]
+        recipes = sorted(
+            recipes,
+            key=lambda item: (
+                *_text_sort_key(item.title),
+                *_text_sort_key(item.domain),
+                *_text_sort_key(item.id),
+            ),
+        )
 
         recipe = st.selectbox(
             "Recipe",
             recipes,
+            index=recipes.index(default_recipe),
             format_func=lambda item: f"{item.title} · {item.domain}",
             key=f"{key_prefix}_recipe",
             help=config_help.field_help("recipe.selector"),
@@ -129,6 +139,8 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
                 + "."
             )
             return None
+        default_processor_id = compatible[0].id
+        compatible = sorted(compatible, key=lambda item: _text_sort_key(item.id))
 
         readiness_by_id = {
             processor.id: recipe_readiness(recipe, processor) for processor in compatible
@@ -137,6 +149,7 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
         processor_id = st.selectbox(
             "Source processor",
             list(processors_by_id),
+            index=list(processors_by_id).index(default_processor_id),
             format_func=lambda value: _processor_label(
                 processors_by_id[value],
                 readiness_by_id[value].status,
@@ -165,6 +178,7 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
         )
 
         targets = _report_targets(dashboards)
+        target_options = sorted(targets, key=lambda value: _text_sort_key(targets[value][0]))
         default_metric_id = unique_artifact_id(recipe.default_metric_id, metric_names)
         install_key = f"{mapping_key}_{_key_fragment(default_metric_id)}_install"
         with st.container(border=True):
@@ -189,7 +203,8 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
             target_key = (
                 st.selectbox(
                     "Report page",
-                    list(targets),
+                    target_options,
+                    index=target_options.index(next(iter(targets))),
                     format_func=lambda value: targets[value][0],
                     key=f"{install_key}_report_target",
                     disabled=not add_to_report,
@@ -574,7 +589,10 @@ def _render_field_algorithm_binding(  # noqa: PLR0912
         return None
 
     resolved_option = next((option for option in options if option.value == resolved), None)
-    fields = _dedupe([option.field or _option_subject(option) for option in options])
+    fields = sorted(
+        _dedupe([option.field or _option_subject(option) for option in options]),
+        key=_text_sort_key,
+    )
     default_field = resolved_option.field if resolved_option else ""
     if not default_field and len(fields) == 1:
         default_field = fields[0]
@@ -606,7 +624,10 @@ def _render_field_algorithm_binding(  # noqa: PLR0912
             f"{', '.join(unavailable_preferred)} is recommended but is not materialized "
             f"for {selected_field}; using it requires a processor change and backfill."
         )
-    algorithms = _dedupe([option.algorithm for option in field_options])
+    algorithms = sorted(
+        _dedupe([option.algorithm for option in field_options]),
+        key=_text_sort_key,
+    )
     resolved_algorithm = ""
     for state_type in item.preferred_state_types:
         if preferred := next(
@@ -647,7 +668,10 @@ def _render_field_algorithm_binding(  # noqa: PLR0912
     if not selected_algorithm:
         return None
 
-    matching = [option for option in field_options if option.algorithm == selected_algorithm]
+    matching = sorted(
+        [option for option in field_options if option.algorithm == selected_algorithm],
+        key=_binding_option_sort_key,
+    )
     if len(matching) == 1:
         selected = matching[0]
         if not selected.configured:
@@ -690,6 +714,8 @@ def _render_choice_binding(
             help=item.description or config_help.field_help("recipe.binding"),
         )
         return None
+    if item.source != "stage":
+        options = sorted(options, key=_binding_option_sort_key)
     if len(options) == 1:
         option = options[0]
         st.text_input(
@@ -780,6 +806,21 @@ def _render_readiness(
 
 def _option_subject(option: RecipeBindingOption) -> str:
     return option.label.rsplit(" · ", maxsplit=1)[0]
+
+
+def _text_sort_key(value: str) -> tuple[str, str]:
+    return value.casefold(), value
+
+
+def _binding_option_sort_key(option: RecipeBindingOption) -> tuple[str, ...]:
+    return (
+        option.label.casefold(),
+        option.label,
+        option.scope.casefold(),
+        option.scope,
+        option.value.casefold(),
+        option.value,
+    )
 
 
 def _matches_search(recipe: KpiRecipe, search: str) -> bool:

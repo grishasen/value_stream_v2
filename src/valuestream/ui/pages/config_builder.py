@@ -1166,15 +1166,18 @@ def _sketch_exploration_panel(
         recommendations = dimension_profile.sketch_recommendations(rows)
         if recommendations:
             st.dataframe(recommendations, hide_index=True, width="stretch", height=180)
-        topk_options = builder.dedupe(
-            [
-                *[
-                    row.field
-                    for row in rows
-                    if row.field in options and row.recommendation in {"Review", "Avoid"}
-                ],
-                *options,
-            ]
+        topk_options = sorted(
+            builder.dedupe(
+                [
+                    *[
+                        row.field
+                        for row in rows
+                        if row.field in options and row.recommendation in {"Review", "Avoid"}
+                    ],
+                    *options,
+                ]
+            ),
+            key=lambda field: (field.casefold(), field),
         )
         entity_default = _default_entity_field(options, source)
         include_topk = st.checkbox(
@@ -3758,7 +3761,10 @@ def _source_field_options(
         if processor.time and processor.time.column:
             fields.append(processor.time.column)
         fields.extend(dimension_profile.processor_field_references(processor))
-    return builder.dedupe([str(field) for field in fields if field])
+    return sorted(
+        builder.dedupe([str(field) for field in fields if field]),
+        key=lambda field: (field.casefold(), field),
+    )
 
 
 def _source_sample_columns(

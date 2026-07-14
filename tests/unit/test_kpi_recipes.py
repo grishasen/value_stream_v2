@@ -313,10 +313,12 @@ def test_recipe_binding_ui_uses_field_and_algorithm_not_state_id() -> None:
 
     assert not at.exception
     field = next(widget for widget in at.selectbox if widget.label == "Entity field")
-    assert "SubjectID" in field.options
-    assert "InteractionID" in field.options
-    assert "Channel" in field.options
-    assert "Placement" in field.options
+    visible_fields = [
+        option
+        for option in field.options
+        if option in {"Channel", "InteractionID", "Placement", "SubjectID"}
+    ]
+    assert visible_fields == ["Channel", "InteractionID", "Placement", "SubjectID"]
     assert "UniqueSubjects_hll" not in field.options
 
     field.set_value("SubjectID").run()
@@ -397,6 +399,8 @@ def test_recipe_library_requires_preview_before_returning_install_request() -> N
 
     assert not at.exception
     assert "installed_request" not in at.session_state
+    recipe_options = next(widget for widget in at.selectbox if widget.label == "Recipe").options
+    assert recipe_options == sorted(recipe_options, key=lambda value: (value.casefold(), value))
     review = next(button for button in at.button if button.label == "Review changes")
     review.click().run()
 

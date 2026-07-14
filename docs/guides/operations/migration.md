@@ -34,6 +34,26 @@ Check the report for:
 
 Treat gaps in the report as migration tasks, not harmless warnings.
 
+## Use the Curated FAT Example
+
+`examples/fat` (documented in `examples/fat/README.md`) is a reviewed migration of a
+legacy Interaction History and Product Holdings TOML. Unlike raw translator
+output, it resolves the manual AST gaps, replaces a non-deterministic revenue
+simulation, separates processor state from derived metrics, and groups the
+result into business-oriented report pages. Use it as a reference when a
+legacy workspace needs engagement, conversion, audience, funnel, model,
+experiment, distribution, and lifecycle coverage from the same two sources.
+
+The example is catalog-only and validates without source data:
+
+```sh
+uv run valuestream validate examples/fat
+```
+
+Review its documented assumptions before copying it. Broad dimensions such as
+action name and treatment increase aggregate cardinality, and its deterministic
+revenue placeholder must be replaced with the real business value field.
+
 ## Backfill Legacy DuckDB Aggregates
 
 Backfill legacy aggregate tables into the Value Stream aggregate layout:

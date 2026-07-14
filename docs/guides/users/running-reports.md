@@ -60,7 +60,11 @@ under `meta/` remain available for audit.
 2. Select a dashboard and page from the sidebar.
 3. Use the compact toolbar for Presentation/Inspect mode, Advanced mode, and Filters.
 4. Choose a date preset and up to three primary business filters; open More filters for secondary controls.
-5. Read active chips for filter coverage. A partial chip names how many charts support it, and unsupported charts name the filters they did not apply.
+5. Read the highlighted calendar chip for the active date preset and exact date
+   range (for example, `Last 90 days · Apr 16–Jul 14, 2026`). Click it to reset
+   the time range to all time across every report page. Other active chips show
+   filter coverage; a partial chip names how many charts support it, and
+   unsupported charts name the filters they did not apply.
 6. Review freshness, comparison-period labels, targets, and approximation badges before interpreting a result.
 7. Use a tile's action menu for View data, Inspect, Expand, and export actions.
 

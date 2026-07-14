@@ -1127,6 +1127,44 @@ def test_source_field_options_apply_rename_capitalize_to_reader_columns(monkeypa
 
 
 @pytest.mark.unit
+def test_source_field_options_include_entity_subject_and_are_ordered(monkeypatch) -> None:
+    source = model.Source.model_validate(
+        {
+            "id": "ih",
+            "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+        }
+    )
+    processor = model.BinaryOutcomeProcessor.model_validate(
+        {
+            "id": "engagement",
+            "source": "ih",
+            "kind": "binary_outcome",
+            "dimensions": ["Issue"],
+            "entities": {"subject": "SubjectID"},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
+            "states": {"Count": {"type": "count"}},
+        }
+    )
+    ctx = SimpleNamespace(
+        catalog=SimpleNamespace(processors=SimpleNamespace(processors=[processor])),
+        workspace=Path("."),
+    )
+    monkeypatch.setattr(
+        config_builder,
+        "_source_sample_columns",
+        lambda *_args, **_kwargs: ["ExperimentName", "AppliedModel"],
+    )
+
+    options = config_builder._source_field_options(ctx, source)
+
+    assert options == ["AppliedModel", "ExperimentName", "Issue", "Outcome", "SubjectID"]
+
+
+@pytest.mark.unit
 def test_source_rename_mapping_remaps_editor_fields(monkeypatch) -> None:
     source = model.Source.model_validate(
         {

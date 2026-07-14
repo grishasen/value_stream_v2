@@ -16,6 +16,7 @@ from valuestream.expr import ast as expr_ast
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEMO_WS = REPO_ROOT / "examples" / "demo"
+FAT_WS = REPO_ROOT / "examples" / "fat"
 
 
 @pytest.mark.unit
@@ -86,6 +87,59 @@ class TestDemoWorkspace:
                     assert tile.metric in defined, (
                         f"unknown metric on tile {tile.id}: {tile.metric}"
                     )
+
+
+@pytest.mark.unit
+class TestFatWorkspace:
+    def test_loads_and_validates(self) -> None:
+        catalog = load(FAT_WS)
+
+        result = validate_catalog(catalog)
+
+        assert result.ok, [f"{issue.location}: {issue.message}" for issue in result.issues]
+        assert {source.id for source in catalog.pipelines.sources} == {"ih", "holdings"}
+
+    def test_covers_viable_legacy_processor_and_metric_kinds(self) -> None:
+        catalog = load(FAT_WS)
+
+        assert {processor.kind for processor in catalog.processors.processors} == {
+            "binary_outcome",
+            "numeric_distribution",
+            "score_distribution",
+            "entity_lifecycle",
+            "entity_set",
+            "funnel",
+        }
+        assert {metric.kind for metric in catalog.metrics.metrics.values()} == {
+            "formula",
+            "approx_distinct_count",
+            "topk_items",
+            "tdigest_quantile",
+            "variant_compare",
+            "curve_from_digests",
+            "calibration_from_digests",
+            "contingency_test",
+            "proportion_test",
+            "lifecycle_summary",
+            "set_op",
+            "funnel_dropoff",
+        }
+
+    def test_business_report_pages_are_present(self) -> None:
+        catalog = load(FAT_WS)
+        dashboard = catalog.dashboards.dashboards[0]
+
+        assert [page.id for page in dashboard.pages] == [
+            "executive_overview",
+            "engagement",
+            "reach_and_frequency",
+            "conversion_and_revenue",
+            "outcome_funnel",
+            "model_quality",
+            "experiments",
+            "distributions",
+            "customer_lifecycle",
+        ]
 
 
 # ---------------------------------------------------------------------------

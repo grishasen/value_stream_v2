@@ -34,6 +34,11 @@ uv run valuestream query examples/demo VS_Engagement_Rate --by Channel --grain D
 uv run valuestream serve examples/demo --port 8501 --headless
 ```
 
+For a larger legacy-migration example, `examples/fat` contains a catalog-only
+FAT workspace with two sources, all currently viable aggregate-first processor
+families for those sources, and broad business KPI/report coverage. See its
+[workspace notes](examples/fat/README.md) before supplying source exports.
+
 ## Tests and Quality
 
 ```sh

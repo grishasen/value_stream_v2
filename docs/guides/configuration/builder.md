@@ -42,6 +42,14 @@ kind-specific fields in two- or three-column rows. Long multi-select values
 therefore keep useful space without making every scalar field consume a full
 row.
 
+Source-field selectors combine the discovered source schema with fields
+referenced by source transforms and processors, including an
+`entities.subject` field. The resulting choices are listed alphabetically so
+the same field is easy to find in every selector. Recipe-library selectors use
+the same alphabetical ordering for recipes, processors, business fields,
+binding choices, algorithms, populations, and report pages. Funnel stages keep
+their configured order because that sequence defines the funnel.
+
 The recipe readiness state tells you whether processor inputs are configured,
 need an explicit mapping, or require a new aggregate state. Sketch recipes list
 all processor `group_by` and configured business fields plus every compatible

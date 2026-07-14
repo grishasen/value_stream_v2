@@ -418,6 +418,9 @@ def processor_field_references(processor: model.Processor) -> list[str]:
     """Return source fields that processor logic reads outside dimensions."""
     fields: list[str] = []
     extra = dict(processor.model_extra or {})
+    entities = extra.get("entities")
+    if isinstance(entities, dict):
+        fields.append(str(entities.get("subject", "") or ""))
     outcome = extra.get("outcome")
     if isinstance(outcome, dict):
         fields.append(str(outcome.get("column", "") or ""))

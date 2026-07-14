@@ -10,7 +10,7 @@ import functools
 import importlib.util
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from io import StringIO
 from typing import Any
@@ -251,6 +251,11 @@ def render(ctx: ValueStreamContext) -> None:
 def _report_toolbar(
     ctx: ValueStreamContext, dashboard: Any, page: Any
 ) -> tuple[Any, Any, dict[str, Any], dt.date | None, dt.date | None, str, bool]:
+    report_pages = tuple(
+        report_page
+        for configured_dashboard in ctx.catalog.dashboards.dashboards
+        for report_page in configured_dashboard.pages
+    )
     with st.sidebar:
         st.write("### Report")
         dashboards = ctx.catalog.dashboards.dashboards
@@ -299,14 +304,14 @@ def _report_toolbar(
                 page,
                 capabilities=filter_capabilities,
             )
-            if st.button(
+            st.button(
                 "Clear",
                 icon=":material/close:",
                 key=f"reports_clear_filters_{page.id}",
                 width="stretch",
-            ):
-                _clear_filter_state(page)
-                st.rerun()
+                on_click=_clear_filter_state,
+                args=(page, report_pages),
+            )
 
         _filter_chips(
             page,
@@ -314,6 +319,7 @@ def _report_toolbar(
             start,
             end,
             capabilities=filter_capabilities,
+            report_pages=report_pages,
         )
     return dashboard, page, filters, start, end, view_mode, bool(advanced_mode)
 
@@ -407,10 +413,10 @@ def _filter_controls(
 
 def _time_preset_label(value: str) -> str:
     return {
-        "last_7_days": "7 days",
-        "last_30_days": "30 days",
-        "last_90_days": "90 days",
-        "year_to_date": "YTD",
+        "last_7_days": "Last 7 days",
+        "last_30_days": "Last 30 days",
+        "last_90_days": "Last 90 days",
+        "year_to_date": "Year to date",
         "custom": "Custom",
         "all_time": "All time",
     }.get(value, value.replace("_", " ").capitalize())
@@ -465,16 +471,31 @@ def _filter_control(
         filters[field] = selected
 
 
-def _clear_filter_state(page: Any) -> None:
+def _clear_filter_state(page: Any, report_pages: Iterable[Any] | None = None) -> None:
     prefixes = (
         f"reports_filter_{page.id}_",
         f"reports_raw_filters_{page.id}",
-        f"reports_time_preset_{page.id}",
         f"reports_custom_range_{page.id}",
+        f"reports_active_filter_chips_{page.id}",
     )
     for key in list(st.session_state):
         if any(str(key).startswith(prefix) for prefix in prefixes):
             st.session_state.pop(key, None)
+    _show_all_time(page, report_pages)
+
+
+def _show_all_time(page: Any, report_pages: Iterable[Any] | None = None) -> None:
+    """Reset every report page to its broadest authored time preset."""
+    targets = {str(target.id): target for target in (report_pages or ())}
+    targets.setdefault(str(page.id), page)
+    for target in targets.values():
+        time_filter = getattr(target, "time_filter", None)
+        presets = list(getattr(time_filter, "presets", []) or [])
+        default = str(getattr(time_filter, "default", "all_time"))
+        st.session_state[f"reports_time_preset_{target.id}"] = (
+            "all_time" if "all_time" in presets or not presets else default
+        )
+        st.session_state.pop(f"reports_custom_range_{target.id}", None)
 
 
 def _filter_columns(ctx: ValueStreamContext, page: Any) -> list[str]:
@@ -556,32 +577,89 @@ def _filter_chip_value(value: Any) -> str:
 
 
 def _filter_chip_labels(
-    filters: Mapping[str, Any], start: dt.date | None, end: dt.date | None
+    filters: Mapping[str, Any],
+    start: dt.date | None,
+    end: dt.date | None,
+    *,
+    time_preset: str | None = None,
 ) -> list[str]:
     """Summarize the active filter context as chip labels."""
     chips: list[str] = []
     if start and end:
-        chips.append(f"Time: {start.isoformat()} to {end.isoformat()}")
+        if time_preset:
+            chips.append(
+                f"{_time_preset_label(time_preset)} · {_compact_date_range(start, end)}"
+            )
+        else:
+            chips.append(f"Time: {start.isoformat()} to {end.isoformat()}")
     chips.extend(f"{key}: {_filter_chip_value(value)}" for key, value in filters.items())
     return chips
 
 
-def _filter_chips(  # noqa: PLR0912
+def _compact_date_range(start: dt.date, end: dt.date) -> str:
+    """Render a concise, locale-independent date range for the active-time chip."""
+    months = (
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    )
+    start_month = months[start.month - 1]
+    end_month = months[end.month - 1]
+    separator = "\N{EN DASH}"
+    if start.year != end.year:
+        return (
+            f"{start_month} {start.day}, {start.year}{separator}"
+            f"{end_month} {end.day}, {end.year}"
+        )
+    if start.month == end.month:
+        return f"{start_month} {start.day}{separator}{end.day}, {end.year}"
+    return f"{start_month} {start.day}{separator}{end_month} {end.day}, {end.year}"
+
+
+def _apply_filter_chip_selection(
+    widget_key: str,
+    removable: Mapping[str, tuple[str, ...]],
+) -> None:
+    """Clear deselected filter widgets before Streamlit reruns the page."""
+    selected = set(st.session_state.get(widget_key) or [])
+    for label, widget_keys in removable.items():
+        if label in selected:
+            continue
+        for widget_key_to_clear in widget_keys:
+            st.session_state.pop(widget_key_to_clear, None)
+
+
+def _filter_chips(
     page: Any,
     filters: Mapping[str, Any],
     start: dt.date | None,
     end: dt.date | None,
     *,
     capabilities: list[FilterCapability] | None = None,
+    report_pages: Iterable[Any] | None = None,
 ) -> None:
     """Render active filters as chips; deselecting a chip clears that filter."""
     removable: dict[str, tuple[str, ...]] = {}
     inert: list[str] = []
+    time_label: str | None = None
     if start and end:
-        removable[_filter_chip_labels({}, start, end)[0]] = (
-            f"reports_time_preset_{page.id}",
-            f"reports_custom_range_{page.id}",
-        )
+        preset_key = f"reports_time_preset_{page.id}"
+        time_preset = str(st.session_state.get(preset_key) or "custom")
+        time_label = _filter_chip_labels(
+            {},
+            start,
+            end,
+            time_preset=time_preset,
+        )[0]
     capability_by_field = {item.field: item for item in (capabilities or [])}
     for column, value in filters.items():
         capability = capability_by_field.get(column)
@@ -598,28 +676,33 @@ def _filter_chips(  # noqa: PLR0912
         else:
             # Filters typed into the raw text area cannot be cleared one by one.
             inert.append(label)
-    if not removable and not inert:
+    if time_label is None and not removable and not inert:
         st.caption("All time · no filters")
         return
-    if removable:
-        selected = st.pills(
-            "Active report filters",
-            list(removable),
-            selection_mode="multi",
-            default=list(removable),
-            label_visibility="collapsed",
-            help="Deselect a chip to clear that filter.",
-        )
-        chosen = set(selected or [])
-        removed = [label for label in removable if label not in chosen]
-        if removed:
-            for label in removed:
-                for widget_key in removable[label]:
-                    if widget_key == f"reports_time_preset_{page.id}":
-                        st.session_state[widget_key] = "all_time"
-                    else:
-                        st.session_state.pop(widget_key, None)
-            st.rerun()
+    with st.container(horizontal=True, gap="small", vertical_alignment="center"):
+        if time_label is not None:
+            st.button(
+                time_label,
+                key=f"reports_time_chip_{page.id}",
+                type="primary",
+                icon=":material/calendar_today:",
+                help="Active time range. Click to show all time.",
+                on_click=_show_all_time,
+                args=(page, report_pages),
+            )
+        if removable:
+            chips_key = f"reports_active_filter_chips_{page.id}"
+            st.pills(
+                "Active report filters",
+                list(removable),
+                selection_mode="multi",
+                default=list(removable),
+                key=chips_key,
+                label_visibility="collapsed",
+                help="Deselect a chip to clear that filter.",
+                on_change=_apply_filter_chip_selection,
+                args=(chips_key, removable),
+            )
     if inert:
         st.caption("Raw filters: " + " · ".join(inert))
 

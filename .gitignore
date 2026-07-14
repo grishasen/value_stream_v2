@@ -54,6 +54,13 @@ site/
 # large data/, aggregates/, and meta/ folders stay ignored and are rebuilt
 # by the test data generator (see tests/conftest.py).
 !/examples/demo/catalog/
+# Track the catalog-only FAT migration showcase while keeping any local source
+# exports and generated workspace state ignored.
+!/examples/fat/
+/examples/fat/*
+!/examples/fat/README.md
+!/examples/fat/catalog/
 /.claude/
 /artifacts/
 /.agents/
+/examples/fat/
