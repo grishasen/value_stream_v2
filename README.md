@@ -2,10 +2,6 @@
 
 Value Stream is a configuration-driven, aggregate-first business intelligence platform. It ingests file-based exports (typically Pega CDH Interaction History and Product Holdings), reduces them to small mergeable sufficient statistics during one chunk pass, and serves business reports and dashboards from those persisted aggregates. Raw event rows never survive the chunk pass.
 
-## Status
-
-Phase 6 — migration and backfill tooling in progress: the aggregate backend covers ingestion, query, descriptive/model-score analytics, lifecycle/set/funnel/snapshot processors, the Streamlit dashboard surface, the Builder UI for metrics/tiles, Chat With Data MLP1, local read-only MCP, a read-only FastAPI surface, and legacy TOML/DuckDB migration helpers. Remote HTTP MCP and multi-user/OIDC deployment remain deferred.
-
 ## Documentation
 
 The docs are the spec and live in [`docs/`](docs/index.md), organized by
