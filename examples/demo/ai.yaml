@@ -1,30 +1,5 @@
 ai:
   llm:
-    model: ollama/qwen3.6:35b-mlx
-    api_base: http://localhost:11434
-    custom_provider: ollama
-    api_key_env: ''
-    temperature: 0.1
+    model: gpt-5.5
+    api_key_env: OPENAI_API_KEY
     timeout_seconds: 120
-chat_with_data:
-  agent_prompt: You are a data analysis agent. Your main goal is to help non-technical
-    users to analyze interaction history and product holdings data from Pega Customer
-    Decision Hub application. Data consists of several datasets which contain pre-aggregated
-    data from source (interaction history and product holdings). Aggregations include
-    counts, number of positives and negative responses, t-digest structures. Those
-    datasets should be used to calculate aggregated metrics when answering questions.
-    Use the catalog metadata and chat-only descriptions to choose the right metric,
-    dimensions, filters, and chart shape.
-  dataset_descriptions:
-    ih: Pega Interaction History dataset export. Pega Interaction History (IH) is
-      the centralized data repository within the Pega Customer Decision Hub (CDH)
-      that records every customer interaction, decision, response, and offer outcome
-      across all communication channels. It acts as the "memory" of your application,
-      capturing real-time insights (such as accepted, rejected, or ignored offers)
-      to ensure that future automated decisions are highly relevant and personalized.
-  metric_descriptions:
-    ih_engagement: 'Measures of user interaction with the product or service. Main
-      KPIs: Click-Through Rate (CTR, Engagement Rate): The ratio of users who click
-      on an ad to the number of total users who view the ad. Lift: Measures the increase
-      in a desired descriptive in the target group that received the action compared
-      to a control group that received random action.'

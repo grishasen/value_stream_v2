@@ -21,6 +21,10 @@ FIELD_HELP: dict[str, str] = {
     ),
     "editor.builder_step": _tip("Open one stage of the catalog configuration workflow."),
     "editor.studio_step": _tip("Open one stage of the AI-assisted configuration workflow."),
+    "editor.studio_phase": _tip(
+        "Group of related studio steps; markers show complete, attention required, or empty.",
+        "✓ Review",
+    ),
     "editor.draft_step": _tip("Open one section of the current catalog draft."),
     # Sources and transforms.
     "source.selector": _tip("Choose the source definition to edit."),
@@ -491,6 +495,21 @@ FIELD_HELP: dict[str, str] = {
     "ai.verbosity": _tip("Optional provider-supported response detail level.", "low"),
     "ai.timeout": _tip("Maximum seconds allowed for one model request.", "120"),
     "ai.raw_yaml": _tip("Complete draft YAML for advanced review or manual correction."),
+    "ai.user_goals": _tip(
+        "Free-form business requirements that guide AI catalog generation.",
+        "Weekly conversion by channel and average revenue per customer",
+    ),
+    "ai.refine_instruction": _tip(
+        "Free-form change request the AI applies to the current draft.",
+        "Add a KPI card with total orders to the overview page",
+    ),
+    "ai.copilot_message": _tip(
+        "Free-form question or change request for the step-aware copilot.",
+        "Add weekly revenue by channel",
+    ),
+    "ai.patch_accept": _tip(
+        "Apply this structural change when the pending review is accepted; clear it to keep the previous accepted definition."
+    ),
     "ai.field_approve": _tip(
         "Allow this field to be used in generated processors, metrics, and reports."
     ),

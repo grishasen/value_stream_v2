@@ -361,6 +361,25 @@ _EXPRESSION_AST_DICTIONARY: dict[str, Any] = {
 }
 
 
+def catalog_prompt_dictionaries() -> dict[str, Any]:
+    """Return the shared catalog dictionaries embedded in AI prompts."""
+
+    return {
+        "application_structure": _APPLICATION_STRUCTURE_DICTIONARY,
+        "catalog_schema": _CATALOG_SCHEMA_DICTIONARY,
+        "processor_kinds": _PROCESSOR_KIND_DICTIONARY,
+        "metric_kinds": _METRIC_KIND_DICTIONARY,
+        "chart_required_fields": _CHART_REQUIRED_FIELD_DICTIONARY,
+        "expression_ast": _EXPRESSION_AST_DICTIONARY,
+    }
+
+
+def prompt_draft_sections(draft: dict[str, Any]) -> dict[str, Any]:
+    """Return the draft sections included in AI prompts."""
+
+    return _prompt_draft(draft)
+
+
 @dataclass(frozen=True)
 class AICallSettings:
     """Runtime settings for a LiteLLM chat completion call."""
@@ -412,6 +431,7 @@ def prompt_for_config_draft(
     approved_fields: list[str],
     hidden_fields: list[str],
     baseline_draft: dict[str, Any],
+    user_goals: str = "",
 ) -> str:
     """Build the first-pass AI prompt for processors, metrics, and dashboards."""
 
@@ -425,6 +445,7 @@ def prompt_for_config_draft(
         approved_fields=approved_fields,
         hidden_fields=hidden_fields,
         current_draft=baseline_draft,
+        user_goals=user_goals,
         extra_rules=[
             "Keep source definitions from pipelines.yaml unchanged.",
             "You may replace processors, metrics, and dashboards.",
@@ -447,6 +468,7 @@ def prompt_for_report_refresh(
     approved_fields: list[str],
     hidden_fields: list[str],
     current_draft: dict[str, Any],
+    user_goals: str = "",
 ) -> str:
     """Build a report-only refresh prompt from the current draft."""
 
@@ -460,6 +482,7 @@ def prompt_for_report_refresh(
         approved_fields=approved_fields,
         hidden_fields=hidden_fields,
         current_draft=current_draft,
+        user_goals=user_goals,
         extra_rules=[
             "Do not change pipelines, processors, or metrics.",
             "Every tile.metric must reference an existing metric id from the current draft.",
@@ -468,6 +491,40 @@ def prompt_for_report_refresh(
             "Use kpi_strip only with scalar kpi_card tiles and configure comparison or target behavior explicitly.",
             "Preserve or author page filters and time_filter presets from aggregate-backed dimensions.",
             "Use scale_mode only on line or stacked_area comparison charts.",
+        ],
+    )
+
+
+def prompt_for_draft_refinement(
+    *,
+    file_name: str,
+    approved_schema: list[dict[str, Any]],
+    approved_fields: list[str],
+    hidden_fields: list[str],
+    current_draft: dict[str, Any],
+    instruction: str,
+    user_goals: str = "",
+) -> str:
+    """Build a free-form revision prompt against the current draft."""
+
+    return _catalog_prompt(
+        task=(
+            "Revise this Value Stream catalog draft according to the change request. "
+            "Return only YAML for the sections you need to replace."
+        ),
+        file_name=file_name,
+        approved_schema=approved_schema,
+        approved_fields=approved_fields,
+        hidden_fields=hidden_fields,
+        current_draft=current_draft,
+        user_goals=user_goals,
+        change_request=instruction,
+        extra_rules=[
+            "Apply only the requested change; keep unrelated processors, metrics, and tiles unchanged.",
+            "Keep existing ids stable unless the change request explicitly renames them.",
+            "Every returned section must be complete for that YAML file.",
+            "Do not change pipelines.",
+            "When the request cannot be satisfied with approved fields, choose the closest valid alternative instead of inventing fields.",
         ],
     )
 
@@ -805,9 +862,22 @@ def _catalog_prompt(
     hidden_fields: list[str],
     current_draft: dict[str, Any],
     extra_rules: list[str],
+    user_goals: str = "",
+    change_request: str = "",
     validation_issues: list[str] | None = None,
     validation_trace: str = "",
 ) -> str:
+    goals_text = ""
+    if user_goals.strip():
+        goals_text = (
+            "Business requirements from the user. Satisfy each requirement with concrete "
+            "processors, metrics, and report tiles where the approved schema allows it; "
+            "skip requirements the schema cannot support:\n"
+            f"{user_goals.strip()}\n\n"
+        )
+    change_text = ""
+    if change_request.strip():
+        change_text = f"Change request from the user:\n{change_request.strip()}\n\n"
     issue_text = ""
     if validation_issues:
         issue_text = "\nValidation errors to fix:\n" + yaml.safe_dump(
@@ -829,6 +899,8 @@ def _catalog_prompt(
     )
     return (
         f"{task}\n\n"
+        f"{goals_text}"
+        f"{change_text}"
         f"Source sample: {file_name}\n\n"
         "Application structure dictionary:\n"
         f"{yaml.safe_dump(_APPLICATION_STRUCTURE_DICTIONARY, sort_keys=False)}\n"

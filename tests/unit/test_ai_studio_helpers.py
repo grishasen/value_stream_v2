@@ -22,6 +22,7 @@ from valuestream.ai import (
     merge_draft_sections,
     parse_ai_yaml_sections,
     prompt_for_config_draft,
+    prompt_for_draft_refinement,
     prompt_for_repair,
     prompt_for_report_refresh,
     section_name_diff,
@@ -213,8 +214,7 @@ def test_apply_draft_rolls_back_catalog_and_ai_config_on_post_write_failure(
 
     assert ai_path.read_text(encoding="utf-8") == original_ai
     assert not any(
-        (tmp_path / "catalog" / filename).exists()
-        for filename in builder.CATALOG_FILENAMES
+        (tmp_path / "catalog" / filename).exists() for filename in builder.CATALOG_FILENAMES
     )
 
 
@@ -304,9 +304,7 @@ def test_install_recipe_in_ai_draft_adds_processor_state_before_metric() -> None
     draft = _base_draft()
     processor = model.Processors.model_validate(draft["processors"]).processors[0]
     recipe = next(
-        item
-        for item in load_builtin_kpi_recipes().recipes
-        if item.id == "audience.unique_entities"
+        item for item in load_builtin_kpi_recipes().recipes if item.id == "audience.unique_entities"
     )
     state_additions = {
         "Channel_cpc": {
@@ -455,6 +453,74 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
     assert "Do not emit legacy TOML-only settings such as metrics.global_filters" in prompt
     assert "Every report/dashboard tile metric exists in metrics." in prompt
     assert "Output valid YAML only." in prompt
+    assert "Return valid YAML only. Do not wrap the answer in prose or Markdown fences." in prompt
+
+
+@pytest.mark.unit
+def test_config_draft_prompt_includes_business_requirements() -> None:
+    prompt = prompt_for_config_draft(
+        file_name="sample.csv",
+        approved_schema=[{"column": "Channel", "dtype": "String", "unique": 3}],
+        approved_fields=["Channel"],
+        hidden_fields=[],
+        baseline_draft=_base_draft(),
+        user_goals="Weekly conversion by channel.\nAverage revenue per customer.",
+    )
+
+    assert "Business requirements from the user" in prompt
+    assert "Weekly conversion by channel." in prompt
+    assert "Average revenue per customer." in prompt
+    goals_index = prompt.index("Business requirements from the user")
+    assert goals_index < prompt.index("Source sample:")
+
+
+@pytest.mark.unit
+def test_config_draft_prompt_omits_requirements_heading_when_goals_empty() -> None:
+    prompt = prompt_for_config_draft(
+        file_name="sample.csv",
+        approved_schema=[{"column": "Channel", "dtype": "String", "unique": 3}],
+        approved_fields=["Channel"],
+        hidden_fields=[],
+        baseline_draft=_base_draft(),
+        user_goals="   ",
+    )
+
+    assert "Business requirements from the user" not in prompt
+
+
+@pytest.mark.unit
+def test_report_refresh_prompt_includes_business_requirements() -> None:
+    prompt = prompt_for_report_refresh(
+        file_name="sample.csv",
+        approved_schema=[{"column": "Channel", "dtype": "String", "unique": 3}],
+        approved_fields=["Channel"],
+        hidden_fields=[],
+        current_draft=_base_draft(),
+        user_goals="Focus reports on channel-level engagement.",
+    )
+
+    assert "Business requirements from the user" in prompt
+    assert "Focus reports on channel-level engagement." in prompt
+    assert "Refresh only dashboards.yaml" in prompt
+
+
+@pytest.mark.unit
+def test_draft_refinement_prompt_includes_change_request_and_rules() -> None:
+    prompt = prompt_for_draft_refinement(
+        file_name="sample.csv",
+        approved_schema=[{"column": "Channel", "dtype": "String", "unique": 3}],
+        approved_fields=["Channel"],
+        hidden_fields=[],
+        current_draft=_base_draft(),
+        instruction="Add a KPI card with total orders to the overview page.",
+        user_goals="Weekly conversion by channel.",
+    )
+
+    assert "Change request from the user:" in prompt
+    assert "Add a KPI card with total orders to the overview page." in prompt
+    assert "Business requirements from the user" in prompt
+    assert "Revise this Value Stream catalog draft" in prompt
+    assert "keep unrelated processors, metrics, and tiles unchanged." in prompt
     assert "Return valid YAML only. Do not wrap the answer in prose or Markdown fences." in prompt
 
 
@@ -1316,6 +1382,56 @@ def test_call_litellm_logs_failure_with_prompt(
     assert "LLM call started" in caplog.text
     assert "Plan CTR query" in caplog.text
     assert "LLM call failed" in caplog.text
+
+
+@pytest.mark.unit
+def test_ai_refine_panel_holds_revision_in_pending_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def fake_call_litellm(settings: AICallSettings, prompt: str, **kwargs: object) -> str:
+        return """
+metrics:
+  CTR:
+    source: engagement
+    kind: formula
+    expression:
+      op: safe_div
+      num: {col: Positives}
+      den: {col: Count}
+  Total:
+    source: engagement
+    kind: formula
+    expression: {col: Count}
+"""
+
+    monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call_litellm)
+
+    def app(draft: dict) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
+        st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
+        st.session_state["ai_studio_user_goals"] = "Track total volume."
+        page._render_ai_refine_panel(draft, None, ["Channel"])
+
+    at = AppTest.from_function(app, kwargs={"draft": _base_draft()}).run()
+
+    assert not at.exception
+    change_request = next(widget for widget in at.text_area if widget.label == "Change Request")
+    change_request.set_value("Add a Total metric with the event count.").run()
+    next(widget for widget in at.button if widget.label == "Generate AI Revision").click().run()
+
+    assert not at.exception
+    pending = at.session_state["ai_studio_pending_draft"]
+    assert sorted(pending["metrics"]["metrics"]) == ["CTR", "Total"]
+    assert at.session_state["ai_studio_pending_kind"] == "revision"
+    prompt = at.session_state["ai_studio_pending_prompt"]
+    assert "Add a Total metric with the event count." in prompt
+    assert "Track total volume." in prompt
 
 
 def _base_draft() -> dict:
