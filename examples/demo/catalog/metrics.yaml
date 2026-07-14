@@ -1,0 +1,256 @@
+metrics:
+  VS_Interactions:
+    source: ih_engagement
+    kind: formula
+    description: Total interaction outcome rows.
+    display:
+      label: Interactions
+      unit: interactions
+      value_format: integer
+      direction: higher_is_better
+    expression:
+      col: Count
+  VS_Positive_Outcomes:
+    source: ih_engagement
+    kind: formula
+    description: Count of positive outcomes, including clicks and conversions.
+    display:
+      label: Positive outcomes
+      unit: outcomes
+      value_format: integer
+      direction: higher_is_better
+    expression:
+      col: Positives
+  VS_Negative_Outcomes:
+    source: ih_engagement
+    kind: formula
+    description: Count of negative outcomes, including impressions and pending outcomes.
+    display:
+      label: Negative outcomes
+      unit: outcomes
+      value_format: integer
+      direction: lower_is_better
+    expression:
+      col: Negatives
+  VS_Engagement_Rate:
+    source: ih_engagement
+    kind: formula
+    description: Positive outcomes divided by positive plus negative outcomes.
+    display:
+      label: Engagement rate
+      unit: percent
+      value_format: percent
+      direction: higher_is_better
+    expression:
+      op: safe_div
+      num:
+        col: Positives
+      den:
+        op: add
+        args:
+        - col: Positives
+        - col: Negatives
+  VS_Unique_Customers:
+    source: ih_engagement
+    kind: approx_distinct_count
+    description: Approximate distinct customers with interaction outcomes.
+    display:
+      label: Unique customers
+      unit: customers
+      value_format: integer
+      direction: higher_is_better
+    state: UniqueCustomers_cpc
+  VS_Unique_Interactions:
+    source: ih_engagement
+    kind: approx_distinct_count
+    description: Approximate distinct interaction identifiers.
+    display:
+      label: Unique interactions
+      unit: interactions
+      value_format: integer
+      direction: higher_is_better
+    state: UniqueInteractions_cpc
+  VS_FinalPropensity_Median:
+    source: ih_propensity_scores
+    kind: tdigest_quantile
+    description: Median final propensity.
+    display:
+      label: Median final propensity
+      unit: score
+      value_format: number
+      direction: neutral
+    state: FinalPropensity_tdigest
+    quantile: 0.5
+  VS_FinalPropensity_P90:
+    source: ih_propensity_scores
+    kind: tdigest_quantile
+    description: 90th percentile final propensity.
+    display:
+      label: P90 final propensity
+      unit: score
+      value_format: number
+      direction: neutral
+    state: FinalPropensity_tdigest
+    quantile: 0.9
+  VS_Priority_Median:
+    source: ih_propensity_scores
+    kind: tdigest_quantile
+    description: Median priority score.
+    display:
+      label: Median priority
+      unit: score
+      value_format: number
+      direction: neutral
+    state: Priority_tdigest
+    quantile: 0.5
+  VS_ResponseTime_P95:
+    source: ih_response_time
+    kind: tdigest_quantile
+    description: 95th percentile response time in seconds.
+    display:
+      label: P95 response time
+      unit: seconds
+      value_format: number
+      direction: lower_is_better
+    state: ResponseTime_tdigest
+    quantile: 0.95
+  VS_ModelControl_Engagement_Compare:
+    source: ih_engagement
+    kind: variant_compare
+    description: Engagement comparison between model control test and NBA groups.
+    display:
+      label: Test versus control effect
+      unit: percentage points
+      value_format: percent
+      direction: higher_is_better
+    variant_column: ModelControlGroup
+    test_role: Test
+    control_role: NBA
+    confidence_level: 0.95
+  VS_ModelControl_Engagement_Z_Test:
+    source: ih_engagement
+    kind: contingency_test
+    description: Z-test for engagement differences by model control group.
+    display:
+      label: Experiment p-value
+      unit: probability
+      value_format: number
+      direction: lower_is_better
+    variant_column: ModelControlGroup
+    tests:
+    - z
+  VS_Impression_to_Click_Dropoff:
+    source: ih_outcome_funnel
+    kind: funnel_dropoff
+    description: Dropoff from impressions to clicks.
+    display:
+      label: Impression-to-click dropoff
+      unit: percent
+      value_format: percent
+      direction: lower_is_better
+    from_stage: Impression
+    to_stage: Clicked
+  VS_Click_to_Conversion_Dropoff:
+    source: ih_outcome_funnel
+    kind: funnel_dropoff
+    description: Dropoff from clicks to conversions.
+    display:
+      label: Click-to-conversion dropoff
+      unit: percent
+      value_format: percent
+      direction: lower_is_better
+    from_stage: Clicked
+    to_stage: Conversion
+  ih_propensity_scores_roc_auc:
+    source: ih_propensity_scores
+    kind: curve_from_digests
+    positive_state: Propensity_tdigest_positives
+    negative_state: Propensity_tdigest_negatives
+    output: roc_auc
+    description: Area under the propensity ROC curve.
+    display:
+      label: Propensity ROC AUC
+      unit: score
+      value_format: number
+      direction: higher_is_better
+  VS_FinalPropensity_Calibration:
+    source: ih_propensity_scores
+    kind: calibration_from_digests
+    description: Calibration bins for final propensity using positive and negative
+      outcome digests.
+    positive_state: FinalPropensity_tdigest_positives
+    negative_state: FinalPropensity_tdigest_negatives
+  final_prop_roc_auc_428864cb00d024e7:
+    source: ih_propensity_scores
+    kind: curve_from_digests
+    positive_state: FinalPropensity_tdigest_positives
+    negative_state: FinalPropensity_tdigest_negatives
+    output: roc_auc
+    description: FinalPropensity AUC
+  impressions_f9ff3b857882646c:
+    source: ih_outcome_funnel
+    kind: formula
+    expression:
+      col: Impression_Count
+    description: Total funnel impressions.
+    display:
+      label: Impressions
+      unit: impressions
+      value_format: integer
+      direction: higher_is_better
+  clicks_e4cbbaaa71be3fb4:
+    source: ih_outcome_funnel
+    kind: formula
+    expression:
+      col: Clicked_Count
+    description: Total funnel clicks.
+    display:
+      label: Clicks
+      unit: clicks
+      value_format: integer
+      direction: higher_is_better
+  VS_Click_Through_Rate:
+    source: ih_outcome_funnel
+    kind: formula
+    expression:
+      op: safe_div
+      num:
+        col: Clicked_Count
+      den:
+        col: Impression_Count
+    description: Clicks divided by impressions.
+    display:
+      label: Click-through rate
+      unit: percent
+      value_format: percent
+      direction: higher_is_better
+  VS_Impression_to_Conversion_Rate:
+    source: ih_outcome_funnel
+    kind: formula
+    expression:
+      op: safe_div
+      num:
+        col: Conversion_Count
+      den:
+        col: Impression_Count
+    description: Conversions divided by impressions.
+    display:
+      label: Impression-to-conversion rate
+      unit: percent
+      value_format: percent
+      direction: higher_is_better
+  VS_Click_to_Conversion_Rate:
+    source: ih_outcome_funnel
+    kind: formula
+    expression:
+      op: safe_div
+      num:
+        col: Conversion_Count
+      den:
+        col: Clicked_Count
+    description: Conversions divided by clicks.
+    display:
+      label: Click-to-conversion rate
+      unit: percent
+      value_format: percent
+      direction: higher_is_better

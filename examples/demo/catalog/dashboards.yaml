@@ -1,0 +1,565 @@
+theme:
+  category_colors:
+    Channel:
+      Web: '#2563EB'
+      Mobile: '#14B8A6'
+      Email: '#F59E0B'
+    Outcome:
+      Impression: '#64748B'
+      Clicked: '#2563EB'
+      Conversion: '#16A34A'
+      Pending: '#F59E0B'
+    ModelControlGroup:
+      Test: '#2563EB'
+      NBA: '#64748B'
+dashboards:
+- id: ih_value_stream_overview
+  title: Interaction History Value Stream Overview
+  layout: tabs
+  pages:
+  - id: executive_summary
+    title: Executive Summary
+    time_filter:
+      default: all_time
+      presets:
+      - last_30_days
+      - last_90_days
+      - year_to_date
+      - custom
+      - all_time
+    filters:
+    - field: Channel
+      label: Channel
+      display: primary
+      scope: all_tiles
+      control: multiselect
+    - field: CustomerSegment
+      label: Customer segment
+      display: primary
+      scope: all_tiles
+      control: multiselect
+    - field: Issue
+      label: Issue
+      display: secondary
+      scope: all_tiles
+      control: multiselect
+    tiles:
+    - id: interactions_kpi
+      title: Interactions
+      metric: VS_Interactions
+      chart: kpi_card
+      value: VS_Interactions
+      description: Total interactions in the selected period.
+      placement: kpi_strip
+      kpi:
+        comparison: previous_period
+        comparison_period: month
+        sparkline_grain: monthly
+        sparkline_points: 12
+    - id: engagement_rate_kpi
+      title: Engagement rate
+      metric: VS_Engagement_Rate
+      chart: kpi_card
+      value: VS_Engagement_Rate
+      description: Positive outcomes as a share of classified outcomes.
+      placement: kpi_strip
+      kpi:
+        comparison: previous_period
+        comparison_period: month
+        sparkline_grain: monthly
+        sparkline_points: 12
+    - id: unique_customers_kpi
+      title: Unique customers
+      metric: VS_Unique_Customers
+      chart: kpi_card
+      value: VS_Unique_Customers
+      description: Approximate distinct customers with an interaction outcome.
+      placement: kpi_strip
+      kpi:
+        comparison: previous_period
+        comparison_period: month
+        sparkline_grain: monthly
+        sparkline_points: 12
+    - id: response_time_kpi
+      title: P95 response time
+      metric: VS_ResponseTime_P95
+      chart: kpi_card
+      value: VS_ResponseTime_P95
+      description: 95th percentile response time in seconds.
+      placement: kpi_strip
+      kpi:
+        comparison: previous_period
+        comparison_period: month
+        sparkline_grain: monthly
+        sparkline_points: 12
+    - id: interactions_trend
+      title: Interactions Trend
+      metric: VS_Interactions
+      chart: line
+      x: Day
+      y: VS_Interactions
+      color: Channel
+    - id: engagement_rate_trend
+      title: Engagement Rate Trend
+      metric: VS_Engagement_Rate
+      chart: line
+      x: Day
+      y: VS_Engagement_Rate
+      color: Channel
+    - id: unique_customers_by_segment
+      title: Unique Customers by Segment
+      metric: VS_Unique_Customers
+      chart: bar
+      x: CustomerSegment
+      y: VS_Unique_Customers
+      color: Channel
+    - id: interactions_by_segment
+      title: Interactions by Customer Segment
+      metric: VS_Interactions
+      chart: treemap
+      x: CustomerSegment
+      y: VS_Interactions
+      color: Channel
+    - id: click_to_conversion_rate_trend
+      title: Click-to-Conversion Rate Trend
+      metric: VS_Click_to_Conversion_Rate
+      chart: line
+      x: Day
+      y: VS_Click_to_Conversion_Rate
+      color: Channel
+    - id: impression_to_conversion_rate_trend
+      title: Impression-to-Conversion Rate Trend
+      metric: VS_Impression_to_Conversion_Rate
+      chart: line
+      x: Day
+      y: VS_Impression_to_Conversion_Rate
+      color: Channel
+  - id: engagement_performance
+    title: Engagement Performance
+    tiles:
+    - id: engagement_heatmap_segment_channel
+      title: Engagement Heatmap by Segment and Channel
+      metric: VS_Engagement_Rate
+      chart: heatmap
+      x: Channel
+      y: CustomerSegment
+      color: VS_Engagement_Rate
+    - id: engagement_by_offer
+      title: Engagement Rate by Offer
+      metric: VS_Engagement_Rate
+      chart: bar
+      x: Name
+      y: VS_Engagement_Rate
+      color: Issue
+    - id: engagement_by_issue_group
+      title: Engagement Rate by Issue and Group
+      metric: VS_Engagement_Rate
+      chart: bar
+      x: Issue
+      y: VS_Engagement_Rate
+      color: Group
+    - id: positive_outcomes_by_channel
+      title: Positive Outcomes by Channel
+      metric: VS_Positive_Outcomes
+      chart: bar
+      x: Channel
+      y: VS_Positive_Outcomes
+      color: CustomerSegment
+    - id: negative_outcomes_by_channel
+      title: Negative Outcomes by Channel
+      metric: VS_Negative_Outcomes
+      chart: bar
+      x: Channel
+      y: VS_Negative_Outcomes
+      color: CustomerSegment
+  - id: propensity_and_priority
+    title: Propensity and Priority
+    tiles:
+    - id: median_final_propensity_trend
+      title: Median Final Propensity Trend
+      metric: VS_FinalPropensity_Median
+      chart: line
+      x: Day
+      y: VS_FinalPropensity_Median
+      color: Channel
+    - id: median_final_propensity_by_channel
+      title: Median Final Propensity by Channel
+      metric: VS_FinalPropensity_Median
+      chart: bar
+      x: Channel
+      y: VS_FinalPropensity_Median
+      color: PropensitySource
+    - id: p90_final_propensity_by_offer
+      title: P90 Final Propensity by Offer
+      metric: VS_FinalPropensity_P90
+      chart: bar
+      x: Name
+      y: VS_FinalPropensity_P90
+      color: Channel
+    - id: median_priority_by_model_control
+      title: Median Priority by Model Control Group
+      metric: VS_Priority_Median
+      chart: bar
+      x: ModelControlGroup
+      y: VS_Priority_Median
+      color: Channel
+    - id: AUC
+      title: AUC
+      metric: ih_propensity_scores_roc_auc
+      chart: line
+      x: Day
+      y: ih_propensity_scores_roc_auc
+      color: PropensitySource
+      facet_row: Channel
+  - id: funnel_and_response
+    title: Funnel and Response
+    tiles:
+    - id: impression_to_click_dropoff_by_channel
+      title: Impression to Click Dropoff by Channel
+      metric: VS_Impression_to_Click_Dropoff
+      chart: bar
+      x: Channel
+      y: VS_Impression_to_Click_Dropoff
+      color: CustomerSegment
+    - id: click_to_conversion_dropoff_by_offer
+      title: Click to Conversion Dropoff by Offer
+      metric: VS_Click_to_Conversion_Dropoff
+      chart: bar
+      x: Name
+      y: VS_Click_to_Conversion_Dropoff
+      color: Channel
+    - id: response_time_p95_trend
+      title: P95 Response Time Trend
+      metric: VS_ResponseTime_P95
+      chart: line
+      x: Day
+      y: VS_ResponseTime_P95
+      color: Channel
+    - id: response_time_p95_by_outcome
+      title: P95 Response Time by Outcome
+      metric: VS_ResponseTime_P95
+      chart: bar
+      x: Outcome
+      y: VS_ResponseTime_P95
+      color: Channel
+  - id: experiment_monitoring
+    title: Experiment Monitoring
+    time_filter:
+      default: all_time
+      presets:
+      - last_30_days
+      - last_90_days
+      - custom
+      - all_time
+    filters:
+    - field: Channel
+      label: Channel
+      display: primary
+      scope: all_tiles
+      control: multiselect
+    - field: CustomerSegment
+      label: Customer segment
+      display: secondary
+      scope: all_tiles
+      control: multiselect
+    tiles:
+    - id: model_control_engagement_compare
+      title: Absolute Engagement Effect
+      metric: VS_ModelControl_Engagement_Compare
+      chart: kpi_card
+      value: AbsoluteRateDifference
+      placement: kpi_strip
+      value_format: percent
+      kpi:
+        target: 0.0
+        sparkline_grain: daily
+        sparkline_points: 30
+    - id: model_control_engagement_z_test
+      title: Experiment P-Value
+      metric: VS_ModelControl_Engagement_Z_Test
+      chart: kpi_card
+      value: z_p_val
+      placement: kpi_strip
+      value_format: number
+      kpi:
+        target: 0.05
+    - id: engagement_effect_interval
+      title: Engagement Effect with 95% Confidence Interval
+      metric: VS_ModelControl_Engagement_Compare
+      chart: interval
+      x: Channel
+      y: AbsoluteRateDifference
+      error_y_lower: AbsoluteRateDifference_CI_Low
+      error_y_upper: AbsoluteRateDifference_CI_High
+      value_format: percent
+    - id: experiment_sample_sizes
+      title: Experiment Sample Sizes by Channel
+      metric: VS_ModelControl_Engagement_Compare
+      chart: table
+      columns:
+      - Channel
+      - TestSampleSize
+      - ControlSampleSize
+      - TestCTR
+      - ControlCTR
+      - Lift_P_Val
+    - id: engagement_by_model_control
+      title: Engagement Rate by Model Control Group
+      metric: VS_Engagement_Rate
+      chart: bar
+      x: ModelControlGroup
+      y: VS_Engagement_Rate
+      color: Channel
+    - id: unique_customers_by_model_control
+      title: Unique Customers by Model Control Group
+      metric: VS_Unique_Customers
+      chart: bar
+      x: ModelControlGroup
+      y: VS_Unique_Customers
+      color: CustomerSegment
+  - id: aggregate_report_type_coverage
+    title: Aggregate Report Type Coverage
+    tiles:
+    - id: interactions_kpi_card
+      title: Interactions KPI Card
+      metric: VS_Interactions
+      chart: kpi_card
+      value: VS_Interactions
+      value_format: integer
+    - id: interactions_gauge
+      title: Interactions Gauge
+      metric: VS_Interactions
+      chart: gauge
+      value: VS_Interactions
+    - id: interactions_stacked_area
+      title: Interactions Stacked Area by Channel
+      metric: VS_Interactions
+      chart: stacked_area
+      x: Day
+      y: VS_Interactions
+      color: Channel
+    - id: interactions_calendar_heatmap
+      title: Interactions Calendar Heatmap
+      metric: VS_Interactions
+      chart: calendar_heatmap
+      date: Day
+      value: VS_Interactions
+    - id: engagement_cohort_heatmap
+      title: Engagement Cohort Heatmap
+      metric: VS_Engagement_Rate
+      chart: cohort_heatmap
+      x: Month
+      y: CustomerSegment
+      color: VS_Engagement_Rate
+    - id: positive_outcomes_donut
+      title: Positive Outcomes Donut
+      metric: VS_Positive_Outcomes
+      chart: donut
+      names: Channel
+      values: VS_Positive_Outcomes
+    - id: interactions_bar_polar
+      title: Interactions Polar Bar
+      metric: VS_Interactions
+      chart: bar_polar
+      r: VS_Interactions
+      theta: Channel
+      color: CustomerSegment
+    - id: interactions_geo_map
+      title: Interactions Geo Map
+      metric: VS_Interactions
+      chart: geo_map
+      locations: Channel
+      value: VS_Interactions
+      color: VS_Interactions
+    - id: interactions_interval
+      title: Interactions Interval by Segment
+      metric: VS_Interactions
+      chart: interval
+      x: CustomerSegment
+      y: VS_Interactions
+      color: Channel
+    - id: interactions_pareto
+      title: Interactions Pareto by Offer
+      metric: VS_Interactions
+      chart: pareto
+      x: Name
+      y: VS_Interactions
+      top_n: 12
+    - id: interactions_sankey
+      title: Interactions Sankey Issue to Group
+      metric: VS_Interactions
+      chart: sankey
+      source: Issue
+      target: Group
+      value: VS_Interactions
+    - id: engagement_scatter_test_vs_control
+      title: Engagement Test vs Control Scatter
+      metric: VS_ModelControl_Engagement_Compare
+      chart: scatter
+      x: TestCTR
+      y: ControlCTR
+      color: ModelControlGroup
+    - id: interactions_table
+      title: Interactions Detail Table
+      metric: VS_Interactions
+      chart: table
+      columns:
+      - Day
+      - Channel
+      - CustomerSegment
+      - VS_Interactions
+    - id: interactions_waterfall
+      title: Interactions Waterfall by Channel
+      metric: VS_Interactions
+      chart: waterfall
+      x: Channel
+      y: VS_Interactions
+  - id: numeric_report_type_coverage
+    title: Numeric Report Type Coverage
+    tiles:
+    - id: response_time_boxplot
+      title: Response Time Boxplot
+      metric: VS_ResponseTime_P95
+      chart: boxplot
+      property: ResponseTime
+      x: Outcome
+      color: Channel
+    - id: response_time_histogram
+      title: Response Time P95 Histogram
+      metric: VS_ResponseTime_P95
+      chart: histogram
+      property: VS_ResponseTime_P95
+      color: Outcome
+    - id: response_time_descriptive_line
+      title: Response Time P95 Descriptive Line
+      metric: VS_ResponseTime_P95
+      chart: descriptive_line
+      x: Day
+      property: VS_ResponseTime
+      score: P95
+      color: Channel
+    - id: response_time_descriptive_boxplot
+      title: Response Time Descriptive Boxplot
+      metric: VS_ResponseTime_P95
+      chart: descriptive_boxplot
+      property: ResponseTime
+      x: Outcome
+      color: Channel
+    - id: response_time_descriptive_histogram
+      title: Response Time Descriptive Histogram
+      metric: VS_ResponseTime_P95
+      chart: descriptive_histogram
+      property: VS_ResponseTime_P95
+      color: Outcome
+    - id: response_time_descriptive_heatmap
+      title: Response Time Descriptive Heatmap
+      metric: VS_ResponseTime_P95
+      chart: descriptive_heatmap
+      x: Channel
+      y: Outcome
+      property: VS_ResponseTime
+      score: P95
+    - id: response_time_descriptive_funnel
+      title: Response Time Descriptive Funnel
+      metric: VS_ResponseTime_P95
+      chart: descriptive_funnel
+      x: Outcome
+      color: Channel
+      stages:
+      - VS_ResponseTime_P95
+    - id: response_time_combo
+      title: Response Time Combo
+      metric: VS_ResponseTime_P95
+      chart: combo
+      x: Day
+      y: VS_ResponseTime_P95
+      y2: ResponseTime_Mean
+      color: Channel
+    - id: response_time_interval
+      title: Response Time Interval
+      metric: VS_ResponseTime_P95
+      chart: interval
+      x: Outcome
+      y: VS_ResponseTime_P95
+      color: Channel
+    - id: response_time_kpi_card
+      title: Response Time P95 KPI Card
+      metric: VS_ResponseTime_P95
+      chart: kpi_card
+      value: VS_ResponseTime_P95
+    - id: response_time_by_outcome_bar
+      title: P95 Response Time by Outcome
+      metric: VS_ResponseTime_P95
+      chart: bar
+      x: Outcome
+      y: VS_ResponseTime_P95
+    - id: response_time_pareto
+      title: Response Time Pareto by Outcome
+      metric: VS_ResponseTime_P95
+      chart: pareto
+      x: Outcome
+      y: VS_ResponseTime_P95
+    - id: response_time_sankey
+      title: Response Time Sankey Outcome to Channel
+      metric: VS_ResponseTime_P95
+      chart: sankey
+      source: Outcome
+      target: Channel
+      value: VS_ResponseTime_P95
+    - id: response_time_table
+      title: Response Time Detail Table
+      metric: VS_ResponseTime_P95
+      chart: table
+      columns:
+      - Outcome
+      - Channel
+      - VS_ResponseTime_P95
+    - id: response_time_waterfall
+      title: Response Time Waterfall
+      metric: VS_ResponseTime_P95
+      chart: waterfall
+      x: Outcome
+      y: VS_ResponseTime_P95
+  - id: funnel_and_curve_report_type_coverage
+    title: Funnel and Curve Report Type Coverage
+    tiles:
+    - id: outcome_stage_funnel
+      title: Outcome Stage Funnel
+      metric: VS_Impression_to_Click_Dropoff
+      chart: funnel
+      stages:
+      - Impression
+      - Clicked
+      - Conversion
+      color: Channel
+    - id: final_propensity_calibration_curve
+      title: Final Propensity Calibration Curve
+      metric: VS_FinalPropensity_Calibration
+      chart: calibration_curve
+      color: PropensitySource
+      facet_row: Channel
+      value_format: percent
+    - id: propensity_roc_curve
+      title: Propensity ROC Curve
+      metric: ih_propensity_scores_roc_auc
+      chart: roc_curve
+      color: PropensitySource
+      facet_row: Channel
+    - id: propensity_precision_recall_curve
+      title: Propensity Precision Recall Curve
+      metric: ih_propensity_scores_roc_auc
+      chart: precision_recall_curve
+      color: PropensitySource
+      facet_row: Channel
+    - id: propensity_gain_curve
+      title: Propensity Gain Curve
+      metric: ih_propensity_scores_roc_auc
+      chart: gain_curve
+      color: PropensitySource
+      facet_row: Channel
+    - id: propensity_lift_curve
+      title: Propensity Lift Curve
+      metric: ih_propensity_scores_roc_auc
+      chart: lift_curve
+      color: PropensitySource
+      facet_row: Channel

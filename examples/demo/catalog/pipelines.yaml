@@ -1,0 +1,56 @@
+version: 1
+workspace: demo
+sources:
+- id: ih
+  description: Generated from AI Configuration Studio.
+  reader:
+    kind: parquet
+    file_pattern: '**/*.parquet'
+    group_by_filename: \d{7}
+    streaming: true
+    root: data
+  schema:
+    timestamp_column: OutcomeTime
+    natural_key:
+    - CustomerID
+    drop_columns: []
+  transforms:
+  - kind: rename_capitalize
+  - kind: parse_datetime
+    columns:
+    - OutcomeTime
+    - DecisionTime
+    format: '%Y%m%dT%H%M%S%.3f %Z'
+  - kind: derive_calendar
+    from: OutcomeTime
+    outputs:
+    - Day
+    - Month
+    - Quarter
+    - Year
+  - kind: defaults
+    values:
+      DefaultActionGroup: Test
+      MktType: Unknown
+      MktValue: Unknown
+      ModelClass: Unknown
+  - kind: filter
+    expression:
+      op: not_null
+      column: Channel
+  - kind: derive_column
+    output: SubjectID
+    expression:
+      col: CustomerID
+  - kind: derive_column
+    output: ResponseTime
+    expression:
+      op: date_diff
+      unit: seconds
+      end:
+        col: OutcomeTime
+      start:
+        col: DecisionTime
+  defaults: {}
+  materialize_transforms: false
+  debugging: false

@@ -1,0 +1,398 @@
+schema_version: 1
+recipes:
+  - id: engagement.engagement_rate
+    version: 1
+    title: Engagement rate
+    domain: Engagement
+    summary: Share of classified outcomes that are positive.
+    business_questions:
+      - Are interactions producing a positive customer response?
+      - Which aggregate segments have the strongest engagement?
+    tags: [ engagement, outcome, rate ]
+    maturity: certified
+    processor_kinds: [ binary_outcome ]
+    inputs:
+      - role: positives
+        label: Positive outcome count
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Positives ]
+        selection: automatic
+        require_preferred: true
+      - role: negatives
+        label: Negative outcome count
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Negatives ]
+        selection: automatic
+        require_preferred: true
+    default_metric_id: VS_Engagement_Rate
+    metric:
+      source: ${processor_id}
+      kind: formula
+      description: Positive outcomes divided by positive plus negative outcomes.
+      display:
+        label: Engagement rate
+        unit: percent
+        value_format: percent
+        direction: higher_is_better
+      expression:
+        op: safe_div
+        num: { col: "${positives}" }
+        den:
+          op: add
+          args:
+            - { col: "${positives}" }
+            - { col: "${negatives}" }
+    method:
+      calculation: positives / (positives + negatives)
+      accuracy: exact
+      algorithm: Safe division over mergeable count states.
+      caveat: The processor's positive and negative value classifications define the denominator.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+      kpi: { comparison: previous_period, comparison_period: month }
+
+  - id: engagement.positive_outcomes
+    version: 1
+    title: Positive outcomes
+    domain: Engagement
+    summary: Number of outcomes classified as positive by the source processor.
+    business_questions:
+      - How many positive responses did the business generate?
+    tags: [ engagement, outcome, volume ]
+    maturity: certified
+    processor_kinds: [ binary_outcome ]
+    inputs:
+      - role: positives
+        label: Positive outcome count
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Positives ]
+        selection: automatic
+        require_preferred: true
+    default_metric_id: VS_Positive_Outcomes
+    metric:
+      source: ${processor_id}
+      kind: formula
+      description: Count of outcomes classified as positive.
+      display:
+        label: Positive outcomes
+        unit: outcomes
+        value_format: integer
+        direction: higher_is_better
+      expression: { col: "${positives}" }
+    method:
+      calculation: positives
+      accuracy: exact
+      algorithm: Mergeable count state.
+      caveat: Classification semantics are owned by the selected processor.
+    report: { chart: kpi_card, placement: kpi_strip }
+
+  - id: audience.unique_entities
+    version: 1
+    title: Unique entities
+    domain: Audience
+    summary: Approximate distinct entities observed by an aggregate processor.
+    business_questions:
+      - How many distinct customers or entities were reached?
+      - What is the de-duplicated audience size for this period?
+    tags: [ audience, reach, distinct, cpc, hll, theta, sketch ]
+    maturity: certified
+    processor_kinds:
+      [ binary_outcome, numeric_distribution, score_distribution, entity_lifecycle, entity_set, funnel, snapshot ]
+    inputs:
+      - role: cardinality_state
+        label: Entity field
+        description: Select any processor-owned field; CPC is preferred, while HLL and Theta remain available.
+        source: state
+        state_types: [ cpc, hll, theta ]
+        preferred_names: [ UniqueCustomers_cpc, UniqueSubjects_cpc, UniqueEntities_cpc ]
+        preferred_state_types: [ cpc ]
+        selection: field_algorithm
+    default_metric_id: VS_Unique_Entities
+    metric:
+      source: ${processor_id}
+      kind: approx_distinct_count
+      description: Approximate distinct entity count from a persisted mergeable sketch.
+      display:
+        label: Unique entities
+        unit: entities
+        value_format: integer
+        direction: higher_is_better
+      state: ${cardinality_state}
+    method:
+      calculation: estimated distinct count of the selected entity sketch
+      accuracy: approximate
+      algorithm: CPC by default; HLL and Theta are available alternatives.
+      caveat: Precision depends on the sketch parameter and estimates include bounded sampling error. Theta is most useful when the same state also participates in set algebra.
+    report: { chart: kpi_card, placement: kpi_strip }
+
+  - id: distribution.median
+    version: 1
+    title: Median value
+    domain: Distribution
+    summary: Median of a persisted numeric or score distribution.
+    business_questions:
+      - What is the typical value without sensitivity to extreme observations?
+    tags: [ distribution, median, quantile, tdigest, kll ]
+    maturity: reviewed
+    processor_kinds: [ numeric_distribution, score_distribution ]
+    inputs:
+      - role: digest_state
+        label: Value field
+        source: state
+        state_types: [ tdigest, kll ]
+        absent_state_attributes: [ outcome ]
+        selection: field_algorithm
+    default_metric_id: VS_Median_Value
+    metric:
+      source: ${processor_id}
+      kind: tdigest_quantile
+      description: Median reconstructed from a persisted mergeable distribution sketch.
+      display:
+        label: Median value
+        unit: value
+        value_format: number
+        direction: neutral
+      state: ${digest_state}
+      quantile: 0.5
+    method:
+      calculation: q(0.50)
+      accuracy: approximate
+      algorithm: Quantile query over a t-digest or KLL state.
+      caveat: Approximation error depends on sketch configuration and the observed distribution.
+    report: { chart: kpi_card, placement: kpi_strip }
+
+  - id: distribution.p95
+    version: 1
+    title: 95th percentile
+    domain: Distribution
+    summary: High-tail value exceeded by approximately five percent of observations.
+    business_questions:
+      - What does a high but non-maximum response time or score look like?
+      - Are tail outcomes improving?
+    tags: [ distribution, p95, tail, service, tdigest, kll ]
+    maturity: reviewed
+    processor_kinds: [ numeric_distribution, score_distribution ]
+    inputs:
+      - role: digest_state
+        label: Value field
+        source: state
+        state_types: [ tdigest, kll ]
+        absent_state_attributes: [ outcome ]
+        selection: field_algorithm
+    default_metric_id: VS_P95_Value
+    metric:
+      source: ${processor_id}
+      kind: tdigest_quantile
+      description: 95th percentile reconstructed from a persisted mergeable distribution sketch.
+      display:
+        label: 95th percentile
+        unit: value
+        value_format: number
+        direction: lower_is_better
+      state: ${digest_state}
+      quantile: 0.95
+    method:
+      calculation: q(0.95)
+      accuracy: approximate
+      algorithm: Quantile query over a t-digest or KLL state.
+      caveat: Confirm whether higher or lower is favorable for the selected business value.
+    report: { chart: kpi_card, placement: kpi_strip }
+
+  - id: model_quality.roc_auc
+    version: 1
+    title: ROC AUC
+    domain: Model quality
+    summary: Ranking discrimination reconstructed from positive and negative score distributions.
+    business_questions:
+      - How well does the score rank positive outcomes above negative outcomes?
+    tags: [ model, quality, roc, auc, digest ]
+    maturity: reviewed
+    processor_kinds: [ score_distribution ]
+    inputs:
+      - role: positive_digest
+        label: Score field
+        source: state
+        state_types: [ tdigest ]
+        state_attributes: { outcome: positive }
+        preferred_state_types: [ tdigest ]
+        selection: field_algorithm
+      - role: negative_digest
+        label: Matched negative-outcome digest
+        source: state
+        state_types: [ tdigest ]
+        state_attributes: { outcome: negative }
+        selection: automatic
+        same_attribute_as: positive_digest
+        match_attribute: score_property
+    default_metric_id: VS_ROC_AUC
+    metric:
+      source: ${processor_id}
+      kind: curve_from_digests
+      description: Approximate ROC AUC reconstructed from positive and negative score digests.
+      display:
+        label: ROC AUC
+        unit: score
+        value_format: number
+        direction: higher_is_better
+      positive_state: ${positive_digest}
+      negative_state: ${negative_digest}
+      output: roc_auc
+    method:
+      calculation: area under the reconstructed receiver operating characteristic curve
+      accuracy: approximate
+      algorithm: Curve reconstruction from mergeable positive and negative t-digests.
+      caveat: It is a distribution-sketch approximation, not an exact row-level rank calculation.
+    report: { chart: kpi_card, placement: kpi_strip }
+
+  - id: funnel.conversion_rate
+    version: 1
+    title: Funnel conversion rate
+    domain: Funnel
+    summary: Share of starting-stage entities that reach the selected completion state.
+    business_questions:
+      - What proportion of the funnel reaches completion?
+    tags: [ funnel, conversion, rate ]
+    maturity: reviewed
+    processor_kinds: [ funnel ]
+    inputs:
+      - role: start_count
+        label: Starting stage
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Impression_Count, Started_Count ]
+      - role: completion_count
+        label: Completion stage
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Conversion_Count, Completed_Count ]
+        different_from: start_count
+    default_metric_id: VS_Funnel_Conversion_Rate
+    metric:
+      source: ${processor_id}
+      kind: formula
+      description: Completion-stage count divided by starting-stage count.
+      display:
+        label: Funnel conversion rate
+        unit: percent
+        value_format: percent
+        direction: higher_is_better
+      expression:
+        op: safe_div
+        num: { col: "${completion_count}" }
+        den: { col: "${start_count}" }
+    method:
+      calculation: completion_count / start_count
+      accuracy: exact
+      algorithm: Safe division over mergeable funnel count states.
+      caveat: Stage definitions and entity-deduplication semantics come from the funnel processor.
+    report: { chart: kpi_card, placement: kpi_strip }
+
+  - id: funnel.dropoff_rate
+    version: 1
+    title: Funnel drop-off rate
+    domain: Funnel
+    summary: Share lost between a selected starting and ending funnel stage.
+    business_questions:
+      - Where is the largest loss between two funnel stages?
+    tags: [ funnel, dropoff, rate ]
+    maturity: reviewed
+    processor_kinds: [ funnel ]
+    inputs:
+      - role: from_stage
+        label: Starting stage
+        source: stage
+        preferred_names: [ Impression, Started ]
+      - role: to_stage
+        label: Ending stage
+        source: stage
+        preferred_names: [ Conversion, Completed ]
+        different_from: from_stage
+    default_metric_id: VS_Funnel_Dropoff
+    metric:
+      source: ${processor_id}
+      kind: funnel_dropoff
+      description: Aggregate funnel drop-off rate between the selected stages.
+      display:
+        label: Funnel drop-off rate
+        unit: percent
+        value_format: percent
+        direction: lower_is_better
+      from_stage: ${from_stage}
+      to_stage: ${to_stage}
+      output: rate
+    method:
+      calculation: 1 - (to_stage_count / from_stage_count)
+      accuracy: exact
+      algorithm: Funnel drop-off over persisted stage aggregates.
+      caveat: Stage order and entity semantics are defined by the selected processor.
+    report: { chart: kpi_card, placement: kpi_strip }
+
+  - id: lifecycle.summary
+    version: 1
+    title: Lifecycle summary
+    domain: Lifecycle
+    summary: Aggregate entity lifecycle measures for recurrence, age, and activity.
+    business_questions:
+      - How active and recurrent are the tracked entities?
+    tags: [ entity, lifecycle, recurrence ]
+    maturity: reviewed
+    processor_kinds: [ entity_lifecycle ]
+    inputs: [ ]
+    default_metric_id: VS_Lifecycle_Summary
+    metric:
+      source: ${processor_id}
+      kind: lifecycle_summary
+      description: Lifecycle measures derived from persisted entity lifecycle state.
+      display:
+        label: Lifecycle summary
+        unit: entities
+        value_format: number
+        direction: neutral
+    method:
+      calculation: lifecycle outputs defined by the entity lifecycle metric implementation
+      accuracy: exact
+      algorithm: Mergeable entity lifecycle aggregates.
+      caveat: This metric returns multiple outputs and is usually better suited to a table than a KPI card.
+    report: { chart: table, placement: content }
+
+  - id: category.top_items
+    version: 1
+    title: Top categories
+    domain: Category
+    summary: Most frequent items from a persisted heavy-hitters sketch.
+    business_questions:
+      - Which categories contribute the most volume?
+      - Which high-frequency items deserve attention?
+    tags: [ category, topk, frequent-items, sketch ]
+    maturity: reviewed
+    processor_kinds:
+      [ binary_outcome, numeric_distribution, score_distribution, entity_lifecycle, entity_set, funnel, snapshot ]
+    inputs:
+      - role: topk_state
+        label: Category field
+        source: state
+        state_types: [ topk ]
+        selection: field_algorithm
+    default_metric_id: VS_Top_Categories
+    metric:
+      source: ${processor_id}
+      kind: topk_items
+      description: Top categories estimated from a persisted frequent-items sketch.
+      display:
+        label: Top categories
+        unit: observations
+        value_format: integer
+        direction: neutral
+      state: ${topk_state}
+      limit: 10
+      error_type: NO_FALSE_POSITIVES
+    method:
+      calculation: ten most frequent items with estimated frequencies
+      accuracy: approximate
+      algorithm: Apache DataSketches frequent-items sketch.
+      caveat: Error guarantees depend on the configured mode and sketch capacity.
+    report: { chart: table, placement: content }

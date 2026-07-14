@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+.installed.cfg
+MANIFEST
+
+# Virtualenvs / uv
+.venv/
+.python-version-*
+.uv-cache/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Project transient
+*.duckdb
+*.duckdb.wal
+
+# R cruft (the original directory had .Rhistory; keep it ignored going forward)
+.Rhistory
+
+# MkDocs build output
+site/
+
+# Claude Code per-user harness state (shared `.claude/settings.json` is fine to commit)
+.claude/settings.local.json
+/examples/*
+!/examples/demo/
+/examples/demo/*
+!/examples/demo/ai.yaml
+!/examples/demo/ai_gpt.yaml
+# Track the demo catalog so tests/CI can load it on a clean checkout; the
+# large data/, aggregates/, and meta/ folders stay ignored and are rebuilt
+# by the test data generator (see tests/conftest.py).
+!/examples/demo/catalog/
+/.claude/
+/artifacts/
+/.agents/

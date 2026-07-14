@@ -1,0 +1,50 @@
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+extend-exclude = ["docs", "examples/**/data"]
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+    "N",    # pep8-naming
+    "PT",   # pytest style
+    "PIE",  # misc
+    "TID",  # tidy imports
+    "PL",   # pylint subset
+]
+ignore = [
+    "E501",     # line length handled by formatter
+    "PLR0913",  # too many arguments — common in config models
+    "PLR2004",  # magic values — fine in tests
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["PLR2004", "S101", "PLR0915"]
+# AST discriminator and tag-mapper are dispatch tables over the 28-variant Expr
+# union — splitting them up just hides the structure.
+"src/valuestream/expr/ast.py" = ["PLR0911", "PLR0912"]
+# The validator's recursive _infer is a dispatch table over the same 28
+# variants — same justification.
+"src/valuestream/expr/validator.py" = ["PLR0911", "PLR0912", "PLR0915"]
+# The translator's _translate is also a per-variant dispatch table.
+"src/valuestream/expr/translator.py" = ["PLR0911", "PLR0912", "PLR0915"]
+# canonicalize is also a single dispatch over Python value kinds.
+"src/valuestream/config/canonical.py" = ["PLR0911"]
+# validate_catalog walks every catalog cross-reference in one pass; the
+# branch density reflects the spec, not accidental complexity.
+"src/valuestream/config/validate.py" = ["PLR0912"]
+
+[lint.isort]
+known-first-party = ["valuestream"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

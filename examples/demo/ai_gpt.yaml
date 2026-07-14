@@ -1,0 +1,5 @@
+ai:
+  llm:
+    model: gpt-5.5
+    api_key_env: OPENAI_API_KEY
+    timeout_seconds: 120

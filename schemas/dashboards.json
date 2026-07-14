@@ -1,0 +1,374 @@
+{
+  "$defs": {
+    "Dashboard": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "layout": {
+          "default": "tabs",
+          "enum": [
+            "tabs",
+            "grid",
+            "stacked"
+          ],
+          "title": "Layout",
+          "type": "string"
+        },
+        "pages": {
+          "items": {
+            "$ref": "#/$defs/DashboardPage"
+          },
+          "title": "Pages",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "pages"
+      ],
+      "title": "Dashboard",
+      "type": "object"
+    },
+    "DashboardPage": {
+      "additionalProperties": false,
+      "properties": {
+        "filters": {
+          "items": {
+            "$ref": "#/$defs/PageFilterSpec"
+          },
+          "title": "Filters",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "tiles": {
+          "items": {
+            "$ref": "#/$defs/Tile"
+          },
+          "title": "Tiles",
+          "type": "array"
+        },
+        "time_filter": {
+          "$ref": "#/$defs/TimeFilterSpec"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "tiles"
+      ],
+      "title": "DashboardPage",
+      "type": "object"
+    },
+    "KpiSpec": {
+      "additionalProperties": false,
+      "description": "Explicit scalar-card comparison, target, and sparkline behavior.",
+      "properties": {
+        "comparison": {
+          "default": "none",
+          "enum": [
+            "none",
+            "previous_period"
+          ],
+          "title": "Comparison",
+          "type": "string"
+        },
+        "comparison_period": {
+          "default": "month",
+          "enum": [
+            "day",
+            "week",
+            "month",
+            "quarter",
+            "year"
+          ],
+          "title": "Comparison Period",
+          "type": "string"
+        },
+        "sparkline_grain": {
+          "anyOf": [
+            {
+              "enum": [
+                "daily",
+                "weekly",
+                "monthly"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sparkline Grain"
+        },
+        "sparkline_points": {
+          "default": 30,
+          "maximum": 366,
+          "minimum": 2,
+          "title": "Sparkline Points",
+          "type": "integer"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        }
+      },
+      "title": "KpiSpec",
+      "type": "object"
+    },
+    "PageFilterSpec": {
+      "additionalProperties": false,
+      "description": "One aggregate-backed page filter exposed by the Reports surface.",
+      "properties": {
+        "control": {
+          "default": "multiselect",
+          "enum": [
+            "multiselect",
+            "selectbox",
+            "text"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "display": {
+          "default": "secondary",
+          "enum": [
+            "primary",
+            "secondary"
+          ],
+          "title": "Display",
+          "type": "string"
+        },
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "scope": {
+          "default": "compatible_tiles",
+          "enum": [
+            "all_tiles",
+            "compatible_tiles"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "title": "PageFilterSpec",
+      "type": "object"
+    },
+    "Tile": {
+      "additionalProperties": true,
+      "description": "One tile on a dashboard page.\n\nRequired and optional fields per chart kind are documented in\n``docs/CHART_CATALOG.md`` \u00a73. We allow extras here so chart-specific\nkeys (``x``, ``y``, ``color``, ``facets``, ``path``, ``references``,\n``value``) don't need their own per-kind schemas at Phase 0.",
+      "properties": {
+        "chart": {
+          "enum": [
+            "line",
+            "stacked_area",
+            "bar",
+            "kpi_card",
+            "waterfall",
+            "pareto",
+            "treemap",
+            "heatmap",
+            "cohort_heatmap",
+            "scatter",
+            "combo",
+            "interval",
+            "donut",
+            "geo_map",
+            "table",
+            "calendar_heatmap",
+            "bar_polar",
+            "sankey",
+            "gauge",
+            "funnel",
+            "boxplot",
+            "histogram",
+            "calibration_curve",
+            "roc_curve",
+            "precision_recall_curve",
+            "gain_curve",
+            "lift_curve",
+            "rfm_density",
+            "exposure",
+            "corr",
+            "model",
+            "descriptive_line",
+            "descriptive_boxplot",
+            "descriptive_histogram",
+            "descriptive_heatmap",
+            "descriptive_funnel",
+            "experiment_z_score",
+            "experiment_odds_ratio",
+            "clv_treemap"
+          ],
+          "title": "Chart",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kpi": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KpiSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "placement": {
+          "default": "content",
+          "enum": [
+            "content",
+            "kpi_strip"
+          ],
+          "title": "Placement",
+          "type": "string"
+        },
+        "scale_mode": {
+          "default": "absolute",
+          "enum": [
+            "absolute",
+            "index_100",
+            "percent_change"
+          ],
+          "title": "Scale Mode",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "value_format": {
+          "anyOf": [
+            {
+              "enum": [
+                "percent",
+                "integer",
+                "number",
+                "currency"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Format"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "metric",
+        "chart"
+      ],
+      "title": "Tile",
+      "type": "object"
+    },
+    "TimeFilterSpec": {
+      "additionalProperties": false,
+      "description": "Available and default time-range presets for one dashboard page.",
+      "properties": {
+        "default": {
+          "default": "all_time",
+          "enum": [
+            "last_7_days",
+            "last_30_days",
+            "last_90_days",
+            "year_to_date",
+            "custom",
+            "all_time"
+          ],
+          "title": "Default",
+          "type": "string"
+        },
+        "presets": {
+          "items": {
+            "enum": [
+              "last_7_days",
+              "last_30_days",
+              "last_90_days",
+              "year_to_date",
+              "custom",
+              "all_time"
+            ],
+            "type": "string"
+          },
+          "title": "Presets",
+          "type": "array"
+        }
+      },
+      "title": "TimeFilterSpec",
+      "type": "object"
+    }
+  },
+  "$id": "https://valuestream.dev/schemas/dashboards.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Top-level shape for ``dashboards.yaml``.",
+  "properties": {
+    "dashboards": {
+      "items": {
+        "$ref": "#/$defs/Dashboard"
+      },
+      "title": "Dashboards",
+      "type": "array"
+    },
+    "theme": {
+      "additionalProperties": true,
+      "title": "Theme",
+      "type": "object"
+    }
+  },
+  "required": [
+    "dashboards"
+  ],
+  "title": "Value Stream Dashboards",
+  "type": "object"
+}

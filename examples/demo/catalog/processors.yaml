@@ -1,0 +1,193 @@
+processors:
+- id: ih_engagement
+  source: ih
+  kind: binary_outcome
+  description: Engagement outcomes for Pega interaction history, with customer, channel,
+    offer, and experiment dimensions.
+  dimensions:
+  - Channel
+  - Direction
+  - CustomerSegment
+  - IsProspect
+  - Issue
+  - Group
+  - Name
+  - Treatment
+  - PlacementType
+  - ModelControlGroup
+  - MktType
+  - MktValue
+  - PropensitySource
+  - ModelClass
+  time:
+    column: OutcomeTime
+    grains:
+    - Day
+  entities:
+    subject: SubjectID
+  outcome:
+    column: Outcome
+    positive_values:
+    - Clicked
+    - Conversion
+    negative_values:
+    - Impression
+    - Pending
+  states:
+    Count:
+      type: count
+    Positives:
+      type: count
+    Negatives:
+      type: count
+    UniqueCustomers_cpc:
+      type: cpc
+      source_column: SubjectID
+      lg_k: 11
+    UniqueInteractions_cpc:
+      type: cpc
+      source_column: InteractionID
+      lg_k: 11
+- value:
+    column: ResponseTime
+    state: ResponseTime_tdigest
+  id: ih_response_time
+  source: ih
+  kind: numeric_distribution
+  description: Response time distribution from decision to outcome by customer, channel,
+    and offer context.
+  dimensions:
+  - Channel
+  - Direction
+  - CustomerSegment
+  - IsProspect
+  - Issue
+  - Group
+  - Name
+  - Outcome
+  time:
+    column: OutcomeTime
+    grains:
+    - Day
+  properties:
+  - ResponseTime
+  quantile_engine: tdigest
+- entity: SubjectID
+  id: ih_outcome_funnel
+  source: ih
+  kind: funnel
+  description: Outcome progression from impressions to clicks to conversions.
+  dimensions:
+  - Channel
+  - Direction
+  - CustomerSegment
+  - IsProspect
+  - Issue
+  - Group
+  - Name
+  - ModelControlGroup
+  - PlacementType
+  time:
+    column: OutcomeTime
+    grains:
+    - Day
+  stages:
+  - name: Impression
+    when:
+      op: eq
+      column: Outcome
+      value: Impression
+  - name: Clicked
+    when:
+      op: eq
+      column: Outcome
+      value: Clicked
+  - name: Conversion
+    when:
+      op: eq
+      column: Outcome
+      value: Conversion
+  states:
+    Impression_Count:
+      type: count
+    Clicked_Count:
+      type: count
+    Conversion_Count:
+      type: count
+- id: ih_propensity_scores
+  source: ih
+  kind: score_distribution
+  description: Distribution of propensity, final propensity, priority, and rank across
+    engagement dimensions.
+  time:
+    column: OutcomeTime
+    grains:
+    - Day
+  states:
+    FinalPropensity_tdigest:
+      type: tdigest
+    Propensity_tdigest:
+      type: tdigest
+    Priority_tdigest:
+      type: tdigest
+    Count:
+      type: count
+    personalization:
+      type: pooled_mean
+    Propensity_tdigest_positives:
+      type: tdigest
+      source_column: Propensity
+      score_property: Propensity
+      outcome: positive
+    Propensity_tdigest_negatives:
+      type: tdigest
+      source_column: Propensity
+      score_property: Propensity
+      outcome: negative
+    FinalPropensity_tdigest_positives:
+      type: tdigest
+      source_column: FinalPropensity
+      score_property: FinalPropensity
+      outcome: positive
+    FinalPropensity_tdigest_negatives:
+      type: tdigest
+      source_column: FinalPropensity
+      score_property: FinalPropensity
+      outcome: negative
+    UniqueCustomers_cpc:
+      type: cpc
+      lg_k: 11
+    novelty:
+      type: pooled_mean
+  score_properties:
+  - Propensity
+  - FinalPropensity
+  - Priority
+  outcome_column: Outcome
+  score_columns:
+  - column: FinalPropensity
+    state: FinalPropensity_tdigest
+  - column: Propensity
+    state: Propensity_tdigest
+  - column: Priority
+    state: Priority_tdigest
+  - column: Rank
+    state: Rank_tdigest
+  dimensions:
+  - Channel
+  - Direction
+  - CustomerSegment
+  - IsProspect
+  - Issue
+  - Group
+  - Name
+  - ModelControlGroup
+  - PropensitySource
+  - PlacementType
+  outcome:
+    column: Outcome
+    positive_values:
+    - Clicked
+    negative_values:
+    - Impression
+    - Pending

@@ -1,0 +1,4441 @@
+{
+  "$defs": {
+    "ApproxDistinctCountMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "approx_distinct_count",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "state"
+      ],
+      "title": "ApproxDistinctCountMetric",
+      "type": "object"
+    },
+    "ArithmeticNary": {
+      "additionalProperties": false,
+      "description": "``{op: add|sub|mul|div, args: [...]}``.",
+      "properties": {
+        "args": {
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Col"
+              },
+              {
+                "$ref": "#/$defs/Lit"
+              },
+              {
+                "$ref": "#/$defs/Param"
+              },
+              {
+                "$ref": "#/$defs/PolarsExpr"
+              },
+              {
+                "$ref": "#/$defs/UnaryArg"
+              },
+              {
+                "$ref": "#/$defs/OpLog"
+              },
+              {
+                "$ref": "#/$defs/OpRound"
+              },
+              {
+                "$ref": "#/$defs/OpCast"
+              },
+              {
+                "$ref": "#/$defs/LogicalNary"
+              },
+              {
+                "$ref": "#/$defs/ArithmeticNary"
+              },
+              {
+                "$ref": "#/$defs/OpSafeDiv"
+              },
+              {
+                "$ref": "#/$defs/OpConcat"
+              },
+              {
+                "$ref": "#/$defs/MinMaxNary"
+              },
+              {
+                "$ref": "#/$defs/OpCoalesce"
+              },
+              {
+                "$ref": "#/$defs/ComparisonColumn"
+              },
+              {
+                "$ref": "#/$defs/ComparisonArgs"
+              },
+              {
+                "$ref": "#/$defs/OpIn"
+              },
+              {
+                "$ref": "#/$defs/OpNotIn"
+              },
+              {
+                "$ref": "#/$defs/OpBetween"
+              },
+              {
+                "$ref": "#/$defs/NullCheck"
+              },
+              {
+                "$ref": "#/$defs/OpMatches"
+              },
+              {
+                "$ref": "#/$defs/StrPrefixSuffix"
+              },
+              {
+                "$ref": "#/$defs/OpCase"
+              },
+              {
+                "$ref": "#/$defs/OpWhenThen"
+              },
+              {
+                "$ref": "#/$defs/OpDateTrunc"
+              },
+              {
+                "$ref": "#/$defs/OpDateDiff"
+              },
+              {
+                "$ref": "#/$defs/OpDatePart"
+              },
+              {
+                "$ref": "#/$defs/OpNow"
+              },
+              {
+                "$ref": "#/$defs/OpStrftime"
+              },
+              {
+                "$ref": "#/$defs/OpStrptime"
+              }
+            ]
+          },
+          "minItems": 2,
+          "title": "Args",
+          "type": "array"
+        },
+        "op": {
+          "enum": [
+            "add",
+            "sub",
+            "mul",
+            "div"
+          ],
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "title": "ArithmeticNary",
+      "type": "object"
+    },
+    "CalibrationFromDigestsMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "calibration_from_digests",
+          "title": "Kind",
+          "type": "string"
+        },
+        "negative_state": {
+          "title": "Negative State",
+          "type": "string"
+        },
+        "positive_state": {
+          "title": "Positive State",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "positive_state",
+        "negative_state"
+      ],
+      "title": "CalibrationFromDigestsMetric",
+      "type": "object"
+    },
+    "CaseBranch": {
+      "additionalProperties": false,
+      "description": "One branch of an ``op: case`` node.",
+      "properties": {
+        "cond": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Cond"
+        },
+        "then": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Then"
+        }
+      },
+      "required": [
+        "cond",
+        "then"
+      ],
+      "title": "CaseBranch",
+      "type": "object"
+    },
+    "Col": {
+      "additionalProperties": false,
+      "description": "``{col: <ident>}`` \u2014 reference to a column by name.",
+      "properties": {
+        "col": {
+          "minLength": 1,
+          "title": "Col",
+          "type": "string"
+        }
+      },
+      "required": [
+        "col"
+      ],
+      "title": "Col",
+      "type": "object"
+    },
+    "ComparisonArgs": {
+      "additionalProperties": false,
+      "description": "Args-form ``eq``/``ne``/``lt``/``le``/``gt``/``ge`` between two expressions.",
+      "properties": {
+        "args": {
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Col"
+              },
+              {
+                "$ref": "#/$defs/Lit"
+              },
+              {
+                "$ref": "#/$defs/Param"
+              },
+              {
+                "$ref": "#/$defs/PolarsExpr"
+              },
+              {
+                "$ref": "#/$defs/UnaryArg"
+              },
+              {
+                "$ref": "#/$defs/OpLog"
+              },
+              {
+                "$ref": "#/$defs/OpRound"
+              },
+              {
+                "$ref": "#/$defs/OpCast"
+              },
+              {
+                "$ref": "#/$defs/LogicalNary"
+              },
+              {
+                "$ref": "#/$defs/ArithmeticNary"
+              },
+              {
+                "$ref": "#/$defs/OpSafeDiv"
+              },
+              {
+                "$ref": "#/$defs/OpConcat"
+              },
+              {
+                "$ref": "#/$defs/MinMaxNary"
+              },
+              {
+                "$ref": "#/$defs/OpCoalesce"
+              },
+              {
+                "$ref": "#/$defs/ComparisonColumn"
+              },
+              {
+                "$ref": "#/$defs/ComparisonArgs"
+              },
+              {
+                "$ref": "#/$defs/OpIn"
+              },
+              {
+                "$ref": "#/$defs/OpNotIn"
+              },
+              {
+                "$ref": "#/$defs/OpBetween"
+              },
+              {
+                "$ref": "#/$defs/NullCheck"
+              },
+              {
+                "$ref": "#/$defs/OpMatches"
+              },
+              {
+                "$ref": "#/$defs/StrPrefixSuffix"
+              },
+              {
+                "$ref": "#/$defs/OpCase"
+              },
+              {
+                "$ref": "#/$defs/OpWhenThen"
+              },
+              {
+                "$ref": "#/$defs/OpDateTrunc"
+              },
+              {
+                "$ref": "#/$defs/OpDateDiff"
+              },
+              {
+                "$ref": "#/$defs/OpDatePart"
+              },
+              {
+                "$ref": "#/$defs/OpNow"
+              },
+              {
+                "$ref": "#/$defs/OpStrftime"
+              },
+              {
+                "$ref": "#/$defs/OpStrptime"
+              }
+            ]
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Args",
+          "type": "array"
+        },
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge"
+          ],
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "title": "ComparisonArgs",
+      "type": "object"
+    },
+    "ComparisonColumn": {
+      "additionalProperties": false,
+      "description": "Column-form ``eq``/``ne``/``lt``/``le``/``gt``/``ge`` against a scalar.",
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "op",
+        "column",
+        "value"
+      ],
+      "title": "ComparisonColumn",
+      "type": "object"
+    },
+    "ContingencyTestMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "contingency_test",
+          "title": "Kind",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "tests": {
+          "items": {
+            "enum": [
+              "chi2",
+              "g",
+              "z"
+            ],
+            "type": "string"
+          },
+          "title": "Tests",
+          "type": "array"
+        },
+        "variant_column": {
+          "title": "Variant Column",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "variant_column",
+        "tests"
+      ],
+      "title": "ContingencyTestMetric",
+      "type": "object"
+    },
+    "CurveFromDigestsMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "curve_from_digests",
+          "title": "Kind",
+          "type": "string"
+        },
+        "negative_state": {
+          "title": "Negative State",
+          "type": "string"
+        },
+        "output": {
+          "default": "roc_auc",
+          "enum": [
+            "roc_auc",
+            "average_precision"
+          ],
+          "title": "Output",
+          "type": "string"
+        },
+        "positive_state": {
+          "title": "Positive State",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "positive_state",
+        "negative_state"
+      ],
+      "title": "CurveFromDigestsMetric",
+      "type": "object"
+    },
+    "FormulaMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expression": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Expression"
+        },
+        "kind": {
+          "const": "formula",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "expression"
+      ],
+      "title": "FormulaMetric",
+      "type": "object"
+    },
+    "FunnelDropoffMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "from_stage": {
+          "title": "From Stage",
+          "type": "string"
+        },
+        "kind": {
+          "const": "funnel_dropoff",
+          "title": "Kind",
+          "type": "string"
+        },
+        "output": {
+          "default": "rate",
+          "enum": [
+            "rate",
+            "count"
+          ],
+          "title": "Output",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "to_stage": {
+          "title": "To Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "from_stage",
+        "to_stage"
+      ],
+      "title": "FunnelDropoffMetric",
+      "type": "object"
+    },
+    "KpiRecipe": {
+      "additionalProperties": false,
+      "description": "An inert business definition plus a validated metric template.",
+      "properties": {
+        "business_questions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Business Questions",
+          "type": "array"
+        },
+        "default_metric_id": {
+          "title": "Default Metric Id",
+          "type": "string"
+        },
+        "domain": {
+          "title": "Domain",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RecipeInput"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "maturity": {
+          "default": "reviewed",
+          "enum": [
+            "draft",
+            "reviewed",
+            "certified"
+          ],
+          "title": "Maturity",
+          "type": "string"
+        },
+        "method": {
+          "$ref": "#/$defs/RecipeMethod"
+        },
+        "metric": {
+          "discriminator": {
+            "mapping": {
+              "approx_distinct_count": "#/$defs/ApproxDistinctCountMetric",
+              "calibration_from_digests": "#/$defs/CalibrationFromDigestsMetric",
+              "contingency_test": "#/$defs/ContingencyTestMetric",
+              "curve_from_digests": "#/$defs/CurveFromDigestsMetric",
+              "formula": "#/$defs/FormulaMetric",
+              "funnel_dropoff": "#/$defs/FunnelDropoffMetric",
+              "lifecycle_summary": "#/$defs/LifecycleSummaryMetric",
+              "proportion_test": "#/$defs/ProportionTestMetric",
+              "set_op": "#/$defs/SetOpMetric",
+              "tdigest_quantile": "#/$defs/TdigestQuantileMetric",
+              "topk_items": "#/$defs/TopKItemsMetric",
+              "variant_compare": "#/$defs/VariantCompareMetric"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/FormulaMetric"
+            },
+            {
+              "$ref": "#/$defs/ApproxDistinctCountMetric"
+            },
+            {
+              "$ref": "#/$defs/TopKItemsMetric"
+            },
+            {
+              "$ref": "#/$defs/TdigestQuantileMetric"
+            },
+            {
+              "$ref": "#/$defs/VariantCompareMetric"
+            },
+            {
+              "$ref": "#/$defs/CurveFromDigestsMetric"
+            },
+            {
+              "$ref": "#/$defs/CalibrationFromDigestsMetric"
+            },
+            {
+              "$ref": "#/$defs/ContingencyTestMetric"
+            },
+            {
+              "$ref": "#/$defs/ProportionTestMetric"
+            },
+            {
+              "$ref": "#/$defs/LifecycleSummaryMetric"
+            },
+            {
+              "$ref": "#/$defs/SetOpMetric"
+            },
+            {
+              "$ref": "#/$defs/FunnelDropoffMetric"
+            }
+          ],
+          "title": "Metric"
+        },
+        "processor_kinds": {
+          "items": {
+            "enum": [
+              "binary_outcome",
+              "numeric_distribution",
+              "score_distribution",
+              "entity_lifecycle",
+              "entity_set",
+              "funnel",
+              "snapshot"
+            ],
+            "type": "string"
+          },
+          "title": "Processor Kinds",
+          "type": "array"
+        },
+        "report": {
+          "$ref": "#/$defs/RecipeReport"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "title",
+        "domain",
+        "summary",
+        "processor_kinds",
+        "default_metric_id",
+        "metric",
+        "method"
+      ],
+      "title": "KpiRecipe",
+      "type": "object"
+    },
+    "LifecycleSummaryMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "lifecycle_summary",
+          "title": "Kind",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind"
+      ],
+      "title": "LifecycleSummaryMetric",
+      "type": "object"
+    },
+    "Lit": {
+      "additionalProperties": false,
+      "description": "``{lit: <scalar>}`` \u2014 literal value.",
+      "properties": {
+        "lit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lit"
+        }
+      },
+      "required": [
+        "lit"
+      ],
+      "title": "Lit",
+      "type": "object"
+    },
+    "LogicalNary": {
+      "additionalProperties": false,
+      "description": "``{op: and|or, args: [...]}`` \u2014 short-circuit logical n-ary.",
+      "properties": {
+        "args": {
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Col"
+              },
+              {
+                "$ref": "#/$defs/Lit"
+              },
+              {
+                "$ref": "#/$defs/Param"
+              },
+              {
+                "$ref": "#/$defs/PolarsExpr"
+              },
+              {
+                "$ref": "#/$defs/UnaryArg"
+              },
+              {
+                "$ref": "#/$defs/OpLog"
+              },
+              {
+                "$ref": "#/$defs/OpRound"
+              },
+              {
+                "$ref": "#/$defs/OpCast"
+              },
+              {
+                "$ref": "#/$defs/LogicalNary"
+              },
+              {
+                "$ref": "#/$defs/ArithmeticNary"
+              },
+              {
+                "$ref": "#/$defs/OpSafeDiv"
+              },
+              {
+                "$ref": "#/$defs/OpConcat"
+              },
+              {
+                "$ref": "#/$defs/MinMaxNary"
+              },
+              {
+                "$ref": "#/$defs/OpCoalesce"
+              },
+              {
+                "$ref": "#/$defs/ComparisonColumn"
+              },
+              {
+                "$ref": "#/$defs/ComparisonArgs"
+              },
+              {
+                "$ref": "#/$defs/OpIn"
+              },
+              {
+                "$ref": "#/$defs/OpNotIn"
+              },
+              {
+                "$ref": "#/$defs/OpBetween"
+              },
+              {
+                "$ref": "#/$defs/NullCheck"
+              },
+              {
+                "$ref": "#/$defs/OpMatches"
+              },
+              {
+                "$ref": "#/$defs/StrPrefixSuffix"
+              },
+              {
+                "$ref": "#/$defs/OpCase"
+              },
+              {
+                "$ref": "#/$defs/OpWhenThen"
+              },
+              {
+                "$ref": "#/$defs/OpDateTrunc"
+              },
+              {
+                "$ref": "#/$defs/OpDateDiff"
+              },
+              {
+                "$ref": "#/$defs/OpDatePart"
+              },
+              {
+                "$ref": "#/$defs/OpNow"
+              },
+              {
+                "$ref": "#/$defs/OpStrftime"
+              },
+              {
+                "$ref": "#/$defs/OpStrptime"
+              }
+            ]
+          },
+          "minItems": 2,
+          "title": "Args",
+          "type": "array"
+        },
+        "op": {
+          "enum": [
+            "and",
+            "or"
+          ],
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "title": "LogicalNary",
+      "type": "object"
+    },
+    "MetricDisplaySpec": {
+      "additionalProperties": false,
+      "description": "Presentation metadata shared by reports and catalog authoring surfaces.",
+      "properties": {
+        "direction": {
+          "default": "neutral",
+          "enum": [
+            "higher_is_better",
+            "lower_is_better",
+            "neutral"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        },
+        "value_format": {
+          "anyOf": [
+            {
+              "enum": [
+                "percent",
+                "integer",
+                "number",
+                "currency"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Format"
+        }
+      },
+      "title": "MetricDisplaySpec",
+      "type": "object"
+    },
+    "MinMaxNary": {
+      "additionalProperties": false,
+      "description": "``{op: least|greatest, args: [...]}``.",
+      "properties": {
+        "args": {
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Col"
+              },
+              {
+                "$ref": "#/$defs/Lit"
+              },
+              {
+                "$ref": "#/$defs/Param"
+              },
+              {
+                "$ref": "#/$defs/PolarsExpr"
+              },
+              {
+                "$ref": "#/$defs/UnaryArg"
+              },
+              {
+                "$ref": "#/$defs/OpLog"
+              },
+              {
+                "$ref": "#/$defs/OpRound"
+              },
+              {
+                "$ref": "#/$defs/OpCast"
+              },
+              {
+                "$ref": "#/$defs/LogicalNary"
+              },
+              {
+                "$ref": "#/$defs/ArithmeticNary"
+              },
+              {
+                "$ref": "#/$defs/OpSafeDiv"
+              },
+              {
+                "$ref": "#/$defs/OpConcat"
+              },
+              {
+                "$ref": "#/$defs/MinMaxNary"
+              },
+              {
+                "$ref": "#/$defs/OpCoalesce"
+              },
+              {
+                "$ref": "#/$defs/ComparisonColumn"
+              },
+              {
+                "$ref": "#/$defs/ComparisonArgs"
+              },
+              {
+                "$ref": "#/$defs/OpIn"
+              },
+              {
+                "$ref": "#/$defs/OpNotIn"
+              },
+              {
+                "$ref": "#/$defs/OpBetween"
+              },
+              {
+                "$ref": "#/$defs/NullCheck"
+              },
+              {
+                "$ref": "#/$defs/OpMatches"
+              },
+              {
+                "$ref": "#/$defs/StrPrefixSuffix"
+              },
+              {
+                "$ref": "#/$defs/OpCase"
+              },
+              {
+                "$ref": "#/$defs/OpWhenThen"
+              },
+              {
+                "$ref": "#/$defs/OpDateTrunc"
+              },
+              {
+                "$ref": "#/$defs/OpDateDiff"
+              },
+              {
+                "$ref": "#/$defs/OpDatePart"
+              },
+              {
+                "$ref": "#/$defs/OpNow"
+              },
+              {
+                "$ref": "#/$defs/OpStrftime"
+              },
+              {
+                "$ref": "#/$defs/OpStrptime"
+              }
+            ]
+          },
+          "minItems": 2,
+          "title": "Args",
+          "type": "array"
+        },
+        "op": {
+          "enum": [
+            "least",
+            "greatest"
+          ],
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "title": "MinMaxNary",
+      "type": "object"
+    },
+    "NullCheck": {
+      "additionalProperties": false,
+      "description": "``is_null`` / ``not_null`` over a column.",
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "is_null",
+            "not_null"
+          ],
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "column"
+      ],
+      "title": "NullCheck",
+      "type": "object"
+    },
+    "OpBetween": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "high": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "High"
+        },
+        "low": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Low"
+        },
+        "op": {
+          "const": "between",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "column",
+        "low",
+        "high"
+      ],
+      "title": "OpBetween",
+      "type": "object"
+    },
+    "OpCase": {
+      "additionalProperties": false,
+      "description": "``{op: case, when: [...], else: ...}`` \u2014 n-ary conditional.",
+      "properties": {
+        "else": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Else"
+        },
+        "op": {
+          "const": "case",
+          "title": "Op",
+          "type": "string"
+        },
+        "when": {
+          "items": {
+            "$ref": "#/$defs/CaseBranch"
+          },
+          "minItems": 1,
+          "title": "When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "when",
+        "else"
+      ],
+      "title": "OpCase",
+      "type": "object"
+    },
+    "OpCast": {
+      "additionalProperties": false,
+      "description": "``{op: cast, arg: ..., dtype: <Dtype>}``.",
+      "properties": {
+        "arg": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Arg"
+        },
+        "dtype": {
+          "enum": [
+            "Int8",
+            "Int16",
+            "Int32",
+            "Int64",
+            "Float32",
+            "Float64",
+            "String",
+            "Date",
+            "Datetime",
+            "Boolean"
+          ],
+          "title": "Dtype",
+          "type": "string"
+        },
+        "op": {
+          "const": "cast",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "arg",
+        "dtype"
+      ],
+      "title": "OpCast",
+      "type": "object"
+    },
+    "OpCoalesce": {
+      "additionalProperties": false,
+      "description": "``{op: coalesce, args: [...]}`` \u2014 first non-null wins.",
+      "properties": {
+        "args": {
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Col"
+              },
+              {
+                "$ref": "#/$defs/Lit"
+              },
+              {
+                "$ref": "#/$defs/Param"
+              },
+              {
+                "$ref": "#/$defs/PolarsExpr"
+              },
+              {
+                "$ref": "#/$defs/UnaryArg"
+              },
+              {
+                "$ref": "#/$defs/OpLog"
+              },
+              {
+                "$ref": "#/$defs/OpRound"
+              },
+              {
+                "$ref": "#/$defs/OpCast"
+              },
+              {
+                "$ref": "#/$defs/LogicalNary"
+              },
+              {
+                "$ref": "#/$defs/ArithmeticNary"
+              },
+              {
+                "$ref": "#/$defs/OpSafeDiv"
+              },
+              {
+                "$ref": "#/$defs/OpConcat"
+              },
+              {
+                "$ref": "#/$defs/MinMaxNary"
+              },
+              {
+                "$ref": "#/$defs/OpCoalesce"
+              },
+              {
+                "$ref": "#/$defs/ComparisonColumn"
+              },
+              {
+                "$ref": "#/$defs/ComparisonArgs"
+              },
+              {
+                "$ref": "#/$defs/OpIn"
+              },
+              {
+                "$ref": "#/$defs/OpNotIn"
+              },
+              {
+                "$ref": "#/$defs/OpBetween"
+              },
+              {
+                "$ref": "#/$defs/NullCheck"
+              },
+              {
+                "$ref": "#/$defs/OpMatches"
+              },
+              {
+                "$ref": "#/$defs/StrPrefixSuffix"
+              },
+              {
+                "$ref": "#/$defs/OpCase"
+              },
+              {
+                "$ref": "#/$defs/OpWhenThen"
+              },
+              {
+                "$ref": "#/$defs/OpDateTrunc"
+              },
+              {
+                "$ref": "#/$defs/OpDateDiff"
+              },
+              {
+                "$ref": "#/$defs/OpDatePart"
+              },
+              {
+                "$ref": "#/$defs/OpNow"
+              },
+              {
+                "$ref": "#/$defs/OpStrftime"
+              },
+              {
+                "$ref": "#/$defs/OpStrptime"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Args",
+          "type": "array"
+        },
+        "op": {
+          "const": "coalesce",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "title": "OpCoalesce",
+      "type": "object"
+    },
+    "OpConcat": {
+      "additionalProperties": false,
+      "description": "``{op: concat, args: [...], sep?: <string>}``.",
+      "properties": {
+        "args": {
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Col"
+              },
+              {
+                "$ref": "#/$defs/Lit"
+              },
+              {
+                "$ref": "#/$defs/Param"
+              },
+              {
+                "$ref": "#/$defs/PolarsExpr"
+              },
+              {
+                "$ref": "#/$defs/UnaryArg"
+              },
+              {
+                "$ref": "#/$defs/OpLog"
+              },
+              {
+                "$ref": "#/$defs/OpRound"
+              },
+              {
+                "$ref": "#/$defs/OpCast"
+              },
+              {
+                "$ref": "#/$defs/LogicalNary"
+              },
+              {
+                "$ref": "#/$defs/ArithmeticNary"
+              },
+              {
+                "$ref": "#/$defs/OpSafeDiv"
+              },
+              {
+                "$ref": "#/$defs/OpConcat"
+              },
+              {
+                "$ref": "#/$defs/MinMaxNary"
+              },
+              {
+                "$ref": "#/$defs/OpCoalesce"
+              },
+              {
+                "$ref": "#/$defs/ComparisonColumn"
+              },
+              {
+                "$ref": "#/$defs/ComparisonArgs"
+              },
+              {
+                "$ref": "#/$defs/OpIn"
+              },
+              {
+                "$ref": "#/$defs/OpNotIn"
+              },
+              {
+                "$ref": "#/$defs/OpBetween"
+              },
+              {
+                "$ref": "#/$defs/NullCheck"
+              },
+              {
+                "$ref": "#/$defs/OpMatches"
+              },
+              {
+                "$ref": "#/$defs/StrPrefixSuffix"
+              },
+              {
+                "$ref": "#/$defs/OpCase"
+              },
+              {
+                "$ref": "#/$defs/OpWhenThen"
+              },
+              {
+                "$ref": "#/$defs/OpDateTrunc"
+              },
+              {
+                "$ref": "#/$defs/OpDateDiff"
+              },
+              {
+                "$ref": "#/$defs/OpDatePart"
+              },
+              {
+                "$ref": "#/$defs/OpNow"
+              },
+              {
+                "$ref": "#/$defs/OpStrftime"
+              },
+              {
+                "$ref": "#/$defs/OpStrptime"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Args",
+          "type": "array"
+        },
+        "op": {
+          "const": "concat",
+          "title": "Op",
+          "type": "string"
+        },
+        "sep": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sep"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "title": "OpConcat",
+      "type": "object"
+    },
+    "OpDateDiff": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "End"
+        },
+        "op": {
+          "const": "date_diff",
+          "title": "Op",
+          "type": "string"
+        },
+        "start": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Start"
+        },
+        "unit": {
+          "enum": [
+            "seconds",
+            "minutes",
+            "hours",
+            "days",
+            "months",
+            "years"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "unit",
+        "end",
+        "start"
+      ],
+      "title": "OpDateDiff",
+      "type": "object"
+    },
+    "OpDatePart": {
+      "additionalProperties": false,
+      "properties": {
+        "arg": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Arg"
+        },
+        "op": {
+          "const": "date_part",
+          "title": "Op",
+          "type": "string"
+        },
+        "unit": {
+          "enum": [
+            "year",
+            "month",
+            "day",
+            "quarter",
+            "hour",
+            "weekday"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "unit",
+        "arg"
+      ],
+      "title": "OpDatePart",
+      "type": "object"
+    },
+    "OpDateTrunc": {
+      "additionalProperties": false,
+      "properties": {
+        "arg": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Arg"
+        },
+        "op": {
+          "const": "date_trunc",
+          "title": "Op",
+          "type": "string"
+        },
+        "unit": {
+          "enum": [
+            "day",
+            "month",
+            "quarter",
+            "year",
+            "hour",
+            "week_iso"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "unit",
+        "arg"
+      ],
+      "title": "OpDateTrunc",
+      "type": "object"
+    },
+    "OpIn": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "op": {
+          "const": "in",
+          "title": "Op",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "column",
+        "values"
+      ],
+      "title": "OpIn",
+      "type": "object"
+    },
+    "OpLog": {
+      "additionalProperties": false,
+      "description": "``{op: log, arg: ..., base?: number}`` \u2014 natural log unless ``base`` set.",
+      "properties": {
+        "arg": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Arg"
+        },
+        "base": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base"
+        },
+        "op": {
+          "const": "log",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "arg"
+      ],
+      "title": "OpLog",
+      "type": "object"
+    },
+    "OpMatches": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "op": {
+          "const": "matches",
+          "title": "Op",
+          "type": "string"
+        },
+        "pattern": {
+          "title": "Pattern",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "column",
+        "pattern"
+      ],
+      "title": "OpMatches",
+      "type": "object"
+    },
+    "OpNotIn": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "op": {
+          "const": "not_in",
+          "title": "Op",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "column",
+        "values"
+      ],
+      "title": "OpNotIn",
+      "type": "object"
+    },
+    "OpNow": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "now",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "title": "OpNow",
+      "type": "object"
+    },
+    "OpRound": {
+      "additionalProperties": false,
+      "description": "``{op: round, arg: ..., ndigits?: int}``.",
+      "properties": {
+        "arg": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Arg"
+        },
+        "ndigits": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ndigits"
+        },
+        "op": {
+          "const": "round",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "arg"
+      ],
+      "title": "OpRound",
+      "type": "object"
+    },
+    "OpSafeDiv": {
+      "additionalProperties": false,
+      "description": "``{op: safe_div, num: ..., den: ...}`` \u2014 returns 0.0 when ``den == 0``.",
+      "properties": {
+        "den": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Den"
+        },
+        "num": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Num"
+        },
+        "op": {
+          "const": "safe_div",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "num",
+        "den"
+      ],
+      "title": "OpSafeDiv",
+      "type": "object"
+    },
+    "OpStrftime": {
+      "additionalProperties": false,
+      "properties": {
+        "arg": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Arg"
+        },
+        "format": {
+          "title": "Format",
+          "type": "string"
+        },
+        "op": {
+          "const": "strftime",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "arg",
+        "format"
+      ],
+      "title": "OpStrftime",
+      "type": "object"
+    },
+    "OpStrptime": {
+      "additionalProperties": false,
+      "properties": {
+        "arg": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Arg"
+        },
+        "format": {
+          "title": "Format",
+          "type": "string"
+        },
+        "op": {
+          "const": "strptime",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "arg",
+        "format"
+      ],
+      "title": "OpStrptime",
+      "type": "object"
+    },
+    "OpWhenThen": {
+      "additionalProperties": false,
+      "description": "``{op: when_then, cond: ..., then: ..., else: ...}`` \u2014 binary conditional.",
+      "properties": {
+        "cond": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Cond"
+        },
+        "else": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Else"
+        },
+        "op": {
+          "const": "when_then",
+          "title": "Op",
+          "type": "string"
+        },
+        "then": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Then"
+        }
+      },
+      "required": [
+        "op",
+        "cond",
+        "then",
+        "else"
+      ],
+      "title": "OpWhenThen",
+      "type": "object"
+    },
+    "Param": {
+      "additionalProperties": false,
+      "description": "``{param: <ident>}`` \u2014 workspace-level parameter reference.",
+      "properties": {
+        "param": {
+          "minLength": 1,
+          "title": "Param",
+          "type": "string"
+        }
+      },
+      "required": [
+        "param"
+      ],
+      "title": "Param",
+      "type": "object"
+    },
+    "PolarsExpr": {
+      "additionalProperties": false,
+      "description": "``{polars: <expr>}`` \u2014 direct Polars expression text for advanced transforms.",
+      "properties": {
+        "polars": {
+          "minLength": 1,
+          "title": "Polars",
+          "type": "string"
+        }
+      },
+      "required": [
+        "polars"
+      ],
+      "title": "PolarsExpr",
+      "type": "object"
+    },
+    "ProportionTestMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "control_role": {
+          "default": "Control",
+          "title": "Control Role",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "proportion_test",
+          "title": "Kind",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "test_role": {
+          "default": "Test",
+          "title": "Test Role",
+          "type": "string"
+        },
+        "variant_column": {
+          "default": "ModelControlGroup",
+          "title": "Variant Column",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind"
+      ],
+      "title": "ProportionTestMetric",
+      "type": "object"
+    },
+    "RecipeInput": {
+      "additionalProperties": false,
+      "description": "One processor capability that must be bound before instantiation.",
+      "properties": {
+        "absent_state_attributes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Absent State Attributes",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "different_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Different From"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "match_attribute": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Match Attribute"
+        },
+        "preferred_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Preferred Names",
+          "type": "array"
+        },
+        "preferred_state_types": {
+          "default": [],
+          "items": {
+            "enum": [
+              "count",
+              "value_sum",
+              "min",
+              "max",
+              "pooled_mean",
+              "pooled_variance",
+              "tdigest",
+              "kll",
+              "cpc",
+              "hll",
+              "theta",
+              "topk"
+            ],
+            "type": "string"
+          },
+          "title": "Preferred State Types",
+          "type": "array"
+        },
+        "require_preferred": {
+          "default": false,
+          "title": "Require Preferred",
+          "type": "boolean"
+        },
+        "role": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Role",
+          "type": "string"
+        },
+        "same_attribute_as": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Same Attribute As"
+        },
+        "selection": {
+          "default": "choice",
+          "enum": [
+            "automatic",
+            "choice",
+            "field_algorithm"
+          ],
+          "title": "Selection",
+          "type": "string"
+        },
+        "source": {
+          "default": "state",
+          "enum": [
+            "state",
+            "stage"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "state_attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "State Attributes",
+          "type": "object"
+        },
+        "state_types": {
+          "default": [],
+          "items": {
+            "enum": [
+              "count",
+              "value_sum",
+              "min",
+              "max",
+              "pooled_mean",
+              "pooled_variance",
+              "tdigest",
+              "kll",
+              "cpc",
+              "hll",
+              "theta",
+              "topk"
+            ],
+            "type": "string"
+          },
+          "title": "State Types",
+          "type": "array"
+        }
+      },
+      "required": [
+        "role",
+        "label"
+      ],
+      "title": "RecipeInput",
+      "type": "object"
+    },
+    "RecipeMethod": {
+      "additionalProperties": false,
+      "properties": {
+        "accuracy": {
+          "enum": [
+            "exact",
+            "approximate",
+            "statistical"
+          ],
+          "title": "Accuracy",
+          "type": "string"
+        },
+        "algorithm": {
+          "title": "Algorithm",
+          "type": "string"
+        },
+        "calculation": {
+          "title": "Calculation",
+          "type": "string"
+        },
+        "caveat": {
+          "default": "",
+          "title": "Caveat",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calculation",
+        "accuracy",
+        "algorithm"
+      ],
+      "title": "RecipeMethod",
+      "type": "object"
+    },
+    "RecipeReport": {
+      "additionalProperties": false,
+      "properties": {
+        "chart": {
+          "default": "kpi_card",
+          "title": "Chart",
+          "type": "string"
+        },
+        "kpi": {
+          "additionalProperties": true,
+          "title": "Kpi",
+          "type": "object"
+        },
+        "placement": {
+          "default": "kpi_strip",
+          "enum": [
+            "content",
+            "kpi_strip"
+          ],
+          "title": "Placement",
+          "type": "string"
+        }
+      },
+      "title": "RecipeReport",
+      "type": "object"
+    },
+    "SetOpMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "set_op",
+          "title": "Kind",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "union",
+            "intersection",
+            "a_not_b",
+            "diff"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "operands": {
+          "items": {
+            "$ref": "#/$defs/SetOpOperand"
+          },
+          "title": "Operands",
+          "type": "array"
+        },
+        "output": {
+          "const": "count",
+          "default": "count",
+          "title": "Output",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "states": {
+          "items": {
+            "type": "string"
+          },
+          "title": "States",
+          "type": "array"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "op"
+      ],
+      "title": "SetOpMetric",
+      "type": "object"
+    },
+    "SetOpOperand": {
+      "additionalProperties": true,
+      "properties": {
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "time_window": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Window"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "SetOpOperand",
+      "type": "object"
+    },
+    "StrPrefixSuffix": {
+      "additionalProperties": false,
+      "description": "``starts_with`` / ``ends_with`` against a literal string.",
+      "properties": {
+        "column": {
+          "minLength": 1,
+          "title": "Column",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "starts_with",
+            "ends_with"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "column",
+        "value"
+      ],
+      "title": "StrPrefixSuffix",
+      "type": "object"
+    },
+    "TdigestQuantileMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "tdigest_quantile",
+          "title": "Kind",
+          "type": "string"
+        },
+        "quantile": {
+          "title": "Quantile",
+          "type": "number"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "state",
+        "quantile"
+      ],
+      "title": "TdigestQuantileMetric",
+      "type": "object"
+    },
+    "TopKItemsMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error_type": {
+          "default": "NO_FALSE_POSITIVES",
+          "enum": [
+            "NO_FALSE_POSITIVES",
+            "NO_FALSE_NEGATIVES"
+          ],
+          "title": "Error Type",
+          "type": "string"
+        },
+        "kind": {
+          "const": "topk_items",
+          "title": "Kind",
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "state"
+      ],
+      "title": "TopKItemsMetric",
+      "type": "object"
+    },
+    "UnaryArg": {
+      "additionalProperties": false,
+      "description": "``not`` / ``neg`` / ``abs`` / ``sqrt`` / ``exp`` / ``ceil`` / ``floor``.",
+      "properties": {
+        "arg": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "Arg"
+        },
+        "op": {
+          "enum": [
+            "not",
+            "neg",
+            "abs",
+            "sqrt",
+            "exp",
+            "ceil",
+            "floor"
+          ],
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "arg"
+      ],
+      "title": "UnaryArg",
+      "type": "object"
+    },
+    "VariantCompareMetric": {
+      "additionalProperties": true,
+      "properties": {
+        "confidence_level": {
+          "default": 0.95,
+          "exclusiveMaximum": 1.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Confidence Level",
+          "type": "number"
+        },
+        "control_role": {
+          "title": "Control Role",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "variant_compare",
+          "title": "Kind",
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "test_role": {
+          "title": "Test Role",
+          "type": "string"
+        },
+        "variant_column": {
+          "title": "Variant Column",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "variant_column",
+        "test_role",
+        "control_role"
+      ],
+      "title": "VariantCompareMetric",
+      "type": "object"
+    }
+  },
+  "$id": "https://valuestream.dev/schemas/kpi-recipes.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "recipes": {
+      "items": {
+        "$ref": "#/$defs/KpiRecipe"
+      },
+      "title": "Recipes",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "recipes"
+  ],
+  "title": "Value Stream KPI Recipe Library",
+  "type": "object"
+}

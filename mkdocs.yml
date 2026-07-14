@@ -1,0 +1,125 @@
+site_name: Value Stream
+site_description: Aggregate-first business intelligence platform
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+
+plugins:
+  - search
+  - redirects:
+      redirect_maps:
+        INDEX.md: meta/documentation-guide.md
+        PHASE1_WALKTHROUGH.md: tutorials/getting-started.md
+        PHASE2_WALKTHROUGH.md: tutorials/distribution-analytics.md
+        PHASE3_WALKTHROUGH.md: tutorials/lifecycle-and-funnel-analytics.md
+        PHASE4_WALKTHROUGH.md: tutorials/ui-tour.md
+        PHASE6_RUNBOOK.md: guides/operations/migration.md
+        PEGA_EXPORT_TUTORIAL.md: tutorials/pega-export.md
+        BUILDER_TUTORIAL.md: tutorials/builder.md
+        ARCHITECTURE.md: concepts/architecture.md
+        DOMAIN_MODEL.md: concepts/domain-model.md
+        ALGORITHMS.md: reference/algorithms.md
+        PROCESSOR_SPECS.md: reference/processors.md
+        EXPRESSION_DSL.md: reference/expression-dsl.md
+        READERS_AND_FORMATS.md: reference/readers-and-formats.md
+        CHART_CATALOG.md: reference/chart-catalog.md
+        QA.md: reference/faq.md
+        CHAT_WITH_DATA_MLP1.md: design/chat-with-data-mlp1.md
+        IMPLEMENTATION_PLAN.md: design/implementation-plan.md
+        REPORTING_BACKLOG.md: design/reporting-backlog.md
+        KICKOFF_PROMPT.md: design/kickoff-prompt.md
+        wiki/index.md: index.md
+        wiki/documentation-plan.md: meta/documentation-guide.md
+        wiki/product-overview.md: concepts/product-overview.md
+        wiki/business-functionality.md: concepts/business-functionality.md
+        wiki/user-guide.md: guides/users/running-reports.md
+        wiki/technical-overview.md: concepts/architecture-overview.md
+        wiki/operations-runbook.md: guides/operations/runbook.md
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - Getting started: tutorials/getting-started.md
+      - UI tour: tutorials/ui-tour.md
+      - Distribution analytics: tutorials/distribution-analytics.md
+      - Funnel & lifecycle analytics: tutorials/lifecycle-and-funnel-analytics.md
+      - Pega export: tutorials/pega-export.md
+      - Configuration Builder: tutorials/builder.md
+  - Guides:
+      - For users:
+          - Running reports: guides/users/running-reports.md
+          - Chat with data: guides/users/chat-with-data.md
+          - Querying & export: guides/users/querying-and-export.md
+      - Configuration:
+          - Workspaces & catalog: guides/configuration/workspaces-and-catalog.md
+          - Configuration Builder: guides/configuration/builder.md
+          - AI Configuration Studio: guides/configuration/ai-config-studio.md
+      - Operations:
+          - Runbook: guides/operations/runbook.md
+          - Migration & backfill: guides/operations/migration.md
+          - Deployment: guides/operations/deployment.md
+          - Security: guides/operations/security.md
+          - Troubleshooting: guides/operations/troubleshooting.md
+  - Concepts:
+      - Product overview: concepts/product-overview.md
+      - Business functionality: concepts/business-functionality.md
+      - Architecture overview: concepts/architecture-overview.md
+      - Architecture (deep): concepts/architecture.md
+      - Domain model: concepts/domain-model.md
+      - Decisions (ADRs):
+          - Index: concepts/adr/index.md
+          - 0001 Aggregate-first storage: concepts/adr/0001-aggregate-first-storage.md
+          - 0002 YAML catalog: concepts/adr/0002-yaml-catalog-as-source-of-behavior.md
+          - 0003 Closed expression AST: concepts/adr/0003-closed-expression-ast.md
+          - 0004 Chunk-ledger idempotency: concepts/adr/0004-chunk-ledger-idempotency.md
+  - Reference:
+      - CLI: reference/cli.md
+      - Expression DSL: reference/expression-dsl.md
+      - Processors: reference/processors.md
+      - Algorithms: reference/algorithms.md
+      - Readers & formats: reference/readers-and-formats.md
+      - Chart catalog: reference/chart-catalog.md
+      - KPI recipes: reference/kpi-recipes.md
+      - Catalog schemas: reference/catalog-schemas.md
+      - API & MCP: reference/api-and-mcp.md
+      - FAQ: reference/faq.md
+  - Design docs:
+      - Replacement design: design/replacement-design.md
+      - Implementation plan: design/implementation-plan.md
+      - Reporting backlog: design/reporting-backlog.md
+      - KPI recipe backlog: design/kpi-recipe-backlog.md
+      - Chat With Data MLP1: design/chat-with-data-mlp1.md
+      - Kickoff prompt: design/kickoff-prompt.md
+      - Documentation guide: meta/documentation-guide.md
