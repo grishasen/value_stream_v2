@@ -46,4 +46,4 @@ uv run mkdocs build --strict
 
 ## License
 
-MIT.
+This project is licensed under the MIT License.
