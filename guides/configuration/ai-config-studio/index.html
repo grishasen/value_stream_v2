@@ -2460,6 +2460,15 @@ states. Publish is complete only after the current validated draft is applied
 to the workspace; editing the draft afterward returns Publish to attention.
 Selecting a phase jumps to its first step; the step selector then shows only
 that phase's steps.</p>
+<p>Every step shows the same <strong>Save draft</strong> action at the upper-right
+of the existing status panel. It publishes the currently accepted, validated
+session draft through the full rollback-protected write path without adding a
+separate vertical block. Its tooltip explains when no draft exists, AI changes
+are pending review, validation fails, or that exact draft is already saved.
+Controls inside review steps use
+<strong>Update ... In Draft</strong> wording: they accept the current panel into the
+session draft but do not write the workspace. This keeps draft editing and
+workspace persistence visibly separate.</p>
 <p>Every editable field and editable table column has a help tooltip. Tooltips
 describe the underlying catalog property and show a concrete example when the
 expected value shape is not obvious. AI Configuration Studio shares this help
@@ -2496,7 +2505,27 @@ independent Streamlit fragment, so ordinary dialogue does not rerun the main
 editor. It knows the current step, business requirements, approved schema,
 and accepted draft. Ask a question or request a change in free form; the
 copilot answers with a short reply and, when you asked for a change, governed
-operations for processors, metrics, built-in KPI recipes, and report tiles.</p>
+operations for source defaults, dataset filters, calculated fields, processors, metrics,
+built-in KPI recipes, and report tiles. For example, "set the
+ModelControlGroup default to Test" creates a <code>set_source_default</code> operation;
+"calculate Margin from Revenue minus Cost" creates a validated
+<code>derive_column</code> expression rather than free-form YAML.</p>
+<p>On the <strong>Calculations</strong> step, the Copilot receives the complete closed
+expression-DSL catalog, including every supported operator, its exact AST
+shape, allowed date units and cast types, and nested examples. Concatenation is
+an AST operation, not a function-call string: for example,
+<code>{op: concat, args: [{col: Issue}, {col: Group}], sep: "/"}</code>. Non-string
+inputs can be nested inside <code>op: cast</code> before concatenation. The prompt must
+not report an operator as unavailable when it appears in this catalog; the
+resulting <code>derive_column</code> still passes normal model and catalog validation
+before it can enter patch review.</p>
+<p>On the <strong>Filters</strong> step, dataset requests use <code>set_source_filter</code> or
+<code>remove_source_filter</code>. They create a source <code>kind: filter</code> transform in
+<code>pipelines.yaml</code>, before processor fan-out, and therefore affect every
+processor bound to that source. A processor-level filter remains a separate
+Processors-step concern. If a model attempts <code>set_processor</code> for a Filters-step
+request, the governed loop rejects it and asks the model to correct the
+operation before anything can enter patch review.</p>
 <p>The operation loop is bounded to three model calls. It applies operations to
 a temporary copy, validates that copy with the catalog validator, and sends
 operation or validation errors back to the model for correction. Only a valid
@@ -2506,8 +2535,17 @@ previous definition; it never deletes a changed object as a side effect.
 While patches are pending, the copilot input is disabled so a later request
 cannot overwrite unreviewed work. When a request is ambiguous, the copilot
 asks a clarifying question with quick-reply options before executing tools.
+Accepted source-default, source-filter, and calculated-field patches are also synchronized
+back into the Defaults, Filters, and Calculations row editors on the next full rerun, so
+the visual preprocessing controls and accepted <code>pipelines.yaml</code> draft remain
+the same source of truth. Removing any of these definitions uses the same governed
+operation and patch review path.
 The conversation and draft reset when a different sample file is loaded,
-including a file with the same column names; business requirements remain.</p>
+including a file with the same column names; business requirements remain.
+If the configured provider rejects a request for insufficient permissions,
+the Studio identifies the selected model and points to <strong>AI Settings</strong> or the
+provider's project/key permissions. The attempted prompt remains available in
+<strong>Last prompt</strong>, and no draft operation is applied.</p>
 <h2 id="requirements-coverage">Requirements Coverage<a class="headerlink" href="#requirements-coverage" title="Permanent link">&para;</a></h2>
 <p>The Metrics Review, Reports Review, and Save &amp; Export steps include a
 <strong>Requirements Coverage</strong> panel. <strong>Check Coverage</strong> asks the model to split
@@ -2542,9 +2580,9 @@ patches before applying them, then validate the catalog and run the workspace.</
   theme/layout/page/tile structure. Sources, processors, metrics, dashboards,
   and <code>ai.yaml</code> are written inside one rollback boundary; failed writes or
   post-write validation restore the prior workspace configuration.</li>
-<li>Use <strong>Apply Draft &amp; Run Source</strong> when a reviewed recipe introduces processor
-  state that must be materialized. Plain <strong>Apply Draft To Workspace</strong> changes
-  configuration only.</li>
+<li>Use <strong>Save Draft &amp; Run Source</strong> on Save &amp; Export when a reviewed recipe
+  introduces processor state that must be materialized. The top <strong>Save draft
+  to workspace</strong> action changes configuration only and never starts ingestion.</li>
 </ul>
 <h2 id="identifiers">Identifiers<a class="headerlink" href="#identifiers" title="Permanent link">&para;</a></h2>
 <p>Generated metric IDs use the entered metric name, so the same metric kind can

@@ -5194,7 +5194,7 @@ configuration-version metadata is not deleted.</p>
 <p>Replaces the current <code>report_builder/</code> and most manual <code>config_generator/</code> editing with a single validation-first Builder workspace:</p>
 <ul>
 <li><strong>Health and review progress</strong> — show source/processor/metric/report validation status before editing.</li>
-<li><strong>Sources</strong> — edit reader kind, file pattern, grouping regex, root, streaming/hive flags, schema timestamp/natural-key/drop columns, source defaults, dataset filters, and calculated fields. Defaults run before filters; filter rules compile to the closed expression AST; calculated fields become <code>derive_column</code> transforms.</li>
+<li><strong>Sources</strong> — edit reader kind, file pattern, grouping regex, root, streaming/hive flags, schema timestamp/natural-key/drop columns, source defaults, dataset filters, and calculated fields. Defaults run before filters; filter rules compile to the closed expression AST; calculated fields become <code>derive_column</code> transforms. A destructive action beside the source selector previews and transactionally removes the selected source, its processors, transitive metric dependants, report tiles, now-unsupported page filters, and related Chat descriptions. Dashboard/page containers and aggregate/run-history artifacts remain.</li>
 <li><strong>Dimensions</strong> — review and update processor group-by fields from the approved source field catalog.</li>
 <li><strong>Processors</strong> — edit source binding, kind, group-by, time grains, state columns, state source fields, and optional processor filters.</li>
 <li><strong>Metrics</strong> — browse the shared KPI recipe library by business question/domain, inspect method accuracy and readiness, select processor-owned business fields plus any recipe-compatible sketch algorithm (or funnel stages/populations), optionally place a recommended report tile, or build a metric directly with the visual/AST editors. Internal state IDs remain technical detail. Before apply, the shared flow shows the exact generated YAML patch and, for a missing field/algorithm state, the source, fields, states, and current/proposed processor computation hashes. Configuration Builder installs and post-validates that patch inside one rollback boundary, then links to Data Load when a source run is required; it never starts ingestion implicitly.</li>
@@ -5213,9 +5213,19 @@ and Plotly themes use explicit light/dark surface and contrast tokens.</p>
 <li><strong>Sample</strong> — upload/select a source sample and review runtime reader controls.</li>
 <li><strong>Required fields</strong> — map subject, outcome time, decision time, and outcome fields.</li>
 <li><strong>Defaults, filters, calculations</strong> — use the same row editors as the Builder; filters compile to AST, calculations compile to <code>derive_column</code> transforms.</li>
+<li><strong>Governed Copilot preprocessing</strong> — source defaults, dataset filters, and
+  calculated fields can be added, replaced, or removed through closed Copilot
+  operations. Dataset filters become source <code>filter</code> transforms before
+  processor fan-out; the Filters-step operation policy rejects processor edits.
+  Calculations receive the complete expression-AST operator catalog and exact
+  node shapes, including <code>concat</code> with <code>args</code> and optional <code>sep</code>, so model
+  capability is bounded by the same closed DSL that validation enforces. Each
+  changed field is an independent before/after patch; accepted patches update
+  the session draft and are then synchronized into the Defaults and
+  Filters/Calculations row editors before those widgets render again.</li>
 <li><strong>Approve fields</strong> — choose which working fields are eligible for draft metric/report generation and which sample values may be shared with a future LLM.</li>
 <li><strong>Draft</strong> — generate reviewed YAML drafts. LLM responses can populate source, processor, metric, report, chat-readiness, workspace-default, and dashboard-theme settings; deterministic generation remains available as a baseline and fallback.</li>
-<li><strong>Save &amp; Export</strong> — download draft YAML or apply it through the same structured writers. Sources, processors, metrics, dashboards, and <code>ai.yaml</code> share one rollback boundary that includes post-write catalog validation. <strong>Apply Draft &amp; Run Source</strong> is the separate explicit materialization action.</li>
+<li><strong>Save &amp; Export</strong> — download draft YAML; the persistent <strong>Save draft</strong> action in the upper-right of the Studio status panel applies the accepted draft through the same structured writers. Sources, processors, metrics, dashboards, and <code>ai.yaml</code> share one rollback boundary that includes post-write catalog validation. <strong>Save Draft &amp; Run Source</strong> is the separate explicit materialization action.</li>
 </ul>
 <h3 id="112-plotly-chart-kinds-catalog-parity-with-current-app">11.2 Plotly chart kinds (catalog parity with current app)<a class="headerlink" href="#112-plotly-chart-kinds-catalog-parity-with-current-app" title="Permanent link">&para;</a></h3>
 <table>

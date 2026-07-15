@@ -3862,6 +3862,11 @@ routing. <code>all_time</code> is the backward-compatible default.</p>
 <td>Add a group-by column; change a filter; change <code>positive_values</code>; change CPC/HLL <code>lg_k</code>; switch sketch type</td>
 <td>Re-process from raw; old aggregates remain readable under their <code>config_hash</code> until vacuumed</td>
 </tr>
+<tr>
+<td><strong>Catalog removal</strong></td>
+<td>Remove a Source from the Builder</td>
+<td>The confirmed cascade removes its Processors, transitive dependent Metrics, bound Tiles, unsupported page filters, and related Chat descriptions from configuration. Persisted aggregates and run audit history remain untouched by the catalog edit.</td>
+</tr>
 </tbody>
 </table>
 <p>Metric display metadata, dashboard/page/tile presentation, KPI comparison
