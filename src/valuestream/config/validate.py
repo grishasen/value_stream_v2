@@ -126,9 +126,11 @@ def validate_catalog(catalog: model.Catalog) -> CatalogValidationResult:
     processor_ids = {p.id for p in catalog.processors.processors}
     metric_names = set(catalog.metrics.metrics.keys())
 
-    group_by_by_source: dict[str, set[str]] = {}
+    seed_columns_by_source: dict[str, set[str]] = {}
     for processor in catalog.processors.processors:
-        group_by_by_source.setdefault(processor.source, set()).update(processor.group_by)
+        seed_columns_by_source.setdefault(processor.source, set()).update(
+            _processor_source_columns(processor)
+        )
 
     # Build per-source row schemas and validate source-level expressions.
     source_schemas: dict[str, dict[str, expr_ast.Dtype]] = {}
@@ -136,7 +138,7 @@ def validate_catalog(catalog: model.Catalog) -> CatalogValidationResult:
         source_schemas[source.id] = _validate_source_expressions(
             source,
             issues,
-            seed_columns=group_by_by_source.get(source.id, set()),
+            seed_columns=seed_columns_by_source.get(source.id, set()),
         )
 
     # 1. processor.source must resolve to a Source.
@@ -608,6 +610,44 @@ def _validate_source_expressions(
                 schema.setdefault(key, "String")
 
     return schema
+
+
+def _processor_source_columns(processor: model.Processor) -> set[str]:
+    """Return source fields declared outside expressions on one processor."""
+
+    columns = {str(column) for column in processor.group_by if str(column).strip()}
+    if processor.time is not None and processor.time.column:
+        columns.add(processor.time.column)
+    raw = processor.model_dump(mode="python", by_alias=True, exclude_none=True)
+    for key in ("outcome_column", "variant_column"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            columns.add(value)
+    for key in ("properties", "score_properties"):
+        values = raw.get(key)
+        if isinstance(values, list):
+            columns.update(str(value) for value in values if str(value).strip())
+    for key in ("score_columns", "scores"):
+        values = raw.get(key)
+        if isinstance(values, dict):
+            columns.update(str(value) for value in values.values() if str(value).strip())
+    for key in ("outcome", "entities"):
+        values = raw.get(key)
+        if not isinstance(values, dict):
+            continue
+        for field_key in ("column", "subject"):
+            value = values.get(field_key)
+            if isinstance(value, str) and value.strip():
+                columns.add(value)
+    states = raw.get("states")
+    if isinstance(states, dict):
+        for state in states.values():
+            if not isinstance(state, dict):
+                continue
+            source_column = state.get("source_column")
+            if isinstance(source_column, str) and source_column.strip():
+                columns.add(source_column)
+    return columns
 
 
 def _capitalize_schema(schema: Mapping[str, expr_ast.Dtype]) -> dict[str, expr_ast.Dtype]:

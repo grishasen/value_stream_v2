@@ -47,6 +47,19 @@ def _qualname(node: ast.AST) -> str:
     return ""
 
 
+def _function_call_names(path: Path) -> dict[str, set[str]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return {
+        node.name: {
+            _qualname(child.func)
+            for child in ast.walk(node)
+            if isinstance(child, ast.Call)
+        }
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
 def _streamlit_aliases(tree: ast.AST) -> tuple[set[str], set[str], set[str]]:
     streamlit_aliases = {"streamlit"}
     component_module_aliases = {"streamlit.components.v1"}
@@ -149,6 +162,28 @@ def test_streamlit_ui_uses_native_components_instead_of_rendered_html() -> None:
                 )
 
     assert not violations, "Use native Streamlit components instead:\n" + "\n".join(violations)
+
+
+@pytest.mark.unit
+def test_configuration_editors_keep_save_action_at_the_top_of_every_step() -> None:
+    builder_calls = _function_call_names(UI_ROOT / "pages" / "config_builder.py")
+    for function_name in (
+        "_health",
+        "_source_builder",
+        "_processor_builder",
+        "_dimensions_builder",
+        "_metric_builder",
+        "_tile_builder",
+        "_chat_review",
+        "_settings_builder",
+        "_save_export",
+    ):
+        assert "components.editor_save_bar" in builder_calls[function_name]
+
+    studio_calls = _function_call_names(UI_ROOT / "pages" / "ai_config_studio.py")
+    assert "_studio_status_bar" in studio_calls["_render_studio"]
+    assert "_render_workspace_save_bar" in studio_calls["_studio_status_bar"]
+    assert "_render_workspace_save_bar" in studio_calls["_current_catalog_draft_editor"]
 
 
 @pytest.mark.unit

@@ -21,6 +21,41 @@ from valuestream.ui.pages import config_builder
 
 
 @pytest.mark.unit
+def test_editor_save_bar_supports_one_out_of_order_top_action() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import components
+
+with st.container(horizontal=True, horizontal_alignment="right"):
+    save_slot = st.empty()
+    save_slot.caption("")
+
+@st.fragment
+def editor(slot):
+    components.editor_save_bar(
+        key="test_editor_ready",
+        caption="Complete the editor below.",
+        disabled=True,
+        placeholder=slot,
+    )
+    components.editor_save_bar(
+        key="test_editor",
+        caption="Save the current editor values.",
+        placeholder=slot,
+    )
+
+editor(save_slot)
+st.write("Editor body")
+"""
+    ).run()
+
+    assert not app.exception
+    assert [button.label for button in app.button] == ["Save"]
+    assert not app.button[0].disabled
+
+
+@pytest.mark.unit
 def test_binary_outcome_editor_uses_compact_logical_columns() -> None:
     app = AppTest.from_string(
         """
@@ -230,9 +265,7 @@ def test_theta_only_processor_can_build_approx_distinct_metric() -> None:
             "id": "unique_users",
             "source": "ih",
             "kind": "entity_set",
-            "states": {
-                "Visitors_theta": {"type": "theta", "source_column": "CustomerID"}
-            },
+            "states": {"Visitors_theta": {"type": "theta", "source_column": "CustomerID"}},
         }
     )
 
@@ -241,9 +274,7 @@ def test_theta_only_processor_can_build_approx_distinct_metric() -> None:
             "id": "descriptive",
             "source": "ih",
             "kind": "numeric_distribution",
-            "states": {
-                "Visitors_theta": {"type": "theta", "source_column": "CustomerID"}
-            },
+            "states": {"Visitors_theta": {"type": "theta", "source_column": "CustomerID"}},
         }
     )
 
@@ -1865,8 +1896,7 @@ def test_catalog_transaction_restores_all_files_when_a_write_fails(tmp_path: Pat
         builder.build_formula_metric("engagement", "Positives", "Count"),
     )
     before = {
-        name: (workspace / "catalog" / name).read_text()
-        for name in builder.CATALOG_FILENAMES
+        name: (workspace / "catalog" / name).read_text() for name in builder.CATALOG_FILENAMES
     }
 
     def _failing_two_file_install() -> None:
@@ -1884,20 +1914,14 @@ def test_catalog_transaction_restores_all_files_when_a_write_fails(tmp_path: Pat
     with pytest.raises(ValueError, match="boom"), builder.catalog_transaction(workspace):
         _failing_two_file_install()
 
-    after = {
-        name: (workspace / "catalog" / name).read_text()
-        for name in builder.CATALOG_FILENAMES
-    }
+    after = {name: (workspace / "catalog" / name).read_text() for name in builder.CATALOG_FILENAMES}
     assert after == before
 
 
 @pytest.mark.unit
 def test_catalog_transaction_rolls_back_post_write_validation_failure(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
-    before = {
-        name: (tmp_path / "catalog" / name).read_text()
-        for name in builder.CATALOG_FILENAMES
-    }
+    before = {name: (tmp_path / "catalog" / name).read_text() for name in builder.CATALOG_FILENAMES}
 
     def install_invalid_metric() -> None:
         with builder.catalog_transaction(tmp_path):
@@ -1915,10 +1939,7 @@ def test_catalog_transaction_rolls_back_post_write_validation_failure(tmp_path: 
     with pytest.raises(ValueError, match="changes were rolled back"):
         install_invalid_metric()
 
-    after = {
-        name: (tmp_path / "catalog" / name).read_text()
-        for name in builder.CATALOG_FILENAMES
-    }
+    after = {name: (tmp_path / "catalog" / name).read_text() for name in builder.CATALOG_FILENAMES}
     assert after == before
 
 
@@ -2193,6 +2214,62 @@ def test_write_source_and_processor_definitions_round_trip(tmp_path: Path) -> No
     assert catalog.processors.processors[0].group_by == ["Channel", "ResponseTime"]
 
 
+@pytest.mark.unit
+def test_delete_source_cascade_removes_catalog_and_chat_dependencies(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    catalog = load(tmp_path)
+
+    plan = builder.source_cascade_plan(catalog, "holdings")
+
+    assert plan.processor_ids == ("holdings_lifecycle",)
+    assert plan.metric_ids == ("HoldingsRate", "HoldingsValue")
+    assert plan.tile_locations == (
+        "overview/portfolio/holdings_rate",
+        "overview/portfolio/holdings_value",
+    )
+    assert plan.page_filter_locations == ("overview/portfolio/HoldingType",)
+
+    deleted = builder.delete_source_cascade(tmp_path, "holdings")
+
+    assert deleted == plan
+    remaining = load(tmp_path)
+    assert [source.id for source in remaining.pipelines.sources] == ["ih"]
+    assert [processor.id for processor in remaining.processors.processors] == ["engagement"]
+    assert list(remaining.metrics.metrics) == ["CTR"]
+    page = remaining.dashboards.dashboards[0].pages[0]
+    assert [tile.id for tile in page.tiles] == ["ctr"]
+    assert [filter_spec.field for filter_spec in page.filters] == ["Channel"]
+    ai_config = yaml.safe_load((tmp_path / "ai.yaml").read_text())
+    assert ai_config["ai"]["llm"]["model"] == "test-model"
+    assert ai_config["chat_with_data"]["dataset_descriptions"] == {"ih": "Interactions"}
+    assert ai_config["chat_with_data"]["metric_descriptions"] == {
+        "CTR": "Engagement rate",
+        "engagement": "Interaction processor",
+    }
+
+
+@pytest.mark.unit
+def test_delete_source_cascade_rolls_back_every_configuration_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    paths = [
+        *(tmp_path / "catalog" / name for name in builder.CATALOG_FILENAMES),
+        tmp_path / "ai.yaml",
+    ]
+    before = {path: path.read_text(encoding="utf-8") for path in paths}
+
+    def reject_deleted_catalog(_workspace: str | Path) -> None:
+        raise ValueError("post-delete validation failed")
+
+    monkeypatch.setattr(builder, "require_valid_workspace", reject_deleted_catalog)
+
+    with pytest.raises(ValueError, match="post-delete validation failed"):
+        builder.delete_source_cascade(tmp_path, "holdings")
+
+    assert {path: path.read_text(encoding="utf-8") for path in paths} == before
+
+
 def _write_builder_catalog(workspace: Path) -> None:
     catalog = workspace / "catalog"
     catalog.mkdir(parents=True)
@@ -2242,6 +2319,98 @@ metrics:
         encoding="utf-8",
     )
     (catalog / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
+
+
+def _write_source_cascade_catalog(workspace: Path) -> None:
+    catalog = workspace / "catalog"
+    catalog.mkdir(parents=True)
+    (catalog / "pipelines.yaml").write_text(
+        """
+version: 1
+workspace: cascade_test
+sources:
+  - id: ih
+    reader: {kind: parquet, file_pattern: "ih/*.parquet"}
+  - id: holdings
+    reader: {kind: parquet, file_pattern: "holdings/*.parquet"}
+""",
+        encoding="utf-8",
+    )
+    (catalog / "processors.yaml").write_text(
+        """
+processors:
+  - id: engagement
+    source: ih
+    kind: binary_outcome
+    group_by: [Channel]
+    states:
+      Count: {type: count}
+  - id: holdings_lifecycle
+    source: holdings
+    kind: binary_outcome
+    group_by: [HoldingType]
+    states:
+      Count: {type: count}
+""",
+        encoding="utf-8",
+    )
+    (catalog / "metrics.yaml").write_text(
+        """
+metrics:
+  CTR:
+    source: engagement
+    kind: formula
+    expression: {col: Count}
+  HoldingsValue:
+    source: holdings_lifecycle
+    kind: formula
+    expression: {col: Count}
+  HoldingsRate:
+    source: holdings_lifecycle
+    kind: formula
+    depends_on: [HoldingsValue]
+    expression: {col: HoldingsValue}
+""",
+        encoding="utf-8",
+    )
+    (catalog / "dashboards.yaml").write_text(
+        """
+dashboards:
+  - id: overview
+    title: Overview
+    pages:
+      - id: portfolio
+        title: Portfolio
+        filters:
+          - {field: Channel, scope: compatible_tiles}
+          - {field: HoldingType, scope: compatible_tiles}
+        tiles:
+          - {id: ctr, title: CTR, metric: CTR, chart: kpi_card, value: CTR}
+          - {id: holdings_value, title: Holdings value, metric: HoldingsValue, chart: kpi_card, value: HoldingsValue}
+          - {id: holdings_rate, title: Holdings rate, metric: HoldingsRate, chart: kpi_card, value: HoldingsRate}
+""",
+        encoding="utf-8",
+    )
+    (workspace / "ai.yaml").write_text(
+        """
+ai:
+  llm:
+    model: test-model
+chat_with_data:
+  agent_prompt: Test prompt
+  dataset_descriptions:
+    ih: Interactions
+    holdings: Product holdings
+  metric_descriptions:
+    engagement: Interaction processor
+    holdings_lifecycle: Holdings processor
+    CTR: Engagement rate
+    HoldingsValue: Holdings value
+    HoldingsRate: Holdings rate
+""",
+        encoding="utf-8",
+    )
+    builder.require_valid_workspace(workspace)
 
 
 def _numeric_distribution_catalog() -> model.Catalog:

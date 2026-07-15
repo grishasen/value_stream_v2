@@ -341,6 +341,7 @@ When the Catalog changes, the planner classifies the change against the existing
 | **Compatible widening** | Add a new Processor; add a new Metric; add a new finer Grain | New aggregates are populated forward; optional backfill; nothing invalidated |
 | **Compatible narrowing** | Remove a group-by column; coarsen a Grain; remove a State | Existing aggregates can be re-compacted directly; no raw replay needed |
 | **Incompatible** | Add a group-by column; change a filter; change `positive_values`; change CPC/HLL `lg_k`; switch sketch type | Re-process from raw; old aggregates remain readable under their `config_hash` until vacuumed |
+| **Catalog removal** | Remove a Source from the Builder | The confirmed cascade removes its Processors, transitive dependent Metrics, bound Tiles, unsupported page filters, and related Chat descriptions from configuration. Persisted aggregates and run audit history remain untouched by the catalog edit. |
 
 Metric display metadata, dashboard/page/tile presentation, KPI comparison
 settings, and filters over existing aggregate dimensions are compatible changes

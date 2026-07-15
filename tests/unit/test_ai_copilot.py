@@ -182,6 +182,211 @@ def test_apply_operations_remove_tile() -> None:
 
 
 @pytest.mark.unit
+def test_apply_operations_sets_and_removes_source_preprocessing() -> None:
+    draft = _base_draft()
+    updated, summaries = apply_draft_operations(
+        draft,
+        [
+            {
+                "op": "set_source_default",
+                "source": "ih",
+                "field": "ModelControlGroup",
+                "value": "Test",
+            },
+            {
+                "op": "set_calculated_field",
+                "source": "ih",
+                "name": "ChannelCopy",
+                "expression": {"col": "Channel"},
+            },
+        ],
+    )
+
+    source = updated["pipelines"]["sources"][0]
+    assert source["defaults"] == {"ModelControlGroup": "Test"}
+    assert source["transforms"] == [
+        {
+            "kind": "derive_column",
+            "output": "ChannelCopy",
+            "expression": {"col": "Channel"},
+        }
+    ]
+    assert summaries == [
+        "Added default 'ih/ModelControlGroup'",
+        "Added calculated field 'ih/ChannelCopy'",
+    ]
+    assert ai_config_studio_page.validate_draft_catalog(updated) == (True, [])
+    assert "defaults" not in draft["pipelines"]["sources"][0]
+
+    removed, remove_summaries = apply_draft_operations(
+        updated,
+        [
+            {"op": "remove_source_default", "source": "ih", "field": "ModelControlGroup"},
+            {"op": "remove_calculated_field", "source": "ih", "name": "ChannelCopy"},
+        ],
+    )
+
+    assert removed["pipelines"]["sources"][0]["defaults"] == {}
+    assert removed["pipelines"]["sources"][0]["transforms"] == []
+    assert remove_summaries == [
+        "Removed default 'ih/ModelControlGroup'",
+        "Removed calculated field 'ih/ChannelCopy'",
+    ]
+
+
+@pytest.mark.unit
+def test_apply_operations_sets_concatenated_calculated_field() -> None:
+    expression = {
+        "op": "concat",
+        "args": [{"col": "Channel"}, {"lit": "offer"}],
+        "sep": "-",
+    }
+
+    updated, summaries = apply_draft_operations(
+        _base_draft(),
+        [
+            {
+                "op": "set_calculated_field",
+                "source": "ih",
+                "name": "ChannelOffer",
+                "expression": expression,
+            }
+        ],
+    )
+
+    assert updated["pipelines"]["sources"][0]["transforms"] == [
+        {
+            "kind": "derive_column",
+            "output": "ChannelOffer",
+            "expression": expression,
+        }
+    ]
+    assert summaries == ["Added calculated field 'ih/ChannelOffer'"]
+    assert ai_config_studio_page.validate_draft_catalog(updated) == (True, [])
+
+
+@pytest.mark.unit
+def test_source_default_operation_uses_transform_after_rename_capitalize() -> None:
+    draft = _base_draft()
+    draft["pipelines"]["sources"][0]["transforms"] = [{"kind": "rename_capitalize"}]
+
+    updated, _ = apply_draft_operations(
+        draft,
+        [
+            {
+                "op": "set_source_default",
+                "source": "ih",
+                "field": "ModelControlGroup",
+                "value": "Test",
+            }
+        ],
+    )
+
+    source = updated["pipelines"]["sources"][0]
+    assert source.get("defaults", {}) == {}
+    assert source["transforms"] == [
+        {"kind": "rename_capitalize"},
+        {"kind": "defaults", "values": {"ModelControlGroup": "Test"}},
+    ]
+
+
+@pytest.mark.unit
+def test_source_filter_operation_updates_pipeline_without_touching_processor() -> None:
+    draft = _base_draft()
+    draft["pipelines"]["sources"][0]["transforms"] = [
+        {"kind": "rename_capitalize"},
+        {
+            "kind": "derive_column",
+            "output": "SubjectID",
+            "expression": {"col": "CustomerID"},
+        },
+        {
+            "kind": "derive_column",
+            "output": "Margin",
+            "expression": {"col": "Revenue"},
+        },
+    ]
+    processor_before = draft["processors"]["processors"][0].copy()
+    expression = {"op": "not_null", "column": "SubjectID"}
+
+    updated, summaries = apply_draft_operations(
+        draft,
+        [{"op": "set_source_filter", "source": "ih", "expression": expression}],
+    )
+
+    transforms = updated["pipelines"]["sources"][0]["transforms"]
+    assert [transform["kind"] for transform in transforms] == [
+        "rename_capitalize",
+        "derive_column",
+        "filter",
+        "derive_column",
+    ]
+    assert transforms[2]["expression"] == expression
+    assert updated["processors"]["processors"][0] == processor_before
+    assert summaries == ["Added source filter 'ih'"]
+
+    removed, remove_summaries = apply_draft_operations(
+        updated,
+        [{"op": "remove_source_filter", "source": "ih"}],
+    )
+
+    assert all(
+        transform.get("kind") != "filter"
+        for transform in removed["pipelines"]["sources"][0]["transforms"]
+    )
+    assert remove_summaries == ["Removed source filter 'ih'"]
+
+
+@pytest.mark.unit
+def test_source_preprocessing_operations_reject_invalid_targets_and_values() -> None:
+    with pytest.raises(ValueError, match="does not exist"):
+        apply_draft_operations(
+            _base_draft(),
+            [{"op": "set_source_default", "source": "missing", "field": "X", "value": 1}],
+        )
+    with pytest.raises(ValueError, match="string, number, boolean, or null"):
+        apply_draft_operations(
+            _base_draft(),
+            [{"op": "set_source_default", "source": "ih", "field": "X", "value": []}],
+        )
+    with pytest.raises(ValueError, match="expression"):
+        apply_draft_operations(
+            _base_draft(),
+            [
+                {
+                    "op": "set_calculated_field",
+                    "source": "ih",
+                    "name": "Broken",
+                    "expression": {"unknown": "expression"},
+                }
+            ],
+        )
+    with pytest.raises(ValueError, match="closed expression AST"):
+        apply_draft_operations(
+            _base_draft(),
+            [
+                {
+                    "op": "set_calculated_field",
+                    "source": "ih",
+                    "name": "Unsafe",
+                    "expression": {"polars": 'pl.col("Channel")'},
+                }
+            ],
+        )
+    with pytest.raises(ValueError, match="closed expression AST"):
+        apply_draft_operations(
+            _base_draft(),
+            [
+                {
+                    "op": "set_source_filter",
+                    "source": "ih",
+                    "expression": {"polars": 'pl.col("Outcome") == "Clicked"'},
+                }
+            ],
+        )
+
+
+@pytest.mark.unit
 def test_apply_operations_installs_ready_builtin_recipe() -> None:
     updated, summaries = apply_draft_operations(
         _base_draft(),
@@ -254,6 +459,68 @@ def test_patch_rejection_restores_changed_object_instead_of_deleting_it() -> Non
 
 
 @pytest.mark.unit
+def test_source_preprocessing_patches_are_independent_and_selective() -> None:
+    base = _base_draft()
+    proposed, _ = apply_draft_operations(
+        base,
+        [
+            {
+                "op": "set_source_default",
+                "source": "ih",
+                "field": "ModelControlGroup",
+                "value": "Test",
+            },
+            {
+                "op": "set_calculated_field",
+                "source": "ih",
+                "name": "ChannelCopy",
+                "expression": {"col": "Channel"},
+            },
+        ],
+    )
+
+    patches = draft_patches(base, proposed)
+    assert {patch.key for patch in patches} == {
+        "source_defaults:ih/ModelControlGroup",
+        "calculated_fields:ih/ChannelCopy",
+    }
+
+    reviewed = merge_selected_draft_patches(
+        base,
+        proposed,
+        {"source_defaults:ih/ModelControlGroup"},
+    )
+    source = reviewed["pipelines"]["sources"][0]
+    assert source["defaults"] == {"ModelControlGroup": "Test"}
+    assert source.get("transforms", []) == []
+
+
+@pytest.mark.unit
+def test_source_filter_patch_is_independent_from_processor_definitions() -> None:
+    base = _base_draft()
+    proposed, _ = apply_draft_operations(
+        base,
+        [
+            {
+                "op": "set_source_filter",
+                "source": "ih",
+                "expression": {"op": "eq", "column": "Outcome", "value": "Clicked"},
+            }
+        ],
+    )
+
+    patches = draft_patches(base, proposed)
+    assert [patch.key for patch in patches] == ["source_filters:ih"]
+
+    accepted = merge_selected_draft_patches(base, proposed, {"source_filters:ih"})
+    rejected = merge_selected_draft_patches(base, proposed, set())
+
+    assert accepted["pipelines"]["sources"][0]["transforms"][0]["kind"] == "filter"
+    assert accepted["processors"] == base["processors"]
+    assert rejected == base
+
+
+@pytest.mark.unit
 def test_copilot_tool_loop_repairs_invalid_operations_before_pending_review() -> None:
     responses = iter(
         [
@@ -286,6 +553,46 @@ def test_copilot_tool_loop_repairs_invalid_operations_before_pending_review() ->
 
 
 @pytest.mark.unit
+def test_copilot_tool_loop_rejects_processor_edit_on_filters_step() -> None:
+    responses = iter(
+        [
+            '{"reply":"Filtering the processor.","operations":[{"op":"set_processor",'
+            '"processor":{"id":"engagement","source":"ih","kind":"binary_outcome",'
+            '"dimensions":["Channel"],"time":{"column":"OutcomeTime",'
+            '"grains":["Day","Summary"]},"outcome":{"column":"Outcome",'
+            '"positive_values":["Clicked"],"negative_values":["Impression"]},'
+            '"filter":{"op":"eq","column":"Outcome","value":"Clicked"}}}],'
+            '"questions":[]}',
+            '{"reply":"Filtering the source pipeline.","operations":['
+            '{"op":"set_source_filter","source":"ih","expression":'
+            '{"op":"eq","column":"Outcome","value":"Clicked"}}],"questions":[]}',
+        ]
+    )
+    prompts: list[str] = []
+
+    def call_model(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(responses)
+
+    policy = ai_config_studio_page._copilot_operation_policy("4. Filters")
+    result = run_copilot_tool_loop(
+        prompt="Filter Outcome to Clicked",
+        draft=_base_draft(),
+        call_model=call_model,
+        validate=ai_config_studio_page.validate_draft_catalog,
+        operation_policy=policy,
+    )
+
+    assert result.iterations == 2
+    assert result.pending_draft is not None
+    source = result.pending_draft["pipelines"]["sources"][0]
+    assert source["transforms"][0]["kind"] == "filter"
+    assert "filter" not in result.pending_draft["processors"]["processors"][0]
+    assert "before processor fan-out" in prompts[1]
+    assert "set_source_filter" in prompts[1]
+
+
+@pytest.mark.unit
 def test_prompt_for_copilot_includes_step_goals_history_and_contract() -> None:
     prompt = prompt_for_copilot(
         step="9. Metrics",
@@ -310,7 +617,55 @@ def test_prompt_for_copilot_includes_step_goals_history_and_contract() -> None:
     assert "User message:\nAdd average revenue per customer." in prompt
     assert '"reply": str' in prompt
     assert "set_metric" in prompt
+    assert "set_source_default" in prompt
+    assert "set_calculated_field" in prompt
+    assert "Never invent an input field" in prompt
     assert "Return valid JSON only." in prompt
+
+
+@pytest.mark.unit
+def test_filters_step_prompt_requires_source_filter_operation() -> None:
+    prompt = prompt_for_copilot(
+        step="4. Filters",
+        user_message="Only keep Clicked outcomes.",
+        history=[],
+        user_goals="",
+        approved_schema=[],
+        approved_fields=["Outcome"],
+        hidden_fields=[],
+        current_draft=_base_draft(),
+    )
+
+    assert "set_source_filter" in prompt
+    assert "remove_source_filter" in prompt
+    assert "before processor fan-out" in prompt
+    assert "do not use set_processor for a dataset filter" in prompt
+
+
+@pytest.mark.unit
+def test_calculations_step_prompt_exposes_concat_and_complete_expression_dsl() -> None:
+    prompt = prompt_for_copilot(
+        step="5. Calculations",
+        user_message="Concatenate Issue and Group with a slash.",
+        history=[],
+        user_goals="",
+        approved_schema=[
+            {"column": "Issue", "dtype": "String", "unique": 3},
+            {"column": "Group", "dtype": "String", "unique": 8},
+        ],
+        approved_fields=["Issue", "Group"],
+        hidden_fields=[],
+        current_draft=_base_draft(),
+    )
+
+    assert "set_calculated_field" in prompt
+    assert "expression_ast catalog dictionary is the complete supported DSL" in prompt
+    assert "Do not claim an operation is unavailable" in prompt
+    assert '"op":"concat"' in prompt
+    assert "concat(...) function-call string" in prompt
+    assert "concatenation:" in prompt
+    assert "multi_branch_conditional:" in prompt
+    assert "datetime_parse:" in prompt
 
 
 @pytest.mark.unit
@@ -446,6 +801,112 @@ def test_copilot_panel_holds_operations_in_pending_review(
     assert history[-1]["role"] == "assistant"
     assert "Added metric 'Total'" in history[-1]["content"]
     assert at.session_state["ai_studio_copilot_input"] is None
+
+
+@pytest.mark.unit
+def test_copilot_permission_error_names_model_and_preserves_last_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def denied_call(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("OpenAIException - You have insufficient permissions for this operation")
+
+    monkeypatch.setattr(ai_config_studio_page, "call_litellm", denied_call)
+
+    def app(draft: dict) -> None:
+        import polars as pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
+        st.session_state["ai_studio_ai_model"] = "gpt-unavailable"
+        st.session_state["ai_studio_draft"] = draft
+        st.session_state.setdefault("ai_studio_pending_draft", None)
+        page._render_copilot_panel(
+            "3. Defaults",
+            pl.DataFrame({"Channel": ["Web"]}),
+            ["Channel"],
+        )
+
+    at = AppTest.from_function(app, kwargs={"draft": _base_draft()}).run()
+    at.chat_input[0].set_value("Set ModelControlGroup to Test.").run()
+
+    assert not at.exception
+    error = at.error[0].value
+    assert "gpt-unavailable" in error
+    assert "AI Settings" in error
+    assert "No draft operations were applied" in error
+    assert "Set ModelControlGroup to Test." in at.session_state["ai_studio_copilot_last_prompt"]
+
+
+@pytest.mark.unit
+def test_accepting_preprocessing_patches_syncs_all_source_editors() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    base = _base_draft()
+    pending, _ = apply_draft_operations(
+        base,
+        [
+            {
+                "op": "set_source_default",
+                "source": "ih",
+                "field": "ModelControlGroup",
+                "value": "Test",
+            },
+            {
+                "op": "set_source_filter",
+                "source": "ih",
+                "expression": {"op": "eq", "column": "Channel", "value": "Web"},
+            },
+            {
+                "op": "set_calculated_field",
+                "source": "ih",
+                "name": "ChannelCopy",
+                "expression": {"col": "Channel"},
+            },
+        ],
+    )
+
+    def app(base_draft: dict, pending_draft: dict) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
+        st.session_state.setdefault("ai_studio_source_id", "ih")
+        st.session_state.setdefault("ai_studio_draft", base_draft)
+        st.session_state.setdefault("ai_studio_pending_draft", pending_draft)
+        st.session_state.setdefault("ai_studio_pending_base_draft", base_draft)
+        st.session_state.setdefault("ai_studio_pending_kind", "copilot")
+        page._consume_preprocessing_editor_sync()
+        page._render_pending_draft_review()
+
+    at = AppTest.from_function(
+        app,
+        kwargs={"base_draft": base, "pending_draft": pending},
+    ).run()
+    next(button for button in at.button if button.label == "Accept patches").click().run()
+
+    assert not at.exception
+    assert at.session_state["ai_studio_pending_draft"] is None
+    assert at.session_state["ai_studio_defaults"] == [
+        {"Field": "ModelControlGroup", "Default Value": "Test", "Enabled": True}
+    ]
+    assert at.session_state["ai_studio_filter_mode"] == "Rules"
+    assert at.session_state["ai_studio_filter_rows"] == [
+        {
+            "Field": "Channel",
+            "Operator": "==",
+            "Value": "Web",
+            "Enabled": True,
+        }
+    ]
+    calculation = at.session_state["ai_studio_calculations"][0]
+    assert calculation["Name"] == "ChannelCopy"
+    assert calculation["Mode"] == "AST YAML"
+    assert "col: Channel" in calculation["Expression"]
 
 
 @pytest.mark.unit

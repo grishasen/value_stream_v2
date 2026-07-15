@@ -620,6 +620,51 @@ class TestErrorPaths:
 
         assert validate_catalog(catalog).ok
 
+    def test_source_filter_accepts_field_declared_by_bound_processor(self) -> None:
+        catalog = model.Catalog.model_validate(
+            {
+                "pipelines": {
+                    "workspace": "source_filter",
+                    "sources": [
+                        {
+                            "id": "ih",
+                            "reader": {"kind": "csv", "file_pattern": "*.csv"},
+                            "schema": {"timestamp_column": "OutcomeTime"},
+                            "transforms": [
+                                {
+                                    "kind": "filter",
+                                    "expression": {
+                                        "op": "eq",
+                                        "column": "Outcome",
+                                        "value": "Clicked",
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "processors": {
+                    "processors": [
+                        {
+                            "id": "engagement",
+                            "source": "ih",
+                            "kind": "binary_outcome",
+                            "time": {"column": "OutcomeTime"},
+                            "outcome": {
+                                "column": "Outcome",
+                                "positive_values": ["Clicked"],
+                                "negative_values": ["Impression"],
+                            },
+                        }
+                    ]
+                },
+                "metrics": {"metrics": {}},
+                "dashboards": {"dashboards": []},
+            }
+        )
+
+        assert validate_catalog(catalog).ok
+
     def test_score_processor_accepts_scores_alias(self) -> None:
         processor = model.ScoreDistributionProcessor.model_validate(
             {

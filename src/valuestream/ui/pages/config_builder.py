@@ -123,7 +123,15 @@ def _builder_steps(ctx: ValueStreamContext) -> None:
         st.session_state["builder_step"] = current_step
     if st.session_state.get(picker_key) not in steps:
         st.session_state[picker_key] = current_step
-    with components.card():
+    with (
+        components.card(),
+        st.container(
+            horizontal=True,
+            horizontal_alignment="distribute",
+            vertical_alignment="center",
+            gap="xsmall",
+        ),
+    ):
         step = st.segmented_control(
             "Builder step",
             steps,
@@ -131,17 +139,21 @@ def _builder_steps(ctx: ValueStreamContext) -> None:
             label_visibility="collapsed",
             help=config_help.field_help("editor.builder_step"),
         )
+        save_slot = st.empty()
+        # An outside container needs one initial write before a fragment can
+        # redraw its save action here during fragment-only reruns.
+        save_slot.caption("")
     st.session_state["builder_step"] = step
     handlers = {
-        "Workspace Health": lambda: _health(ctx),
-        "Sources": lambda: _source_builder(ctx),
-        "Processors": lambda: _processor_builder(ctx),
-        "Dimensions": lambda: _dimensions_builder(ctx),
-        "Metrics": lambda: _metric_builder(ctx.workspace, ctx.catalog),
-        "Reports / Tiles": lambda: _tile_builder(ctx.workspace, ctx.catalog),
-        "Chat Review": lambda: _chat_review(ctx),
-        "Settings": lambda: _settings_builder(ctx),
-        "Save & Export": lambda: _save_export(ctx),
+        "Workspace Health": lambda: _health(ctx, save_slot),
+        "Sources": lambda: _source_builder(ctx, save_slot),
+        "Processors": lambda: _processor_builder(ctx, save_slot),
+        "Dimensions": lambda: _dimensions_builder(ctx, save_slot),
+        "Metrics": lambda: _metric_builder(ctx.workspace, ctx.catalog, save_slot),
+        "Reports / Tiles": lambda: _tile_builder(ctx.workspace, ctx.catalog, save_slot),
+        "Chat Review": lambda: _chat_review(ctx, save_slot),
+        "Settings": lambda: _settings_builder(ctx, save_slot),
+        "Save & Export": lambda: _save_export(ctx, save_slot),
     }
     handlers.get(step, handlers["Save & Export"])()
 
@@ -214,7 +226,13 @@ def _funnel_stage_warnings(catalog: model.Catalog) -> list[str]:
     return warnings
 
 
-def _health(ctx: ValueStreamContext) -> None:
+def _health(ctx: ValueStreamContext, save_slot: Any) -> None:
+    components.editor_save_bar(
+        key="builder_health_save",
+        caption="Workspace Health is read-only; there are no changes to save on this step.",
+        disabled=True,
+        placeholder=save_slot,
+    )
     components.metric_strip(
         [{"label": key, "value": value} for key, value in catalog_counts(ctx).items()],
         key="builder_health",
@@ -436,19 +454,106 @@ def _render_state_rows_editor(
     st.session_state[state_key] = builder.normalize_editor_rows(edited_states)
 
 
+@st.dialog(
+    "Delete source and dependencies",
+    width="medium",
+    icon=":material/delete_forever:",
+    on_dismiss="rerun",
+)
+def _delete_source_dialog(ctx: ValueStreamContext, source_id: str) -> None:
+    try:
+        plan = builder.source_cascade_plan(ctx.catalog, source_id)
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+
+    st.warning(
+        f"Source `{plan.source_id}` and every catalog definition that depends on it "
+        "will be removed from the active workspace."
+    )
+    components.metric_cards(
+        [
+            {"label": "Processors", "value": len(plan.processor_ids)},
+            {"label": "Metrics", "value": len(plan.metric_ids)},
+            {"label": "Report tiles", "value": len(plan.tile_locations)},
+            {"label": "Page filters", "value": len(plan.page_filter_locations)},
+        ],
+        columns=4,
+    )
+    with st.expander("Definitions to remove", expanded=True):
+        st.markdown("**Processors**")
+        st.code("\n".join(plan.processor_ids) or "None")
+        st.markdown("**Metrics**")
+        st.code("\n".join(plan.metric_ids) or "None")
+        st.markdown("**Report tiles** (`dashboard/page/tile`)")
+        st.code("\n".join(plan.tile_locations) or "None")
+        if plan.page_filter_locations:
+            st.markdown("**Unsupported page filters** (`dashboard/page/field`)")
+            st.code("\n".join(plan.page_filter_locations))
+    st.caption(
+        "Dashboard and page containers are kept. Related Chat descriptions are removed. "
+        "Aggregate Parquet files and run history are not deleted by this catalog action."
+    )
+    confirmed = st.checkbox(
+        f"I understand that `{plan.source_id}` and the definitions listed above will be deleted.",
+        key=f"builder_delete_source_confirm_{plan.source_id}",
+        help="Confirm the catalog cascade before enabling the permanent delete action.",
+    )
+    if st.button(
+        "Delete source and dependencies",
+        type="primary",
+        icon=":material/delete_forever:",
+        disabled=not confirmed,
+        width="stretch",
+        key=f"builder_delete_source_confirm_action_{plan.source_id}",
+    ):
+        try:
+            deleted = builder.delete_source_cascade(ctx.workspace, plan.source_id)
+        except Exception as exc:  # pragma: no cover - Streamlit display path
+            logger.exception("Failed to delete source cascade: source=%s", plan.source_id)
+            st.error(str(exc))
+            return
+        st.session_state["builder_source_delete_notice"] = (
+            f"Deleted source `{deleted.source_id}`, {len(deleted.processor_ids)} processor(s), "
+            f"{len(deleted.metric_ids)} metric(s), and {len(deleted.tile_locations)} tile(s)."
+        )
+        st.rerun()
+
+
 @st.fragment()
-def _source_builder(ctx: ValueStreamContext) -> None:  # noqa: PLR0912, PLR0915
+def _source_builder(ctx: ValueStreamContext, save_slot: Any) -> None:  # noqa: PLR0912, PLR0915
+    components.editor_save_bar(
+        key="builder_source_save_pending",
+        caption="Complete the source definition below to enable saving.",
+        disabled=True,
+        placeholder=save_slot,
+    )
+    delete_notice = st.session_state.pop("builder_source_delete_notice", None)
+    if delete_notice:
+        st.session_state.pop("builder_source_select", None)
+        st.toast(str(delete_notice), icon=":material/delete_sweep:")
     if not ctx.catalog.pipelines.sources:
         st.info("No sources configured.")
         return
 
-    source = st.selectbox(
-        "Source",
-        ctx.catalog.pipelines.sources,
-        format_func=lambda item: f"{item.id} ({item.reader.kind})",
-        key="builder_source_select",
-        help=config_help.field_help("source.selector"),
-    )
+    source_col, delete_col = st.columns([8, 2], vertical_alignment="bottom")
+    with source_col:
+        source = st.selectbox(
+            "Source",
+            ctx.catalog.pipelines.sources,
+            format_func=lambda item: f"{item.id} ({item.reader.kind})",
+            key="builder_source_select",
+            help=config_help.field_help("source.selector"),
+        )
+    if delete_col.button(
+        "Delete source",
+        icon=":material/delete_forever:",
+        width="stretch",
+        key="builder_delete_source",
+        help="Preview and remove this Source together with its dependent catalog definitions.",
+    ):
+        st.session_state[f"builder_delete_source_confirm_{source.id}"] = False
+        _delete_source_dialog(ctx, source.id)
     rename_key = f"builder_source_rename_capitalize_{source.id}"
     if rename_key not in st.session_state:
         st.session_state[rename_key] = _source_has_transform(
@@ -715,10 +820,11 @@ def _source_builder(ctx: ValueStreamContext) -> None:  # noqa: PLR0912, PLR0915
     )
     st.write("### Generated YAML")
     st.code(yaml.safe_dump({"sources": [source_def]}, sort_keys=False), language="yaml")
-    if st.button(
-        "Apply Source",
-        type="primary",
+    if components.editor_save_bar(
+        key="builder_source_save",
+        caption=f"Save `{source.id}` directly to the active workspace catalog.",
         disabled=not source_id.strip() or not calculated_rows_valid,
+        placeholder=save_slot,
     ):
         try:
             builder.write_source_definition(ctx.workspace, source_def)
@@ -729,7 +835,13 @@ def _source_builder(ctx: ValueStreamContext) -> None:  # noqa: PLR0912, PLR0915
 
 
 @st.fragment()
-def _dimensions_builder(ctx: ValueStreamContext) -> None:
+def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
+    components.editor_save_bar(
+        key="builder_dimensions_save_pending",
+        caption="Select a processor below to enable saving.",
+        disabled=True,
+        placeholder=save_slot,
+    )
     with components.bordered_panel(
         "Dimension Coverage", "Review and update processor group-by fields."
     ):
@@ -792,8 +904,12 @@ def _dimensions_builder(ctx: ValueStreamContext) -> None:
     processor_def["dimensions"] = selected
     processor_def.pop("group_by", None)
     st.code(yaml.safe_dump({"processors": [processor_def]}, sort_keys=False), language="yaml")
-    apply_col, run_col = st.columns(2)
-    if apply_col.button("Apply Dimensions", type="primary", disabled=not processor.id):
+    if components.editor_save_bar(
+        key="builder_dimensions_save",
+        caption=f"Save the selected dimensions for processor `{processor.id}`.",
+        disabled=not processor.id,
+        placeholder=save_slot,
+    ):
         try:
             builder.write_processor_definition(ctx.workspace, processor_def)
             _show_validation_after_write(
@@ -803,8 +919,8 @@ def _dimensions_builder(ctx: ValueStreamContext) -> None:
         except Exception as exc:  # pragma: no cover - Streamlit display path
             logger.exception("Failed to write processor dimensions: processor=%s", processor.id)
             st.error(str(exc))
-    if run_col.button(
-        "Apply & Run Source",
+    if st.button(
+        "Save & Run Source",
         icon=":material/play_arrow:",
         disabled=not processor.id,
         help="Write the processor dimensions, validate the catalog, then run this source so new aggregate files are materialized.",
@@ -1580,7 +1696,15 @@ def _utc_now() -> dt.datetime:
 
 
 @st.fragment()
-def _processor_builder(ctx: ValueStreamContext) -> None:  # noqa: PLR0912, PLR0915
+def _processor_builder(  # noqa: PLR0912, PLR0915
+    ctx: ValueStreamContext, save_slot: Any
+) -> None:
+    components.editor_save_bar(
+        key="builder_processor_save_pending",
+        caption="Complete the processor definition below to enable saving.",
+        disabled=True,
+        placeholder=save_slot,
+    )
     processors = ctx.catalog.processors.processors
     if not ctx.catalog.pipelines.sources:
         st.info("No sources configured.")
@@ -1794,7 +1918,16 @@ def _processor_builder(ctx: ValueStreamContext) -> None:  # noqa: PLR0912, PLR09
         processor_def.pop("filter", None)
     st.write("### Generated YAML")
     st.code(yaml.safe_dump({"processors": [processor_def]}, sort_keys=False), language="yaml")
-    if st.button("Apply Processor", type="primary", disabled=not processor_id.strip()):
+    if components.editor_save_bar(
+        key="builder_processor_save",
+        caption=(
+            f"Save processor `{processor.id}` to the active workspace catalog."
+            if not creating
+            else "Save the new processor to the active workspace catalog."
+        ),
+        disabled=not processor_id.strip(),
+        placeholder=save_slot,
+    ):
         try:
             builder.write_processor_definition(ctx.workspace, processor_def)
             message = "Processor created." if creating else "Processor written."
@@ -1847,8 +1980,14 @@ def _remap_processor_def_fields(
 
 @st.fragment()
 def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
-    workspace: Path, catalog: model.Catalog
+    workspace: Path, catalog: model.Catalog, save_slot: Any
 ) -> None:
+    components.editor_save_bar(
+        key="builder_metric_save_pending",
+        caption="Complete or review a metric definition below to enable saving.",
+        disabled=True,
+        placeholder=save_slot,
+    )
     processors = catalog.processors.processors
     if not processors:
         st.info("No processors configured.")
@@ -1915,6 +2054,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             key_prefix="builder_kpi_recipes",
             submit_label="Add recipe to catalog",
             expanded=True,
+            submit_placeholder=save_slot,
         )
         if recipe_request is None:
             return
@@ -2132,11 +2272,15 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
         if display:
             metric_def["display"] = display
         metric_ready = bool(metric_name.strip()) and (editing or bool(metric_label.strip()))
-        if st.button(
-            "Apply Metric",
-            type="primary",
+        if components.editor_save_bar(
+            key="builder_metric_save",
+            caption=(
+                f"Save metric `{metric_name}` to the active workspace catalog."
+                if metric_name
+                else "Name the metric to enable saving."
+            ),
             disabled=not metric_ready,
-            key=f"builder_apply_metric_{metric_token}_{processor.id}_{metric_kind}",
+            placeholder=save_slot,
         ):
             try:
                 if not editing and metric_name.strip() in catalog.metrics.metrics:
@@ -2278,7 +2422,15 @@ def _start_new_tile_editor(session_state: MutableMapping[str, Any]) -> None:
 
 
 @st.fragment()
-def _tile_builder(workspace: Path, catalog: model.Catalog) -> None:  # noqa: PLR0912, PLR0915
+def _tile_builder(  # noqa: PLR0912, PLR0915
+    workspace: Path, catalog: model.Catalog, save_slot: Any
+) -> None:
+    components.editor_save_bar(
+        key="builder_reports_save_pending",
+        caption="Complete the tile and page settings below to enable saving.",
+        disabled=True,
+        placeholder=save_slot,
+    )
     metric_names = sorted(catalog.metrics.metrics)
     if not metric_names:
         st.info("No metrics configured.")
@@ -2543,8 +2695,7 @@ def _tile_builder(workspace: Path, catalog: model.Catalog) -> None:  # noqa: PLR
             page_id = page.id
             page_title = page.title
 
-        _page_settings_editor(
-            workspace,
+        page_filters, page_time_filter, page_settings_ready = _page_settings_editor(
             dashboard_id=dashboard_id,
             dashboard_title=dashboard_title,
             page_id=page_id,
@@ -2624,23 +2775,41 @@ def _tile_builder(workspace: Path, catalog: model.Catalog) -> None:  # noqa: PLR
         else:
             built_tile = {}
 
-        preview, write = st.columns(2)
-        if preview.button("Preview Tile", icon=":material/preview:", disabled=not built_tile):
+        if st.button("Preview Tile", icon=":material/preview:", disabled=not built_tile):
             _preview_tile(workspace, catalog, built_tile)
-        if write.button(
-            "Apply Tile", type="primary", disabled=not built_tile or not dashboard_id.strip()
+        if components.editor_save_bar(
+            key="builder_reports_save",
+            caption="Save the current tile and its page settings to the active catalog.",
+            disabled=(
+                not built_tile
+                or not dashboard_id.strip()
+                or not page_id.strip()
+                or not page_settings_ready
+            ),
+            placeholder=save_slot,
         ):
             try:
-                builder.write_tile_definition(
-                    workspace,
-                    dashboard_id=dashboard_id.strip(),
-                    dashboard_title=dashboard_title.strip()
-                    or builder.title_from_identifier(dashboard_id),
-                    page_id=page_id.strip() or "builder",
-                    page_title=page_title.strip() or builder.title_from_identifier(page_id),
-                    tile=built_tile,
-                )
-                _show_validation_after_write(workspace, "Tile written.")
+                with builder.catalog_transaction(workspace):
+                    builder.write_tile_definition(
+                        workspace,
+                        dashboard_id=dashboard_id.strip(),
+                        dashboard_title=dashboard_title.strip()
+                        or builder.title_from_identifier(dashboard_id),
+                        page_id=page_id.strip(),
+                        page_title=page_title.strip() or builder.title_from_identifier(page_id),
+                        tile=built_tile,
+                    )
+                    builder.write_page_settings(
+                        workspace,
+                        dashboard_id=dashboard_id.strip(),
+                        dashboard_title=dashboard_title.strip()
+                        or builder.title_from_identifier(dashboard_id),
+                        page_id=page_id.strip(),
+                        page_title=page_title.strip() or builder.title_from_identifier(page_id),
+                        filters=page_filters,
+                        time_filter=page_time_filter,
+                    )
+                _show_validation_after_write(workspace, "Tile and page settings written.")
             except Exception as exc:  # pragma: no cover - Streamlit display path
                 logger.exception(
                     "Failed to write tile definition: dashboard=%s page=%s tile=%s",
@@ -2669,7 +2838,6 @@ def _compatible_tile_field_keys(chart_kind: str) -> set[str]:
 
 
 def _page_settings_editor(
-    workspace: Path,
     *,
     dashboard_id: str,
     dashboard_title: str,
@@ -2677,7 +2845,7 @@ def _page_settings_editor(
     page_title: str,
     page: model.DashboardPage | None,
     key_suffix: str,
-) -> None:
+) -> tuple[list[dict[str, Any]], dict[str, Any], bool]:
     with st.expander("Page filters and time range", expanded=False):
         rows = [item.model_dump(mode="python") for item in page.filters] if page is not None else []
         edited = st.data_editor(
@@ -2742,26 +2910,8 @@ def _page_settings_editor(
             key=f"builder_page_time_default_{key_suffix}",
             help=config_help.field_help("report.default_range"),
         )
-        if st.button(
-            "Apply Page Settings",
-            key=f"builder_page_settings_apply_{key_suffix}",
-            disabled=not dashboard_id.strip() or not page_id.strip() or not presets,
-        ):
-            try:
-                builder.write_page_settings(
-                    workspace,
-                    dashboard_id=dashboard_id.strip(),
-                    dashboard_title=dashboard_title.strip()
-                    or builder.title_from_identifier(dashboard_id),
-                    page_id=page_id.strip(),
-                    page_title=page_title.strip() or builder.title_from_identifier(page_id),
-                    filters=filters,
-                    time_filter={"default": default, "presets": presets},
-                )
-                _show_validation_after_write(workspace, "Page settings written.")
-            except Exception as exc:  # pragma: no cover - Streamlit display path
-                logger.exception("Failed to write page settings: page=%s", page_id)
-                st.error(str(exc))
+    ready = bool(dashboard_id.strip() and page_id.strip() and presets)
+    return filters, {"default": default, "presets": presets}, ready
 
 
 def _page_filter_rows(edited: Any) -> list[dict[str, Any]]:
@@ -3296,7 +3446,13 @@ def _chat_description_map(rows: Any) -> dict[str, str]:
 
 
 @st.fragment()
-def _chat_review(ctx: ValueStreamContext) -> None:
+def _chat_review(ctx: ValueStreamContext, save_slot: Any) -> None:
+    components.editor_save_bar(
+        key="builder_chat_save_pending",
+        caption="Edit chat guidance below, then save it to the active workspace.",
+        disabled=True,
+        placeholder=save_slot,
+    )
     components.render_validation_summary(ctx.validation.issues, ok=ctx.validation.ok)
     config_path, ai_config = load_llm_settings_config(ctx.workspace)
     chat_config_path, chat_config = load_chat_with_data_config(ctx.workspace)
@@ -3320,15 +3476,20 @@ def _chat_review(ctx: ValueStreamContext) -> None:
     rows = _chat_metric_rows(ctx.catalog)
     if not rows:
         st.info("Add aggregate metrics before using Chat With Data.")
-        _chat_settings_editor(ctx, chat_config)
+        _chat_settings_editor(ctx, chat_config, save_slot=save_slot)
         return
     st.dataframe(rows, hide_index=True, width="stretch", height=420)
     if not ctx.validation.ok:
         st.warning("Resolve catalog validation issues before relying on chat answers.")
-    _chat_settings_editor(ctx, chat_config)
+    _chat_settings_editor(ctx, chat_config, save_slot=save_slot)
 
 
-def _chat_settings_editor(ctx: ValueStreamContext, chat_config: Mapping[str, Any]) -> None:
+def _chat_settings_editor(
+    ctx: ValueStreamContext,
+    chat_config: Mapping[str, Any],
+    *,
+    save_slot: Any,
+) -> None:
     agent_prompt = str(chat_config.get("agent_prompt") or DEFAULT_CHAT_AGENT_PROMPT)
     metric_descriptions = {
         str(key): str(value)
@@ -3416,7 +3577,11 @@ def _chat_settings_editor(ctx: ValueStreamContext, chat_config: Mapping[str, Any
             },
         )
 
-    if st.button("Apply Chat Settings", type="primary"):
+    if components.editor_save_bar(
+        key="builder_chat_save",
+        caption="Save chat prompt and descriptions to `ai.yaml` in the active workspace.",
+        placeholder=save_slot,
+    ):
         path = write_chat_with_data_config(
             ctx.workspace,
             agent_prompt=edited_prompt,
@@ -3427,7 +3592,13 @@ def _chat_settings_editor(ctx: ValueStreamContext, chat_config: Mapping[str, Any
 
 
 @st.fragment()
-def _settings_builder(ctx: ValueStreamContext) -> None:
+def _settings_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
+    components.editor_save_bar(
+        key="builder_settings_save_pending",
+        caption="Complete the workspace settings below to enable saving.",
+        disabled=True,
+        placeholder=save_slot,
+    )
     defaults = ctx.catalog.pipelines.defaults
     calendar = defaults.calendar
     known_grains = ["Day", "Month", "Quarter", "Year", "Summary"]
@@ -3493,10 +3664,11 @@ def _settings_builder(ctx: ValueStreamContext) -> None:
     )
     if not selected_grains:
         st.warning("Select at least one calendar grain.")
-    if st.button(
-        "Apply Settings",
-        type="primary",
+    if components.editor_save_bar(
+        key="builder_settings_save",
+        caption="Save workspace defaults and dashboard theme to the active catalog.",
         disabled=bool(theme_error) or not selected_grains,
+        placeholder=save_slot,
     ):
         builder.write_workspace_settings(
             ctx.workspace,
@@ -3510,7 +3682,14 @@ def _settings_builder(ctx: ValueStreamContext) -> None:
 
 
 @st.fragment()
-def _save_export(ctx: ValueStreamContext) -> None:
+def _save_export(ctx: ValueStreamContext, save_slot: Any) -> None:
+    components.editor_save_bar(
+        key="builder_export_save",
+        caption="Builder changes are already saved to the active workspace; export files below.",
+        label="Saved",
+        disabled=True,
+        placeholder=save_slot,
+    )
     components.render_validation_summary(ctx.validation.issues, ok=ctx.validation.ok)
     for filename in [
         "pipelines.yaml",

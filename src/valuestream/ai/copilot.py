@@ -41,6 +41,63 @@ _HISTORY_LIMIT = 8
 _COVERAGE_STATUSES = ("covered", "partial", "missing")
 
 OPERATION_DICTIONARY: dict[str, Any] = {
+    "set_source_default": {
+        "purpose": "Add or replace one scalar default on an existing source.",
+        "shape": {
+            "op": "set_source_default",
+            "source": "existing source id",
+            "field": "existing or explicitly user-requested new field name",
+            "value": "string, number, boolean, or null",
+        },
+    },
+    "remove_source_default": {
+        "purpose": "Remove one default from an existing source.",
+        "shape": {
+            "op": "remove_source_default",
+            "source": "existing source id",
+            "field": "field with an existing default",
+        },
+    },
+    "set_source_filter": {
+        "purpose": (
+            "Add or replace the dataset filter on an existing source before processor fan-out."
+        ),
+        "shape": {
+            "op": "set_source_filter",
+            "source": "existing source id",
+            "expression": "closed boolean expression AST over approved or derived source fields",
+        },
+    },
+    "remove_source_filter": {
+        "purpose": "Remove the dataset filter from an existing source.",
+        "shape": {
+            "op": "remove_source_filter",
+            "source": "existing source id",
+        },
+    },
+    "set_calculated_field": {
+        "purpose": (
+            "Add or replace one derive_column transform on an existing source. The complete "
+            "supported expression language is listed in catalog dictionaries > expression_ast."
+        ),
+        "shape": {
+            "op": "set_calculated_field",
+            "source": "existing source id",
+            "name": "new or existing calculated output field",
+            "expression": (
+                "closed expression AST mapping over approved or derived fields; use op: concat "
+                "with args and optional sep for string concatenation"
+            ),
+        },
+    },
+    "remove_calculated_field": {
+        "purpose": "Remove one derive_column transform from an existing source.",
+        "shape": {
+            "op": "remove_calculated_field",
+            "source": "existing source id",
+            "name": "existing calculated output field",
+        },
+    },
     "set_processor": {
         "purpose": "Add or replace one processor definition.",
         "shape": {
@@ -307,6 +364,101 @@ def install_recipe_request_in_draft(
     return updated
 
 
+def _apply_set_source_default(
+    draft: dict[str, Any], op: dict[str, Any]
+) -> tuple[dict[str, Any], str]:
+    source_id = str(op.get("source") or "").strip()
+    field_name = str(op.get("field") or "").strip()
+    if not source_id or not field_name or "value" not in op:
+        raise ValueError("set_source_default requires source, field, and value")
+    value = op["value"]
+    if not (isinstance(value, bool | int | float | str) or value is None):
+        raise ValueError("set_source_default value must be a string, number, boolean, or null")
+    source = _source_by_id(draft, source_id)
+    existed = field_name in _effective_source_defaults(source)
+    _set_source_default_value(source, field_name, value)
+    model.Source.model_validate(source)
+    verb = "Updated" if existed else "Added"
+    return draft, f"{verb} default '{source_id}/{field_name}'"
+
+
+def _apply_remove_source_default(
+    draft: dict[str, Any], op: dict[str, Any]
+) -> tuple[dict[str, Any], str]:
+    source_id = str(op.get("source") or "").strip()
+    field_name = str(op.get("field") or "").strip()
+    if not source_id or not field_name:
+        raise ValueError("remove_source_default requires source and field")
+    source = _source_by_id(draft, source_id)
+    if field_name not in _effective_source_defaults(source):
+        raise ValueError(f"Default '{source_id}/{field_name}' does not exist in the draft")
+    _remove_source_default_value(source, field_name)
+    model.Source.model_validate(source)
+    return draft, f"Removed default '{source_id}/{field_name}'"
+
+
+def _apply_set_source_filter(
+    draft: dict[str, Any], op: dict[str, Any]
+) -> tuple[dict[str, Any], str]:
+    source_id = str(op.get("source") or "").strip()
+    expression = op.get("expression")
+    if not source_id or not isinstance(expression, dict):
+        raise ValueError("set_source_filter requires source and an expression mapping")
+    source = _source_by_id(draft, source_id)
+    existed = bool(_source_filter_transforms(source))
+    transform = _validated_source_filter(expression)
+    _replace_source_filter_transforms(source, [transform])
+    model.Source.model_validate(source)
+    verb = "Updated" if existed else "Added"
+    return draft, f"{verb} source filter '{source_id}'"
+
+
+def _apply_remove_source_filter(
+    draft: dict[str, Any], op: dict[str, Any]
+) -> tuple[dict[str, Any], str]:
+    source_id = str(op.get("source") or "").strip()
+    if not source_id:
+        raise ValueError("remove_source_filter requires source")
+    source = _source_by_id(draft, source_id)
+    if not _source_filter_transforms(source):
+        raise ValueError(f"Source filter '{source_id}' does not exist in the draft")
+    _replace_source_filter_transforms(source, [])
+    model.Source.model_validate(source)
+    return draft, f"Removed source filter '{source_id}'"
+
+
+def _apply_set_calculated_field(
+    draft: dict[str, Any], op: dict[str, Any]
+) -> tuple[dict[str, Any], str]:
+    source_id = str(op.get("source") or "").strip()
+    field_name = str(op.get("name") or "").strip()
+    expression = op.get("expression")
+    if not source_id or not field_name or not isinstance(expression, dict):
+        raise ValueError("set_calculated_field requires source, name, and an expression mapping")
+    source = _source_by_id(draft, source_id)
+    existed = _calculated_transform_index(source, field_name) is not None
+    transform = _validated_calculated_transform(field_name, expression)
+    _set_calculated_transform(source, field_name, transform)
+    model.Source.model_validate(source)
+    verb = "Updated" if existed else "Added"
+    return draft, f"{verb} calculated field '{source_id}/{field_name}'"
+
+
+def _apply_remove_calculated_field(
+    draft: dict[str, Any], op: dict[str, Any]
+) -> tuple[dict[str, Any], str]:
+    source_id = str(op.get("source") or "").strip()
+    field_name = str(op.get("name") or "").strip()
+    if not source_id or not field_name:
+        raise ValueError("remove_calculated_field requires source and name")
+    source = _source_by_id(draft, source_id)
+    if _calculated_transform_index(source, field_name) is None:
+        raise ValueError(f"Calculated field '{source_id}/{field_name}' does not exist in the draft")
+    _remove_calculated_transform(source, field_name)
+    model.Source.model_validate(source)
+    return draft, f"Removed calculated field '{source_id}/{field_name}'"
+
+
 def _apply_set_processor(draft: dict[str, Any], op: dict[str, Any]) -> tuple[dict[str, Any], str]:
     processor = op.get("processor")
     if not isinstance(processor, dict) or not str(processor.get("id") or "").strip():
@@ -487,6 +639,12 @@ def _apply_install_recipe(draft: dict[str, Any], op: dict[str, Any]) -> tuple[di
 
 
 _OPERATION_HANDLERS = {
+    "set_source_default": _apply_set_source_default,
+    "remove_source_default": _apply_remove_source_default,
+    "set_source_filter": _apply_set_source_filter,
+    "remove_source_filter": _apply_remove_source_filter,
+    "set_calculated_field": _apply_set_calculated_field,
+    "remove_calculated_field": _apply_remove_calculated_field,
     "set_processor": _apply_set_processor,
     "remove_processor": _apply_remove_processor,
     "set_metric": _apply_set_metric,
@@ -496,6 +654,285 @@ _OPERATION_HANDLERS = {
     "set_dashboards": _apply_set_dashboards,
     "install_recipe": _apply_install_recipe,
 }
+
+
+def _source_by_id(draft: dict[str, Any], source_id: str) -> dict[str, Any]:
+    sources = draft.get("pipelines", {}).get("sources", [])
+    if not isinstance(sources, list):
+        raise ValueError("Draft pipelines section does not contain a sources list")
+    source = _find_by_id(sources, source_id)
+    if source is None:
+        raise ValueError(f"Source '{source_id}' does not exist in the draft")
+    return source
+
+
+def _effective_source_defaults(source: dict[str, Any]) -> dict[str, Any]:
+    raw_defaults = source.get("defaults", {})
+    values = copy.deepcopy(raw_defaults) if isinstance(raw_defaults, dict) else {}
+    for transform in source.get("transforms", []) or []:
+        if not isinstance(transform, dict) or transform.get("kind") != "defaults":
+            continue
+        transform_values = transform.get("values", {})
+        if isinstance(transform_values, dict):
+            values.update(copy.deepcopy(transform_values))
+    return values
+
+
+def _set_source_default_value(source: dict[str, Any], field_name: str, value: Any) -> None:
+    transforms = source.setdefault("transforms", [])
+    if not isinstance(transforms, list):
+        raise ValueError("Source transforms section is not a list")
+    default_indexes = [
+        index
+        for index, transform in enumerate(transforms)
+        if isinstance(transform, dict) and transform.get("kind") == "defaults"
+    ]
+    target_index = next(
+        (
+            index
+            for index in reversed(default_indexes)
+            if isinstance(transforms[index].get("values"), dict)
+            and field_name in transforms[index]["values"]
+        ),
+        default_indexes[-1] if default_indexes else None,
+    )
+    _remove_source_default_value(source, field_name, prune_empty=False)
+    if target_index is not None:
+        values = transforms[target_index].setdefault("values", {})
+        if not isinstance(values, dict):
+            raise ValueError("Source defaults transform values are not a mapping")
+        values[field_name] = copy.deepcopy(value)
+        return
+    rename_indexes = [
+        index
+        for index, transform in enumerate(transforms)
+        if isinstance(transform, dict) and transform.get("kind") == "rename_capitalize"
+    ]
+    if rename_indexes:
+        transforms.insert(
+            rename_indexes[-1] + 1,
+            {"kind": "defaults", "values": {field_name: copy.deepcopy(value)}},
+        )
+        return
+    defaults = source.setdefault("defaults", {})
+    if not isinstance(defaults, dict):
+        raise ValueError("Source defaults section is not a mapping")
+    defaults[field_name] = copy.deepcopy(value)
+
+
+def _remove_source_default_value(
+    source: dict[str, Any], field_name: str, *, prune_empty: bool = True
+) -> None:
+    defaults = source.get("defaults")
+    if isinstance(defaults, dict):
+        defaults.pop(field_name, None)
+    transforms = source.get("transforms", [])
+    if not isinstance(transforms, list):
+        raise ValueError("Source transforms section is not a list")
+    for transform in transforms:
+        if not isinstance(transform, dict) or transform.get("kind") != "defaults":
+            continue
+        values = transform.get("values")
+        if isinstance(values, dict):
+            values.pop(field_name, None)
+    if prune_empty:
+        source["transforms"] = [
+            transform
+            for transform in transforms
+            if not (
+                isinstance(transform, dict)
+                and transform.get("kind") == "defaults"
+                and not transform.get("values")
+            )
+        ]
+
+
+def _source_filter_transforms(source: dict[str, Any]) -> list[dict[str, Any]]:
+    transforms = source.get("transforms", [])
+    if not isinstance(transforms, list):
+        raise ValueError("Source transforms section is not a list")
+    return [
+        transform
+        for transform in transforms
+        if isinstance(transform, dict) and transform.get("kind") == "filter"
+    ]
+
+
+def _validated_source_filter(expression: dict[str, Any]) -> dict[str, Any]:
+    if _expression_contains_key(expression, "polars"):
+        raise ValueError("Copilot source filters require the closed expression AST, not Polars")
+    transform = model.FilterTransform.model_validate(
+        {"kind": "filter", "expression": expression}
+    )
+    return cast(
+        dict[str, Any],
+        transform.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
+
+
+def _replace_source_filter_transforms(
+    source: dict[str, Any], filters: list[dict[str, Any]]
+) -> None:
+    transforms = source.setdefault("transforms", [])
+    if not isinstance(transforms, list):
+        raise ValueError("Source transforms section is not a list")
+    first_filter_index = next(
+        (
+            index
+            for index, transform in enumerate(transforms)
+            if isinstance(transform, dict) and transform.get("kind") == "filter"
+        ),
+        None,
+    )
+    remaining = [
+        transform
+        for transform in transforms
+        if not (isinstance(transform, dict) and transform.get("kind") == "filter")
+    ]
+    if not filters:
+        source["transforms"] = remaining
+        return
+    if first_filter_index is None:
+        insertion_index = _source_filter_insertion_index(remaining, filters[0]["expression"])
+    else:
+        insertion_index = sum(
+            1
+            for transform in transforms[:first_filter_index]
+            if not (isinstance(transform, dict) and transform.get("kind") == "filter")
+        )
+    source["transforms"] = [
+        *remaining[:insertion_index],
+        *(copy.deepcopy(item) for item in filters),
+        *remaining[insertion_index:],
+    ]
+
+
+def _source_filter_insertion_index(
+    transforms: list[Any], expression: dict[str, Any]
+) -> int:
+    referenced_fields = _expression_field_references(expression)
+    insertion_index = 0
+    for index, transform in enumerate(transforms):
+        if not isinstance(transform, dict):
+            continue
+        kind = transform.get("kind")
+        if kind in {"rename_capitalize", "defaults"} or _transform_affects_fields(
+            transform, referenced_fields
+        ):
+            insertion_index = index + 1
+    return insertion_index
+
+
+def _transform_affects_fields(transform: dict[str, Any], fields: set[str]) -> bool:
+    kind = transform.get("kind")
+    if kind in {"parse_datetime", "cast"}:
+        columns = transform.get("columns", [])
+        values = columns if isinstance(columns, list | dict) else []
+        return bool(fields & {str(item) for item in values})
+    if kind == "derive_calendar":
+        return bool(fields & {str(item) for item in transform.get("outputs", [])})
+    if kind in {"derive_column", "coalesce"}:
+        return str(transform.get("output") or "") in fields
+    if kind == "derive_action_id":
+        return "ActionID" in fields
+    if kind == "defaults":
+        values = transform.get("values", {})
+        return isinstance(values, dict) and bool(fields & {str(item) for item in values})
+    return False
+
+
+def _expression_field_references(value: Any) -> set[str]:
+    if isinstance(value, dict):
+        fields = {
+            str(value[key])
+            for key in ("col", "column")
+            if isinstance(value.get(key), str) and str(value[key]).strip()
+        }
+        for item in value.values():
+            fields.update(_expression_field_references(item))
+        return fields
+    if isinstance(value, list):
+        fields: set[str] = set()
+        for item in value:
+            fields.update(_expression_field_references(item))
+        return fields
+    return set()
+
+
+def _expression_contains_key(value: Any, key: str) -> bool:
+    if isinstance(value, dict):
+        return key in value or any(_expression_contains_key(item, key) for item in value.values())
+    if isinstance(value, list):
+        return any(_expression_contains_key(item, key) for item in value)
+    return False
+
+
+def _calculated_transform_index(source: dict[str, Any], field_name: str) -> int | None:
+    transforms = source.get("transforms", [])
+    if not isinstance(transforms, list):
+        raise ValueError("Source transforms section is not a list")
+    return next(
+        (
+            index
+            for index, transform in enumerate(transforms)
+            if isinstance(transform, dict)
+            and transform.get("kind") == "derive_column"
+            and transform.get("output") == field_name
+        ),
+        None,
+    )
+
+
+def _validated_calculated_transform(
+    field_name: str, expression: dict[str, Any]
+) -> dict[str, Any]:
+    if "polars" in expression:
+        raise ValueError("Copilot calculated fields require the closed expression AST, not Polars")
+    transform = model.DeriveColumn.model_validate(
+        {"kind": "derive_column", "output": field_name, "expression": expression}
+    )
+    return cast(
+        dict[str, Any],
+        transform.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
+
+
+def _set_calculated_transform(
+    source: dict[str, Any], field_name: str, transform: dict[str, Any]
+) -> None:
+    transforms = source.setdefault("transforms", [])
+    if not isinstance(transforms, list):
+        raise ValueError("Source transforms section is not a list")
+    index = _calculated_transform_index(source, field_name)
+    if index is None:
+        transforms.append(copy.deepcopy(transform))
+        return
+    transforms[index] = copy.deepcopy(transform)
+    source["transforms"] = [
+        item
+        for item_index, item in enumerate(transforms)
+        if item_index == index
+        or not (
+            isinstance(item, dict)
+            and item.get("kind") == "derive_column"
+            and item.get("output") == field_name
+        )
+    ]
+
+
+def _remove_calculated_transform(source: dict[str, Any], field_name: str) -> None:
+    transforms = source.get("transforms", [])
+    if not isinstance(transforms, list):
+        raise ValueError("Source transforms section is not a list")
+    source["transforms"] = [
+        transform
+        for transform in transforms
+        if not (
+            isinstance(transform, dict)
+            and transform.get("kind") == "derive_column"
+            and transform.get("output") == field_name
+        )
+    ]
 
 
 def _find_by_id(items: Any, item_id: str) -> dict[str, Any] | None:
@@ -540,6 +977,27 @@ def draft_patches(base: dict[str, Any], proposed: dict[str, Any]) -> list[DraftP
     """Return independently reviewable structural changes between two drafts."""
 
     patches: list[DraftPatch] = []
+    patches.extend(
+        _mapping_patches(
+            "source_filters",
+            _source_filters_by_id(base),
+            _source_filters_by_id(proposed),
+        )
+    )
+    patches.extend(
+        _mapping_patches(
+            "source_defaults",
+            _source_defaults_by_key(base),
+            _source_defaults_by_key(proposed),
+        )
+    )
+    patches.extend(
+        _mapping_patches(
+            "calculated_fields",
+            _calculated_fields_by_key(base),
+            _calculated_fields_by_key(proposed),
+        )
+    )
     patches.extend(
         _mapping_patches(
             "processors",
@@ -594,13 +1052,19 @@ def merge_selected_draft_patches(
     accepted = set(accepted_patch_keys)
     patches = draft_patches(base, proposed)
     merged = copy.deepcopy(base)
+    patch_setters = {
+        "source_filters": _set_source_filters_patch_value,
+        "source_defaults": _set_source_default_patch_value,
+        "calculated_fields": _set_calculated_field_patch_value,
+        "processors": _set_processor_value,
+        "metrics": _set_metric_value,
+    }
     for patch in patches:
-        if patch.section not in {"processors", "metrics"} or patch.key not in accepted:
+        if patch.key not in accepted:
             continue
-        if patch.section == "processors":
-            _set_processor_value(merged, patch.object_id, patch.after)
-        else:
-            _set_metric_value(merged, patch.object_id, patch.after)
+        setter = patch_setters.get(patch.section)
+        if setter is not None:
+            setter(merged, patch.object_id, patch.after)
 
     structure_patch = next(
         (patch for patch in patches if patch.key == "dashboards:structure"),
@@ -636,6 +1100,7 @@ def run_copilot_tool_loop(
     call_model: Callable[[str], str],
     validate: Callable[[dict[str, Any]], tuple[bool, list[str]]],
     max_iterations: int = 3,
+    operation_policy: dict[str, str] | None = None,
 ) -> CopilotRun:
     """Run a bounded operation/validation loop without mutating the accepted draft."""
 
@@ -646,6 +1111,7 @@ def run_copilot_tool_loop(
     issues: list[str] = []
     current_prompt = prompt
     last_turn = CopilotTurn(reply="No copilot response was produced.")
+    policy = operation_policy or {}
     for iteration in range(1, limit + 1):
         response = call_model(current_prompt)
         responses.append(response)
@@ -663,21 +1129,31 @@ def run_copilot_tool_loop(
                 responses=tuple(responses),
                 iterations=iteration,
             )
-        try:
-            candidate, operation_summaries = apply_draft_operations(candidate, turn.operations)
-        except (TypeError, ValueError) as exc:
-            issues = [str(exc)]
+        policy_issues = list(
+            dict.fromkeys(
+                policy[kind]
+                for operation in turn.operations
+                if (kind := str(operation.get("op") or "")) in policy
+            )
+        )
+        if policy_issues:
+            issues = policy_issues
         else:
-            summaries.extend(operation_summaries)
-            ok, issues = validate(candidate)
-            if ok:
-                return CopilotRun(
-                    turn=turn,
-                    pending_draft=candidate,
-                    summaries=tuple(summaries),
-                    responses=tuple(responses),
-                    iterations=iteration,
-                )
+            try:
+                candidate, operation_summaries = apply_draft_operations(candidate, turn.operations)
+            except (TypeError, ValueError) as exc:
+                issues = [str(exc)]
+            else:
+                summaries.extend(operation_summaries)
+                ok, issues = validate(candidate)
+                if ok:
+                    return CopilotRun(
+                        turn=turn,
+                        pending_draft=candidate,
+                        summaries=tuple(summaries),
+                        responses=tuple(responses),
+                        iterations=iteration,
+                    )
         if iteration < limit:
             current_prompt = _tool_correction_prompt(
                 original_prompt=prompt,
@@ -704,7 +1180,7 @@ def _tool_correction_prompt(
 ) -> str:
     return (
         f"{original_prompt}\n\n"
-        "The previous governed operations were applied to a temporary draft and failed. "
+        "The previous governed operations were evaluated against a temporary draft and failed. "
         "Return corrected operations against the current temporary draft. Do not repeat an "
         "invalid operation. Ask a clarifying question instead of guessing when the errors "
         "cannot be resolved from the approved context.\n\n"
@@ -754,6 +1230,51 @@ def _processors_by_id(draft: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(item["id"]): item for item in processors if isinstance(item, dict) and item.get("id")
     }
+
+
+def _source_defaults_by_key(draft: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    sources = draft.get("pipelines", {}).get("sources", [])
+    if not isinstance(sources, list):
+        return out
+    for source in sources:
+        if not isinstance(source, dict) or not source.get("id"):
+            continue
+        for field_name, value in _effective_source_defaults(source).items():
+            out[f"{source['id']}/{field_name}"] = {"value": copy.deepcopy(value)}
+    return out
+
+
+def _source_filters_by_id(draft: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    sources = draft.get("pipelines", {}).get("sources", [])
+    if not isinstance(sources, list):
+        return out
+    for source in sources:
+        if not isinstance(source, dict) or not source.get("id"):
+            continue
+        filters = _source_filter_transforms(source)
+        if filters:
+            out[str(source["id"])] = filters
+    return out
+
+
+def _calculated_fields_by_key(draft: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    sources = draft.get("pipelines", {}).get("sources", [])
+    if not isinstance(sources, list):
+        return out
+    for source in sources:
+        if not isinstance(source, dict) or not source.get("id"):
+            continue
+        for transform in source.get("transforms", []) or []:
+            if (
+                isinstance(transform, dict)
+                and transform.get("kind") == "derive_column"
+                and transform.get("output")
+            ):
+                out[f"{source['id']}/{transform['output']}"] = transform
+    return out
 
 
 def _metrics_by_name(draft: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -810,6 +1331,59 @@ def _set_processor_value(draft: dict[str, Any], processor_id: str, value: Any) -
         processors.append(copy.deepcopy(value))
     else:
         processors[index] = copy.deepcopy(value)
+
+
+def _source_object_parts(object_id: str) -> tuple[str, str]:
+    source_id, separator, field_name = object_id.partition("/")
+    if not separator or not source_id or not field_name:
+        raise ValueError(f"Invalid source patch key '{object_id}'")
+    return source_id, field_name
+
+
+def _set_source_default_patch_value(draft: dict[str, Any], object_id: str, value: Any) -> None:
+    source_id, field_name = _source_object_parts(object_id)
+    source = _source_by_id(draft, source_id)
+    if value is None:
+        _remove_source_default_value(source, field_name)
+        return
+    if not isinstance(value, dict) or "value" not in value:
+        raise ValueError(f"Invalid source default patch for '{object_id}'")
+    _set_source_default_value(source, field_name, value["value"])
+
+
+def _set_source_filters_patch_value(draft: dict[str, Any], source_id: str, value: Any) -> None:
+    source = _source_by_id(draft, source_id)
+    if value is None:
+        _replace_source_filter_transforms(source, [])
+        return
+    if not isinstance(value, list):
+        raise ValueError(f"Invalid source filter patch for '{source_id}'")
+    filters = [
+        cast(
+            dict[str, Any],
+            model.FilterTransform.model_validate(item).model_dump(
+                mode="json", by_alias=True, exclude_none=True
+            ),
+        )
+        for item in value
+    ]
+    _replace_source_filter_transforms(source, filters)
+
+
+def _set_calculated_field_patch_value(
+    draft: dict[str, Any], object_id: str, value: Any
+) -> None:
+    source_id, field_name = _source_object_parts(object_id)
+    source = _source_by_id(draft, source_id)
+    if value is None:
+        _remove_calculated_transform(source, field_name)
+        return
+    if not isinstance(value, dict):
+        raise ValueError(f"Invalid calculated field patch for '{object_id}'")
+    transform = model.DeriveColumn.model_validate(value).model_dump(
+        mode="json", by_alias=True, exclude_none=True
+    )
+    _set_calculated_transform(source, field_name, transform)
 
 
 def _set_metric_value(draft: dict[str, Any], metric_id: str, value: Any) -> None:
@@ -894,7 +1468,8 @@ def prompt_for_copilot(
     return (
         "You are the configuration copilot inside Value Stream's AI Configuration Studio. "
         "You help the user turn free-form requests into reviewable draft changes.\n\n"
-        f"The user is on the {_step_name(step)!r} studio step. {_step_hint(step)}\n\n"
+        f"The user is on the {_step_name(step)!r} studio step. {_step_hint(step)} "
+        f"{_step_operation_rule(step)}\n\n"
         "Respond with a single JSON object and nothing else:\n"
         '{"reply": str, "operations": [Operation], "questions": '
         '[{"question": str, "options": [str]}]}\n'
@@ -904,8 +1479,11 @@ def prompt_for_copilot(
         "- questions: when the request is ambiguous, ask before guessing and offer two to "
         "four concrete options per question. Leave empty otherwise.\n"
         "- Never return operations and questions in the same response. Resolve questions first.\n"
-        "- Use only approved fields, existing processor ids, and existing metric ids in "
-        "operations. Never invent source fields.\n\n"
+        "- Use only approved input fields, existing source ids, existing processor ids, and "
+        "existing metric ids in operations. A new default or calculated output field is allowed "
+        "only when the user explicitly names or requests it. Calculated expressions may reference "
+        "only approved inputs or calculated fields already present earlier in the source pipeline. "
+        "Never invent an input field.\n\n"
         "Operation dictionary:\n"
         f"{yaml.safe_dump(OPERATION_DICTIONARY, sort_keys=False)}\n"
         "Built-in KPI recipe ids:\n"
@@ -929,6 +1507,28 @@ def _step_name(step: str) -> str:
 
 def _step_hint(step: str) -> str:
     return _STEP_HINTS.get(_step_name(step), "")
+
+
+def _step_operation_rule(step: str) -> str:
+    return {
+        "Defaults": (
+            "On this step, source default requests must use set_source_default or "
+            "remove_source_default; do not edit a processor."
+        ),
+        "Filters": (
+            "On this step, dataset filter requests must use set_source_filter or "
+            "remove_source_filter so the filter runs in the source pipeline before processor "
+            "fan-out; do not use set_processor for a dataset filter."
+        ),
+        "Calculations": (
+            "On this step, calculated-field requests must use set_calculated_field or "
+            "remove_calculated_field; do not edit a processor. The expression_ast catalog "
+            "dictionary is the complete supported DSL. Do not claim an operation is unavailable "
+            "when it is listed there. For concatenation, emit an expression such as "
+            '{"op":"concat","args":[{"col":"Issue"},{"col":"Group"}],"sep":"/"}; '
+            "do not emit a concat(...) function-call string."
+        ),
+    }.get(_step_name(step), "")
 
 
 def parse_copilot_response(text: str) -> CopilotTurn:

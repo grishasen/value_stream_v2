@@ -79,7 +79,7 @@ Both authoring surfaces provide the same steps:
 8. When a processor state is proposed, review the source, source fields,
    affected states, and current/proposed processor computation hashes.
 9. Apply explicitly. If materialization is required, run the named source from
-   Data Load (or use **Apply Draft & Run Source** in AI Configuration Studio).
+   Data Load (or use **Save Draft & Run Source** in AI Configuration Studio).
 
 Configuration Builder writes any proposed processor state first, followed by
 the materialized metric and optional tile. All writes and post-write catalog

@@ -71,6 +71,49 @@ def render_page_header(
         status_badge(status_label or status.title(), status, help=status_help)
 
 
+def editor_save_bar(
+    *,
+    key: str,
+    caption: str,
+    label: str = "Save",
+    disabled: bool = False,
+    help: str | None = None,
+    placeholder: Any | None = None,
+) -> bool:
+    """Render the primary editor save action compactly at the top right.
+
+    ``placeholder`` supports Streamlit's out-of-order rendering: an editor can
+    calculate and validate its payload below the bar, then populate the reserved
+    top position with the correctly enabled action.
+    """
+
+    tooltip = f"{caption}\n\n{help}" if help else caption
+    if placeholder is not None:
+        placeholder.empty()
+        return placeholder.button(
+            label,
+            type="primary",
+            icon=":material/save:",
+            key=f"{key}_button",
+            disabled=disabled,
+            help=tooltip,
+        )
+    with st.container(
+        horizontal=True,
+        horizontal_alignment="right",
+        vertical_alignment="center",
+        gap=None,
+    ):
+        return st.button(
+            label,
+            type="primary",
+            icon=":material/save:",
+            key=f"{key}_button",
+            disabled=disabled,
+            help=tooltip,
+        )
+
+
 def status_badge(label: str, status: str, *, help: str | None = None) -> None:
     """Render a standard status badge."""
     color, icon = STATUS_BADGES.get(status.lower(), STATUS_BADGES["unknown"])

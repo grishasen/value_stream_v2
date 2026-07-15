@@ -66,7 +66,9 @@ under `meta/` remain available for audit.
    filter coverage; a partial chip names how many charts support it, and
    unsupported charts name the filters they did not apply.
 6. Review freshness, comparison-period labels, targets, and approximation badges before interpreting a result.
-7. Use a tile's action menu for View data, Inspect, Expand, and export actions.
+7. Use a tile's action menu for Inspect, Expand, and export actions. Chart tiles
+   also offer View data. Table tiles are already native sortable dataframes and
+   export their displayed rows directly to CSV.
 
 Summary metric cards use compact display values such as `349K` and `120M`
 when no explicit catalog `value_format` is configured. Help text and report

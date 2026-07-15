@@ -348,15 +348,183 @@ _CHART_REQUIRED_FIELD_DICTIONARY: dict[str, list[str]] = {
 }
 
 _EXPRESSION_AST_DICTIONARY: dict[str, Any] = {
-    "atoms": [{"col": "ColumnOrState"}, {"lit": "scalar"}, {"param": "Name"}],
-    "safe_ratio_example": {"op": "safe_div", "num": {"col": "Positives"}, "den": {"col": "Count"}},
-    "common_ops": {
-        "arithmetic": ["add", "sub", "mul", "div", "safe_div"],
-        "comparison": ["eq", "ne", "lt", "le", "gt", "ge"],
-        "logical": ["and", "or", "not"],
-        "set_membership": ["in", "not_in"],
-        "date": ["date_trunc", "date_diff", "date_part", "strftime", "strptime"],
-        "nulls": ["is_null", "not_null", "coalesce"],
+    "syntax_rules": [
+        "Expressions are nested YAML/JSON mappings, not SQL or function-call strings.",
+        "Use only the atoms and operator forms below; every expression-valued slot may nest.",
+        "String concatenation is supported by op: concat with args and optional sep; "
+        "concat(...) is not valid AST syntax.",
+    ],
+    "atoms": {
+        "column_or_state": {"col": "ColumnOrState"},
+        "literal": {"lit": "scalar"},
+        "workspace_parameter": {"param": "Name"},
+    },
+    "operator_forms": {
+        "unary": {
+            "ops": ["not", "neg", "abs", "sqrt", "exp", "ceil", "floor"],
+            "shape": {"op": "<one of ops>", "arg": "<expression>"},
+        },
+        "log": {
+            "ops": ["log"],
+            "shape": {"op": "log", "arg": "<expression>", "base": "<optional number>"},
+        },
+        "round": {
+            "ops": ["round"],
+            "shape": {
+                "op": "round",
+                "arg": "<expression>",
+                "ndigits": "<optional integer>",
+            },
+        },
+        "cast": {
+            "ops": ["cast"],
+            "shape": {"op": "cast", "arg": "<expression>", "dtype": "<dtype>"},
+        },
+        "logical": {
+            "ops": ["and", "or"],
+            "shape": {"op": "<one of ops>", "args": ["<expression>", "<expression>"]},
+        },
+        "arithmetic": {
+            "ops": ["add", "sub", "mul", "div"],
+            "shape": {"op": "<one of ops>", "args": ["<expression>", "<expression>"]},
+        },
+        "safe_division": {
+            "ops": ["safe_div"],
+            "shape": {"op": "safe_div", "num": "<expression>", "den": "<expression>"},
+        },
+        "concatenation": {
+            "ops": ["concat"],
+            "shape": {
+                "op": "concat",
+                "args": ["<string expression>", "<string expression>", "<optional more>"],
+                "sep": "<optional string; empty by default>",
+            },
+        },
+        "horizontal_min_max": {
+            "ops": ["least", "greatest"],
+            "shape": {"op": "<one of ops>", "args": ["<expression>", "<expression>"]},
+        },
+        "first_non_null": {
+            "ops": ["coalesce"],
+            "shape": {"op": "coalesce", "args": ["<expression>", "<optional more>"]},
+        },
+        "comparison_to_literal": {
+            "ops": ["eq", "ne", "lt", "le", "gt", "ge"],
+            "shape": {"op": "<one of ops>", "column": "<column>", "value": "<scalar>"},
+        },
+        "comparison_of_expressions": {
+            "ops": ["eq", "ne", "lt", "le", "gt", "ge"],
+            "shape": {"op": "<one of ops>", "args": ["<expression>", "<expression>"]},
+        },
+        "set_membership": {
+            "ops": ["in", "not_in"],
+            "shape": {
+                "op": "<one of ops>",
+                "column": "<column>",
+                "values": ["<scalar>", "<optional more>"],
+            },
+        },
+        "range": {
+            "ops": ["between"],
+            "shape": {
+                "op": "between",
+                "column": "<column>",
+                "low": "<scalar>",
+                "high": "<scalar>",
+            },
+        },
+        "null_check": {
+            "ops": ["is_null", "not_null"],
+            "shape": {"op": "<one of ops>", "column": "<column>"},
+        },
+        "regex_match": {
+            "ops": ["matches"],
+            "shape": {"op": "matches", "column": "<column>", "pattern": "<regex>"},
+        },
+        "string_affix": {
+            "ops": ["starts_with", "ends_with"],
+            "shape": {"op": "<one of ops>", "column": "<column>", "value": "<string>"},
+        },
+        "multi_branch_conditional": {
+            "ops": ["case"],
+            "shape": {
+                "op": "case",
+                "when": [{"cond": "<expression>", "then": "<expression>"}],
+                "else": "<expression>",
+            },
+        },
+        "binary_conditional": {
+            "ops": ["when_then"],
+            "shape": {
+                "op": "when_then",
+                "cond": "<expression>",
+                "then": "<expression>",
+                "else": "<expression>",
+            },
+        },
+        "date_truncation": {
+            "ops": ["date_trunc"],
+            "shape": {"op": "date_trunc", "unit": "<date_trunc unit>", "arg": "<expression>"},
+        },
+        "date_difference": {
+            "ops": ["date_diff"],
+            "shape": {
+                "op": "date_diff",
+                "unit": "<date_diff unit>",
+                "end": "<expression>",
+                "start": "<expression>",
+            },
+        },
+        "date_part": {
+            "ops": ["date_part"],
+            "shape": {"op": "date_part", "unit": "<date_part unit>", "arg": "<expression>"},
+        },
+        "current_time": {"ops": ["now"], "shape": {"op": "now"}},
+        "datetime_format": {
+            "ops": ["strftime"],
+            "shape": {"op": "strftime", "arg": "<expression>", "format": "<string>"},
+        },
+        "datetime_parse": {
+            "ops": ["strptime"],
+            "shape": {"op": "strptime", "arg": "<expression>", "format": "<string>"},
+        },
+    },
+    "allowed_values": {
+        "dtype": [
+            "Int8",
+            "Int16",
+            "Int32",
+            "Int64",
+            "Float32",
+            "Float64",
+            "String",
+            "Date",
+            "Datetime",
+            "Boolean",
+        ],
+        "date_trunc_unit": ["day", "month", "quarter", "year", "hour", "week_iso"],
+        "date_diff_unit": ["seconds", "minutes", "hours", "days", "months", "years"],
+        "date_part_unit": ["year", "month", "day", "quarter", "hour", "weekday"],
+    },
+    "examples": {
+        "safe_ratio": {
+            "op": "safe_div",
+            "num": {"col": "Positives"},
+            "den": {"col": "Count"},
+        },
+        "concatenate_fields": {
+            "op": "concat",
+            "args": [{"col": "Issue"}, {"col": "Group"}, {"col": "Name"}],
+            "sep": "/",
+        },
+        "concatenate_after_cast": {
+            "op": "concat",
+            "args": [
+                {"col": "Channel"},
+                {"op": "cast", "arg": {"col": "Rank"}, "dtype": "String"},
+            ],
+            "sep": "-",
+        },
     },
 }
 

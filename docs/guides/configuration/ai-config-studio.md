@@ -14,6 +14,16 @@ to the workspace; editing the draft afterward returns Publish to attention.
 Selecting a phase jumps to its first step; the step selector then shows only
 that phase's steps.
 
+Every step shows the same **Save draft** action at the upper-right
+of the existing status panel. It publishes the currently accepted, validated
+session draft through the full rollback-protected write path without adding a
+separate vertical block. Its tooltip explains when no draft exists, AI changes
+are pending review, validation fails, or that exact draft is already saved.
+Controls inside review steps use
+**Update ... In Draft** wording: they accept the current panel into the
+session draft but do not write the workspace. This keeps draft editing and
+workspace persistence visibly separate.
+
 Every editable field and editable table column has a help tooltip. Tooltips
 describe the underlying catalog property and show a concrete example when the
 expected value shape is not obvious. AI Configuration Studio shares this help
@@ -59,7 +69,29 @@ independent Streamlit fragment, so ordinary dialogue does not rerun the main
 editor. It knows the current step, business requirements, approved schema,
 and accepted draft. Ask a question or request a change in free form; the
 copilot answers with a short reply and, when you asked for a change, governed
-operations for processors, metrics, built-in KPI recipes, and report tiles.
+operations for source defaults, dataset filters, calculated fields, processors, metrics,
+built-in KPI recipes, and report tiles. For example, "set the
+ModelControlGroup default to Test" creates a `set_source_default` operation;
+"calculate Margin from Revenue minus Cost" creates a validated
+`derive_column` expression rather than free-form YAML.
+
+On the **Calculations** step, the Copilot receives the complete closed
+expression-DSL catalog, including every supported operator, its exact AST
+shape, allowed date units and cast types, and nested examples. Concatenation is
+an AST operation, not a function-call string: for example,
+`{op: concat, args: [{col: Issue}, {col: Group}], sep: "/"}`. Non-string
+inputs can be nested inside `op: cast` before concatenation. The prompt must
+not report an operator as unavailable when it appears in this catalog; the
+resulting `derive_column` still passes normal model and catalog validation
+before it can enter patch review.
+
+On the **Filters** step, dataset requests use `set_source_filter` or
+`remove_source_filter`. They create a source `kind: filter` transform in
+`pipelines.yaml`, before processor fan-out, and therefore affect every
+processor bound to that source. A processor-level filter remains a separate
+Processors-step concern. If a model attempts `set_processor` for a Filters-step
+request, the governed loop rejects it and asks the model to correct the
+operation before anything can enter patch review.
 
 The operation loop is bounded to three model calls. It applies operations to
 a temporary copy, validates that copy with the catalog validator, and sends
@@ -70,8 +102,17 @@ previous definition; it never deletes a changed object as a side effect.
 While patches are pending, the copilot input is disabled so a later request
 cannot overwrite unreviewed work. When a request is ambiguous, the copilot
 asks a clarifying question with quick-reply options before executing tools.
+Accepted source-default, source-filter, and calculated-field patches are also synchronized
+back into the Defaults, Filters, and Calculations row editors on the next full rerun, so
+the visual preprocessing controls and accepted `pipelines.yaml` draft remain
+the same source of truth. Removing any of these definitions uses the same governed
+operation and patch review path.
 The conversation and draft reset when a different sample file is loaded,
 including a file with the same column names; business requirements remain.
+If the configured provider rejects a request for insufficient permissions,
+the Studio identifies the selected model and points to **AI Settings** or the
+provider's project/key permissions. The attempted prompt remains available in
+**Last prompt**, and no draft operation is applied.
 
 ## Requirements Coverage
 
@@ -110,9 +151,9 @@ patches before applying them, then validate the catalog and run the workspace.
   theme/layout/page/tile structure. Sources, processors, metrics, dashboards,
   and `ai.yaml` are written inside one rollback boundary; failed writes or
   post-write validation restore the prior workspace configuration.
-- Use **Apply Draft & Run Source** when a reviewed recipe introduces processor
-  state that must be materialized. Plain **Apply Draft To Workspace** changes
-  configuration only.
+- Use **Save Draft & Run Source** on Save & Export when a reviewed recipe
+  introduces processor state that must be materialized. The top **Save draft
+  to workspace** action changes configuration only and never starts ingestion.
 
 ## Identifiers
 

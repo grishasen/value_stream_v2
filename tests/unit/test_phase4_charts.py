@@ -196,7 +196,7 @@ def test_supported_charts_validate_plotly_6_json(
 
 
 @pytest.mark.unit
-def test_table_chart_formats_topk_items_as_labels() -> None:
+def test_table_chart_expands_topk_items_into_ranked_rows() -> None:
     rows = pl.DataFrame(
         {
             "Channel": ["Web"],
@@ -228,9 +228,30 @@ def test_table_chart_formats_topk_items_as_labels() -> None:
             "chart": "table",
             "columns": ["Channel", "Issue", "Top_Actions"],
         },
+        theme={"font": {"family": "Inter", "size": 14}},
     )
 
-    assert figure.data[0].cells.values[2][0] == "Retention (12), CrossSell (7)"
+    table = figure.data[0]
+    assert list(table.header.values) == [
+        "Channel",
+        "Issue",
+        "Rank",
+        "Top_Actions",
+        "Estimate",
+        "Lower bound",
+        "Upper bound",
+    ]
+    assert list(table.cells.values[0]) == ["Web", "Web"]
+    assert list(table.cells.values[2]) == [1, 2]
+    assert list(table.cells.values[3]) == ["Retention", "CrossSell"]
+    assert list(table.cells.values[4]) == [12, 7]
+    assert list(table.cells.values[5]) == [11, 7]
+    assert list(table.cells.values[6]) == [13, 8]
+    expected_font = "Inter, DM Sans, Segoe UI, system-ui, sans-serif"
+    assert table.header.font.family == expected_font
+    assert table.cells.font.family == expected_font
+    assert table.header.font.size == 14
+    assert figure.layout.height == 140
 
 
 @pytest.mark.unit

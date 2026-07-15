@@ -23,6 +23,10 @@ from valuestream.utils.timer import timed
 MAX_POINTS = 50_000
 SCATTER_SIZE_MAX = 72
 LINE_AS_BAR_MAX_DISTINCT_X = 30
+TABLE_MIN_HEIGHT_PX = 140
+TABLE_MAX_HEIGHT_PX = 520
+TABLE_ROW_HEIGHT_PX = 22
+TABLE_CHROME_HEIGHT_PX = 72
 _DESCRIPTIVE_QUANTILES = {
     "Median": 0.5,
     "p25": 0.25,
@@ -665,21 +669,17 @@ def _geo_map(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
 
 
 def _table(rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, Any]) -> go.Figure:
-    columns = tile.get("columns")
-    if isinstance(columns, list):
-        selected = [str(column) for column in columns if str(column) in rows.columns]
-    else:
-        selected = list(rows.columns)
-    if not selected:
-        selected = list(rows.columns)
+    frame = prepare_table_data(rows, tile)
+    selected = list(frame.columns)
     inks = _CHART_INKS[_theme_base(tile, theme)]
-    frame = rows.select(selected)
+    table_font = _table_font(theme)
     fig = go.Figure(
         go.Table(
             header={
                 "values": selected,
                 "fill_color": str(tile.get("header_fill_color", inks["table_header_fill"])),
                 "align": "left",
+                "font": table_font,
             },
             cells={
                 "values": [
@@ -688,11 +688,139 @@ def _table(rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, Any]
                 ],
                 "fill_color": _table_fill_colors(frame, tile, inks["table_cell_fill"]),
                 "align": "left",
+                "font": table_font,
             },
         )
     )
-    fig.update_layout(title=str(tile.get("title", "")))
+    table_height = min(
+        TABLE_MAX_HEIGHT_PX,
+        max(TABLE_MIN_HEIGHT_PX, TABLE_CHROME_HEIGHT_PX + TABLE_ROW_HEIGHT_PX * frame.height),
+    )
+    fig.update_layout(title=str(tile.get("title", "")), height=table_height)
     return fig
+
+
+def prepare_table_data(rows: pl.DataFrame, tile: Mapping[str, Any]) -> pl.DataFrame:
+    """Select and normalize table columns for every presentation surface."""
+
+    columns = tile.get("columns")
+    if isinstance(columns, list):
+        selected = [str(column) for column in columns if str(column) in rows.columns]
+    else:
+        selected = list(rows.columns)
+    if not selected:
+        selected = list(rows.columns)
+    return _expand_topk_table_rows(rows.select(selected))
+
+
+def table_row_colors(rows: pl.DataFrame, tile: Mapping[str, Any]) -> list[str | None]:
+    """Resolve optional conditional-formatting colors for prepared table rows."""
+
+    raw_rules = tile.get("conditional_formatting")
+    if not isinstance(raw_rules, list):
+        return [None] * rows.height
+    rules = [rule for rule in raw_rules if isinstance(rule, Mapping)]
+    return [
+        next((_rule_color(rule) for rule in rules if _rule_matches(rule, row)), None)
+        for row in rows.iter_rows(named=True)
+    ]
+
+
+def _table_font(theme: Mapping[str, Any]) -> dict[str, Any]:
+    raw_font = theme.get("font")
+    font = (
+        {
+            key: raw_font[key]
+            for key in ("family", "size", "color")
+            if key in raw_font and raw_font[key] not in (None, "")
+        }
+        if isinstance(raw_font, Mapping)
+        else {}
+    )
+    font.setdefault("family", "DM Sans, Inter, Segoe UI, system-ui, sans-serif")
+    font.setdefault("size", 13)
+    family = str(font["family"])
+    if "sans-serif" not in family.casefold() and "serif" not in family.casefold():
+        font["family"] = f"{family}, DM Sans, Segoe UI, system-ui, sans-serif"
+    return font
+
+
+def _expand_topk_table_rows(frame: pl.DataFrame) -> pl.DataFrame:
+    """Expand one Top-K list column into ranked rows with uncertainty columns."""
+
+    topk_columns = [
+        column
+        for column in frame.columns
+        if _is_topk_table_column(frame[column].to_list())
+    ]
+    if len(topk_columns) != 1:
+        return frame
+
+    topk_column = topk_columns[0]
+    used_columns = set(frame.columns)
+    rank_column = _unique_table_column("Rank", used_columns)
+    estimate_column = _unique_table_column("Estimate", used_columns)
+    lower_column = _unique_table_column("Lower bound", used_columns)
+    upper_column = _unique_table_column("Upper bound", used_columns)
+    base_columns = [column for column in frame.columns if column != topk_column]
+    expanded: list[dict[str, Any]] = []
+    for row in frame.iter_rows(named=True):
+        raw_items = row.get(topk_column)
+        items = list(raw_items) if isinstance(raw_items, list | tuple) else []
+        if not items:
+            expanded.append(
+                {
+                    **{column: row.get(column) for column in base_columns},
+                    rank_column: None,
+                    topk_column: "",
+                    estimate_column: None,
+                    lower_column: None,
+                    upper_column: None,
+                }
+            )
+            continue
+        for rank, item in enumerate(items, start=1):
+            expanded.append(
+                {
+                    **{column: row.get(column) for column in base_columns},
+                    rank_column: rank,
+                    topk_column: str(item.get("item", "")),
+                    estimate_column: item.get("estimate"),
+                    lower_column: item.get("lower_bound"),
+                    upper_column: item.get("upper_bound"),
+                }
+            )
+    return pl.DataFrame(expanded).select(
+        *base_columns,
+        rank_column,
+        topk_column,
+        estimate_column,
+        lower_column,
+        upper_column,
+    )
+
+
+def _is_topk_table_column(values: list[Any]) -> bool:
+    has_items = False
+    for value in values:
+        if value is None or value == []:
+            continue
+        if not isinstance(value, list | tuple) or not value:
+            return False
+        if not all(isinstance(item, Mapping) and _is_topk_item(item) for item in value):
+            return False
+        has_items = True
+    return has_items
+
+
+def _unique_table_column(preferred: str, used: set[str]) -> str:
+    candidate = preferred
+    suffix = 2
+    while candidate in used:
+        candidate = f"{preferred} {suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
 
 
 def _table_cell_value(value: Any) -> Any:
@@ -1900,24 +2028,11 @@ def _first_numeric_column(rows: pl.DataFrame) -> str | None:
 def _table_fill_colors(
     rows: pl.DataFrame, tile: Mapping[str, Any], default_fill: str
 ) -> list[list[str]] | str:
-    raw_rules = tile.get("conditional_formatting")
-    if not isinstance(raw_rules, list):
-        return str(tile.get("cell_fill_color", default_fill))
-    rules = [rule for rule in raw_rules if isinstance(rule, Mapping)]
-    if not rules:
-        return str(tile.get("cell_fill_color", default_fill))
     default = str(tile.get("cell_fill_color", default_fill))
-    out: list[list[str]] = []
-    for _column in rows.columns:
-        column_colors: list[str] = []
-        for row in rows.iter_rows(named=True):
-            color = next(
-                (_rule_color(rule) for rule in rules if _rule_matches(rule, row)),
-                default,
-            )
-            column_colors.append(color)
-        out.append(column_colors)
-    return out
+    row_colors = table_row_colors(rows, tile)
+    if not any(row_colors):
+        return default
+    return [[color or default for color in row_colors] for _column in rows.columns]
 
 
 def _calendar_matrix(

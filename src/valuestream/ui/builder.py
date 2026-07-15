@@ -10,6 +10,7 @@ import secrets
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -1401,6 +1402,253 @@ def tile_yaml(tile: dict[str, Any]) -> str:
 CATALOG_FILENAMES = ("pipelines.yaml", "processors.yaml", "metrics.yaml", "dashboards.yaml")
 
 
+@dataclass(frozen=True, slots=True)
+class SourceCascadePlan:
+    """Catalog definitions removed together with one source."""
+
+    source_id: str
+    processor_ids: tuple[str, ...]
+    metric_ids: tuple[str, ...]
+    tile_locations: tuple[str, ...]
+    page_filter_locations: tuple[str, ...]
+
+
+def source_cascade_plan(catalog: model.Catalog, source_id: str) -> SourceCascadePlan:
+    """Return the complete, deterministic catalog cascade for ``source_id``."""
+
+    normalized_source_id = str(source_id).strip()
+    if normalized_source_id not in {source.id for source in catalog.pipelines.sources}:
+        raise ValueError(f"unknown source {normalized_source_id!r}")
+
+    processor_ids = {
+        processor.id
+        for processor in catalog.processors.processors
+        if processor.source == normalized_source_id
+    }
+    metric_ids = {
+        name for name, metric in catalog.metrics.metrics.items() if metric.source in processor_ids
+    }
+    while True:
+        dependants = {
+            name
+            for name, metric in catalog.metrics.metrics.items()
+            if name not in metric_ids and any(dep in metric_ids for dep in metric.depends_on)
+        }
+        if not dependants:
+            break
+        metric_ids.update(dependants)
+
+    tile_locations: list[str] = []
+    page_filter_locations: list[str] = []
+    remaining_metrics = {
+        name: metric for name, metric in catalog.metrics.metrics.items() if name not in metric_ids
+    }
+    remaining_processors = {
+        processor.id: processor
+        for processor in catalog.processors.processors
+        if processor.id not in processor_ids
+    }
+    for dashboard in catalog.dashboards.dashboards:
+        for page in dashboard.pages:
+            remaining_tiles = [tile for tile in page.tiles if tile.metric not in metric_ids]
+            tile_locations.extend(
+                f"{dashboard.id}/{page.id}/{tile.id}"
+                for tile in page.tiles
+                if tile.metric in metric_ids
+            )
+            for filter_spec in page.filters:
+                if not _page_filter_has_support(
+                    filter_spec.field,
+                    remaining_tiles,
+                    remaining_metrics,
+                    remaining_processors,
+                ):
+                    page_filter_locations.append(f"{dashboard.id}/{page.id}/{filter_spec.field}")
+
+    sort_key = str.casefold
+    return SourceCascadePlan(
+        source_id=normalized_source_id,
+        processor_ids=tuple(sorted(processor_ids, key=sort_key)),
+        metric_ids=tuple(sorted(metric_ids, key=sort_key)),
+        tile_locations=tuple(sorted(tile_locations, key=sort_key)),
+        page_filter_locations=tuple(sorted(page_filter_locations, key=sort_key)),
+    )
+
+
+def delete_source_cascade(
+    workspace: str | Path,
+    source_id: str,
+) -> SourceCascadePlan:
+    """Delete one source and every catalog definition that depends on it.
+
+    Aggregate files and run metadata intentionally remain untouched. The
+    catalog and chat-description writes share one rollback boundary and the
+    resulting workspace is validated before the deletion is committed.
+    """
+
+    catalog = load(workspace)
+    plan = source_cascade_plan(catalog, source_id)
+    processor_ids = set(plan.processor_ids)
+    metric_ids = set(plan.metric_ids)
+
+    with workspace_configuration_transaction(workspace):
+        pipelines_path = _catalog_file(workspace, "pipelines.yaml")
+        pipelines = _read_yaml(pipelines_path)
+        sources = pipelines.get("sources", [])
+        if not isinstance(sources, list):
+            raise ValueError("pipelines.yaml must contain a list at `sources`")
+        pipelines["sources"] = [source for source in sources if source.get("id") != plan.source_id]
+
+        processors_path = _catalog_file(workspace, "processors.yaml")
+        processors = _read_yaml(processors_path)
+        processor_defs = processors.get("processors", [])
+        if not isinstance(processor_defs, list):
+            raise ValueError("processors.yaml must contain a list at `processors`")
+        processors["processors"] = [
+            processor for processor in processor_defs if processor.get("id") not in processor_ids
+        ]
+
+        metrics_path = _catalog_file(workspace, "metrics.yaml")
+        metrics = _read_yaml(metrics_path)
+        metric_defs = metrics.get("metrics", {})
+        if not isinstance(metric_defs, dict):
+            raise ValueError("metrics.yaml must contain a mapping at `metrics`")
+        metrics["metrics"] = {
+            name: definition for name, definition in metric_defs.items() if name not in metric_ids
+        }
+
+        dashboards_path = _catalog_file(workspace, "dashboards.yaml")
+        dashboards = _read_yaml(dashboards_path)
+        _remove_source_dashboard_dependencies(
+            dashboards,
+            metric_ids=metric_ids,
+            remaining_metrics={
+                name: metric
+                for name, metric in catalog.metrics.metrics.items()
+                if name not in metric_ids
+            },
+            remaining_processors={
+                processor.id: processor
+                for processor in catalog.processors.processors
+                if processor.id not in processor_ids
+            },
+        )
+
+        model.Pipelines.model_validate(pipelines)
+        model.Processors.model_validate(processors)
+        model.Metrics.model_validate(metrics)
+        model.Dashboards.model_validate(dashboards)
+
+        # Remove downstream definitions first so readers never observe a
+        # dangling tile/metric/processor reference during this process.
+        _write_yaml(dashboards_path, dashboards)
+        _write_yaml(metrics_path, metrics)
+        _write_yaml(processors_path, processors)
+        _write_yaml(pipelines_path, pipelines)
+        _remove_source_chat_descriptions(
+            workspace,
+            source_id=plan.source_id,
+            processor_ids=processor_ids,
+            metric_ids=metric_ids,
+        )
+        require_valid_workspace(workspace)
+    return plan
+
+
+def _dimension_key(value: str) -> str:
+    return "".join(character for character in str(value).casefold() if character.isalnum())
+
+
+def _page_filter_has_support(
+    field: str,
+    tiles: Iterable[model.Tile],
+    metrics: dict[str, model.Metric],
+    processors: dict[str, model.Processor],
+) -> bool:
+    field_key = _dimension_key(field)
+    for tile in tiles:
+        metric = metrics.get(tile.metric)
+        processor = processors.get(metric.source) if metric is not None else None
+        if processor is not None and any(
+            _dimension_key(column) == field_key for column in processor.group_by
+        ):
+            return True
+    return False
+
+
+def _remove_source_dashboard_dependencies(
+    dashboards: dict[str, Any],
+    *,
+    metric_ids: set[str],
+    remaining_metrics: dict[str, model.Metric],
+    remaining_processors: dict[str, model.Processor],
+) -> None:
+    dashboard_defs = dashboards.get("dashboards", [])
+    if not isinstance(dashboard_defs, list):
+        raise ValueError("dashboards.yaml must contain a list at `dashboards`")
+    for dashboard in dashboard_defs:
+        pages = dashboard.get("pages", [])
+        if not isinstance(pages, list):
+            raise ValueError("dashboard must contain a list at `pages`")
+        for page in pages:
+            tiles = page.get("tiles", [])
+            if not isinstance(tiles, list):
+                raise ValueError("dashboard page must contain a list at `tiles`")
+            page["tiles"] = [tile for tile in tiles if tile.get("metric") not in metric_ids]
+            filters = page.get("filters", [])
+            if not isinstance(filters, list):
+                raise ValueError("dashboard page must contain a list at `filters`")
+            remaining_tile_models = [model.Tile.model_validate(tile) for tile in page["tiles"]]
+            page["filters"] = [
+                filter_def
+                for filter_def in filters
+                if _page_filter_has_support(
+                    str(filter_def.get("field", "")),
+                    remaining_tile_models,
+                    remaining_metrics,
+                    remaining_processors,
+                )
+            ]
+            if not page["filters"]:
+                page.pop("filters", None)
+
+
+def _remove_source_chat_descriptions(
+    workspace: str | Path,
+    *,
+    source_id: str,
+    processor_ids: set[str],
+    metric_ids: set[str],
+) -> None:
+    path = Path(workspace) / "ai.yaml"
+    if not path.exists():
+        return
+    data = _read_yaml(path)
+    blocks: list[dict[str, Any]] = []
+    top_level = data.get("chat_with_data")
+    if isinstance(top_level, dict):
+        blocks.append(top_level)
+    ai = data.get("ai")
+    nested = ai.get("chat_with_data") if isinstance(ai, dict) else None
+    if isinstance(nested, dict):
+        blocks.append(nested)
+
+    changed = False
+    for block in blocks:
+        dataset_descriptions = block.get("dataset_descriptions")
+        if isinstance(dataset_descriptions, dict) and source_id in dataset_descriptions:
+            dataset_descriptions.pop(source_id)
+            changed = True
+        metric_descriptions = block.get("metric_descriptions")
+        if isinstance(metric_descriptions, dict):
+            for identifier in processor_ids | metric_ids:
+                if identifier in metric_descriptions:
+                    metric_descriptions.pop(identifier)
+                    changed = True
+    if changed:
+        _write_yaml(path, data)
+
+
 @contextmanager
 def catalog_transaction(workspace: str | Path) -> Iterator[None]:
     """Restore every catalog file if a multi-file authoring write fails midway."""
@@ -1429,8 +1677,7 @@ def _configuration_file_transaction(paths: Iterable[Path]) -> Iterator[None]:
 
     unique_paths = list(dict.fromkeys(paths))
     snapshots = {
-        path: path.read_text(encoding="utf-8") if path.exists() else None
-        for path in unique_paths
+        path: path.read_text(encoding="utf-8") if path.exists() else None for path in unique_paths
     }
     try:
         yield

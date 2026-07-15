@@ -19,7 +19,7 @@ import polars as pl
 import streamlit as st
 import yaml
 
-from valuestream.charts import render_chart
+from valuestream.charts import prepare_table_data, render_chart, table_row_colors
 from valuestream.config import model
 from valuestream.query import AggregateNotReadyError
 from valuestream.ui import builder, components
@@ -1333,8 +1333,16 @@ def _tile_card(
                 ctx.workspace, ctx.catalog, parsed_tile, filters=filters, start=start, end=end
             )
             elapsed_ms = (time.perf_counter() - start_time) * 1000
-            figure = render_chart(
-                rows, tile_dict, theme={**dashboard_theme(), **ctx.catalog.dashboards.theme}
+            is_native_table = str(tile_dict.get("chart", "")).casefold() == "table"
+            table_data = _native_table_data(tile_dict, rows) if is_native_table else None
+            figure = (
+                None
+                if is_native_table
+                else render_chart(
+                    rows,
+                    tile_dict,
+                    theme={**dashboard_theme(), **ctx.catalog.dashboards.theme},
+                )
             )
             with header_slot.container():
                 tile_inspect, expanded, show_data = _tile_header(
@@ -1347,31 +1355,42 @@ def _tile_card(
                     rows,
                     figure,
                     inspect_mode=inspect_mode,
+                    download_rows=table_data[0] if table_data is not None else rows,
                 )
             if ignored_filters:
                 st.caption(
                     ":material/info: Active filters not applied to this chart: "
                     + ", ".join(ignored_filters)
                 )
-            chart_height = _report_chart_height(
-                figure,
-                layout_mode=TILE_LAYOUT_EXPANDED if expanded else layout_mode,
-            )
-            figure.update_layout(height=chart_height)
-            st.plotly_chart(
-                figure,
-                width="stretch",
-                height=chart_height,
-                theme=None,
-                key=f"reports_chart_{dashboard.id}_{page.id}_{configured_tile['id']}",
-            )
+            if table_data is not None:
+                _render_report_table(
+                    *table_data,
+                    key=f"reports_table_{dashboard.id}_{page.id}_{configured_tile['id']}",
+                )
+            else:
+                chart_height = _report_chart_height(
+                    figure,
+                    layout_mode=TILE_LAYOUT_EXPANDED if expanded else layout_mode,
+                )
+                figure.update_layout(height=chart_height)
+                st.plotly_chart(
+                    figure,
+                    width="stretch",
+                    height=chart_height,
+                    theme=None,
+                    key=f"reports_chart_{dashboard.id}_{page.id}_{configured_tile['id']}",
+                )
             if show_data:
                 _tile_data_table(tile_dict, rows)
             if tile_inspect:
                 st.caption(
                     f"{freshness_label(fresh)} | {rows.height:,} row(s) | {elapsed_ms:.0f} ms"
                 )
-                _tile_inspectors(tile_dict, rows, include_data=not show_data)
+                _tile_inspectors(
+                    tile_dict,
+                    rows,
+                    include_data=not (show_data or is_native_table),
+                )
         except AggregateNotReadyError as exc:
             logger.info(
                 "Report tile is waiting for aggregate backfill: dashboard=%s page=%s "
@@ -1412,9 +1431,10 @@ def _tile_header(
     grain: str,
     fresh: Any,
     rows: pl.DataFrame,
-    figure: Any,
+    figure: Any | None,
     *,
     inspect_mode: bool,
+    download_rows: pl.DataFrame | None = None,
 ) -> tuple[bool, bool, bool]:
     action_prefix = _tile_action_prefix(dashboard.id, page.id, configured_tile)
     inspect_key = f"{action_prefix}_inspect"
@@ -1450,43 +1470,47 @@ def _tile_header(
             value=bool(st.session_state.get(expand_key, False)),
             key=expand_key,
         )
-        show_data = st.toggle(
-            "View data",
-            value=bool(st.session_state.get(data_key, False)),
-            key=data_key,
-        )
+        if figure is None:
+            show_data = False
+        else:
+            show_data = st.toggle(
+                "View data",
+                value=bool(st.session_state.get(data_key, False)),
+                key=data_key,
+            )
         # ``data=`` callables defer generation until the user actually clicks
         # the button (Streamlit >= 1.58), so no CSV/PNG/HTML is built during
         # normal tile renders.
         st.download_button(
             "CSV",
-            data=lambda: _rows_csv(rows),
+            data=lambda: _rows_csv(download_rows if download_rows is not None else rows),
             file_name=f"{_download_file_stem(page, configured_tile)}.csv",
             mime="text/csv",
             icon=":material/download:",
             key=f"{action_prefix}_csv",
             width="stretch",
         )
-        if _png_export_available():
-            st.download_button(
-                "PNG",
-                data=lambda: _figure_png_bytes(figure),
-                file_name=f"{_download_file_stem(page, configured_tile)}.png",
-                mime="image/png",
-                icon=":material/image:",
-                key=f"{action_prefix}_png",
-                width="stretch",
-            )
-        else:
-            st.download_button(
-                "Chart HTML",
-                data=lambda: figure.to_html(include_plotlyjs="cdn", full_html=True),
-                file_name=f"{_download_file_stem(page, configured_tile)}.html",
-                mime="text/html",
-                icon=":material/image:",
-                key=f"{action_prefix}_html",
-                width="stretch",
-            )
+        if figure is not None:
+            if _png_export_available():
+                st.download_button(
+                    "PNG",
+                    data=lambda: _figure_png_bytes(figure),
+                    file_name=f"{_download_file_stem(page, configured_tile)}.png",
+                    mime="image/png",
+                    icon=":material/image:",
+                    key=f"{action_prefix}_png",
+                    width="stretch",
+                )
+            else:
+                st.download_button(
+                    "Chart HTML",
+                    data=lambda: figure.to_html(include_plotlyjs="cdn", full_html=True),
+                    file_name=f"{_download_file_stem(page, configured_tile)}.html",
+                    mime="text/html",
+                    icon=":material/image:",
+                    key=f"{action_prefix}_html",
+                    width="stretch",
+                )
     return inspect_mode or local_inspect, expanded, show_data
 
 
@@ -1580,6 +1604,33 @@ def _tile_data_table(tile_dict: Mapping[str, Any], rows: pl.DataFrame) -> None:
     if rows.is_empty():
         st.info("No rows returned.")
         return
+    displayed_rows = (
+        prepare_table_data(rows, tile_dict)
+        if str(tile_dict.get("chart", "")).casefold() == "table"
+        else rows
+    )
+    displayed, column_config = _present_table_data(tile_dict, displayed_rows)
+    st.dataframe(
+        displayed,
+        hide_index=True,
+        width="stretch",
+        height=REPORT_DATAFRAME_HEIGHT_PX,
+        column_config=column_config or None,
+        placeholder="—",
+    )
+
+
+def _native_table_data(
+    tile_dict: Mapping[str, Any], rows: pl.DataFrame
+) -> tuple[pl.DataFrame, dict[str, Any], list[str | None]]:
+    prepared = prepare_table_data(rows, tile_dict)
+    displayed, column_config = _present_table_data(tile_dict, prepared)
+    return displayed, column_config, table_row_colors(prepared, tile_dict)
+
+
+def _present_table_data(
+    tile_dict: Mapping[str, Any], rows: pl.DataFrame
+) -> tuple[pl.DataFrame, dict[str, Any]]:
     labels = tile_dict.get("labels")
     rename = {
         column: str(labels[column])
@@ -1592,12 +1643,40 @@ def _tile_data_table(tile_dict: Mapping[str, Any], rows: pl.DataFrame) -> None:
     displayed = rows.rename(rename)
     raw_config = _percent_column_config(dict(tile_dict), rows) or {}
     column_config = {rename.get(column, column): config for column, config in raw_config.items()}
+    for column in rows.columns:
+        if rows.schema[column].is_numeric():
+            column_config.setdefault(
+                rename.get(column, column),
+                st.column_config.NumberColumn(format="localized"),
+            )
+    return displayed, column_config
+
+
+def _render_report_table(
+    displayed: pl.DataFrame,
+    column_config: Mapping[str, Any],
+    row_colors: list[str | None],
+    *,
+    key: str,
+) -> None:
+    if displayed.is_empty():
+        st.info("No rows returned.")
+        return
+    rendered: Any = displayed
+    if any(row_colors):
+        row_styles = [f"background-color: {color}" if color else "" for color in row_colors]
+        rendered = displayed.to_pandas().style.apply(
+            lambda row: [row_styles[int(row.name)]] * len(row),
+            axis=1,
+        )
     st.dataframe(
-        displayed,
+        rendered,
         hide_index=True,
         width="stretch",
-        height=REPORT_DATAFRAME_HEIGHT_PX,
+        height="auto",
         column_config=column_config or None,
+        key=key,
+        placeholder="—",
     )
 
 

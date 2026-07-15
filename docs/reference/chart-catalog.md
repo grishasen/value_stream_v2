@@ -1,6 +1,10 @@
 # Value Stream — Chart Catalog
 
-This doc specifies the presentation surface: every chart kind a Tile can use, the Tile fields it requires, the Plotly API calls used to render it, and how the chart consumes a metric's output. Implementers build the chart-factory registry from this doc directly.
+This doc specifies the presentation surface: every chart kind a Tile can use,
+the Tile fields it requires, and how the chart consumes a metric's output. Most
+charts render through Plotly. Report `table` tiles use Streamlit's native
+dataframe, while the chart factory retains a Plotly table adapter for headless
+and compatibility callers.
 
 Companion docs:
 
@@ -414,8 +418,8 @@ fig = px.treemap(df.to_pandas(), path=[px.Constant("All"), "rfm_segment"], value
 
 ### 3.20 Marketing dashboard chart set
 
-These chart kinds cover common marketing reporting needs and are implemented
-with Plotly primitives:
+These chart kinds cover common marketing reporting needs. Charts use Plotly
+primitives except for the native Streamlit table on the Reports surface:
 
 | Chart kind | Required fields | Primary use |
 |---|---|---|
@@ -429,7 +433,7 @@ with Plotly primitives:
 | `interval` | `x, y` plus optional `error_y` | Lift/estimate with uncertainty interval |
 | `donut` | `names, values` | Simple share-of-total for small category sets |
 | `geo_map` | `locations, value` or `lat, lon, value` | Country/region/city performance |
-| `table` | optional `columns` | Ranked operational table with optional conditional formatting |
+| `table` | optional `columns` | Native sortable and scrollable report table with optional conditional formatting; a selected `topk_items` list is expanded into rank, item, estimate, and lower/upper-bound columns |
 | `calendar_heatmap` | `date, value` | Daily seasonality and campaign activity |
 
 ```yaml
@@ -566,6 +570,15 @@ Supported values:
   or empty baseline yields null display values rather than infinity.
 - `labels`, metric `display.label`, and metric `display.unit` resolve axis,
   legend, hover, KPI, and table labels centrally. Tile overrides win.
+- Report table tiles render with native `st.dataframe`, use the available tile
+  width, size automatically up to ten visible rows, and provide native sorting,
+  column resizing, scrolling, localized numeric formatting, and row highlighting
+  from `conditional_formatting`. A single selected `topk_items` output renders as
+  one ranked row per frequent item, with its estimate and lower/upper bounds,
+  rather than as one comma-separated text cell. Their action menu exports the
+  displayed rows as CSV; image and Plotly HTML exports apply only to charts.
+- The headless `render_chart` compatibility path still returns a content-sized
+  Plotly table figure for `chart: table` callers outside the Reports surface.
 - `theme.category_colors` maps dimension values to stable colors across result
   order, filters, and reruns. Conditional formatting and experiment-role colors
   retain precedence.

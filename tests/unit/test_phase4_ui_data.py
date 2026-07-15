@@ -56,6 +56,7 @@ from valuestream.ui.pages.reports import (
     _is_full_width_tile,
     _kpi_bundle,
     _kpi_strip,
+    _native_table_data,
     _page_help_text,
     _page_status_banner,
     _report_chart_height,
@@ -535,6 +536,83 @@ def test_report_chart_height_respects_taller_figure_layout_heights() -> None:
 
     assert _report_chart_height(default_figure) == REPORT_CHART_HEIGHT_FALLBACK_PX
     assert _report_chart_height(tall_figure) == 1200
+
+
+@pytest.mark.unit
+def test_native_report_table_expands_topk_and_applies_labels() -> None:
+    rows = pl.DataFrame(
+        {
+            "Channel": ["Web"],
+            "Top_Actions": [
+                [
+                    {
+                        "item": "Retention",
+                        "estimate": 12,
+                        "lower_bound": 11,
+                        "upper_bound": 13,
+                    },
+                    {
+                        "item": "CrossSell",
+                        "estimate": 7,
+                        "lower_bound": 7,
+                        "upper_bound": 8,
+                    },
+                ]
+            ],
+        }
+    )
+
+    displayed, column_config, row_colors = _native_table_data(
+        {
+            "chart": "table",
+            "columns": ["Channel", "Top_Actions"],
+            "labels": {"Top_Actions": "Top actions"},
+            "conditional_formatting": [
+                {
+                    "column": "Estimate",
+                    "operator": ">=",
+                    "value": 10,
+                    "color": "#d9ead3",
+                }
+            ],
+        },
+        rows,
+    )
+
+    assert displayed.columns == [
+        "Channel",
+        "Rank",
+        "Top actions",
+        "Estimate",
+        "Lower bound",
+        "Upper bound",
+    ]
+    assert displayed["Top actions"].to_list() == ["Retention", "CrossSell"]
+    assert displayed["Rank"].to_list() == [1, 2]
+    assert set(column_config) == {"Rank", "Estimate", "Lower bound", "Upper bound"}
+    assert row_colors == ["#d9ead3", None]
+
+
+@pytest.mark.unit
+def test_report_table_renders_with_native_streamlit_dataframe() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app(rows) -> None:
+        from valuestream.ui.pages.reports import (  # noqa: PLC0415
+            _render_report_table,
+        )
+
+        _render_report_table(rows, {}, ["#d9ead3", None], key="native_report_table")
+
+    at = AppTest.from_function(
+        app,
+        kwargs={"rows": pl.DataFrame({"Rank": [1, 2], "Action": ["A", "B"]})},
+    ).run()
+
+    assert not at.exception
+    assert len(at.dataframe) == 1
+    assert at.dataframe[0].value.columns.to_list() == ["Rank", "Action"]
+    assert at.dataframe[0].value["Action"].to_list() == ["A", "B"]
 
 
 @pytest.mark.unit

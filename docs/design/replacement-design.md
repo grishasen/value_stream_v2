@@ -1149,7 +1149,7 @@ The figure factory registry is one Python module per chart type (mirrors the cur
 Replaces the current `report_builder/` and most manual `config_generator/` editing with a single validation-first Builder workspace:
 
 - **Health and review progress** — show source/processor/metric/report validation status before editing.
-- **Sources** — edit reader kind, file pattern, grouping regex, root, streaming/hive flags, schema timestamp/natural-key/drop columns, source defaults, dataset filters, and calculated fields. Defaults run before filters; filter rules compile to the closed expression AST; calculated fields become `derive_column` transforms.
+- **Sources** — edit reader kind, file pattern, grouping regex, root, streaming/hive flags, schema timestamp/natural-key/drop columns, source defaults, dataset filters, and calculated fields. Defaults run before filters; filter rules compile to the closed expression AST; calculated fields become `derive_column` transforms. A destructive action beside the source selector previews and transactionally removes the selected source, its processors, transitive metric dependants, report tiles, now-unsupported page filters, and related Chat descriptions. Dashboard/page containers and aggregate/run-history artifacts remain.
 - **Dimensions** — review and update processor group-by fields from the approved source field catalog.
 - **Processors** — edit source binding, kind, group-by, time grains, state columns, state source fields, and optional processor filters.
 - **Metrics** — browse the shared KPI recipe library by business question/domain, inspect method accuracy and readiness, select processor-owned business fields plus any recipe-compatible sketch algorithm (or funnel stages/populations), optionally place a recommended report tile, or build a metric directly with the visual/AST editors. Internal state IDs remain technical detail. Before apply, the shared flow shows the exact generated YAML patch and, for a missing field/algorithm state, the source, fields, states, and current/proposed processor computation hashes. Configuration Builder installs and post-validates that patch inside one rollback boundary, then links to Data Load when a source run is required; it never starts ingestion implicitly.
@@ -1169,9 +1169,19 @@ AI Configuration Studio remains a separate guided workflow because it starts fro
 - **Sample** — upload/select a source sample and review runtime reader controls.
 - **Required fields** — map subject, outcome time, decision time, and outcome fields.
 - **Defaults, filters, calculations** — use the same row editors as the Builder; filters compile to AST, calculations compile to `derive_column` transforms.
+- **Governed Copilot preprocessing** — source defaults, dataset filters, and
+  calculated fields can be added, replaced, or removed through closed Copilot
+  operations. Dataset filters become source `filter` transforms before
+  processor fan-out; the Filters-step operation policy rejects processor edits.
+  Calculations receive the complete expression-AST operator catalog and exact
+  node shapes, including `concat` with `args` and optional `sep`, so model
+  capability is bounded by the same closed DSL that validation enforces. Each
+  changed field is an independent before/after patch; accepted patches update
+  the session draft and are then synchronized into the Defaults and
+  Filters/Calculations row editors before those widgets render again.
 - **Approve fields** — choose which working fields are eligible for draft metric/report generation and which sample values may be shared with a future LLM.
 - **Draft** — generate reviewed YAML drafts. LLM responses can populate source, processor, metric, report, chat-readiness, workspace-default, and dashboard-theme settings; deterministic generation remains available as a baseline and fallback.
-- **Save & Export** — download draft YAML or apply it through the same structured writers. Sources, processors, metrics, dashboards, and `ai.yaml` share one rollback boundary that includes post-write catalog validation. **Apply Draft & Run Source** is the separate explicit materialization action.
+- **Save & Export** — download draft YAML; the persistent **Save draft** action in the upper-right of the Studio status panel applies the accepted draft through the same structured writers. Sources, processors, metrics, dashboards, and `ai.yaml` share one rollback boundary that includes post-write catalog validation. **Save Draft & Run Source** is the separate explicit materialization action.
 
 ### 11.2 Plotly chart kinds (catalog parity with current app)
 

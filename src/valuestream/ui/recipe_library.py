@@ -26,7 +26,7 @@ from valuestream.recipes import (
     recipe_readiness,
     unique_artifact_id,
 )
-from valuestream.ui import config_help
+from valuestream.ui import components, config_help
 from valuestream.utils.names import dedupe_strings as _dedupe
 
 
@@ -76,8 +76,17 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
     key_prefix: str,
     submit_label: str,
     expanded: bool = False,
+    submit_placeholder: Any | None = None,
 ) -> RecipeInstallRequest | None:
     """Render one reusable recipe browser and return a validated install request."""
+
+    if submit_placeholder is not None:
+        components.editor_save_bar(
+            key=f"{key_prefix}_save",
+            caption="Review the generated recipe changes below to enable saving.",
+            disabled=True,
+            placeholder=submit_placeholder,
+        )
 
     library = load_builtin_kpi_recipes()
     processors = catalog.processors.processors
@@ -263,6 +272,7 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
             request,
             submit_label=submit_label,
             key=f"{install_key}_{fingerprint[:12]}",
+            submit_placeholder=submit_placeholder,
         ):
             st.session_state.pop(preview_key, None)
             return request
@@ -418,6 +428,7 @@ def _render_install_preview(
     *,
     submit_label: str,
     key: str,
+    submit_placeholder: Any | None = None,
 ) -> bool:
     """Render the reviewed YAML patch and explicit materialization handoff."""
 
@@ -456,6 +467,12 @@ def _render_install_preview(
                 "mixed with the new contract."
             )
 
+        if submit_placeholder is not None:
+            return components.editor_save_bar(
+                key=f"{key}_confirm",
+                caption="Save the reviewed recipe changes to the active workspace catalog.",
+                placeholder=submit_placeholder,
+            )
         return st.button(
             submit_label,
             type="primary",

@@ -457,6 +457,72 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
 
 
 @pytest.mark.unit
+def test_expression_prompt_dictionary_covers_the_closed_dsl() -> None:
+    expression_ast = ai_studio.catalog_prompt_dictionaries()["expression_ast"]
+    prompted_ops = {
+        op
+        for form in expression_ast["operator_forms"].values()
+        for op in form["ops"]
+    }
+
+    assert prompted_ops == {
+        "not",
+        "neg",
+        "abs",
+        "sqrt",
+        "exp",
+        "ceil",
+        "floor",
+        "log",
+        "round",
+        "cast",
+        "and",
+        "or",
+        "add",
+        "sub",
+        "mul",
+        "div",
+        "safe_div",
+        "concat",
+        "least",
+        "greatest",
+        "coalesce",
+        "eq",
+        "ne",
+        "lt",
+        "le",
+        "gt",
+        "ge",
+        "in",
+        "not_in",
+        "between",
+        "is_null",
+        "not_null",
+        "matches",
+        "starts_with",
+        "ends_with",
+        "case",
+        "when_then",
+        "date_trunc",
+        "date_diff",
+        "date_part",
+        "now",
+        "strftime",
+        "strptime",
+    }
+    assert expression_ast["operator_forms"]["concatenation"]["shape"] == {
+        "op": "concat",
+        "args": ["<string expression>", "<string expression>", "<optional more>"],
+        "sep": "<optional string; empty by default>",
+    }
+    assert expression_ast["examples"]["concatenate_fields"] == {
+        "op": "concat",
+        "args": [{"col": "Issue"}, {"col": "Group"}, {"col": "Name"}],
+        "sep": "/",
+    }
+
+
+@pytest.mark.unit
 def test_config_draft_prompt_includes_business_requirements() -> None:
     prompt = prompt_for_config_draft(
         file_name="sample.csv",
@@ -1432,6 +1498,69 @@ metrics:
     prompt = at.session_state["ai_studio_pending_prompt"]
     assert "Add a Total metric with the event count." in prompt
     assert "Track total volume." in prompt
+
+
+@pytest.mark.unit
+def test_workspace_save_bar_exposes_ready_and_published_states() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app(draft: dict, published: bool) -> None:
+        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state["ai_studio_draft"] = draft
+        st.session_state["ai_studio_pending_draft"] = None
+        st.session_state["ai_studio_published_signature"] = (
+            page._draft_signature(draft) if published else ""
+        )
+        page._render_workspace_save_bar(SimpleNamespace(workspace="."))
+
+    ready = AppTest.from_function(app, kwargs={"draft": _base_draft(), "published": False}).run()
+    published = AppTest.from_function(
+        app,
+        kwargs={"draft": _base_draft(), "published": True},
+    ).run()
+
+    assert not ready.exception
+    assert ready.button[0].label == "Save draft"
+    assert not ready.button[0].disabled
+    assert not published.exception
+    assert published.button[0].label == "Saved"
+    assert published.button[0].disabled
+
+
+@pytest.mark.unit
+def test_studio_status_panel_hosts_compact_save_action() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app(draft: dict) -> None:
+        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+
+        import polars as pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
+        st.session_state["ai_studio_draft"] = draft
+        st.session_state["ai_studio_pending_draft"] = None
+        page._studio_status_bar(
+            SimpleNamespace(workspace="."),
+            pl.DataFrame({"Channel": ["Web"]}),
+            pl.DataFrame({"Channel": ["Web"]}),
+            ["Channel"],
+            None,
+        )
+
+    rendered = AppTest.from_function(app, kwargs={"draft": _base_draft()}).run()
+
+    assert not rendered.exception
+    assert rendered.button[0].label == "Save draft"
+    assert not rendered.button[0].disabled
+    assert len(rendered.get("column")) == 2
 
 
 def _base_draft() -> dict:

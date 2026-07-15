@@ -17,16 +17,29 @@ checklist.
    recommended tile. Internal aggregate state IDs appear only under technical
    details. Select **Review changes** to inspect the exact generated YAML patch
    and any source-run plan before installing.
-5. After a metric is written, the Builder reloads the catalog, switches to
+5. Use the **Save** action at the right edge of the step selector row.
+   The action stays in the same compact top-right position throughout the
+   Builder and writes the object shown on the current step to the active YAML
+   catalog. Hover it to see why saving is unavailable on a read-only or
+   incomplete step.
+6. After a metric is written, the Builder reloads the catalog, switches to
    **Edit Existing Metric**, and opens that metric so the saved definition is
    immediately visible. Use **Edit Existing Metric** directly for later
    maintenance.
-6. Author page filters/time presets and KPI comparison, target, or sparkline behavior.
-7. Review chat metric readiness and edit chat-only prompt/description guidance.
-8. Update workspace defaults and dashboard theme settings.
-9. Save or export YAML.
-10. Validate the workspace.
-11. Re-run affected sources when processor changes require new aggregates.
+7. Author page filters/time presets and KPI comparison, target, or sparkline
+   behavior. On Reports / Tiles, the one top save action writes the current
+   tile and its page settings together inside a rollback boundary.
+8. Review chat metric readiness and edit chat-only prompt/description guidance.
+9. Update workspace defaults and dashboard theme settings.
+10. Export the already-saved YAML from Save & Export.
+11. Validate the workspace.
+12. Re-run affected sources when processor changes require new aggregates.
+
+Read-only steps keep the same compact save action visible but disabled, with
+the explanation in its tooltip. For recipe-based metrics, **Review changes** must establish the
+exact YAML patch first; the top save action becomes available after that
+review. **Save & Run Source** remains a separate, explicit action because it
+materializes aggregates in addition to saving configuration.
 
 Every editable field has a help tooltip beside its label. The tooltip explains
 the catalog meaning of the field and includes a concrete example when a value
@@ -49,6 +62,15 @@ the same field is easy to find in every selector. Recipe-library selectors use
 the same alphabetical ordering for recipes, processors, business fields,
 binding choices, algorithms, populations, and report pages. Funnel stages keep
 their configured order because that sequence defines the funnel.
+
+To remove a source, select it on **Sources** and choose **Delete source** beside
+the selector. The confirmation dialog previews the complete catalog cascade:
+the source's processors, their metrics (including transitive `depends_on`
+metrics), report tiles, and page filters that would otherwise have no remaining
+tile support. The apply runs across all four catalog files and related
+`ai.yaml` descriptions in one rollback boundary, then validates the resulting
+workspace. Dashboard/page containers are retained. Aggregate Parquet files and
+run history are deliberately not deleted by this catalog-authoring action.
 
 The recipe readiness state tells you whether processor inputs are configured,
 need an explicit mapping, or require a new aggregate state. Sketch recipes list

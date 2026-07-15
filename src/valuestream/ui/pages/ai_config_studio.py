@@ -20,6 +20,7 @@ from streamlit.errors import StreamlitAPIException
 
 from valuestream.ai import (
     AICallSettings,
+    DraftPatch,
     call_litellm,
     classify_draft_validation_issues,
     draft_object_counts,
@@ -115,6 +116,10 @@ STUDIO_PHASES: tuple[tuple[str, tuple[int, ...]], ...] = (
     ("Publish", (11, 12, 13)),
 )
 _COPILOT_HISTORY_DISPLAY = 8
+_PREPROCESSING_PATCH_SECTIONS = frozenset(
+    {"source_defaults", "source_filters", "calculated_fields"}
+)
+_PREPROCESSING_SYNC_STATE_KEY = "ai_studio_preprocessing_sync_sections"
 
 TIME_TARGETS = ("OutcomeTime", "DecisionTime")
 FIELD_APPROVAL_EDITOR_COLUMNS = [
@@ -180,12 +185,13 @@ def _render_studio(
         return
 
     _initialize_state(raw_sample)
+    _consume_preprocessing_editor_sync()
     _sync_ai_rename_capitalize_state(raw_sample)
     schema_sample = _schema_sample(raw_sample)
     _set_effective_schema_state(schema_sample)
     working, preprocessing_error = _working_sample(schema_sample)
     approved_fields = _approve_fields(working)
-    _studio_status_bar(raw_sample, working, approved_fields, preprocessing_error)
+    _studio_status_bar(ctx, raw_sample, working, approved_fields, preprocessing_error)
 
     steps = _studio_steps(ai_calls_enabled=ai_calls_enabled)
     next_step = st.session_state.pop("ai_studio_next_step", None)
@@ -383,14 +389,16 @@ def _current_catalog_draft_editor(ctx: ValueStreamContext) -> None:
         "Current Catalog Draft",
         "Edit the loaded workspace with the same non-AI review tools used after draft generation.",
     ):
-        action_cols = st.columns([0.25, 0.75], vertical_alignment="center")
+        action_cols = st.columns([0.24, 0.58, 0.18], vertical_alignment="center")
         if action_cols[0].button("Reload Current Catalog Draft", icon=":material/refresh:"):
             _load_current_catalog_draft(ctx)
             st.rerun()
         action_cols[1].caption(
             "This draft starts from the active catalog. Changes are held in session state "
-            "until Save & Export applies them."
+            "until the save action writes them to the workspace."
         )
+        with action_cols[2]:
+            _render_workspace_save_bar(ctx)
         _draft_counts(draft)
         ok, issues = validate_draft_catalog(draft)
         _render_draft_validation(ok, issues, expanded=not ok)
@@ -1713,7 +1721,10 @@ def _save_export(
         return
     draft = _current_or_deterministic_draft(working, approved_fields)
     st.write("### Save & Export")
-    st.caption("Export or apply the reviewed draft only after validation passes.")
+    st.caption(
+        "Export the reviewed draft here. Use the consistent save action at the top "
+        "of the editor to write it to the workspace."
+    )
     _draft_counts(draft)
     ok, issues = validate_draft_catalog(draft)
     _render_draft_validation(ok, issues, expanded=not ok)
@@ -1734,22 +1745,8 @@ def _save_export(
                 key=f"ai_studio_download_{filename}",
                 disabled=not ok,
             )
-    apply_col, run_col = st.columns(2)
-    if apply_col.button("Apply Draft To Workspace", type="primary", disabled=not ok):
-        try:
-            _apply_draft(ctx, draft)
-            _mark_draft_published(draft)
-            ok, issues = builder.validate_workspace(ctx.workspace)
-            if ok:
-                st.success("Draft applied and catalog validates.")
-            else:
-                st.warning("Draft applied, but catalog needs attention.")
-                st.code("\n".join(issues), language="text")
-        except Exception as exc:  # pragma: no cover - Streamlit display path
-            logger.exception("Failed to apply AI draft to workspace")
-            st.error(str(exc))
-    if run_col.button(
-        "Apply Draft & Run Source",
+    if st.button(
+        "Save Draft & Run Source",
         icon=":material/play_arrow:",
         disabled=not ok,
         help="Write the draft, validate the workspace catalog, then run generated sources so aggregates are materialized.",
@@ -1759,6 +1756,67 @@ def _save_export(
         except Exception as exc:  # pragma: no cover - Streamlit display path
             logger.exception("Failed to apply AI draft and run source")
             st.error(str(exc))
+
+
+def _render_workspace_save_bar(ctx: ValueStreamContext) -> None:
+    """Publish the accepted AI draft from one consistent top-of-editor action."""
+
+    feedback = st.session_state.pop("ai_studio_workspace_save_feedback", None)
+    draft = st.session_state.get("ai_studio_draft")
+    pending = st.session_state.get("ai_studio_pending_draft") is not None
+    ok = False
+    issues: list[str] = []
+    if isinstance(draft, dict):
+        ok, issues = validate_draft_catalog(draft)
+
+    published = bool(
+        isinstance(draft, dict)
+        and st.session_state.get("ai_studio_published_signature") == _draft_signature(draft)
+    )
+    if not isinstance(draft, dict):
+        caption = "Generate and accept a draft before saving it to the workspace."
+    elif pending:
+        caption = "Review or reject the pending AI changes before saving the accepted draft."
+    elif not ok:
+        caption = f"Resolve {len(issues)} draft validation issue(s) before saving."
+    elif published:
+        caption = "The accepted draft is already saved to the active workspace."
+    else:
+        caption = "Save the accepted in-session draft to the active workspace catalog."
+
+    if components.editor_save_bar(
+        key="ai_studio_workspace_save",
+        caption=caption,
+        label="Saved" if published else "Save draft",
+        disabled=not isinstance(draft, dict) or pending or not ok or published,
+        help=(
+            "This writes the accepted draft only. Use the update buttons inside a review "
+            "step to accept its current controls into the draft first."
+        ),
+    ):
+        try:
+            _apply_draft(ctx, draft)
+            _mark_draft_published(draft)
+            workspace_ok, workspace_issues = builder.validate_workspace(ctx.workspace)
+            st.session_state["ai_studio_workspace_save_feedback"] = {
+                "ok": workspace_ok,
+                "issues": workspace_issues,
+            }
+            st.rerun()
+        except Exception as exc:  # pragma: no cover - Streamlit display path
+            logger.exception("Failed to save AI draft to workspace")
+            st.toast(f"Draft could not be saved: {exc}", icon=":material/error:")
+    if isinstance(feedback, dict):
+        if feedback.get("ok"):
+            st.toast(
+                "Draft saved to the workspace and the catalog validates.",
+                icon=":material/check_circle:",
+            )
+        else:
+            st.toast(
+                "Draft saved, but the workspace catalog needs attention.",
+                icon=":material/warning:",
+            )
 
 
 def _processors_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
@@ -1791,7 +1849,7 @@ def _processors_review(working: pl.DataFrame, approved_fields: list[str]) -> Non
         key="ai_studio_processors_to_keep",
         help="Metrics and tiles that depend on rejected processors are removed automatically.",
     )
-    if st.button("Apply Processor Selection", type="primary", disabled=not selected):
+    if st.button("Update Draft: Processor Selection", type="primary", disabled=not selected):
         _set_draft(filter_draft_by_selection(draft, selected_processors=selected))
         st.rerun()
 
@@ -1809,7 +1867,7 @@ def _processors_review(working: pl.DataFrame, approved_fields: list[str]) -> Non
             height=360,
             help=config_help.field_help("ai.raw_yaml"),
         )
-        if st.button("Apply Raw Processors YAML", type="secondary"):
+        if st.button("Update Draft From Processors YAML", type="secondary"):
             try:
                 sections = parse_ai_yaml_sections(raw)
                 if "processors" not in sections:
@@ -1960,7 +2018,7 @@ def _render_processor_parameter_editor(
                 language="yaml",
             )
 
-        if st.button("Apply Processor Changes", type="primary", key=f"{key_prefix}_apply"):
+        if st.button("Update Processor In Draft", type="primary", key=f"{key_prefix}_apply"):
             if not new_processor_id:
                 st.error("Processor ID is required.")
                 return
@@ -2290,7 +2348,7 @@ def _metrics_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
         key="ai_studio_metrics_to_keep",
         help="Tiles for rejected metrics are removed automatically.",
     )
-    if st.button("Apply Metric Selection", type="primary", disabled=not selected):
+    if st.button("Update Draft: Metric Selection", type="primary", disabled=not selected):
         _set_draft(filter_draft_by_selection(draft, selected_metrics=selected))
         st.rerun()
 
@@ -2308,7 +2366,7 @@ def _metrics_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
             height=360,
             help=config_help.field_help("ai.raw_yaml"),
         )
-        if st.button("Apply Raw Metrics YAML", type="secondary"):
+        if st.button("Update Draft From Metrics YAML", type="secondary"):
             try:
                 sections = parse_ai_yaml_sections(raw)
                 if "metrics" not in sections:
@@ -2334,7 +2392,7 @@ def _render_ai_recipe_library(draft: dict[str, Any]) -> None:
             f"`{value}`" for value in materialization_feedback.get("state_names", [])
         )
         st.info(
-            f"Recipe added to the draft. Use **Apply Draft & Run Source** in Save & "
+            f"Recipe added to the draft. Use **Save Draft & Run Source** in Save & "
             f"Export to materialize {states or 'the new aggregate state'} from "
             f"source `{source_id}`."
         )
@@ -2498,7 +2556,7 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
                 language="yaml",
             )
 
-        if st.button("Apply Metric Changes", type="primary", key=f"{key_prefix}_apply"):
+        if st.button("Update Metric In Draft", type="primary", key=f"{key_prefix}_apply"):
             _set_draft(_update_metric_definition(draft, metric_name, renamed_metric, edited_metric))
             st.rerun()
 
@@ -3160,7 +3218,7 @@ def _reports_review(approved_fields: list[str]) -> None:
             key="ai_studio_tiles_to_keep",
             help=config_help.field_help("ai.keep_tiles"),
         )
-        if st.button("Apply Tile Selection", type="primary", disabled=not selected_tiles):
+        if st.button("Update Draft: Tile Selection", type="primary", disabled=not selected_tiles):
             _set_draft(filter_draft_by_selection(draft, selected_tiles=selected_tiles))
             st.rerun()
     else:
@@ -3181,7 +3239,7 @@ def _reports_review(approved_fields: list[str]) -> None:
             height=420,
             help=config_help.field_help("ai.raw_yaml"),
         )
-        if st.button("Apply Raw Dashboards YAML", type="secondary"):
+        if st.button("Update Draft From Dashboards YAML", type="secondary"):
             try:
                 sections = parse_ai_yaml_sections(raw)
                 if "dashboards" not in sections:
@@ -3348,7 +3406,7 @@ def _render_report_settings_editor(  # noqa: PLR0912
                     tile_updates["kpi"] = None
 
         if st.button(
-            "Apply Report Settings",
+            "Update Report Settings In Draft",
             type="primary",
             disabled=not presets,
             key=f"ai_studio_report_settings_apply_{dashboard_index}_{page_index}",
@@ -3526,7 +3584,7 @@ def _settings_review() -> None:
         except Exception as exc:
             logger.exception("Failed to parse dashboard theme YAML")
             st.warning(str(exc))
-    if st.button("Apply Settings To Draft", type="primary"):
+    if st.button("Update Settings In Draft", type="primary"):
         _set_draft(updated)
         st.success("Draft settings updated.")
 
@@ -3547,10 +3605,11 @@ def _render_pending_draft_review() -> None:
         st.info("The AI response does not change the accepted draft.")
     accepted: list[str] = []
     for index, patch in enumerate(patches):
+        patch_label = _draft_patch_label(patch.section)
         with st.container(border=True):
-            st.write(f"**{patch.change.title()} {patch.section}: `{patch.object_id}`**")
+            st.write(f"**{patch.change.title()} {patch_label}: `{patch.object_id}`**")
             keep = st.checkbox(
-                f"Accept {patch.section} patch",
+                f"Accept {patch_label} patch",
                 value=True,
                 key=f"ai_studio_patch_{signature}_{index}",
                 help=config_help.field_help("ai.patch_accept"),
@@ -3584,6 +3643,7 @@ def _render_pending_draft_review() -> None:
     with st.container(horizontal=True):
         if st.button("Accept patches", type="primary", disabled=not patches):
             _set_draft(reviewed)
+            _queue_preprocessing_editor_sync(patches, accepted)
             _clear_pending_ai_draft()
             if not ok:
                 st.session_state["ai_studio_next_step"] = STEPS[7]
@@ -3601,6 +3661,41 @@ def _render_pending_draft_review() -> None:
 def _pending_review_signature(base: dict[str, Any], pending: dict[str, Any], kind: str) -> str:
     payload = {"kind": kind, "base": base, "pending": pending}
     return hashlib.sha256(yaml.safe_dump(payload, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def _draft_patch_label(section: str) -> str:
+    return {
+        "source_defaults": "source default",
+        "source_filters": "source filter",
+        "calculated_fields": "calculated field",
+    }.get(section, section)
+
+
+def _queue_preprocessing_editor_sync(patches: list[DraftPatch], accepted: list[str]) -> None:
+    accepted_keys = set(accepted)
+    queued: dict[str, set[str]] = {}
+    queued_raw = st.session_state.get(_PREPROCESSING_SYNC_STATE_KEY) or {}
+    if isinstance(queued_raw, dict):
+        for source_id, sections in queued_raw.items():
+            queued[str(source_id)] = {str(section) for section in sections}
+    elif isinstance(queued_raw, list):
+        for source_id in queued_raw:
+            queued[str(source_id)] = {"source_defaults", "calculated_fields"}
+    for patch in patches:
+        if patch.key not in accepted_keys or patch.section not in _PREPROCESSING_PATCH_SECTIONS:
+            continue
+        source_id = (
+            patch.object_id
+            if patch.section == "source_filters"
+            else patch.object_id.partition("/")[0]
+        )
+        if source_id:
+            queued.setdefault(source_id, set()).add(patch.section)
+    if queued:
+        st.session_state[_PREPROCESSING_SYNC_STATE_KEY] = {
+            source_id: sorted(sections, key=str.casefold)
+            for source_id, sections in sorted(queued.items())
+        }
 
 
 def _render_ai_repair_panel(
@@ -3766,6 +3861,7 @@ def _handle_copilot_message(
         hidden_fields=hidden_fields,
         current_draft=draft,
     )
+    st.session_state["ai_studio_copilot_last_prompt"] = prompt
     try:
         with st.status("Running governed draft tools", expanded=False) as status:
             result = run_copilot_tool_loop(
@@ -3774,6 +3870,7 @@ def _handle_copilot_message(
                 call_model=lambda iteration_prompt: call_litellm(ai_settings, iteration_prompt),
                 validate=validate_draft_catalog,
                 max_iterations=3,
+                operation_policy=_copilot_operation_policy(step),
             )
             status.update(
                 label=f"Copilot finished after {result.iterations} iteration(s)",
@@ -3781,9 +3878,8 @@ def _handle_copilot_message(
             )
     except Exception as exc:  # pragma: no cover - Streamlit display path
         logger.exception("Copilot request failed")
-        st.error(f"Copilot request failed: {exc}")
+        st.error(_copilot_request_error_message(exc))
         return
-    st.session_state["ai_studio_copilot_last_prompt"] = prompt
     history.append({"role": "user", "content": message})
     reply_lines = [result.turn.reply]
     if result.pending_draft is not None and draft_patches(draft, result.pending_draft):
@@ -3807,6 +3903,29 @@ def _handle_copilot_message(
     if result.pending_draft is not None:
         st.rerun()
     _rerun_copilot_fragment()
+
+
+def _copilot_request_error_message(exc: Exception) -> str:
+    error = str(exc).strip()
+    if "insufficient permissions" in error.casefold():
+        model_name = str(st.session_state.get("ai_studio_ai_model") or "the selected model")
+        return (
+            f"The provider denied access to `{model_name}` for the current API project/key. "
+            "Choose a model available to that project in **AI Settings**, or grant the project "
+            "model usage and the key write permission. No draft operations were applied."
+        )
+    return f"Copilot request failed: {error or type(exc).__name__}"
+
+
+def _copilot_operation_policy(step: str) -> dict[str, str]:
+    step_name = step.split(". ", 1)[-1]
+    if step_name != "Filters":
+        return {}
+    message = (
+        "The Filters step edits the source pipeline before processor fan-out. "
+        "Use set_source_filter or remove_source_filter; do not edit a processor."
+    )
+    return {"set_processor": message, "remove_processor": message}
 
 
 def _rerun_copilot_fragment() -> None:
@@ -4202,6 +4321,109 @@ def _clear_schema_widget_state() -> None:
             key.startswith(f"{base}_") for base in schema_widget_bases
         ):
             st.session_state.pop(key, None)
+
+
+def _clear_preprocessing_widget_state(sections: set[str]) -> None:
+    section_widget_bases = {
+        "source_defaults": (
+            "ai_studio_defaults_editor",
+            "ai_studio_defaults_field_picker",
+        ),
+        "source_filters": ("ai_studio_filter_editor",),
+        "calculated_fields": ("ai_studio_calculation_editor",),
+    }
+    widget_bases = tuple(
+        base
+        for section in sections
+        for base in section_widget_bases.get(section, ())
+    )
+    for key in list(st.session_state.keys()):
+        if key in widget_bases or any(key.startswith(f"{base}_") for base in widget_bases):
+            st.session_state.pop(key, None)
+
+
+def _consume_preprocessing_editor_sync() -> None:
+    queued = _preprocessing_sync_queue()
+    active_source_id = str(st.session_state.get("ai_studio_source_id") or "").strip()
+    if not queued or active_source_id not in queued:
+        return
+    sections = queued.pop(active_source_id)
+    _store_preprocessing_sync_queue(queued)
+
+    draft = st.session_state.get("ai_studio_draft") or {}
+    source_defs = draft.get("pipelines", {}).get("sources", [])
+    source_def = next(
+        (
+            item
+            for item in source_defs
+            if isinstance(item, dict) and item.get("id") == active_source_id
+        ),
+        None,
+    )
+    if source_def is None:
+        return
+    source = model.Source.model_validate(source_def)
+    syncers = {
+        "source_defaults": _sync_source_defaults_editor,
+        "source_filters": _sync_source_filter_editor,
+        "calculated_fields": _sync_calculated_fields_editor,
+    }
+    for section in sections:
+        syncer = syncers.get(section)
+        if syncer is not None:
+            syncer(source)
+    _clear_preprocessing_widget_state(sections)
+
+
+def _preprocessing_sync_queue() -> dict[str, set[str]]:
+    queued_raw = st.session_state.get(_PREPROCESSING_SYNC_STATE_KEY) or {}
+    if isinstance(queued_raw, list):
+        return {
+            str(source_id): {"source_defaults", "calculated_fields"}
+            for source_id in queued_raw
+            if str(source_id).strip()
+        }
+    if isinstance(queued_raw, dict):
+        return {
+            str(source_id): {str(section) for section in sections}
+            for source_id, sections in queued_raw.items()
+        }
+    return {}
+
+
+def _store_preprocessing_sync_queue(queued: dict[str, set[str]]) -> None:
+    if not queued:
+        st.session_state.pop(_PREPROCESSING_SYNC_STATE_KEY, None)
+        return
+    st.session_state[_PREPROCESSING_SYNC_STATE_KEY] = {
+        source_id: sorted(values, key=str.casefold)
+        for source_id, values in sorted(queued.items())
+    }
+
+
+def _sync_source_defaults_editor(source: model.Source) -> None:
+    default_rows = builder.default_rows_from_values(builder.source_defaults(source))
+    for row in default_rows:
+        if row.get("Default Value") is None:
+            row["Default Value"] = "null"
+    st.session_state["ai_studio_defaults"] = default_rows
+
+
+def _sync_source_filter_editor(source: model.Source) -> None:
+    expression = builder.first_filter_expression(source)
+    filter_rows = builder.filter_rows_from_expression(expression)
+    if filter_rows is None:
+        st.session_state["ai_studio_filter_mode"] = "Raw AST"
+        st.session_state["ai_studio_filter_rows"] = [builder.blank_filter_row()]
+        st.session_state["ai_studio_raw_filter"] = builder.expression_yaml(expression)
+        return
+    st.session_state["ai_studio_filter_mode"] = "Rules"
+    st.session_state["ai_studio_filter_rows"] = filter_rows
+    st.session_state["ai_studio_raw_filter"] = ""
+
+
+def _sync_calculated_fields_editor(source: model.Source) -> None:
+    st.session_state["ai_studio_calculations"] = builder.calculated_rows_from_source(source)
 
 
 def _working_sample(sample: pl.DataFrame) -> tuple[pl.DataFrame, str | None]:
@@ -4746,6 +4968,7 @@ def _mark_draft_published(draft: dict[str, Any]) -> None:
 
 
 def _studio_status_bar(
+    ctx: ValueStreamContext,
     raw: pl.DataFrame,
     working: pl.DataFrame,
     approved_fields: list[str],
@@ -4757,40 +4980,62 @@ def _studio_status_bar(
     pending = st.session_state.get("ai_studio_pending_draft")
     draft_ok, draft_issues = validate_draft_catalog(draft) if draft else (False, [])
     with st.container(border=True):
-        with st.container(horizontal=True):
-            components.status_badge("Sample", "ready" if raw.height else "warning")
-            components.status_badge(
-                "Preprocessing",
-                "blocked" if preprocessing_error else "ready",
-                help=preprocessing_error or "Working schema is available.",
+        status_col, save_col = st.columns([0.84, 0.16], vertical_alignment="center")
+        with status_col:
+            with st.container(horizontal=True):
+                components.status_badge("Sample", "ready" if raw.height else "warning")
+                components.status_badge(
+                    "Preprocessing",
+                    "blocked" if preprocessing_error else "ready",
+                    help=preprocessing_error or "Working schema is available.",
+                )
+                components.status_badge(
+                    "Field Approval", "ready" if approved_fields else "warning"
+                )
+                components.status_badge(
+                    "AI Draft" if ai_calls_enabled else "Draft",
+                    (
+                        "warning"
+                        if ai_calls_enabled and pending
+                        else ("ready" if draft else "pending")
+                    ),
+                    help=(
+                        "Pending AI output needs review."
+                        if ai_calls_enabled and pending
+                        else None
+                    ),
+                )
+                components.status_badge(
+                    "Processors",
+                    (
+                        "ready"
+                        if draft and draft.get("processors", {}).get("processors")
+                        else "pending"
+                    ),
+                )
+                components.status_badge(
+                    "Metrics",
+                    (
+                        "ready"
+                        if draft and draft.get("metrics", {}).get("metrics")
+                        else "pending"
+                    ),
+                )
+                components.status_badge(
+                    "Reports",
+                    "ready" if draft and tile_keys(draft) else "pending",
+                )
+                components.status_badge(
+                    "Export",
+                    "ready" if draft_ok else ("blocked" if draft_issues else "pending"),
+                    help=draft_issues[0] if draft_issues else None,
+                )
+            st.caption(
+                f"{len(raw.columns)} raw columns · {len(working.columns)} working columns · "
+                f"{len(approved_fields)} approved fields · {working.height:,} sample rows"
             )
-            components.status_badge("Field Approval", "ready" if approved_fields else "warning")
-            components.status_badge(
-                "AI Draft" if ai_calls_enabled else "Draft",
-                "warning" if ai_calls_enabled and pending else ("ready" if draft else "pending"),
-                help="Pending AI output needs review." if ai_calls_enabled and pending else None,
-            )
-            components.status_badge(
-                "Processors",
-                "ready" if draft and draft.get("processors", {}).get("processors") else "pending",
-            )
-            components.status_badge(
-                "Metrics",
-                "ready" if draft and draft.get("metrics", {}).get("metrics") else "pending",
-            )
-            components.status_badge(
-                "Reports",
-                "ready" if draft and tile_keys(draft) else "pending",
-            )
-            components.status_badge(
-                "Export",
-                "ready" if draft_ok else ("blocked" if draft_issues else "pending"),
-                help=draft_issues[0] if draft_issues else None,
-            )
-        st.caption(
-            f"{len(raw.columns)} raw columns · {len(working.columns)} working columns · "
-            f"{len(approved_fields)} approved fields · {working.height:,} sample rows"
-        )
+        with save_col:
+            _render_workspace_save_bar(ctx)
 
 
 def _privacy_summary(
