@@ -3078,9 +3078,10 @@ persisting the index.</p>
       |    -- merge states by state-type rule, without rereading raw rows
       v
 [Immutable run/chunk parquet partials written atomically]
+      |    -- writer returns path/hash/rows/size/timestamp receipts
       |
       v
-[Lineage transaction committed] -- every written aggregate path
+[Lineage transaction committed] -- receipts for every written aggregate path
       |
       v
 [Chunk ledger row status=ok] -- last durable chunk commit marker
@@ -3177,6 +3178,11 @@ ingestion. Canonical payloads for all three identities are inserted into
 <code>meta/config_versions.duckdb</code>; each emitted aggregate file is recorded in
 <code>meta/lineage.duckdb</code> with its run, chunk, processor, grain, period, hash, row
 count, and path.</p>
+<p>The Parquet writer derives that lineage receipt from the in-memory partition
+while writing it; before the chunk marker, the ledger confirms the file still
+exists with the recorded size. The normal ingestion path does not reopen the
+new file merely to recover metadata it already knows. Recovery still
+deep-scans embedded provenance before publishing an interrupted run.</p>
 <h3 id="configuration-authoring-surfaces">Configuration authoring surfaces<a class="headerlink" href="#configuration-authoring-surfaces" title="Permanent link">&para;</a></h3>
 <p>Value Stream has two Streamlit authoring paths over the same YAML catalog:</p>
 <ul>
@@ -3378,7 +3384,11 @@ new caller treats every older <code>running</code> row for that source as interr
 physical provenance, and processor computation hashes all verify. The stale run
 becomes <code>partial</code> when at least one chunk verifies and <code>failed</code> otherwise.
 Files without a committed chunk marker remain invisible and are eligible for a
-later vacuum.</p>
+later vacuum.
+Recovery fetches lineage once per stale run, indexes that run's physical paths
+once, and deep-scans schema-compatible processor/grain files together; embedded
+provenance verification remains mandatory. Run-level input/kept row totals sum
+only the chunks whose final durable marker is <code>ok</code>.</p>
 <h2 id="15-security-and-privacy">15. Security and privacy<a class="headerlink" href="#15-security-and-privacy" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

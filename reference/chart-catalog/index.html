@@ -2984,6 +2984,15 @@ and compatibility callers.</p>
 </code></pre></div>
 <p>The validator checks filter coverage against every tile processor. Older pages
 without these blocks retain an inference fallback.</p>
+<p>For <code>multiselect</code> and <code>selectbox</code>, options are aggregate-derived suggestions,
+not an exhaustive allowlist. The report runtime checks compatible <code>content</code>
+tiles in authored order and takes up to 500 sorted distinct values from the
+first aggregate result that contains them; it does not union results from every
+tile. An empty or not-yet-ready result falls through to the next compatible
+content tile, and compatible <code>kpi_strip</code> tiles are considered only if no content
+tile yields values. Both controls accept a custom typed value even when the
+suggestion list is empty. A <code>text</code> control remains a free-form comma-separated
+input and does not perform option lookup.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">tiles</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;snake_case&gt;</span>
 <span class="w">    </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;string&gt;</span>

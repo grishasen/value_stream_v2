@@ -3731,7 +3731,10 @@ While it is running, <code>finished_at</code> is null and none of that run's new
 visible. Normal completion transitions the same row to <code>ok</code>, <code>partial</code>, or
 <code>failed</code>. If the process dies first, the next caller holding the source lock
 verifies committed chunks and performs the terminal transition; it never
-creates a second row for the interrupted run.</p>
+creates a second row for the interrupted run.
+Run-level <code>rows_in</code> and <code>rows_kept</code> totals include only chunks whose durable
+marker finishes as <code>ok</code>; failed, recovery-rejected, and skipped chunks do not
+inflate the published-row totals shown by operational surfaces.</p>
 <h3 id="plan">Plan<a class="headerlink" href="#plan" title="Permanent link">&para;</a></h3>
 <p>The result of the Query Layer's planner: which physical aggregate to scan, what predicates to push down, what columns to read, what derive function to apply. Deterministic for a given input + config_hash.</p>
 <h3 id="processor">Processor<a class="headerlink" href="#processor" title="Permanent link">&para;</a></h3>
