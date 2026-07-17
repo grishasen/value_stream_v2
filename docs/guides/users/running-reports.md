@@ -82,6 +82,14 @@ usable but is never silent: both the filter chip and unsupported tile disclose
 it. KPI-strip cards are explicitly configured scalar queries; ordinary charts
 are not promoted into KPI cards.
 
+For `multiselect` and `selectbox` filters, the displayed choices are suggestions
+loaded from aggregates rather than a fixed whitelist. Value Stream queries
+compatible ordinary plots in page order and uses the distinct values returned
+by the first plot that has data; an empty or not-yet-ready plot falls through to
+the next compatible plot. This avoids querying and combining every chart just
+to open the filter panel. You can also type a value that is not suggested, and
+the control remains editable when no aggregate suggestions are available.
+
 If a filter has no effect on one tile, the tile's backing processor does not
 persist that dimension — see
 [troubleshooting](../operations/troubleshooting.md).

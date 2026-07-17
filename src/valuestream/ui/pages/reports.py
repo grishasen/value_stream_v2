@@ -448,14 +448,13 @@ def _filter_control(
         selected = [item.strip() for item in raw.split(",") if item.strip()]
     else:
         options = _filter_options(ctx, page, capability)
-        if not options:
-            return
         if capability.control == "selectbox":
             value = st.selectbox(
                 capability.label,
                 options,
                 index=None,
-                placeholder="All",
+                placeholder="All — choose or type",
+                accept_new_options=True,
                 key=key,
                 help=coverage,
             )
@@ -464,6 +463,8 @@ def _filter_control(
             selected = st.multiselect(
                 capability.label,
                 options,
+                placeholder="Choose or type values",
+                accept_new_options=True,
                 key=key,
                 help=coverage,
             )
@@ -514,10 +515,19 @@ def _filter_options(
     page: model.DashboardPage,
     capability: FilterCapability,
 ) -> list[str]:
-    values: set[str] = set()
-    for tile in page.tiles:
-        if tile.id not in capability.supported_tile_ids:
-            continue
+    """Load suggestions from the first compatible plot that has values.
+
+    A filter remains editable when no aggregate values are available.  Querying
+    one compatible plot at a time avoids the previous eager union across every
+    tile while retaining a fallback for an empty or not-yet-ready first plot.
+    """
+
+    supported_tiles = [
+        tile for tile in page.tiles if tile.id in capability.supported_tile_ids
+    ]
+    plot_tiles = [tile for tile in supported_tiles if tile.placement != "kpi_strip"]
+    kpi_tiles = [tile for tile in supported_tiles if tile.placement == "kpi_strip"]
+    for tile in [*plot_tiles, *kpi_tiles]:
         metric = ctx.catalog.metrics.metrics.get(tile.metric)
         if metric is None:
             continue
@@ -559,12 +569,14 @@ def _filter_options(
             continue
         if capability.field not in rows.columns:
             continue
-        values.update(
+        values = {
             str(value)
             for value in rows.get_column(capability.field).drop_nulls().unique().to_list()
             if str(value)
-        )
-    return sorted(values, key=str.casefold)[:500]
+        }
+        if values:
+            return sorted(values, key=str.casefold)[:500]
+    return []
 
 
 def _filter_chip_value(value: Any) -> str:

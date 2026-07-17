@@ -32,6 +32,16 @@ time_filter:
 The validator checks filter coverage against every tile processor. Older pages
 without these blocks retain an inference fallback.
 
+For `multiselect` and `selectbox`, options are aggregate-derived suggestions,
+not an exhaustive allowlist. The report runtime checks compatible `content`
+tiles in authored order and takes up to 500 sorted distinct values from the
+first aggregate result that contains them; it does not union results from every
+tile. An empty or not-yet-ready result falls through to the next compatible
+content tile, and compatible `kpi_strip` tiles are considered only if no content
+tile yields values. Both controls accept a custom typed value even when the
+suggestion list is empty. A `text` control remains a free-form comma-separated
+input and does not perform option lookup.
+
 ```yaml
 tiles:
   - id: <snake_case>

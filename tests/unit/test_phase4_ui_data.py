@@ -23,6 +23,7 @@ from valuestream.store.parquet import write_aggregate
 from valuestream.ui import data as ui_data
 from valuestream.ui.context import ValueStreamContext, load_context
 from valuestream.ui.data import (
+    FilterCapability,
     _restore_time_columns,
     available_filter_columns_for_page,
     filter_capabilities_for_page,
@@ -34,6 +35,7 @@ from valuestream.ui.data import (
     query_tile,
 )
 from valuestream.ui.freshness import Freshness, metric_freshness
+from valuestream.ui.pages import reports as reports_page
 from valuestream.ui.pages.ai_config_studio import _natural_key_fields
 from valuestream.ui.pages.config_builder import (
     _new_processor_template,
@@ -505,6 +507,112 @@ def test_parse_filter_text() -> None:
         "Channel": ["Web", "Mobile"],
         "Plan": "Basic",
     }
+
+
+@pytest.mark.unit
+def test_filter_options_stop_at_first_compatible_non_kpi_plot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tiles = [
+        SimpleNamespace(id="summary", metric="SummaryCTR", placement="kpi_strip"),
+        SimpleNamespace(id="first_plot", metric="PlotCTR", placement="content"),
+        SimpleNamespace(id="later_plot", metric="LaterCTR", placement="content"),
+    ]
+    ctx = _filter_option_context(tiles)
+    page = SimpleNamespace(tiles=tiles)
+    capability = _filter_capability(*(tile.id for tile in tiles))
+    queried_metrics: list[str] = []
+
+    def fake_query_metric_cached(
+        _workspace: object,
+        _catalog: object,
+        metric_name: str,
+        **kwargs: object,
+    ) -> pl.DataFrame:
+        queried_metrics.append(metric_name)
+        assert kwargs["group_by"] == ["Channel"]
+        return pl.DataFrame({"Channel": ["Web", "Mobile", "Web"]})
+
+    monkeypatch.setattr(reports_page, "query_metric_cached", fake_query_metric_cached)
+
+    options = reports_page._filter_options(ctx, page, capability)
+
+    assert options == ["Mobile", "Web"]
+    assert queried_metrics == ["PlotCTR"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("first_result", ["empty", "not_ready"])
+def test_filter_options_fall_back_when_first_plot_has_no_values(
+    monkeypatch: pytest.MonkeyPatch,
+    first_result: str,
+) -> None:
+    tiles = [
+        SimpleNamespace(id="first_plot", metric="FirstCTR", placement="content"),
+        SimpleNamespace(id="fallback_plot", metric="FallbackCTR", placement="content"),
+    ]
+    ctx = _filter_option_context(tiles)
+    page = SimpleNamespace(tiles=tiles)
+    capability = _filter_capability(*(tile.id for tile in tiles))
+    queried_metrics: list[str] = []
+
+    def fake_query_metric_cached(
+        _workspace: object,
+        _catalog: object,
+        metric_name: str,
+        **_kwargs: object,
+    ) -> pl.DataFrame:
+        queried_metrics.append(metric_name)
+        if metric_name == "FirstCTR":
+            if first_result == "not_ready":
+                raise AggregateNotReadyError("aggregate backfill is still required")
+            return pl.DataFrame(schema={"Channel": pl.String})
+        return pl.DataFrame({"Channel": ["Partner", "Branch"]})
+
+    monkeypatch.setattr(reports_page, "query_metric_cached", fake_query_metric_cached)
+
+    options = reports_page._filter_options(ctx, page, capability)
+
+    assert options == ["Branch", "Partner"]
+    assert queried_metrics == ["FirstCTR", "FallbackCTR"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("control", "widget_name", "widget_value"),
+    [
+        ("multiselect", "multiselect", ["Partner"]),
+        ("selectbox", "selectbox", "Partner"),
+    ],
+)
+def test_choice_filter_controls_accept_custom_values_without_suggestions(
+    monkeypatch: pytest.MonkeyPatch,
+    control: str,
+    widget_name: str,
+    widget_value: str | list[str],
+) -> None:
+    capability = _filter_capability("plot", control=control)
+    captured: dict[str, object] = {}
+
+    def fake_widget(label: str, options: list[str], **kwargs: object) -> object:
+        captured.update(label=label, options=options, kwargs=kwargs)
+        return widget_value
+
+    monkeypatch.setattr(reports_page, "_filter_options", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(reports_page.st, widget_name, fake_widget)
+    filters: dict[str, object] = {}
+
+    reports_page._filter_control(
+        SimpleNamespace(),
+        SimpleNamespace(id="report", tiles=[]),
+        capability,
+        filters,
+    )
+
+    assert captured["options"] == []
+    assert isinstance(captured["kwargs"], dict)
+    assert captured["kwargs"]["accept_new_options"] is True
+    assert filters == {"Channel": ["Partner"]}
 
 
 @pytest.mark.unit
@@ -1559,6 +1667,34 @@ def _catalog(group_by: list[str]) -> model.Catalog:
                 ]
             },
         }
+    )
+
+
+def _filter_option_context(tiles: list[SimpleNamespace]) -> SimpleNamespace:
+    metric_defs = {
+        tile.metric: SimpleNamespace(source=f"processor_{tile.metric}") for tile in tiles
+    }
+    processors = [SimpleNamespace(id=metric.source) for metric in metric_defs.values()]
+    catalog = SimpleNamespace(
+        metrics=SimpleNamespace(metrics=metric_defs),
+        processors=SimpleNamespace(processors=processors),
+    )
+    return SimpleNamespace(workspace=Path("workspace"), catalog=catalog)
+
+
+def _filter_capability(
+    *supported_tile_ids: str,
+    control: str = "multiselect",
+) -> FilterCapability:
+    return FilterCapability(
+        field="Channel",
+        label="Channel",
+        display="primary",
+        scope="compatible_tiles",
+        control=control,
+        supported_tile_ids=tuple(supported_tile_ids),
+        unsupported_tile_ids=(),
+        explicit=True,
     )
 
 
