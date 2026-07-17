@@ -1659,6 +1659,15 @@ def catalog_transaction(workspace: str | Path) -> Iterator[None]:
 
 
 @contextmanager
+def validated_catalog_transaction(workspace: str | Path) -> Iterator[None]:
+    """Commit Builder catalog writes only when the resulting workspace is valid."""
+
+    with catalog_transaction(workspace):
+        yield
+        require_valid_workspace(workspace)
+
+
+@contextmanager
 def workspace_configuration_transaction(workspace: str | Path) -> Iterator[None]:
     """Restore catalog and workspace AI config when a complete apply fails."""
 
@@ -1676,9 +1685,7 @@ def _configuration_file_transaction(paths: Iterable[Path]) -> Iterator[None]:
     """Restore ``paths`` to their exact pre-write contents on any exception."""
 
     unique_paths = list(dict.fromkeys(paths))
-    snapshots = {
-        path: path.read_text(encoding="utf-8") if path.exists() else None for path in unique_paths
-    }
+    snapshots = {path: path.read_bytes() if path.exists() else None for path in unique_paths}
     try:
         yield
     except BaseException:
@@ -1686,7 +1693,7 @@ def _configuration_file_transaction(paths: Iterable[Path]) -> Iterator[None]:
             if content is None:
                 path.unlink(missing_ok=True)
             else:
-                path.write_text(content, encoding="utf-8")
+                path.write_bytes(content)
         raise
 
 

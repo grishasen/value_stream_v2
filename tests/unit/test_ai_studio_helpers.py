@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -427,7 +428,7 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
             "ModelControlGroup",
             "Propensity",
         ],
-        hidden_fields=["CustomerID"],
+        hidden_fields=["InternalSecret"],
         baseline_draft=_base_draft(),
     )
 
@@ -450,6 +451,8 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
     assert "- Revenue" in prompt
     assert "avoid_for_group_by_or_filters:" in prompt
     assert "- CustomerID" in prompt
+    assert "Hidden field count: 1" in prompt
+    assert "InternalSecret" not in prompt
     assert "Do not emit legacy TOML-only settings such as metrics.global_filters" in prompt
     assert "Set sketch_build_mode to bulk" in prompt
     assert "Every report/dashboard tile metric exists in metrics." in prompt
@@ -593,20 +596,25 @@ def test_repair_prompt_includes_validation_errors_and_traceback() -> None:
         file_name="sample.csv",
         approved_schema=[{"column": "Channel", "dtype": "String", "unique": 3}],
         approved_fields=["Channel"],
-        hidden_fields=[],
+        hidden_fields=["CustomerID"],
         current_draft=_base_draft(),
         validation_issues=[
-            "dashboards[overview].pages[engagement].tiles[ctr].metric: unknown metric 'Missing'"
+            "dashboards[overview].pages[engagement].tiles[ctr].metric: unknown metric 'Missing'",
+            "CustomerID must not be exposed",
         ],
-        validation_trace="Traceback (most recent call last):\nValidationError: bad draft",
+        validation_trace=(
+            "Traceback (most recent call last):\nValidationError: CustomerID caused a bad draft"
+        ),
     )
 
     assert "Validation errors to fix:" in prompt
     assert "unknown metric" in prompt
     assert "Missing" in prompt
     assert "Validation exception traceback, if available:" in prompt
+    assert "CustomerID" not in prompt
+    assert "<hidden-field>" in prompt
     assert "Traceback (most recent call last):" in prompt
-    assert "ValidationError: bad draft" in prompt
+    assert "ValidationError: <hidden-field> caused a bad draft" in prompt
 
 
 @pytest.mark.unit
@@ -942,6 +950,34 @@ def test_generate_schema_preview_masks_unselected_examples() -> None:
 
 
 @pytest.mark.unit
+def test_zero_example_prompt_sends_profile_counts_but_no_values_or_hidden_names() -> None:
+    frame = pl.DataFrame(
+        {
+            "Channel": ["private-web", "private-mobile"],
+            "SubjectID": ["customer-secret-001", "customer-secret-002"],
+            "HealthDiagnosis": ["private-a", "private-b"],
+        }
+    )
+    approved_fields = ["Channel", "SubjectID"]
+    schema = generate_schema_preview(frame, approved_fields, example_fields=[])
+
+    prompt = prompt_for_config_draft(
+        file_name="sample.csv",
+        approved_schema=schema,
+        approved_fields=approved_fields,
+        hidden_fields=["HealthDiagnosis"],
+        baseline_draft=_base_draft(),
+    )
+
+    assert "nulls:" in prompt
+    assert "unique:" in prompt
+    assert "Hidden field count: 1" in prompt
+    assert "private-web" not in prompt
+    assert "customer-secret-001" not in prompt
+    assert "HealthDiagnosis" not in prompt
+
+
+@pytest.mark.unit
 def test_schema_preview_display_rows_are_arrow_safe_for_mixed_examples() -> None:
     rows = _schema_preview_display_rows(
         [
@@ -992,6 +1028,226 @@ def test_field_approval_editor_rows_include_approval_examples_and_schema() -> No
     assert by_field["Channel"]["Most occurring"] == "['Web']"
     assert by_field["Channel"]["Values"] == "['Web', 'Mobile']"
     assert "Required" in by_field["SubjectID"]["Field Tags"]
+    assert "Likely ID" in by_field["SubjectID"]["Field Tags"]
+
+
+@pytest.mark.unit
+def test_new_sample_defaults_example_sharing_off_and_prompt_preview_has_no_values() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import polars as pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        frame = pl.DataFrame(
+            {
+                "Channel": ["Web", "Mobile"],
+                "SubjectID": ["customer-001", "customer-002"],
+            }
+        )
+        st.session_state["ai_studio_sample_identity"] = "sample-one"
+        page._initialize_state(frame)
+        available = sorted(frame.columns, key=str.casefold)
+        approved, examples, _ = page._sync_field_approval_state(
+            frame,
+            available,
+            ["SubjectID"],
+        )
+        st.session_state["approved"] = approved
+        st.session_state["examples"] = examples
+        st.session_state["schema_preview"] = page._schema_preview_for_ai(frame, approved)
+
+    at = AppTest.from_function(app).run()
+
+    assert not at.exception
+    assert at.session_state["approved"] == ["Channel", "SubjectID"]
+    assert at.session_state["examples"] == []
+    assert all("examples" not in row for row in at.session_state["schema_preview"])
+
+
+@pytest.mark.unit
+def test_field_scope_change_immediately_invalidates_ai_sharing_confirmation() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state[page.AI_SHARING_CONFIRMATION_STATE_KEY] = "confirmed"
+        stale_widget_key = f"{page.AI_SHARING_CONFIRMATION_WIDGET_PREFIX}old-scope"
+        st.session_state[stale_widget_key] = True
+        st.session_state["ai_studio_copilot_history"] = [
+            {"role": "assistant", "content": "Observed alice@example.com"}
+        ]
+        st.session_state["ai_studio_copilot_questions"] = [{"question": "Keep it?"}]
+        st.session_state["ai_studio_copilot_last_prompt"] = "alice@example.com"
+        st.session_state["ai_studio_copilot_queued_message"] = "alice@example.com"
+        page._invalidate_ai_sharing_confirmation_if_scope_changed(
+            previous_approved_fields=["Channel", "Email"],
+            previous_example_fields=["Email"],
+            approved_fields=["Channel", "Email"],
+            example_fields=[],
+        )
+        st.session_state["stale_consent_widget_present"] = stale_widget_key in st.session_state
+        st.session_state["queued_copilot_message_present"] = (
+            "ai_studio_copilot_queued_message" in st.session_state
+        )
+        st.session_state["post_revoke_prompt"] = page.prompt_for_copilot(
+            step="9. Metrics",
+            user_message="Add a metric.",
+            history=st.session_state["ai_studio_copilot_history"],
+            user_goals="",
+            approved_schema=[{"column": "Email", "dtype": "String"}],
+            approved_fields=["Channel", "Email"],
+            hidden_fields=[],
+            current_draft={},
+        )
+
+    at = AppTest.from_function(app).run()
+
+    assert not at.exception
+    assert at.session_state[ai_config_studio_page.AI_SHARING_CONFIRMATION_STATE_KEY] == ""
+    assert at.session_state["stale_consent_widget_present"] is False
+    assert at.session_state["ai_studio_copilot_history"] == []
+    assert at.session_state["ai_studio_copilot_questions"] == []
+    assert at.session_state["ai_studio_copilot_last_prompt"] == ""
+    assert at.session_state["queued_copilot_message_present"] is False
+    assert "alice@example.com" not in at.session_state["post_revoke_prompt"]
+
+
+@pytest.mark.unit
+def test_ai_calls_require_sample_scoped_data_sharing_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    calls: list[str] = []
+
+    def fake_call_litellm(settings: AICallSettings, prompt: str, **kwargs: object) -> str:
+        calls.append(prompt)
+        return "ok"
+
+    monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call_litellm)
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ai import AICallSettings  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state.setdefault("ai_studio_sample_identity", "sample-one")
+        st.session_state.setdefault("ai_studio_sample_name", "sample.csv")
+        st.session_state.setdefault("ai_studio_ai_model", "openai/gpt-test")
+        st.session_state.setdefault("ai_studio_ai_provider", "openai")
+        st.session_state.setdefault(
+            "ai_studio_ai_api_base",
+            "https://user:private-password@internal.example/v1?token=secret",
+        )
+        st.session_state.setdefault("ai_studio_approved_fields", ["Channel", "SubjectID"])
+        st.session_state.setdefault("ai_studio_example_fields", [])
+        contract = page._ai_sharing_contract([])
+        st.session_state["explicit_empty_scope"] = contract["approved_fields"]
+        st.session_state["sharing_contract"] = contract
+
+        def switch_sample() -> None:
+            current = st.session_state["ai_studio_sample_identity"]
+            st.session_state["ai_studio_sample_identity"] = (
+                "sample-two" if current == "sample-one" else "sample-one"
+            )
+
+        def seed_copilot_history() -> None:
+            st.session_state["ai_studio_copilot_history"] = [
+                {"role": "assistant", "content": "Echoed PRIVATE-SAMPLE-VALUE"}
+            ]
+
+        page._render_ai_data_sharing_confirmation(["Channel", "SubjectID"])
+        confirmed = page._ai_data_sharing_confirmed(["Channel", "SubjectID"])
+        if st.button("Run model", disabled=not confirmed):
+            st.session_state["result"] = page._call_litellm_for_current_sample(
+                AICallSettings(model="openai/gpt-test"),
+                "Generate a draft",
+                approved_fields=["Channel", "SubjectID"],
+            )
+        st.button("Switch sample", on_click=switch_sample)
+        st.button("Seed Copilot history", on_click=seed_copilot_history)
+
+    at = AppTest.from_function(app).run()
+
+    assert not at.exception
+    assert at.session_state["explicit_empty_scope"] == []
+    assert at.session_state["sharing_contract"]["destination"] == "Custom endpoint configured"
+    assert "private-password" not in json.dumps(at.session_state["sharing_contract"])
+    assert "token=secret" not in json.dumps(at.session_state["sharing_contract"])
+    assert any("Custom endpoint configured" in caption.value for caption in at.caption)
+    assert next(button for button in at.button if button.label == "Run model").disabled
+    assert calls == []
+
+    consent = next(
+        checkbox
+        for checkbox in at.checkbox
+        if checkbox.label.startswith("I confirm the sharing scope above")
+    )
+    consent.check().run()
+    run_button = next(button for button in at.button if button.label == "Run model")
+    assert not run_button.disabled
+    run_button.click().run()
+    assert calls == ["Generate a draft"]
+    assert at.session_state["result"] == "ok"
+
+    next(
+        checkbox
+        for checkbox in at.checkbox
+        if checkbox.label.startswith("I confirm the sharing scope above")
+    ).uncheck().run()
+    assert not at.exception
+    assert next(button for button in at.button if button.label == "Run model").disabled
+    next(
+        checkbox
+        for checkbox in at.checkbox
+        if checkbox.label.startswith("I confirm the sharing scope above")
+    ).check().run()
+
+    next(button for button in at.button if button.label == "Seed Copilot history").click().run()
+    assert "PRIVATE-SAMPLE-VALUE" in str(at.session_state["ai_studio_copilot_history"])
+
+    next(button for button in at.button if button.label == "Switch sample").click().run()
+    assert next(button for button in at.button if button.label == "Run model").disabled
+    assert calls == ["Generate a draft"]
+    assert at.session_state["ai_studio_copilot_history"] == []
+
+    # Returning to a previously confirmed scope does not reactivate stale consent.
+    next(button for button in at.button if button.label == "Switch sample").click().run()
+    assert next(button for button in at.button if button.label == "Run model").disabled
+    assert calls == ["Generate a draft"]
+
+
+@pytest.mark.unit
+def test_ai_studio_routes_every_litellm_call_through_sample_consent_guard() -> None:
+    import ast  # noqa: PLC0415 - focused source guard
+    import inspect  # noqa: PLC0415 - focused source guard
+
+    class CallVisitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.function_stack: list[str] = []
+            self.callers: list[str] = []
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self.function_stack.append(node.name)
+            self.generic_visit(node)
+            self.function_stack.pop()
+
+        def visit_Call(self, node: ast.Call) -> None:
+            if isinstance(node.func, ast.Name) and node.func.id == "call_litellm":
+                self.callers.append(self.function_stack[-1] if self.function_stack else "")
+            self.generic_visit(node)
+
+    visitor = CallVisitor()
+    visitor.visit(ast.parse(inspect.getsource(ai_config_studio_page)))
+
+    assert visitor.callers == ["_call_litellm_for_current_sample"]
 
 
 @pytest.mark.unit
@@ -1334,7 +1590,8 @@ def test_report_refresh_prompt_is_report_only() -> None:
 
     assert "Refresh only dashboards.yaml" in prompt
     assert "Do not change pipelines, processors, or metrics." in prompt
-    assert "CustomerID" in prompt
+    assert "Hidden field count: 1" in prompt
+    assert "CustomerID" not in prompt
 
 
 @pytest.mark.unit
@@ -1402,7 +1659,7 @@ def test_call_litellm_sends_provider_settings(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.unit
-def test_call_litellm_logs_prompts_and_response(
+def test_call_litellm_logs_metadata_without_prompts_or_response(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1420,16 +1677,17 @@ def test_call_litellm_logs_prompts_and_response(
 
     assert result == "metrics: {}"
     assert "LLM call started" in caplog.text
-    assert "Return valid YAML only" in caplog.text
-    assert "Return YAML with CTR" in caplog.text
     assert "LLM call completed" in caplog.text
-    assert "metrics: {}" in caplog.text
+    assert "openai/gpt-5.1" in caplog.text
     assert "has_api_key': True" in caplog.text
+    assert "Return valid YAML only" not in caplog.text
+    assert "Return YAML with CTR" not in caplog.text
+    assert "metrics: {}" not in caplog.text
     assert "secret-token" not in caplog.text
 
 
 @pytest.mark.unit
-def test_call_litellm_logs_failure_with_prompt(
+def test_call_litellm_logs_failure_without_prompt_or_exception_message(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1439,12 +1697,16 @@ def test_call_litellm_logs_failure_with_prompt(
     monkeypatch.setattr(ai_studio, "litellm_completion", fake_completion)
     caplog.set_level(logging.INFO, logger=ai_studio.__name__)
 
-    with pytest.raises(RuntimeError, match="provider unavailable"):
+    with pytest.raises(RuntimeError, match=r"AI provider call failed \(RuntimeError\)") as error:
         call_litellm(AICallSettings(model="ollama/llama3.1"), "Plan CTR query")
 
+    assert error.value.__context__ is None
+    assert "provider unavailable" not in str(error.value)
     assert "LLM call started" in caplog.text
-    assert "Plan CTR query" in caplog.text
     assert "LLM call failed" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "Plan CTR query" not in caplog.text
+    assert "provider unavailable" not in caplog.text
 
 
 @pytest.mark.unit

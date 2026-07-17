@@ -57,9 +57,26 @@ tightly governed:
 - Chat only sends catalog metadata and governed aggregate rows to the model,
   but those prompts leave the local app when using hosted model APIs. Do not
   use Chat With Data for sensitive raw samples.
-- Every LiteLLM call logs provider settings, prompts, responses, and timing.
-  API key values are not logged, but prompts may contain catalog metadata and
-  approved sample values from AI Configuration Studio.
+- AI Configuration Studio requires confirmation of the current
+  sample/provider/model sharing scope before sending a sample-backed prompt.
+  Sample values are excluded by default and require per-field opt-in; changing
+  the sample, model, provider, approved fields, or example selection
+  invalidates the confirmation. The review identifies whether data uses the
+  provider default or a configured custom endpoint. Approved schema names,
+  types, null counts, and unique counts are disclosed even when examples are
+  off; hidden field names are not sent. A sharing-scope change also clears prior
+  Copilot context so echoed values cannot be forwarded into the new scope.
+- LiteLLM calls log only privacy-safe operational metadata such as the call
+  identifier, a redacted model identifier, duration, outcome, and safe token
+  counts. Normal logs do not include prompt or response bodies, API keys,
+  sample values, API-base values, or raw provider exception payloads. Provider
+  failures are converted to safe reference errors before callers can display or
+  log them. Invalid model-generated Chat plans are likewise converted to a safe
+  status before UI or API error handling can log generated values. Studio
+  sample-read and preprocessing failures log only a bounded error type, because
+  parser exception text can echo an offending cell.
+- Governed SQL logs a query hash, statement kind, length, cap, and result
+  counts. It does not log SQL text, literal values, or workspace paths.
 
 ## Traceability
 

@@ -53,6 +53,34 @@ processors, metrics, and tiles target your goals instead of a generic starter
 catalog. Requirements are kept when you switch samples; requirements the
 approved schema cannot support are skipped rather than guessed.
 
+## Review Data Sharing Before AI Runs
+
+Field approval and sample-value sharing are separate choices. A new sample
+starts with all discovered fields approved for schema use and **no sample
+values selected for sharing**. Identifier-like names such as `CustomerID` or
+`SubjectID` are marked **Likely ID** so they receive extra scrutiny before you
+opt them into example sharing.
+
+Before any model-backed draft, revision, repair, report refresh, Copilot, or
+requirements-coverage action can run, confirm **Review data sent to AI**. The
+checkpoint shows the configured provider and model, every approved schema
+field, whether a custom endpoint is configured, and the fields whose sample
+values will be included. Even with examples off, the approved schema includes
+field names, types, null counts, and unique counts. Hidden field names are not
+sent; matching names are also redacted from business requirements, change
+requests, prior Copilot history, validation diagnostics, and draft identifiers.
+Prompts can also contain the remaining business requirements and relevant
+deterministic catalog or current draft settings. Provider storage and retention
+follow the terms of the configured destination.
+
+Confirmation is scoped to the current sample and sharing contract. Loading a
+different sample or changing the provider, model, approved fields, or example
+sharing invalidates it, clears prior consent controls, and requires another
+review. It also clears prior Copilot conversation context so echoed sample
+values cannot cross into a narrower scope or a different provider. The local
+**Use Deterministic Draft** action never calls a model and remains available
+without AI data-sharing confirmation.
+
 ## Revise With Free-Form Change Requests
 
 The Processors, Metrics, and Reports Review steps include an **AI Revision**

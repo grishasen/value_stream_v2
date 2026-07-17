@@ -47,6 +47,11 @@ exact YAML patch first; the top save action becomes available after that
 review. **Save & Run Source** remains a separate, explicit action because it
 materializes aggregates in addition to saving configuration.
 
+Every Builder catalog write and its post-write validation run inside one
+rollback boundary. If either the write or validation fails, all affected
+catalog files are restored to their exact prior contents and the source run is
+not started.
+
 Every editable field has a help tooltip beside its label. The tooltip explains
 the catalog meaning of the field and includes a concrete example when a value
 shape is useful, such as `ih_ai_engagement` for a processor ID or

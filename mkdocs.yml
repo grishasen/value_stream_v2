@@ -121,6 +121,9 @@ nav:
       - Implementation plan: design/implementation-plan.md
       - Reporting backlog: design/reporting-backlog.md
       - KPI recipe backlog: design/kpi-recipe-backlog.md
+      - Configuration authoring improvement plan: design/configuration-builder-ai-studio-improvement-plan-2026-07-17.md
+      - Configuration authoring conversion audit: design/configuration-builder-ai-studio-conversion-audit-2026-07-17.md
+      - Independent configuration authoring UX review: design/ux-review-config-builder-ai-studio.md
       - Chat With Data MLP1: design/chat-with-data-mlp1.md
       - Kickoff prompt: design/kickoff-prompt.md
       - Documentation guide: meta/documentation-guide.md

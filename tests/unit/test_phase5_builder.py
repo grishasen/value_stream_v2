@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2076,12 +2077,26 @@ def test_catalog_transaction_restores_all_files_when_a_write_fails(tmp_path: Pat
 
 
 @pytest.mark.unit
-def test_catalog_transaction_rolls_back_post_write_validation_failure(tmp_path: Path) -> None:
+def test_validated_catalog_transaction_rolls_back_all_post_write_changes(
+    tmp_path: Path,
+) -> None:
     _write_builder_catalog(tmp_path)
-    before = {name: (tmp_path / "catalog" / name).read_text() for name in builder.CATALOG_FILENAMES}
+    metrics_path = tmp_path / "catalog" / "metrics.yaml"
+    metrics_path.write_bytes(metrics_path.read_bytes().replace(b"\n", b"\r\n"))
+    before = {
+        name: (tmp_path / "catalog" / name).read_bytes() for name in builder.CATALOG_FILENAMES
+    }
 
     def install_invalid_metric() -> None:
-        with builder.catalog_transaction(tmp_path):
+        with builder.validated_catalog_transaction(tmp_path):
+            builder.write_workspace_settings(
+                tmp_path,
+                workspace_name="should_roll_back",
+                time_zone="Europe/Berlin",
+                calendar_grains=["Day", "Summary"],
+                week_start="sunday",
+                dashboard_theme={"colorway": ["#ff0000"]},
+            )
             builder.write_metric_definition(
                 tmp_path,
                 "BrokenReach",
@@ -2091,13 +2106,97 @@ def test_catalog_transaction_rolls_back_post_write_validation_failure(tmp_path: 
                     "state": "Missing_theta",
                 },
             )
-            builder.require_valid_workspace(tmp_path)
 
     with pytest.raises(ValueError, match="changes were rolled back"):
         install_invalid_metric()
 
-    after = {name: (tmp_path / "catalog" / name).read_text() for name in builder.CATALOG_FILENAMES}
+    after = {name: (tmp_path / "catalog" / name).read_bytes() for name in builder.CATALOG_FILENAMES}
     assert after == before
+
+
+@pytest.mark.unit
+def test_save_and_run_does_not_start_source_when_post_write_validation_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    before = {
+        name: (tmp_path / "catalog" / name).read_bytes() for name in builder.CATALOG_FILENAMES
+    }
+    run_calls: list[str] = []
+    errors: list[str] = []
+
+    def fail_post_write_validation(workspace: str | Path) -> None:
+        raise ValueError("post-write validation failed")
+
+    monkeypatch.setattr(builder, "require_valid_workspace", fail_post_write_validation)
+    monkeypatch.setattr(
+        config_builder,
+        "_run_source_with_status",
+        lambda ctx, source_id: run_calls.append(source_id),
+    )
+    monkeypatch.setattr(config_builder.st, "error", lambda message: errors.append(str(message)))
+
+    config_builder._write_processor_and_run_source(
+        SimpleNamespace(workspace=tmp_path),
+        "ih",
+        {"id": "engagement", "source": "ih", "kind": "binary_outcome"},
+        "Processor written.",
+    )
+
+    after = {name: (tmp_path / "catalog" / name).read_bytes() for name in builder.CATALOG_FILENAMES}
+    assert run_calls == []
+    assert errors == ["post-write validation failed"]
+    assert after == before
+
+
+@pytest.mark.unit
+def test_configuration_builder_catalog_mutations_use_validated_transaction() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    catalog_mutators = {
+        "delete_tile_definition",
+        "write_dashboards_definition",
+        "write_metric_definition",
+        "write_page_settings",
+        "write_processor_definition",
+        "write_source_definition",
+        "write_tile_definition",
+        "write_workspace_settings",
+    }
+    violations: list[tuple[str, int]] = []
+
+    class CatalogMutationVisitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.validated_transaction_depth = 0
+
+        def visit_With(self, node: ast.With) -> None:
+            guarded = any(
+                isinstance(item.context_expr, ast.Call)
+                and isinstance(item.context_expr.func, ast.Attribute)
+                and isinstance(item.context_expr.func.value, ast.Name)
+                and item.context_expr.func.value.id == "builder"
+                and item.context_expr.func.attr == "validated_catalog_transaction"
+                for item in node.items
+            )
+            self.validated_transaction_depth += int(guarded)
+            self.generic_visit(node)
+            self.validated_transaction_depth -= int(guarded)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "builder"
+                and func.attr in catalog_mutators
+                and self.validated_transaction_depth == 0
+            ):
+                violations.append((func.attr, node.lineno))
+            self.generic_visit(node)
+
+    CatalogMutationVisitor().visit(tree)
+
+    assert violations == []
 
 
 @pytest.mark.unit

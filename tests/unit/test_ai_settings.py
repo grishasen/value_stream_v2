@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 import pytest
 
+from valuestream.ai import settings as ai_settings
 from valuestream.ai.settings import (
     AI_CONFIG_FILENAMES,
     configured_api_key,
@@ -47,6 +49,27 @@ ai:
     assert config_path == tmp_path / "ai.yaml"
     assert config["model"] == "ollama/llama3.1"
     assert config["api_base"] == "http://localhost:11434"
+
+
+@pytest.mark.unit
+def test_ai_settings_logs_do_not_expose_workspace_paths(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    workspace = tmp_path / "PRIVATE-WORKSPACE-SECRET"
+    workspace.mkdir()
+    (workspace / "ai.yaml").write_text(
+        "ai:\n  llm:\n    model: openai/gpt-5.1\n",
+        encoding="utf-8",
+    )
+    caplog.set_level(logging.DEBUG, logger=ai_settings.__name__)
+
+    load_llm_settings_config(workspace)
+    load_chat_with_data_config(workspace)
+
+    assert "Loaded AI LLM settings" in caplog.text
+    assert str(workspace) not in caplog.text
+    assert "PRIVATE-WORKSPACE-SECRET" not in caplog.text
 
 
 @pytest.mark.unit

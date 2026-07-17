@@ -544,10 +544,18 @@ def catalog_prompt_dictionaries() -> dict[str, Any]:
     }
 
 
-def prompt_draft_sections(draft: dict[str, Any]) -> dict[str, Any]:
-    """Return the draft sections included in AI prompts."""
+def prompt_draft_sections(
+    draft: dict[str, Any],
+    *,
+    hidden_fields: list[str] | None = None,
+) -> dict[str, Any]:
+    """Return prompt-safe draft sections with unapproved field names removed."""
 
-    return _prompt_draft(draft)
+    prompt_draft = _prompt_draft(draft)
+    if not hidden_fields:
+        return prompt_draft
+    redacted = redact_hidden_field_mentions(prompt_draft, hidden_fields)
+    return redacted if isinstance(redacted, dict) else {}
 
 
 @dataclass(frozen=True)
@@ -562,6 +570,17 @@ class AICallSettings:
     reasoning_effort: str = ""
     verbosity: str = ""
     timeout_seconds: int = 90
+
+
+class AIProviderCallError(RuntimeError):
+    """A provider failure safe to show in UI and record in caller logs."""
+
+    def __init__(self, *, call_id: str, error_type: str, permission_denied: bool) -> None:
+        self.call_id = call_id
+        self.error_type = error_type
+        self.permission_denied = permission_denied
+        detail = " due to insufficient permissions" if permission_denied else f" ({error_type})"
+        super().__init__(f"AI provider call failed{detail}. Reference: {call_id}.")
 
 
 def generate_schema_preview(
@@ -965,44 +984,133 @@ def call_litellm(
     if settings.custom_llm_provider:
         request_kwargs["custom_llm_provider"] = settings.custom_llm_provider
 
-    logger.info(
-        "LLM call started: call_id=%s settings=%s system_prompt=%r user_prompt=%r",
-        call_id,
-        _litellm_log_settings(settings),
-        system_prompt,
-        prompt,
-    )
+    log_settings = _litellm_log_settings(settings)
+    logger.info("LLM call started: call_id=%s settings=%s", call_id, log_settings)
     started_at = time.perf_counter()
     try:
         response = litellm_completion(**request_kwargs)
         content = _litellm_message_content(response)
-    except Exception:
-        logger.exception(
-            "LLM call failed: call_id=%s duration_ms=%.2f",
+    except Exception as exc:
+        error_type = _safe_error_type_for_log(exc)
+        logger.error(
+            "LLM call failed: call_id=%s model=%s duration_ms=%.2f status=error error_type=%s",
             call_id,
+            log_settings["model"],
             (time.perf_counter() - started_at) * 1000,
+            error_type,
         )
-        raise
-    logger.info(
-        "LLM call completed: call_id=%s duration_ms=%.2f response=%r",
-        call_id,
-        (time.perf_counter() - started_at) * 1000,
-        content,
-    )
-    return content
+        failure = AIProviderCallError(
+            call_id=call_id,
+            error_type=error_type,
+            permission_denied=_is_permission_denied(exc),
+        )
+    else:
+        response_metadata = _litellm_response_log_metadata(response)
+        logger.info(
+            "LLM call completed: call_id=%s model=%s duration_ms=%.2f metadata=%s",
+            call_id,
+            log_settings["model"],
+            (time.perf_counter() - started_at) * 1000,
+            response_metadata,
+        )
+        return content
+
+    # Raise outside the provider exception handler so caller tracebacks cannot
+    # retain or re-log the raw exception text, request body, credentials, or paths.
+    raise failure
 
 
 def _litellm_log_settings(settings: AICallSettings) -> dict[str, Any]:
     return {
-        "model": settings.model,
-        "api_base": settings.api_base,
-        "custom_llm_provider": settings.custom_llm_provider,
+        "model": _safe_model_for_log(settings.model),
+        "has_api_base": bool(settings.api_base),
+        "has_custom_llm_provider": bool(settings.custom_llm_provider),
         "temperature": settings.temperature,
-        "reasoning_effort": settings.reasoning_effort,
-        "verbosity": settings.verbosity,
+        "has_reasoning_effort": bool(settings.reasoning_effort),
+        "has_verbosity": bool(settings.verbosity),
         "timeout_seconds": settings.timeout_seconds,
         "has_api_key": bool(settings.api_key),
     }
+
+
+def _safe_model_for_log(model: str) -> str:
+    """Return a useful model identifier without exposing filesystem locations."""
+
+    value = model.strip()
+    normalized = value.replace("\\", "/")
+    local_path_markers = ("/Users/", "/home/", "/private/", "/tmp/", "/var/folders/")
+    if (
+        not value
+        or value.startswith(("/", "~", "./", "../", "file:", "http://", "https://"))
+        or re.match(r"^[A-Za-z]:[\\/]", value)
+        or any(marker in normalized for marker in local_path_markers)
+        or any(character in value for character in "\r\n\t")
+    ):
+        return "<redacted-model>"
+    return value[:128]
+
+
+def _litellm_response_log_metadata(response: Any) -> dict[str, Any]:
+    """Return non-content response metadata suitable for routine logs."""
+
+    metadata: dict[str, Any] = {"status": "success"}
+    choices = _field(response, "choices")
+    if choices:
+        finish_reason = _safe_status_for_log(_field(choices[0], "finish_reason"))
+        if finish_reason:
+            metadata["status"] = finish_reason
+
+    usage = _field(response, "usage")
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        count = _field(usage, key)
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            metadata[key] = count
+    return metadata
+
+
+def _safe_status_for_log(value: Any) -> str:
+    """Return a bounded provider status without accepting arbitrary text."""
+
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip().lower()
+    if normalized in {
+        "stop",
+        "length",
+        "tool_calls",
+        "function_call",
+        "content_filter",
+        "cancelled",
+        "timeout",
+        "error",
+    }:
+        return normalized
+    return "other"
+
+
+def _safe_error_type_for_log(exc: Exception) -> str:
+    """Return a bounded exception class name without provider-controlled text."""
+
+    name = type(exc).__name__
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", name):
+        return name
+    return "ProviderError"
+
+
+def _is_permission_denied(exc: Exception) -> bool:
+    """Classify permission failures without carrying their raw text forward."""
+
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {401, 403}:
+        return True
+    try:
+        message = str(exc).casefold()
+    except Exception:  # pragma: no cover - defensive provider exception behavior
+        return False
+    return any(
+        marker in message
+        for marker in ("insufficient permission", "permission denied", "not authorized")
+    )
 
 
 def _litellm_message_content(response: Any) -> str:
@@ -1037,31 +1145,52 @@ def _catalog_prompt(
     validation_issues: list[str] | None = None,
     validation_trace: str = "",
 ) -> str:
+    hidden_names = {field.casefold() for field in hidden_fields}
+    prompt_approved_fields = [
+        field for field in approved_fields if field.casefold() not in hidden_names
+    ]
+    prompt_approved_schema = [
+        row
+        for row in approved_schema
+        if str(row.get("column") or "").casefold() not in hidden_names
+    ]
+    prompt_approved_schema = redact_hidden_field_mentions(
+        prompt_approved_schema,
+        hidden_fields,
+    )
+    safe_file_name = redact_hidden_field_mentions(file_name, hidden_fields)
+    safe_user_goals = redact_hidden_field_mentions(user_goals, hidden_fields)
+    safe_change_request = redact_hidden_field_mentions(change_request, hidden_fields)
+    safe_validation_issues = redact_hidden_field_mentions(
+        validation_issues or [],
+        hidden_fields,
+    )
+    safe_validation_trace = redact_hidden_field_mentions(validation_trace, hidden_fields)
+    safe_extra_rules = redact_hidden_field_mentions(extra_rules, hidden_fields)
     goals_text = ""
-    if user_goals.strip():
+    if safe_user_goals.strip():
         goals_text = (
             "Business requirements from the user. Satisfy each requirement with concrete "
             "processors, metrics, and report tiles where the approved schema allows it; "
             "skip requirements the schema cannot support:\n"
-            f"{user_goals.strip()}\n\n"
+            f"{safe_user_goals.strip()}\n\n"
         )
     change_text = ""
-    if change_request.strip():
-        change_text = f"Change request from the user:\n{change_request.strip()}\n\n"
+    if safe_change_request.strip():
+        change_text = f"Change request from the user:\n{safe_change_request.strip()}\n\n"
     issue_text = ""
-    if validation_issues:
+    if safe_validation_issues:
         issue_text = "\nValidation errors to fix:\n" + yaml.safe_dump(
-            validation_issues, sort_keys=False
+            safe_validation_issues, sort_keys=False
         )
-    if validation_trace.strip():
+    if safe_validation_trace.strip():
         issue_text += "\nValidation exception traceback, if available:\n"
-        issue_text += validation_trace.strip()
+        issue_text += safe_validation_trace.strip()
         issue_text += "\n"
-    rules = "\n".join(f"- {rule}" for rule in extra_rules)
+    rules = "\n".join(f"- {rule}" for rule in safe_extra_rules)
     field_roles = _approved_field_role_dictionary(
-        approved_schema,
-        approved_fields=approved_fields,
-        hidden_fields=hidden_fields,
+        prompt_approved_schema,
+        approved_fields=prompt_approved_fields,
     )
     hard_rules = "\n".join(f"- {rule}" for rule in _hard_output_rules())
     final_self_check = "\n".join(
@@ -1071,7 +1200,7 @@ def _catalog_prompt(
         f"{task}\n\n"
         f"{goals_text}"
         f"{change_text}"
-        f"Source sample: {file_name}\n\n"
+        f"Source sample: {safe_file_name}\n\n"
         "Application structure dictionary:\n"
         f"{yaml.safe_dump(_APPLICATION_STRUCTURE_DICTIONARY, sort_keys=False)}\n"
         "Catalog schema dictionary:\n"
@@ -1088,10 +1217,11 @@ def _catalog_prompt(
         f"{yaml.safe_dump(field_roles, sort_keys=False)}\n"
         f"Rules:\n{rules}\n\n"
         f"Hard output rules:\n{hard_rules}\n\n"
-        f"Approved fields:\n{yaml.safe_dump(approved_fields, sort_keys=False)}\n"
-        f"Hidden fields:\n{yaml.safe_dump(hidden_fields, sort_keys=False)}\n"
-        f"Approved schema preview:\n{yaml.safe_dump(approved_schema, sort_keys=False)}\n"
-        f"Current draft:\n{yaml.safe_dump(_prompt_draft(current_draft), sort_keys=False)}"
+        f"Approved fields:\n{yaml.safe_dump(prompt_approved_fields, sort_keys=False)}\n"
+        f"Hidden field count: {len(hidden_fields)}\n"
+        f"Approved schema preview:\n{yaml.safe_dump(prompt_approved_schema, sort_keys=False)}\n"
+        "Current draft:\n"
+        f"{yaml.safe_dump(prompt_draft_sections(current_draft, hidden_fields=hidden_fields), sort_keys=False)}"
         f"{issue_text}\n\n"
         f"Final self-check before returning:\n{final_self_check}\n\n"
         "Return valid YAML only. Do not wrap the answer in prose or Markdown fences."
@@ -1102,14 +1232,12 @@ def _approved_field_role_dictionary(
     approved_schema: list[dict[str, Any]],
     *,
     approved_fields: list[str],
-    hidden_fields: list[str],
 ) -> dict[str, list[str]]:
     schema_by_field = {
         str(row.get("column")): row
         for row in approved_schema
         if isinstance(row, dict) and row.get("column") is not None
     }
-    hidden = set(hidden_fields)
     roles: dict[str, list[str]] = {
         "safe_dimension_candidates": [],
         "time_candidates": [],
@@ -1125,9 +1253,6 @@ def _approved_field_role_dictionary(
         dtype = str(row.get("dtype", "")).casefold()
         unique = _safe_int(row.get("unique"))
         normalized = field.casefold()
-        if field in hidden:
-            roles["avoid_for_group_by_or_filters"].append(field)
-            continue
         if _is_time_field(field, dtype):
             roles["time_candidates"].append(field)
         if _is_numeric_dtype(dtype) and not _looks_like_identifier(field):
@@ -1148,6 +1273,37 @@ def _approved_field_role_dictionary(
         ):
             roles["clv_candidates"].append(field)
     return {key: _dedupe(values) for key, values in roles.items()}
+
+
+def redact_hidden_field_mentions(
+    value: Any,
+    hidden_fields: list[str],
+) -> Any:
+    """Recursively replace unapproved field-name mentions in dynamic prompt data."""
+
+    patterns = tuple(
+        re.compile(re.escape(field), re.IGNORECASE)
+        for field in sorted({field for field in hidden_fields if field}, key=len, reverse=True)
+    )
+
+    def redact(item: Any) -> Any:
+        if isinstance(item, str):
+            for pattern in patterns:
+                item = pattern.sub("<hidden-field>", item)
+            return item
+        if isinstance(item, dict):
+            cleaned: dict[Any, Any] = {}
+            for key, nested_item in item.items():
+                safe_key = redact(key) if isinstance(key, str) else key
+                cleaned[safe_key] = redact(nested_item)
+            return cleaned
+        if isinstance(item, list):
+            return [redact(nested_item) for nested_item in item]
+        if isinstance(item, tuple):
+            return tuple(redact(nested_item) for nested_item in item)
+        return item
+
+    return redact(value)
 
 
 def _hard_output_rules() -> tuple[str, ...]:

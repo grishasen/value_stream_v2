@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 
 import duckdb
@@ -73,6 +75,27 @@ def test_run_sql_query_masks_blobs_and_caps_rows(tmp_path: Path) -> None:
     assert result.masked_columns == ["State_blob"]
     assert result.rows.columns == ["Channel", "CTR"]
     assert result.rows.get_column("Channel").to_list() == ["Store", "Web"]
+
+
+@pytest.mark.unit
+def test_run_sql_query_logs_only_safe_metadata(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    workspace = tmp_path / "PRIVATE-WORKSPACE-SECRET"
+    _seed_export_db(workspace)
+    sql_secret = "PRIVATE-CUSTOMER-42"
+    sql = f"SELECT Channel, CTR FROM metrics_summary.\"CTR\" WHERE Channel = '{sql_secret}'"
+    caplog.set_level(logging.INFO, logger=sql_tool.__name__)
+
+    sql_tool.run_sql_query(workspace, sql)
+
+    assert re.search(r"query_id=[0-9a-f]{12}", caplog.text)
+    assert "statement=select" in caplog.text
+    assert f"sql_length={len(sql)}" in caplog.text
+    assert "column_count=2" in caplog.text
+    assert sql_secret not in caplog.text
+    assert str(workspace) not in caplog.text
 
 
 @pytest.mark.unit

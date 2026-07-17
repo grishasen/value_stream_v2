@@ -974,7 +974,8 @@ def _source_builder(ctx: ValueStreamContext, save_slot: Any) -> None:  # noqa: P
         placeholder=save_slot,
     ):
         try:
-            builder.write_source_definition(ctx.workspace, source_def)
+            with builder.validated_catalog_transaction(ctx.workspace):
+                builder.write_source_definition(ctx.workspace, source_def)
             _show_validation_after_write(ctx.workspace, "Source written.")
         except Exception as exc:  # pragma: no cover - Streamlit display path
             logger.exception("Failed to write source definition: source=%s", source_id.strip())
@@ -1058,7 +1059,8 @@ def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
         placeholder=save_slot,
     ):
         try:
-            builder.write_processor_definition(ctx.workspace, processor_def)
+            with builder.validated_catalog_transaction(ctx.workspace):
+                builder.write_processor_definition(ctx.workspace, processor_def)
             _show_validation_after_write(
                 ctx.workspace,
                 "Processor dimensions written. Re-run the source to materialize new aggregates.",
@@ -1073,14 +1075,8 @@ def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
         help="Write the processor dimensions, validate the catalog, then run this source so new aggregate files are materialized.",
     ):
         try:
-            builder.write_processor_definition(ctx.workspace, processor_def)
-            ok, issues = builder.validate_workspace(ctx.workspace)
-            if not ok:
-                st.warning(
-                    "Processor dimensions written, but catalog needs attention before running."
-                )
-                st.code("\n".join(issues), language="text")
-                return
+            with builder.validated_catalog_transaction(ctx.workspace):
+                builder.write_processor_definition(ctx.workspace, processor_def)
             with st.status("Running source", expanded=True) as status:
                 chunk_progress = components.chunk_progress_indicator(include_source=False)
                 result = run_source(
@@ -1391,7 +1387,8 @@ def _temporary_exploration_panel(
             key=f"builder_exploration_create_{processor.id}",
         ):
             try:
-                builder.write_processor_definition(ctx.workspace, processor_def)
+                with builder.validated_catalog_transaction(ctx.workspace):
+                    builder.write_processor_definition(ctx.workspace, processor_def)
                 _show_validation_after_write(ctx.workspace, "Exploratory aggregate written.")
             except Exception as exc:  # pragma: no cover - Streamlit display path
                 logger.exception("Failed to write exploratory processor: source=%s", source.id)
@@ -1513,9 +1510,10 @@ def _sketch_exploration_panel(
             key=f"builder_sketch_create_{processor.id}",
         ):
             try:
-                builder.write_processor_definition(ctx.workspace, processor_def)
-                for metric_name, metric_def in metric_defs.items():
-                    builder.write_metric_definition(ctx.workspace, metric_name, metric_def)
+                with builder.validated_catalog_transaction(ctx.workspace):
+                    builder.write_processor_definition(ctx.workspace, processor_def)
+                    for metric_name, metric_def in metric_defs.items():
+                        builder.write_metric_definition(ctx.workspace, metric_name, metric_def)
                 _show_validation_after_write(ctx.workspace, "Sketch exploration written.")
             except Exception as exc:  # pragma: no cover - Streamlit display path
                 logger.exception("Failed to write sketch exploration: source=%s", source.id)
@@ -1527,14 +1525,10 @@ def _sketch_exploration_panel(
             key=f"builder_sketch_run_{processor.id}",
         ):
             try:
-                builder.write_processor_definition(ctx.workspace, processor_def)
-                for metric_name, metric_def in metric_defs.items():
-                    builder.write_metric_definition(ctx.workspace, metric_name, metric_def)
-                ok, issues = builder.validate_workspace(ctx.workspace)
-                if not ok:
-                    st.warning("Sketch exploration written, but catalog needs attention.")
-                    st.code("\n".join(issues), language="text")
-                    return
+                with builder.validated_catalog_transaction(ctx.workspace):
+                    builder.write_processor_definition(ctx.workspace, processor_def)
+                    for metric_name, metric_def in metric_defs.items():
+                        builder.write_metric_definition(ctx.workspace, metric_name, metric_def)
                 _run_source_with_status(ctx, source.id)
                 st.success("Sketch exploration written and source run finished.")
             except Exception as exc:  # pragma: no cover - Streamlit display path
@@ -1559,12 +1553,8 @@ def _write_processor_and_run_source(
     write_message: str,
 ) -> None:
     try:
-        builder.write_processor_definition(ctx.workspace, processor_def)
-        ok, issues = builder.validate_workspace(ctx.workspace)
-        if not ok:
-            st.warning(f"{write_message} Catalog needs attention before running.")
-            st.code("\n".join(issues), language="text")
-            return
+        with builder.validated_catalog_transaction(ctx.workspace):
+            builder.write_processor_definition(ctx.workspace, processor_def)
         _run_source_with_status(ctx, source_id)
         st.success(f"{write_message} Source run finished.")
     except Exception as exc:  # pragma: no cover - Streamlit display path
@@ -1720,7 +1710,8 @@ def _exploration_lifecycle_controls(ctx: ValueStreamContext, source_id: str) -> 
         metadata.pop("expires_at", None)
         processor_def["exploration"] = metadata
         try:
-            builder.write_processor_definition(ctx.workspace, processor_def)
+            with builder.validated_catalog_transaction(ctx.workspace):
+                builder.write_processor_definition(ctx.workspace, processor_def)
             _show_validation_after_write(ctx.workspace, "Exploration promoted.")
         except Exception as exc:  # pragma: no cover - Streamlit display path
             logger.exception("Failed to promote exploration: processor=%s", selected.id)
@@ -2076,7 +2067,8 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         placeholder=save_slot,
     ):
         try:
-            builder.write_processor_definition(ctx.workspace, processor_def)
+            with builder.validated_catalog_transaction(ctx.workspace):
+                builder.write_processor_definition(ctx.workspace, processor_def)
             message = "Processor created." if creating else "Processor written."
             _show_validation_after_write(ctx.workspace, message)
         except Exception as exc:  # pragma: no cover - Streamlit display path
@@ -2206,7 +2198,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
         if recipe_request is None:
             return
         try:
-            with builder.catalog_transaction(workspace):
+            with builder.validated_catalog_transaction(workspace):
                 if recipe_request.processor_def:
                     builder.write_processor_definition(
                         workspace,
@@ -2227,7 +2219,6 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                         page_title=target.page_title,
                         tile=recipe_request.tile_def,
                     )
-                builder.require_valid_workspace(workspace)
             _queue_metric_refresh(
                 st.session_state,
                 metric_id=recipe_request.metric_id,
@@ -2433,8 +2424,8 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 if not editing and metric_name.strip() in catalog.metrics.metrics:
                     st.error(f"Metric {metric_name.strip()!r} already exists.")
                     return
-                builder.write_metric_definition(workspace, metric_name.strip(), metric_def)
-                ok, issues = builder.validate_workspace(workspace)
+                with builder.validated_catalog_transaction(workspace):
+                    builder.write_metric_definition(workspace, metric_name.strip(), metric_def)
                 _queue_metric_refresh(
                     st.session_state,
                     metric_id=metric_name.strip(),
@@ -2443,7 +2434,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                         f"Metric `{metric_name.strip()}` was written to "
                         "`catalog/metrics.yaml` and opened for editing."
                     ),
-                    issues=[] if ok else issues,
+                    issues=[],
                 )
                 st.rerun(scope="app")
             except Exception as exc:  # pragma: no cover - Streamlit display path
@@ -2708,8 +2699,7 @@ def _render_report_library_browser(
         required=True,
         width="stretch",
         format_func=lambda group_id: (
-            f"{REPORT_LIBRARY_GROUPS[group_id].icon} "
-            f"{REPORT_LIBRARY_GROUPS[group_id].label}"
+            f"{REPORT_LIBRARY_GROUPS[group_id].icon} {REPORT_LIBRARY_GROUPS[group_id].label}"
         ),
         help=config_help.field_help("report.library_purpose"),
     )
@@ -2793,9 +2783,7 @@ def _render_report_library_chart_group(
                     f"Open {_report_library_chart_label(chart_type)} report",
                     tile_keys,
                     index=(
-                        None
-                        if widget_has_state or default is None
-                        else tile_keys.index(default)
+                        None if widget_has_state or default is None else tile_keys.index(default)
                     ),
                     key=widget_key,
                     format_func=lambda tile_key: tile_labels[tile_key],
@@ -2887,7 +2875,14 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
             )
         )
         figure.update_layout(yaxis2={"overlaying": "y", "side": "right", "visible": False})
-    elif chart_type in {"calendar_heatmap", "heatmap", "cohort_heatmap", "corr", "rfm_density", "descriptive_heatmap"}:
+    elif chart_type in {
+        "calendar_heatmap",
+        "heatmap",
+        "cohort_heatmap",
+        "corr",
+        "rfm_density",
+        "descriptive_heatmap",
+    }:
         figure.add_trace(
             go.Heatmap(
                 z=[[1, 2, 4, 3], [2, 5, 3, 1], [4, 3, 2, 5]],
@@ -3093,13 +3088,23 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             st.session_state["builder_tile_seed"] = (selected_seed[0], selected_seed[1], seed)
             st.session_state["builder_tile_editor_token"] = f"new_{counter}"
         if delete_tile and selected_seed is not None:
-            deleted = builder.delete_tile_definition(
-                workspace,
-                dashboard_id=selected_seed[0],
-                page_id=selected_seed[1],
-                tile_id=selected_seed[2],
-            )
-            st.success("Tile deleted." if deleted else "Tile was not found.")
+            try:
+                with builder.validated_catalog_transaction(workspace):
+                    deleted = builder.delete_tile_definition(
+                        workspace,
+                        dashboard_id=selected_seed[0],
+                        page_id=selected_seed[1],
+                        tile_id=selected_seed[2],
+                    )
+                st.success("Tile deleted." if deleted else "Tile was not found.")
+            except Exception as exc:  # pragma: no cover - Streamlit display path
+                logger.exception(
+                    "Failed to delete tile definition: dashboard=%s page=%s tile=%s",
+                    selected_seed[0],
+                    selected_seed[1],
+                    selected_seed[2],
+                )
+                st.error(str(exc))
 
     with st.container(border=True):
         st.write("### Tile Editor")
@@ -3341,7 +3346,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             placeholder=save_slot,
         ):
             try:
-                with builder.catalog_transaction(workspace):
+                with builder.validated_catalog_transaction(workspace):
                     builder.write_tile_definition(
                         workspace,
                         dashboard_id=dashboard_id.strip(),
@@ -4222,15 +4227,20 @@ def _settings_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
         disabled=bool(theme_error) or not selected_grains,
         placeholder=save_slot,
     ):
-        builder.write_workspace_settings(
-            ctx.workspace,
-            workspace_name=workspace_name,
-            time_zone=time_zone,
-            calendar_grains=selected_grains,
-            week_start=week_start,
-            dashboard_theme=theme,
-        )
-        _show_validation_after_write(ctx.workspace, "Settings saved.")
+        try:
+            with builder.validated_catalog_transaction(ctx.workspace):
+                builder.write_workspace_settings(
+                    ctx.workspace,
+                    workspace_name=workspace_name,
+                    time_zone=time_zone,
+                    calendar_grains=selected_grains,
+                    week_start=week_start,
+                    dashboard_theme=theme,
+                )
+            _show_validation_after_write(ctx.workspace, "Settings saved.")
+        except Exception as exc:  # pragma: no cover - Streamlit display path
+            logger.exception("Failed to write workspace settings")
+            st.error(str(exc))
 
 
 @st.fragment()

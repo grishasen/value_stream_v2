@@ -10,6 +10,7 @@ row counts are capped.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import threading
 from dataclasses import dataclass
@@ -143,11 +144,14 @@ def run_sql_query(
     trimmed = validate_sql(sql)
     cap = max(1, min(int(limit), MAX_ROW_CAP))
     wrapped = f"SELECT * FROM ({trimmed}) AS governed_query LIMIT {cap + 1}"
+    query_id = hashlib.sha256(trimmed.encode("utf-8")).hexdigest()[:12]
+    statement_kind = _WORD_RE.search(trimmed)
     logger.info(
-        "Running governed SQL: workspace=%s cap=%s sql=%r",
-        workspace_path,
+        "Running governed SQL: query_id=%s statement=%s sql_length=%s cap=%s",
+        query_id,
+        statement_kind.group(0).lower() if statement_kind is not None else "unknown",
+        len(trimmed),
         cap,
-        " ".join(trimmed.split())[:500],
     )
     with _GovernedConnection(workspace_path, catalog) as conn:
         timer = threading.Timer(max(1.0, float(timeout_seconds)), conn.interrupt)
@@ -167,10 +171,13 @@ def run_sql_query(
     if masked:
         frame = frame.drop(masked)
     logger.info(
-        "Governed SQL completed: rows=%s truncated=%s masked=%s",
+        "Governed SQL completed: query_id=%s rows=%s column_count=%s truncated=%s "
+        "masked_column_count=%s",
+        query_id,
         frame.height,
+        frame.width,
         truncated,
-        masked,
+        len(masked),
     )
     return SqlQueryResult(
         sql=trimmed,
@@ -205,8 +212,11 @@ def list_sql_tables(
             qualified = f'{database_name}."{table_name}"'
             try:
                 described = conn.execute(f"DESCRIBE SELECT * FROM {qualified} LIMIT 0").fetchall()
-            except duckdb.Error:
-                logger.exception("Failed to describe governed table: table=%s", qualified)
+            except duckdb.Error as exc:
+                error_type = type(exc).__name__
+                if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error_type):
+                    error_type = "DatabaseError"
+                logger.error("Governed table description failed: error_type=%s", error_type)
                 continue
             columns = [
                 (str(name), str(dtype))

@@ -22,6 +22,7 @@ from valuestream.ai.studio import (
     catalog_prompt_dictionaries,
     filter_draft_by_selection,
     prompt_draft_sections,
+    redact_hidden_field_mentions,
     tile_keys,
 )
 from valuestream.config import model
@@ -761,9 +762,7 @@ def _source_filter_transforms(source: dict[str, Any]) -> list[dict[str, Any]]:
 def _validated_source_filter(expression: dict[str, Any]) -> dict[str, Any]:
     if _expression_contains_key(expression, "polars"):
         raise ValueError("Copilot source filters require the closed expression AST, not Polars")
-    transform = model.FilterTransform.model_validate(
-        {"kind": "filter", "expression": expression}
-    )
+    transform = model.FilterTransform.model_validate({"kind": "filter", "expression": expression})
     return cast(
         dict[str, Any],
         transform.model_dump(mode="json", by_alias=True, exclude_none=True),
@@ -807,9 +806,7 @@ def _replace_source_filter_transforms(
     ]
 
 
-def _source_filter_insertion_index(
-    transforms: list[Any], expression: dict[str, Any]
-) -> int:
+def _source_filter_insertion_index(transforms: list[Any], expression: dict[str, Any]) -> int:
     referenced_fields = _expression_field_references(expression)
     insertion_index = 0
     for index, transform in enumerate(transforms):
@@ -883,9 +880,7 @@ def _calculated_transform_index(source: dict[str, Any], field_name: str) -> int 
     )
 
 
-def _validated_calculated_transform(
-    field_name: str, expression: dict[str, Any]
-) -> dict[str, Any]:
+def _validated_calculated_transform(field_name: str, expression: dict[str, Any]) -> dict[str, Any]:
     if "polars" in expression:
         raise ValueError("Copilot calculated fields require the closed expression AST, not Polars")
     transform = model.DeriveColumn.model_validate(
@@ -1101,6 +1096,7 @@ def run_copilot_tool_loop(
     validate: Callable[[dict[str, Any]], tuple[bool, list[str]]],
     max_iterations: int = 3,
     operation_policy: dict[str, str] | None = None,
+    hidden_fields: list[str] | None = None,
 ) -> CopilotRun:
     """Run a bounded operation/validation loop without mutating the accepted draft."""
 
@@ -1159,6 +1155,7 @@ def run_copilot_tool_loop(
                 original_prompt=prompt,
                 candidate=candidate,
                 issues=issues,
+                hidden_fields=hidden_fields or [],
             )
     failed_reply = (
         f"{last_turn.reply}\n\nNo pending change was created because the proposed "
@@ -1177,16 +1174,19 @@ def _tool_correction_prompt(
     original_prompt: str,
     candidate: dict[str, Any],
     issues: list[str],
+    hidden_fields: list[str],
 ) -> str:
+    safe_original_prompt = redact_hidden_field_mentions(original_prompt, hidden_fields)
+    safe_issues = redact_hidden_field_mentions(issues, hidden_fields)
     return (
-        f"{original_prompt}\n\n"
+        f"{safe_original_prompt}\n\n"
         "The previous governed operations were evaluated against a temporary draft and failed. "
         "Return corrected operations against the current temporary draft. Do not repeat an "
         "invalid operation. Ask a clarifying question instead of guessing when the errors "
         "cannot be resolved from the approved context.\n\n"
-        f"Validation or operation errors:\n{yaml.safe_dump(issues, sort_keys=False)}\n"
+        f"Validation or operation errors:\n{yaml.safe_dump(safe_issues, sort_keys=False)}\n"
         "Current temporary draft:\n"
-        f"{yaml.safe_dump(prompt_draft_sections(candidate), sort_keys=False)}\n"
+        f"{yaml.safe_dump(prompt_draft_sections(candidate, hidden_fields=hidden_fields), sort_keys=False)}\n"
         "Return the same JSON response contract only."
     )
 
@@ -1370,9 +1370,7 @@ def _set_source_filters_patch_value(draft: dict[str, Any], source_id: str, value
     _replace_source_filter_transforms(source, filters)
 
 
-def _set_calculated_field_patch_value(
-    draft: dict[str, Any], object_id: str, value: Any
-) -> None:
+def _set_calculated_field_patch_value(draft: dict[str, Any], object_id: str, value: Any) -> None:
     source_id, field_name = _source_object_parts(object_id)
     source = _source_by_id(draft, source_id)
     if value is None:
@@ -1454,12 +1452,29 @@ def prompt_for_copilot(
 ) -> str:
     """Build the step-aware copilot prompt for one user message."""
 
+    hidden_names = {field.casefold() for field in hidden_fields}
+    prompt_approved_fields = [
+        field for field in approved_fields if field.casefold() not in hidden_names
+    ]
+    prompt_approved_schema = [
+        row
+        for row in approved_schema
+        if str(row.get("column") or "").casefold() not in hidden_names
+    ]
+    prompt_approved_schema = redact_hidden_field_mentions(
+        prompt_approved_schema,
+        hidden_fields,
+    )
+    safe_user_message = redact_hidden_field_mentions(user_message, hidden_fields)
+    safe_user_goals = redact_hidden_field_mentions(user_goals, hidden_fields)
     goals_text = ""
-    if user_goals.strip():
-        goals_text = f"Business requirements from the user:\n{user_goals.strip()}\n\n"
+    if safe_user_goals.strip():
+        goals_text = f"Business requirements from the user:\n{safe_user_goals.strip()}\n\n"
     transcript_lines = []
     for item in history[-_HISTORY_LIMIT:]:
-        content = str(item.get("content") or "").strip()
+        content = str(
+            redact_hidden_field_mentions(item.get("content") or "", hidden_fields)
+        ).strip()
         if content:
             role = str(item.get("role") or "user")
             transcript_lines.append(f"{role}: {content}")
@@ -1491,12 +1506,13 @@ def prompt_for_copilot(
         "Catalog dictionaries:\n"
         f"{yaml.safe_dump(catalog_prompt_dictionaries(), sort_keys=False)}\n"
         f"{goals_text}"
-        f"Approved fields:\n{yaml.safe_dump(approved_fields, sort_keys=False)}\n"
-        f"Hidden fields:\n{yaml.safe_dump(hidden_fields, sort_keys=False)}\n"
-        f"Approved schema preview:\n{yaml.safe_dump(approved_schema, sort_keys=False)}\n"
-        f"Current draft:\n{yaml.safe_dump(prompt_draft_sections(current_draft), sort_keys=False)}\n"
+        f"Approved fields:\n{yaml.safe_dump(prompt_approved_fields, sort_keys=False)}\n"
+        f"Hidden field count: {len(hidden_fields)}\n"
+        f"Approved schema preview:\n{yaml.safe_dump(prompt_approved_schema, sort_keys=False)}\n"
+        "Current draft:\n"
+        f"{yaml.safe_dump(prompt_draft_sections(current_draft, hidden_fields=hidden_fields), sort_keys=False)}\n"
         f"{history_text}"
-        f"User message:\n{user_message.strip()}\n\n"
+        f"User message:\n{safe_user_message.strip()}\n\n"
         "Return valid JSON only. Do not wrap the answer in prose or Markdown fences."
     )
 
@@ -1567,10 +1583,18 @@ def parse_copilot_response(text: str) -> CopilotTurn:
     return CopilotTurn(reply=reply, operations=operations, questions=questions)
 
 
-def prompt_for_coverage(*, user_goals: str, draft: dict[str, Any]) -> str:
+def prompt_for_coverage(
+    *,
+    user_goals: str,
+    draft: dict[str, Any],
+    hidden_fields: list[str] | None = None,
+) -> str:
     """Build the prompt that maps business requirements onto the current draft."""
 
     metrics = sorted(draft.get("metrics", {}).get("metrics", {}), key=str.casefold)
+    safe_goals = redact_hidden_field_mentions(user_goals, hidden_fields or [])
+    safe_metrics = redact_hidden_field_mentions(metrics, hidden_fields or [])
+    safe_tile_keys = redact_hidden_field_mentions(tile_keys(draft), hidden_fields or [])
     return (
         "Judge how well this Value Stream catalog draft covers the user's business "
         "requirements. Split the requirements into distinct individual requirements "
@@ -1581,10 +1605,11 @@ def prompt_for_coverage(*, user_goals: str, draft: dict[str, Any]) -> str:
         "- metrics: existing metric ids that cover the requirement.\n"
         "- tiles: existing dashboard/page/tile keys that report it.\n"
         "- note: one short sentence explaining the judgement.\n\n"
-        f"Business requirements:\n{user_goals.strip()}\n\n"
-        f"Metric ids in the draft:\n{yaml.safe_dump(metrics, sort_keys=False)}\n"
-        f"Tile keys in the draft:\n{yaml.safe_dump(tile_keys(draft), sort_keys=False)}\n"
-        f"Current draft:\n{yaml.safe_dump(prompt_draft_sections(draft), sort_keys=False)}\n"
+        f"Business requirements:\n{safe_goals.strip()}\n\n"
+        f"Metric ids in the draft:\n{yaml.safe_dump(safe_metrics, sort_keys=False)}\n"
+        f"Tile keys in the draft:\n{yaml.safe_dump(safe_tile_keys, sort_keys=False)}\n"
+        "Current draft:\n"
+        f"{yaml.safe_dump(prompt_draft_sections(draft, hidden_fields=hidden_fields), sort_keys=False)}\n"
         "Return valid JSON only. Do not wrap the answer in prose or Markdown fences."
     )
 

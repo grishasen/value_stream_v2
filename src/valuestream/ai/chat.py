@@ -87,9 +87,7 @@ _TIME_COLUMNS = {
 _MAX_CHAT_ROWS = 500
 _METRIC_KIND_EXPLANATIONS = {
     "formula": "Derived from aggregate state columns or dependency metrics using the expression AST.",
-    "approx_distinct_count": (
-        "Approximate distinct count from a CPC, HLL, or Theta sketch state."
-    ),
+    "approx_distinct_count": ("Approximate distinct count from a CPC, HLL, or Theta sketch state."),
     "topk_items": "Top-K items from a processor top-k state.",
     "tdigest_quantile": "Quantile or percentile derived from a t-digest state.",
     "variant_compare": "Compares test and control roles across a variant column.",
@@ -101,6 +99,12 @@ _METRIC_KIND_EXPLANATIONS = {
     "set_op": "Set algebra metric over sketch states.",
     "funnel_dropoff": "Funnel transition count or rate between configured stages.",
 }
+
+
+class ChatIntentPlanningError(ValueError):
+    """A model-plan failure safe for caller logs and user-facing errors."""
+
+
 _PROCESSOR_KIND_EXPLANATIONS = {
     "binary_outcome": "Counts positive and negative outcomes for rates, lift, and tests.",
     "numeric_distribution": "Stores numeric distribution states such as count, mean, variance, and quantile sketches.",
@@ -742,12 +746,13 @@ def plan_chat_intent(
     """Ask the configured model for a structured intent and validate it."""
 
     logger.info(
-        "Chat intent planning started: model=%s provider=%s api_base=%s question=%r sql_enabled=%s",
-        settings.model,
-        settings.custom_llm_provider or "",
-        settings.api_base or "",
-        _preview(question),
+        "Chat intent planning started: model=%s has_custom_llm_provider=%s "
+        "has_api_base=%s sql_enabled=%s history_message_count=%s",
+        _safe_chat_model_for_log(settings.model),
+        bool(settings.custom_llm_provider),
+        bool(settings.api_base),
         bool(sql_schema),
+        len(history or []),
     )
     prompt = prompt_for_chat_intent(
         catalog,
@@ -770,17 +775,29 @@ def plan_chat_intent(
             + sql_clause
         ),
     )
-    logger.debug("Chat intent raw model response: response=%r", _preview(raw, limit=1000))
-    intent = parse_chat_intent(raw, catalog, question=question, allow_sql=bool(sql_schema))
-    logger.info(
-        "Chat intent planning completed: metric=%s response=%s grain=%s group_by=%s chart=%s",
-        intent.metric,
-        intent.response,
-        intent.grain,
-        intent.group_by,
-        _chart_log_payload(intent.chart),
-    )
-    return intent, raw
+    try:
+        intent = parse_chat_intent(raw, catalog, question=question, allow_sql=bool(sql_schema))
+    except Exception:
+        logger.warning("Chat intent planning failed: status=invalid_model_intent")
+        failure = ChatIntentPlanningError(
+            "The model returned an invalid query plan. Rephrase the question and try again."
+        )
+    else:
+        logger.info(
+            "Chat intent planning completed: intent_type=%s metric=%s grain=%s "
+            "group_count=%s filter_count=%s chart_kind=%s",
+            intent.response,
+            intent.metric,
+            intent.grain,
+            len(intent.group_by),
+            len(intent.filters),
+            intent.chart.kind if intent.chart is not None else "none",
+        )
+        return intent, raw
+
+    # Raise after leaving the parser exception handler so callers cannot log
+    # provider-generated metric, grain, filter, or chart fragments as context.
+    raise failure
 
 
 def parse_chat_intent(
@@ -794,7 +811,11 @@ def parse_chat_intent(
     """Parse and validate model-produced chat intent JSON."""
 
     payload = _extract_json_payload(text)
-    logger.debug("Parsing chat intent payload: payload=%s", _json_log_payload(payload))
+    logger.debug(
+        "Parsing chat intent payload: field_count=%s has_nested_intent=%s",
+        len(payload),
+        isinstance(payload.get("intent"), dict),
+    )
     if "intent" in payload and isinstance(payload["intent"], dict):
         payload = payload["intent"]
     response_raw = str(payload.get("response") or "").strip().lower()
@@ -802,7 +823,7 @@ def parse_chat_intent(
     if response_raw == "clarify" or (clarify_text and not _optional_text(payload.get("metric"))):
         if not clarify_text:
             raise ValueError("clarify response requires a `clarify` question for the user")
-        logger.info("Chat intent asks for clarification: question=%r", _preview(clarify_text))
+        logger.info("Parsed non-query chat intent: intent_type=clarify")
         return _non_query_intent(question, "clarify", clarify=clarify_text)
     sql_text = _optional_text(payload.get("sql"))
     if response_raw == "sql" or (sql_text and not _optional_text(payload.get("metric"))):
@@ -812,7 +833,7 @@ def parse_chat_intent(
             )
         if not sql_text:
             raise ValueError("sql response requires a `sql` SELECT statement")
-        logger.info("Chat intent escalated to governed SQL: sql=%r", _preview(sql_text))
+        logger.info("Parsed non-query chat intent: intent_type=sql")
         return _non_query_intent(question, "sql", sql=sql_text)
     metric_name = _resolve_metric_name(payload.get("metric"), catalog)
     metric = catalog.metrics.metrics[metric_name]
@@ -871,18 +892,19 @@ def parse_chat_intent(
         quantiles=bool(payload.get("quantiles")),
     )
     logger.debug(
-        "Validated chat intent: metric=%s response=%s grain=%s group_by=%s filters=%s "
-        "having=%s order_by=%s top_n=%s compare=%s chart=%s limit=%s",
-        intent.metric,
+        "Validated chat intent: intent_type=%s metric=%s grain=%s group_count=%s "
+        "filter_count=%s having_count=%s order_count=%s top_n=%s compare=%s "
+        "chart_kind=%s limit=%s",
         intent.response,
+        intent.metric,
         intent.grain,
-        intent.group_by,
-        list(intent.filters),
-        list(intent.having),
-        intent.order_by,
+        len(intent.group_by),
+        len(intent.filters),
+        len(intent.having),
+        len(intent.order_by),
         intent.top_n,
         intent.compare,
-        _chart_log_payload(intent.chart),
+        intent.chart.kind if intent.chart is not None else "none",
         intent.limit,
     )
     return intent
@@ -958,7 +980,12 @@ def chart_intent_from_parameters(
         "limit": limit,
     }
     logger.debug(
-        "Building chart intent from explicit parameters: payload=%s", _json_log_payload(payload)
+        "Building chart intent from explicit parameters: group_count=%s filter_count=%s "
+        "having_count=%s order_count=%s",
+        len(group_by),
+        len(filters or {}),
+        len(having or {}),
+        len(order_by or []),
     )
     return parse_chat_intent(
         json.dumps(payload),
@@ -980,16 +1007,17 @@ def execute_chat_intent(
             f"intent with response {intent.response!r} cannot be executed as a metric query"
         )
     logger.info(
-        "Executing chat aggregate query: metric=%s grain=%s group_by=%s filters=%s start=%s "
-        "end=%s having=%s order_by=%s top_n=%s compare=%s limit=%s",
+        "Executing chat aggregate query: metric=%s grain=%s group_count=%s filter_count=%s "
+        "has_start=%s has_end=%s having_count=%s order_count=%s top_n=%s compare=%s "
+        "limit=%s",
         intent.metric,
         intent.grain,
-        intent.group_by,
-        list(intent.filters),
-        intent.start,
-        intent.end,
-        list(intent.having),
-        intent.order_by,
+        len(intent.group_by),
+        len(intent.filters),
+        bool(intent.start),
+        bool(intent.end),
+        len(intent.having),
+        len(intent.order_by),
         intent.top_n,
         intent.compare,
         intent.limit,
@@ -1014,11 +1042,11 @@ def execute_chat_intent(
         rows = rows.head(intent.limit)
     fresh = metric_freshness(workspace_path, catalog, intent.metric, grain=intent.grain)
     logger.info(
-        "Executed chat aggregate query: metric=%s grain=%s rows=%s columns=%s freshness=%s",
+        "Executed chat aggregate query: metric=%s grain=%s rows=%s column_count=%s freshness=%s",
         intent.metric,
         intent.grain,
         rows.height,
-        rows.columns,
+        rows.width,
         freshness_label(fresh),
     )
     return ChatQueryResult(
@@ -1049,9 +1077,8 @@ def dimension_values(
         return []
     values = rows.get_column(column).drop_nulls().unique(maintain_order=True).head(limit).to_list()
     logger.debug(
-        "Loaded chat dimension values: metric=%s column=%s grain=%s count=%s",
+        "Loaded chat dimension values: metric=%s grain=%s count=%s",
         metric_name,
-        column,
         grain,
         len(values),
     )
@@ -1266,10 +1293,9 @@ def _normalize_chart_kind(
         if candidate in allowed_kinds:
             if requested:
                 logger.info(
-                    "Chat chart kind %r not allowed for metric; defaulted to %s (allowed=%s)",
-                    requested,
+                    "Chat chart kind not allowed for metric: defaulted_kind=%s allowed_kind_count=%s",
                     candidate,
-                    allowed_kinds,
+                    len(allowed_kinds),
                 )
             return candidate
     return allowed_kinds[0] if allowed_kinds else "bar"
@@ -1313,10 +1339,8 @@ def _normalize_chart_x_value(value: object, processor: model.Processor) -> str |
         return _resolve_column_name(raw, processor.group_by)
     except ValueError:
         logger.warning(
-            "Ignoring invalid chart x-axis: raw=%r processor=%s allowed_dimensions=%s",
-            raw,
-            processor.id,
-            processor.group_by,
+            "Ignoring invalid chart x-axis: allowed_dimension_count=%s",
+            len(processor.group_by),
         )
         return None
 
@@ -1331,9 +1355,8 @@ def _normalize_dimension_chart_column(value: object, processor: model.Processor)
         return _resolve_column_name(raw, processor.group_by)
     except ValueError:
         logger.warning(
-            "Ignoring non-dimension chart field: raw=%r processor=%s",
-            raw,
-            processor.id,
+            "Ignoring non-dimension chart field: allowed_dimension_count=%s",
+            len(processor.group_by),
         )
         return None
 
@@ -1351,19 +1374,17 @@ def _normalize_chart_x(
         return requested_x
     if kind == "line" and time_x is not None:
         logger.info(
-            "Defaulted missing/invalid line chart x-axis to time column: normalized_x=%s grain=%s",
-            time_x,
+            "Defaulted missing/invalid line chart x-axis to time column: grain=%s",
             grain,
         )
         return time_x
     fallback = group_by[0] if group_by else time_x
     if fallback is not None:
         logger.info(
-            "Defaulted missing/invalid chart x-axis: normalized_x=%s grain=%s kind=%s group_by=%s",
-            fallback,
+            "Defaulted missing/invalid chart x-axis: grain=%s kind=%s group_count=%s",
             grain,
             kind,
-            group_by,
+            len(group_by),
         )
     return fallback
 
@@ -1381,10 +1402,8 @@ def _default_chart_color(
         if candidate in (x, facet_col):
             continue
         logger.info(
-            "Defaulted missing chart color to grouped dimension: color=%s x=%s group_by=%s",
-            candidate,
-            x,
-            group_by,
+            "Defaulted missing chart color to grouped dimension: group_count=%s",
+            len(group_by),
         )
         return candidate
     return None
@@ -1596,8 +1615,11 @@ def overall_metric_value(
             start=intent.start,
             end=intent.end,
         )
-    except Exception:
-        logger.exception("Failed to load overall metric value: metric=%s", intent.metric)
+    except Exception as exc:
+        logger.error(
+            "Overall metric value load failed: error_type=%s",
+            _safe_chat_error_type(exc),
+        )
         return None
     if rows.height != 1:
         return None
@@ -1652,37 +1674,37 @@ def narrate_chat_result(
     return " ".join(raw.split()).strip()
 
 
-def _preview(value: str, *, limit: int = 240) -> str:
-    single_line = " ".join(value.split())
-    if len(single_line) <= limit:
-        return single_line
-    return f"{single_line[:limit]}..."
+def _safe_chat_model_for_log(model_name: str) -> str:
+    """Return a useful model identifier without exposing local paths or URLs."""
+
+    value = model_name.strip()
+    normalized = value.replace("\\", "/")
+    local_path_markers = ("/Users/", "/home/", "/private/", "/tmp/", "/var/folders/")
+    if (
+        not value
+        or value.startswith(("/", "~", "./", "../", "file:", "http://", "https://"))
+        or re.match(r"^[A-Za-z]:[\\/]", value)
+        or any(marker in normalized for marker in local_path_markers)
+        or any(character in value for character in "\r\n\t")
+    ):
+        return "<redacted-model>"
+    return value[:128]
 
 
-def _chart_log_payload(chart: ChartIntent | None) -> dict[str, Any] | None:
-    if chart is None:
-        return None
-    return {
-        "kind": chart.kind,
-        "x": chart.x,
-        "y": chart.y,
-        "color": chart.color,
-        "facet_col": chart.facet_col,
-        "value_format": chart.value_format,
-    }
+def _safe_chat_error_type(exc: Exception) -> str:
+    """Return a bounded exception class for privacy-safe Chat logs."""
 
-
-def _json_log_payload(payload: Mapping[str, Any]) -> str:
-    try:
-        return json.dumps(payload, sort_keys=True)[:2000]
-    except TypeError:
-        return repr(payload)[:2000]
+    error_type = type(exc).__name__
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error_type):
+        return error_type
+    return "ApplicationError"
 
 
 __all__ = [
     "CHAT_CHART_KINDS",
     "ChartIntent",
     "ChatIntent",
+    "ChatIntentPlanningError",
     "ChatQueryResult",
     "allowed_chart_kinds",
     "catalog_chat_manifest",

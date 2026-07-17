@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from io import BytesIO
 from typing import Any
 
@@ -12,6 +13,7 @@ import streamlit as st
 from valuestream.ai import AICallSettings
 from valuestream.ai.chat import (
     ChatIntent,
+    ChatIntentPlanningError,
     ChatQueryResult,
     chart_tile_from_intent,
     chat_pin_tile,
@@ -28,6 +30,7 @@ from valuestream.ai.settings import (
     write_llm_settings_config,
 )
 from valuestream.ai.sql_tool import run_sql_query, sql_schema_summary
+from valuestream.ai.studio import AIProviderCallError
 from valuestream.charts import render_chart
 from valuestream.ui import builder, components
 from valuestream.ui.context import ValueStreamContext
@@ -123,14 +126,35 @@ def render(ctx: ValueStreamContext) -> None:  # noqa: PLR0915 — Streamlit page
             _render_response(response, index)
             _render_pin_control(ctx, response, index)
         except Exception as exc:  # pragma: no cover - Streamlit display path
-            logger.exception(
-                "Chat query failed: controls=%s",
-                controls,
-            )
-            message = f"I couldn't answer from aggregate data: {exc}"
+            _log_chat_query_failure(exc)
+            message = _chat_query_error_message(exc)
             response = {"role": "assistant", "type": "text", "content": message}
             st.session_state.vs_chat_messages.append(response)
             st.error(message)
+
+
+def _log_chat_query_failure(exc: Exception) -> None:
+    """Log a bounded failure classification without request or model payloads."""
+
+    _log_chat_operation_failure("Chat query", exc)
+
+
+def _log_chat_operation_failure(operation: str, exc: Exception) -> None:
+    """Log only a static operation and bounded exception class."""
+
+    error_type = type(exc).__name__
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error_type):
+        error_type = "ApplicationError"
+    logger.error("%s failed: status=error error_type=%s", operation, error_type)
+
+
+def _chat_query_error_message(exc: Exception) -> str:
+    if isinstance(exc, (AIProviderCallError, ChatIntentPlanningError)):
+        return f"I couldn't answer from aggregate data. {exc}"
+    return (
+        "I couldn't answer from aggregate data. Try rephrasing the question or check the "
+        "configured metric and model settings."
+    )
 
 
 def _sidebar_controls(ctx: ValueStreamContext) -> dict[str, Any]:
@@ -206,7 +230,7 @@ def _render_save_settings(ctx: ValueStreamContext) -> None:
         )
         st.success(f"Saved LLM settings to `{path.name}`.")
     except Exception as exc:  # pragma: no cover - Streamlit display path
-        logger.exception("Failed to save LLM settings to ai.yaml")
+        _log_chat_operation_failure("Chat LLM settings save", exc)
         st.error(f"Could not save settings: {exc}")
 
 
@@ -406,7 +430,7 @@ def _render_pin_control(ctx: ValueStreamContext, response: dict[str, Any], index
         )
         st.success("Pinned to the Chat Pins dashboard. Reload the catalog to see it.")
     except Exception as exc:  # pragma: no cover - Streamlit display path
-        logger.exception("Failed to pin chat answer: metric=%s", metric)
+        _log_chat_operation_failure("Chat answer pin", exc)
         st.error(f"Could not pin this answer: {exc}")
 
 
@@ -462,8 +486,8 @@ def _kpi_value(rows, intent: ChatIntent, workspace: Any) -> tuple[str, Any] | No
         column = _default_value_column(rows, intent)
         try:
             return column, rows.get_column(column).item()
-        except Exception:
-            logger.exception("Failed to read KPI value: column=%s", column)
+        except Exception as exc:
+            _log_chat_operation_failure("Chat KPI value read", exc)
             return None
     if workspace is not None:
         # Report the governed overall value rather than averaging grouped rows,
@@ -477,8 +501,8 @@ def _value_detail(rows, intent: ChatIntent, workspace: Any) -> str:
         column = _default_value_column(rows, intent)
         try:
             return f" `{column}` is {_format_value(rows.get_column(column).item())}."
-        except Exception:
-            logger.exception("Failed to summarize chat response value: column=%s", column)
+        except Exception as exc:
+            _log_chat_operation_failure("Chat response value summary", exc)
             return ""
     if workspace is not None:
         overall = overall_metric_value(workspace, intent)
@@ -539,8 +563,8 @@ def _maybe_narrate(
     try:
         with st.spinner("Summarizing result..."):
             narrative = narrate_chat_result(settings, result)
-    except Exception:
-        logger.exception("Chat narrative failed; falling back to template summary")
+    except Exception as exc:
+        _log_chat_operation_failure("Chat narrative", exc)
         return response
     if not narrative:
         return response
@@ -600,8 +624,8 @@ def _chat_figure(rows, intent: ChatIntent, theme: dict[str, Any]):
     tile = _fit_tile_to_columns(chart_tile_from_intent(intent), rows, intent)
     try:
         return render_chart(rows, tile, theme=theme)
-    except Exception:
-        logger.exception("Chat chart factory render failed; using fallback: tile=%s", tile)
+    except Exception as exc:
+        _log_chat_operation_failure("Chat chart render", exc)
         return _px_fallback_figure(rows, intent)
 
 

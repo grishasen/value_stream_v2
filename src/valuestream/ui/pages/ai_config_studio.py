@@ -108,6 +108,9 @@ CATALOG_DRAFT_STEPS = [
     "Save & Export",
 ]
 AI_CALLS_ENABLED_STATE_KEY = "ai_studio_ai_calls_enabled"
+AI_SHARING_CONFIRMATION_STATE_KEY = "ai_studio_ai_sharing_confirmed_signature"
+AI_SHARING_CONFIRMATION_WIDGET_PREFIX = "ai_studio_ai_sharing_consent_"
+AI_SHARING_CONTRACT_STATE_KEY = "ai_studio_ai_sharing_contract_signature"
 CATALOG_DRAFT_SOURCE = "catalog"
 STUDIO_PHASES: tuple[tuple[str, tuple[int, ...]], ...] = (
     ("Data", (0, 1, 2, 3, 4, 5)),
@@ -235,6 +238,7 @@ def _render_studio(
     step = step or current_step
 
     if ai_calls_enabled:
+        _render_ai_data_sharing_confirmation(approved_fields)
         content_col, copilot_col = st.columns([2.35, 1], gap="large")
         with copilot_col:
             _render_copilot_panel(step, working, approved_fields)
@@ -367,7 +371,7 @@ def _render_selected_step(
             preprocessing_error,
             ai_calls_enabled=ai_calls_enabled,
         ),
-        10: lambda: _reports_review(approved_fields),
+        10: lambda: _reports_review(working, approved_fields),
         11: _chat_review,
         12: _settings_review,
         13: lambda: _save_export(ctx, working, approved_fields, preprocessing_error),
@@ -425,7 +429,7 @@ def _current_catalog_draft_editor(ctx: ValueStreamContext) -> None:
             None,
             ai_calls_enabled=False,
         ),
-        CATALOG_DRAFT_STEPS[4]: lambda: _reports_review(approved_fields),
+        CATALOG_DRAFT_STEPS[4]: lambda: _reports_review(working, approved_fields),
         CATALOG_DRAFT_STEPS[5]: _chat_review,
         CATALOG_DRAFT_STEPS[6]: _settings_review,
         CATALOG_DRAFT_STEPS[7]: lambda: _save_export(ctx, working, approved_fields, None),
@@ -657,8 +661,7 @@ def _load_sample(
         frame = _read_sample_bytes(sample_name, data)
         return frame.head(limit)
     except Exception as exc:
-        sample_label = upload.name if upload is not None else active_workspace_sample
-        logger.exception("Could not read AI Studio sample: file=%s", sample_label)
+        _log_ai_operation_failure("Sample read", exc)
         st.sidebar.error(f"Could not read sample: {exc}")
         return None
 
@@ -914,6 +917,7 @@ def _initialize_state(sample: pl.DataFrame) -> None:
     st.session_state["ai_studio_example_fields"] = []
     st.session_state["ai_studio_group_by_fields"] = []
     st.session_state["ai_studio_field_approval_initialized"] = False
+    _clear_ai_sharing_confirmation()
     _clear_schema_widget_state()
     st.session_state["ai_studio_draft"] = None
     st.session_state["ai_studio_pending_draft"] = None
@@ -1319,7 +1323,7 @@ def _render_calculations_editor(
             st.caption("Generated calculated transforms")
             st.code(yaml.safe_dump({"transforms": transforms}, sort_keys=False), language="yaml")
         except Exception as exc:
-            logger.exception("Failed to generate calculated transform preview")
+            _log_ai_operation_failure("Calculated transform preview", exc)
             st.error(str(exc))
 
 
@@ -1343,6 +1347,8 @@ def _render_approve_fields_step(sample: pl.DataFrame) -> None:
         available_fields,
         required,
     )
+    previous_approved_fields = list(approved_fields)
+    previous_example_fields = list(example_fields)
     with components.bordered_panel(
         "Approve Fields And Data Sharing With AI",
         "Approve exposes a field to the AI stage; Share Sample Values additionally "
@@ -1439,6 +1445,12 @@ def _render_approve_fields_step(sample: pl.DataFrame) -> None:
         st.session_state["ai_studio_approved_fields"] = selected
         st.session_state["ai_studio_example_fields"] = example_fields
         st.session_state["ai_studio_group_by_fields"] = group_by
+        _invalidate_ai_sharing_confirmation_if_scope_changed(
+            previous_approved_fields=previous_approved_fields,
+            previous_example_fields=previous_example_fields,
+            approved_fields=selected,
+            example_fields=example_fields,
+        )
 
     with components.bordered_panel(
         "Suggested Group-By Fields",
@@ -1665,6 +1677,7 @@ def _ai_draft(  # noqa: PLR0912, PLR0915
         return
 
     ai_settings = _current_ai_settings() if ai_calls_enabled else None
+    sharing_confirmed = _ai_data_sharing_confirmed(approved_fields)
     action_col1, action_col2, action_col3 = st.columns(
         [0.28, 0.28, 0.44] if ai_calls_enabled else [0.32, 0.32, 0.36],
         vertical_alignment="center",
@@ -1675,13 +1688,23 @@ def _ai_draft(  # noqa: PLR0912, PLR0915
     if ai_calls_enabled and action_col2.button(
         "Generate AI Draft",
         type="primary",
-        disabled=ai_settings is None,
-        help="Configure a LiteLLM model in the sidebar to enable AI generation.",
+        disabled=ai_settings is None or not sharing_confirmed,
+        help=(
+            "Configure a LiteLLM model in the sidebar to enable AI generation."
+            if ai_settings is None
+            else "Confirm the AI data-sharing scope above to enable AI generation."
+            if not sharing_confirmed
+            else "Generate a governed draft with the confirmed sharing scope."
+        ),
     ):
         try:
             with st.status("Generating AI draft", expanded=True) as status:
                 status.write("Sending approved schema and baseline catalog to the model...")
-                response = call_litellm(ai_settings, prompt)
+                response = _call_litellm_for_current_sample(
+                    ai_settings,
+                    prompt,
+                    approved_fields=approved_fields,
+                )
                 sections = parse_ai_yaml_sections(response)
                 pending = merge_draft_sections(baseline, sections)
                 st.session_state["ai_studio_pending_draft"] = pending
@@ -1693,7 +1716,7 @@ def _ai_draft(  # noqa: PLR0912, PLR0915
                 status.update(label="Draft ready for review", state="complete")
             st.rerun()
         except Exception as exc:  # pragma: no cover - Streamlit display path
-            logger.exception("AI draft generation failed")
+            _log_ai_operation_failure("AI draft generation", exc)
             st.error(f"AI draft generation failed: {exc}")
     if ai_calls_enabled:
         with action_col3, st.popover("Show Prompt", icon=":material/psychology:"):
@@ -1731,7 +1754,7 @@ def _save_export(
     _render_ai_repair_panel(draft, working, approved_fields, issues)
     if st.session_state.get("ai_studio_pending_draft") is not None:
         return
-    _render_coverage_panel(draft)
+    _render_coverage_panel(draft, working, approved_fields)
     files = _draft_files(draft)
     for filename, section in files.items():
         text = yaml.safe_dump(section, sort_keys=False)
@@ -1754,7 +1777,7 @@ def _save_export(
         try:
             _apply_draft_and_run_sources(ctx, draft)
         except Exception as exc:  # pragma: no cover - Streamlit display path
-            logger.exception("Failed to apply AI draft and run source")
+            _log_ai_operation_failure("AI draft apply and source run", exc)
             st.error(str(exc))
 
 
@@ -1804,7 +1827,7 @@ def _render_workspace_save_bar(ctx: ValueStreamContext) -> None:
             }
             st.rerun()
         except Exception as exc:  # pragma: no cover - Streamlit display path
-            logger.exception("Failed to save AI draft to workspace")
+            _log_ai_operation_failure("AI draft workspace save", exc)
             st.toast(f"Draft could not be saved: {exc}", icon=":material/error:")
     if isinstance(feedback, dict):
         if feedback.get("ok"):
@@ -1875,7 +1898,7 @@ def _processors_review(working: pl.DataFrame, approved_fields: list[str]) -> Non
                 _set_draft(merge_draft_sections(draft, sections))
                 st.rerun()
             except Exception as exc:
-                logger.exception("Failed to apply raw processors YAML")
+                _log_ai_operation_failure("Raw processor YAML apply", exc)
                 st.error(str(exc))
     with st.expander("Approved field catalog", expanded=False):
         st.write(", ".join(approved_fields) if approved_fields else "No approved fields.")
@@ -2335,7 +2358,7 @@ def _metrics_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
     if st.session_state.get("ai_studio_pending_draft") is not None:
         return
     _render_ai_refine_panel(draft, working, approved_fields)
-    _render_coverage_panel(draft)
+    _render_coverage_panel(draft, working, approved_fields)
     _render_ai_recipe_library(draft)
     metrics = sorted(draft.get("metrics", {}).get("metrics", {}), key=str.casefold)
     if not metrics:
@@ -2375,7 +2398,7 @@ def _metrics_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
                 _set_draft(merge_draft_sections(draft, sections))
                 st.rerun()
             except Exception as exc:
-                logger.exception("Failed to apply raw metrics YAML")
+                _log_ai_operation_failure("Raw metric YAML apply", exc)
                 st.error(str(exc))
     with st.expander("Approved field catalog", expanded=False):
         st.write(", ".join(approved_fields) if approved_fields else "No approved fields.")
@@ -2895,16 +2918,27 @@ def _ai_reports(
         user_goals=_current_user_goals(),
     )
     ai_settings = _current_ai_settings()
+    sharing_confirmed = _ai_data_sharing_confirmed(approved_fields)
     action_col1, action_col2 = st.columns([0.3, 0.7], vertical_alignment="center")
     if action_col1.button(
         "Refresh Reports From Metrics",
         type="primary",
-        disabled=ai_settings is None,
-        help="Configure a LiteLLM model in the sidebar to enable AI report refresh.",
+        disabled=ai_settings is None or not sharing_confirmed,
+        help=(
+            "Configure a LiteLLM model in the sidebar to enable AI report refresh."
+            if ai_settings is None
+            else "Confirm the AI data-sharing scope above to enable AI report refresh."
+            if not sharing_confirmed
+            else "Refresh reports with the confirmed sharing scope."
+        ),
     ):
         try:
             with st.status("Refreshing reports", expanded=True) as status:
-                response = call_litellm(ai_settings, prompt)
+                response = _call_litellm_for_current_sample(
+                    ai_settings,
+                    prompt,
+                    approved_fields=approved_fields,
+                )
                 sections = parse_ai_yaml_sections(response)
                 if "dashboards" not in sections:
                     raise ValueError("AI response did not include dashboards")
@@ -2920,7 +2954,7 @@ def _ai_reports(
                 status.update(label="Reports ready for review", state="complete")
             st.rerun()
         except Exception as exc:  # pragma: no cover - Streamlit display path
-            logger.exception("Report refresh failed")
+            _log_ai_operation_failure("Report refresh", exc)
             st.error(f"Report refresh failed: {exc}")
     with action_col2, st.popover("Show Prompt", icon=":material/psychology:"):
         st.code(prompt, language="text")
@@ -3195,7 +3229,7 @@ def _unique_tile_id(base: str, used_ids: set[str]) -> str:
     return candidate
 
 
-def _reports_review(approved_fields: list[str]) -> None:
+def _reports_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
     draft = st.session_state.get("ai_studio_draft")
     if draft is None:
         st.info("Generate and accept a draft first.")
@@ -3208,7 +3242,7 @@ def _reports_review(approved_fields: list[str]) -> None:
     if st.session_state.get("ai_studio_pending_draft") is not None:
         return
     _render_ai_refine_panel(draft, None, approved_fields)
-    _render_coverage_panel(draft)
+    _render_coverage_panel(draft, working, approved_fields)
 
     keys = tile_keys(draft)
     if keys:
@@ -3248,7 +3282,7 @@ def _reports_review(approved_fields: list[str]) -> None:
                 _set_draft(merge_draft_sections(draft, sections))
                 st.rerun()
             except Exception as exc:
-                logger.exception("Failed to apply raw dashboards YAML")
+                _log_ai_operation_failure("Raw dashboard YAML apply", exc)
                 st.error(str(exc))
 
 
@@ -3583,7 +3617,7 @@ def _settings_review() -> None:
                 raise ValueError("theme must be a YAML mapping")
             dashboards["theme"] = theme
         except Exception as exc:
-            logger.exception("Failed to parse dashboard theme YAML")
+            _log_ai_operation_failure("Dashboard theme YAML parse", exc)
             st.warning(str(exc))
     if st.button("Update Settings In Draft", type="primary"):
         _set_draft(updated)
@@ -3712,6 +3746,7 @@ def _render_ai_repair_panel(
     if not issues:
         return
     ai_settings = _current_ai_settings()
+    sharing_confirmed = _ai_data_sharing_confirmed(approved_fields)
     schema_preview = _schema_preview_for_ai(working, approved_fields) if working is not None else []
     hidden_fields = (
         sorted(set(working.columns) - set(approved_fields), key=str.casefold)
@@ -3737,11 +3772,22 @@ def _render_ai_repair_panel(
         if action_col1.button(
             "Generate AI Repair",
             type="primary",
-            disabled=ai_settings is None,
+            disabled=ai_settings is None or not sharing_confirmed,
+            help=(
+                "Configure a LiteLLM model in the sidebar to enable AI repair."
+                if ai_settings is None
+                else "Confirm the AI data-sharing scope above to enable AI repair."
+                if not sharing_confirmed
+                else "Generate a repair with the confirmed sharing scope."
+            ),
         ):
             try:
                 with st.status("Generating repair", expanded=True) as status:
-                    response = call_litellm(ai_settings, prompt)
+                    response = _call_litellm_for_current_sample(
+                        ai_settings,
+                        prompt,
+                        approved_fields=approved_fields,
+                    )
                     sections = parse_ai_yaml_sections(response)
                     pending = merge_draft_sections(draft, sections)
                     st.session_state["ai_studio_pending_draft"] = pending
@@ -3752,7 +3798,7 @@ def _render_ai_repair_panel(
                     status.update(label="Repair ready for review", state="complete")
                 st.rerun()
             except Exception as exc:  # pragma: no cover - Streamlit display path
-                logger.exception("AI repair failed")
+                _log_ai_operation_failure("AI repair", exc)
                 st.error(f"AI repair failed: {exc}")
         with action_col2, st.popover("Show Repair Prompt", icon=":material/build:"):
             st.code(prompt, language="text")
@@ -3768,6 +3814,7 @@ def _render_copilot_panel(
         return
     history = st.session_state.setdefault("ai_studio_copilot_history", [])
     has_pending = st.session_state.get("ai_studio_pending_draft") is not None
+    sharing_confirmed = _ai_data_sharing_confirmed(approved_fields)
     queued = st.session_state.get("ai_studio_copilot_queued_message")
     st.write("## AI Copilot")
     st.caption(
@@ -3789,9 +3836,11 @@ def _render_copilot_panel(
     message_text = st.chat_input(
         "Describe a change or ask about this step",
         key="ai_studio_copilot_input",
-        disabled=has_pending,
+        disabled=has_pending or not sharing_confirmed,
         submit_mode="disable",
     )
+    if not sharing_confirmed:
+        st.caption("Confirm the current sample's AI data-sharing scope before using Copilot.")
     last_prompt = str(st.session_state.get("ai_studio_copilot_last_prompt") or "")
     if last_prompt:
         with st.popover("Last prompt", icon=":material/psychology:"):
@@ -3843,6 +3892,9 @@ def _handle_copilot_message(
     if ai_settings is None:
         st.info("Configure a LiteLLM model in the sidebar to use the copilot.")
         return
+    if not _ai_data_sharing_confirmed(approved_fields):
+        st.info("Confirm the current sample's AI data-sharing scope before using the copilot.")
+        return
     history = st.session_state.setdefault("ai_studio_copilot_history", [])
     accepted_draft = st.session_state.get("ai_studio_draft")
     draft = (
@@ -3868,17 +3920,22 @@ def _handle_copilot_message(
             result = run_copilot_tool_loop(
                 prompt=prompt,
                 draft=draft,
-                call_model=lambda iteration_prompt: call_litellm(ai_settings, iteration_prompt),
+                call_model=lambda iteration_prompt: _call_litellm_for_current_sample(
+                    ai_settings,
+                    iteration_prompt,
+                    approved_fields=approved_fields,
+                ),
                 validate=validate_draft_catalog,
                 max_iterations=3,
                 operation_policy=_copilot_operation_policy(step),
+                hidden_fields=hidden_fields,
             )
             status.update(
                 label=f"Copilot finished after {result.iterations} iteration(s)",
                 state="complete" if not result.validation_issues else "error",
             )
     except Exception as exc:  # pragma: no cover - Streamlit display path
-        logger.exception("Copilot request failed")
+        _log_ai_operation_failure("Copilot request", exc)
         st.error(_copilot_request_error_message(exc))
         return
     history.append({"role": "user", "content": message})
@@ -3937,7 +3994,11 @@ def _rerun_copilot_fragment() -> None:
         st.rerun()
 
 
-def _render_coverage_panel(draft: dict[str, Any]) -> None:
+def _render_coverage_panel(
+    draft: dict[str, Any],
+    working: pl.DataFrame,
+    approved_fields: list[str],
+) -> None:
     if not _ai_calls_enabled():
         return
     with st.container(border=True):
@@ -3950,7 +4011,13 @@ def _render_coverage_panel(draft: dict[str, Any]) -> None:
             return
         st.caption("Ask AI to map each business requirement to the metrics and tiles covering it.")
         ai_settings = _current_ai_settings()
-        prompt = prompt_for_coverage(user_goals=goals, draft=draft)
+        sharing_confirmed = _ai_data_sharing_confirmed(approved_fields)
+        hidden_fields = sorted(set(working.columns) - set(approved_fields), key=str.casefold)
+        prompt = prompt_for_coverage(
+            user_goals=goals,
+            draft=draft,
+            hidden_fields=hidden_fields,
+        )
         signature = _coverage_signature(goals, draft)
         action_col, prompt_col = st.columns([0.32, 0.68], vertical_alignment="center")
         if (
@@ -3958,14 +4025,24 @@ def _render_coverage_panel(draft: dict[str, Any]) -> None:
                 "Check Coverage",
                 key="ai_studio_coverage_check",
                 type="primary",
-                disabled=ai_settings is None,
-                help="Configure a LiteLLM model in the sidebar to check coverage.",
+                disabled=ai_settings is None or not sharing_confirmed,
+                help=(
+                    "Configure a LiteLLM model in the sidebar to check coverage."
+                    if ai_settings is None
+                    else "Confirm the AI data-sharing scope above to check coverage."
+                    if not sharing_confirmed
+                    else "Check coverage with the confirmed sharing scope."
+                ),
             )
             and ai_settings is not None
         ):
             try:
                 with st.status("Checking requirements coverage", expanded=False):
-                    response = call_litellm(ai_settings, prompt)
+                    response = _call_litellm_for_current_sample(
+                        ai_settings,
+                        prompt,
+                        approved_fields=approved_fields,
+                    )
                     coverage = parse_coverage_response(response, draft=draft)
                 st.session_state["ai_studio_coverage_rows"] = [
                     {
@@ -3979,7 +4056,7 @@ def _render_coverage_panel(draft: dict[str, Any]) -> None:
                 ]
                 st.session_state["ai_studio_coverage_signature"] = signature
             except Exception as exc:  # pragma: no cover - Streamlit display path
-                logger.exception("Coverage check failed")
+                _log_ai_operation_failure("Coverage check", exc)
                 st.error(f"Coverage check failed: {exc}")
         with prompt_col, st.popover("Show Prompt", icon=":material/psychology:"):
             st.code(prompt, language="text")
@@ -4058,6 +4135,7 @@ def _render_ai_refine_panel(
     if st.session_state.get("ai_studio_pending_draft") is not None:
         return
     ai_settings = _current_ai_settings()
+    sharing_confirmed = _ai_data_sharing_confirmed(approved_fields)
     with st.container(border=True):
         st.write("### AI Revision")
         st.caption(
@@ -4094,14 +4172,26 @@ def _render_ai_refine_panel(
             action_col1.button(
                 "Generate AI Revision",
                 type="primary",
-                disabled=ai_settings is None or not instruction,
-                help="Configure a LiteLLM model in the sidebar and enter a change request.",
+                disabled=ai_settings is None or not instruction or not sharing_confirmed,
+                help=(
+                    "Configure a LiteLLM model in the sidebar and enter a change request."
+                    if ai_settings is None
+                    else "Confirm the AI data-sharing scope above before generating a revision."
+                    if not sharing_confirmed
+                    else "Enter a change request."
+                    if not instruction
+                    else "Generate a revision with the confirmed sharing scope."
+                ),
             )
             and ai_settings is not None
         ):
             try:
                 with st.status("Generating revision", expanded=True) as status:
-                    response = call_litellm(ai_settings, prompt)
+                    response = _call_litellm_for_current_sample(
+                        ai_settings,
+                        prompt,
+                        approved_fields=approved_fields,
+                    )
                     sections = parse_ai_yaml_sections(response)
                     pending = merge_draft_sections(draft, sections)
                     st.session_state["ai_studio_pending_draft"] = pending
@@ -4112,7 +4202,7 @@ def _render_ai_refine_panel(
                     status.update(label="Revision ready for review", state="complete")
                 st.rerun()
             except Exception as exc:  # pragma: no cover - Streamlit display path
-                logger.exception("AI revision failed")
+                _log_ai_operation_failure("AI revision", exc)
                 st.error(f"AI revision failed: {exc}")
         with action_col2, st.popover("Show Prompt", icon=":material/psychology:"):
             st.code(prompt, language="text")
@@ -4176,6 +4266,172 @@ def _examples_display_text(examples: Any) -> str:
     if isinstance(examples, list):
         return "[" + ", ".join(_sample_display_value(value) for value in examples) + "]"
     return _sample_display_value(examples)
+
+
+def _ai_sharing_contract(approved_fields: list[str] | None = None) -> dict[str, Any]:
+    approved = (
+        st.session_state.get("ai_studio_approved_fields") or []
+        if approved_fields is None
+        else approved_fields
+    )
+    approved = sorted({str(field) for field in approved if str(field)}, key=str.casefold)
+    example_fields = sorted(
+        {
+            str(field)
+            for field in st.session_state.get("ai_studio_example_fields", [])
+            if str(field) in approved
+        },
+        key=str.casefold,
+    )
+    model_name = str(st.session_state.get("ai_studio_ai_model") or "").strip()
+    custom_provider = str(st.session_state.get("ai_studio_ai_provider") or "").strip()
+    inferred_provider = model_name.partition("/")[0] if "/" in model_name else ""
+    api_base = str(st.session_state.get("ai_studio_ai_api_base") or "").strip()
+    return {
+        "sample_identity": str(st.session_state.get("ai_studio_sample_identity") or ""),
+        "sample_name": _sample_file_name(),
+        "model": model_name,
+        "provider": custom_provider or inferred_provider or "Configured model provider",
+        "destination": "Custom endpoint configured" if api_base else "Provider default endpoint",
+        "endpoint_fingerprint": (
+            hashlib.sha256(api_base.encode("utf-8")).hexdigest() if api_base else ""
+        ),
+        "approved_fields": approved,
+        "example_fields": example_fields,
+    }
+
+
+def _ai_sharing_signature(approved_fields: list[str] | None = None) -> str:
+    payload = json.dumps(
+        _ai_sharing_contract(approved_fields),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _sample_sharing_confirmation_required() -> bool:
+    return bool(st.session_state.get("ai_studio_sample_identity"))
+
+
+def _ai_data_sharing_confirmed(approved_fields: list[str] | None = None) -> bool:
+    if not _sample_sharing_confirmation_required():
+        return True
+    return st.session_state.get(AI_SHARING_CONFIRMATION_STATE_KEY) == _ai_sharing_signature(
+        approved_fields
+    )
+
+
+def _clear_ai_sharing_confirmation() -> None:
+    """Clear approval widgets and sample/provider-scoped Copilot context."""
+
+    st.session_state[AI_SHARING_CONFIRMATION_STATE_KEY] = ""
+    st.session_state[AI_SHARING_CONTRACT_STATE_KEY] = ""
+    for key in list(st.session_state):
+        if str(key).startswith(AI_SHARING_CONFIRMATION_WIDGET_PREFIX):
+            st.session_state.pop(key, None)
+    st.session_state["ai_studio_copilot_history"] = []
+    st.session_state["ai_studio_copilot_questions"] = []
+    st.session_state["ai_studio_copilot_last_prompt"] = ""
+    st.session_state.pop("ai_studio_copilot_queued_message", None)
+
+
+def _render_ai_data_sharing_confirmation(approved_fields: list[str]) -> None:
+    """Require an explicit, sample-scoped review before any model call."""
+    if not _sample_sharing_confirmation_required():
+        return
+    contract = _ai_sharing_contract(approved_fields)
+    signature = _ai_sharing_signature(approved_fields)
+    stored_signature = str(st.session_state.get(AI_SHARING_CONFIRMATION_STATE_KEY) or "")
+    previous_contract_signature = str(st.session_state.get(AI_SHARING_CONTRACT_STATE_KEY) or "")
+    confirmed_scope_changed = bool(stored_signature and stored_signature != signature)
+    rendered_scope_changed = bool(
+        previous_contract_signature and previous_contract_signature != signature
+    )
+    if confirmed_scope_changed or rendered_scope_changed:
+        # Confirmation is single-use for the current sharing contract. Once a
+        # model/provider/field scope changes, returning to an older scope must
+        # still require a new review, and prior Copilot text cannot cross scopes.
+        _clear_ai_sharing_confirmation()
+    st.session_state[AI_SHARING_CONTRACT_STATE_KEY] = signature
+    example_fields = contract["example_fields"]
+    likely_identifiers = [field for field in example_fields if _looks_like_id(field)]
+    already_confirmed = _ai_data_sharing_confirmed(approved_fields)
+    with st.container(border=True):
+        st.write("### Review data sent to AI")
+        st.caption(
+            "Confirm this sharing scope for the current sample before any AI action can run. "
+            "Changing the sample, model, provider, approved fields, or example sharing requires "
+            "a new confirmation. Prompts also include your business requirements and the "
+            "relevant deterministic catalog or current draft settings."
+        )
+        summary_cols = st.columns(4)
+        summary_cols[0].metric("Provider", contract["provider"])
+        summary_cols[1].metric("Model", contract["model"] or "Not configured")
+        summary_cols[2].metric("Schema Fields", len(contract["approved_fields"]))
+        summary_cols[3].metric("Fields With Examples", len(example_fields))
+        st.caption(f"Destination: **{contract['destination']}**")
+        if example_fields:
+            st.warning("Sample values will be included for: " + ", ".join(example_fields) + ".")
+        else:
+            st.info(
+                "No sample values will be sent. Approved field names, types, null counts, and "
+                "unique counts, plus business requirements and relevant catalog or draft "
+                "settings, are still included."
+            )
+        if likely_identifiers:
+            st.warning(
+                "Likely identifier fields are selected for sample-value sharing: "
+                + ", ".join(likely_identifiers)
+                + ". Verify that your provider is allowed to receive them."
+            )
+        with st.expander("Sharing scope", expanded=False):
+            st.write(f"Sample: `{contract['sample_name']}`")
+            st.write(
+                "Approved schema fields: " + (", ".join(contract["approved_fields"]) or "none")
+            )
+            st.write("Fields with sample values: " + (", ".join(example_fields) or "none"))
+            st.write(f"Destination: {contract['destination']}")
+            st.write("Also included: business requirements and relevant catalog or draft settings")
+            st.caption("Provider storage and retention follow your configured provider terms.")
+        confirmed = st.checkbox(
+            "I confirm the sharing scope above may be sent to the provider and model shown.",
+            value=already_confirmed,
+            key=f"{AI_SHARING_CONFIRMATION_WIDGET_PREFIX}{signature[:16]}",
+            help=(
+                "Required once for the current sample and sharing scope. Changing the sample, "
+                "provider, model, approved schema, or example fields requires confirmation again."
+            ),
+        )
+        if confirmed:
+            st.session_state[AI_SHARING_CONFIRMATION_STATE_KEY] = signature
+        elif already_confirmed:
+            # The current checkbox has already been instantiated in this run;
+            # clear only the approval marker and leave its now-false widget state.
+            st.session_state[AI_SHARING_CONFIRMATION_STATE_KEY] = ""
+
+
+def _call_litellm_for_current_sample(
+    settings: AICallSettings,
+    prompt: str,
+    *,
+    approved_fields: list[str] | None = None,
+    **kwargs: Any,
+) -> str:
+    if not _ai_data_sharing_confirmed(approved_fields):
+        raise PermissionError(
+            "Review and confirm the current sample's AI data-sharing scope before continuing."
+        )
+    return call_litellm(settings, prompt, **kwargs)
+
+
+def _log_ai_operation_failure(operation: str, exc: Exception) -> None:
+    """Log Studio failures without sample, model, config, or exception payloads."""
+
+    error_type = type(exc).__name__
+    if len(error_type) > 64 or not error_type.isascii() or not error_type.isidentifier():
+        error_type = "ApplicationError"
+    logger.error("%s failed: error_type=%s", operation, error_type)
 
 
 def _ai_privacy_summary(working: pl.DataFrame, approved_fields: list[str], prompt: str) -> None:
@@ -4446,7 +4702,7 @@ def _working_sample(sample: pl.DataFrame) -> tuple[pl.DataFrame, str | None]:
             )
         return frame, None
     except Exception as exc:
-        logger.exception("Failed to preprocess working sample")
+        _log_ai_operation_failure("Working sample preprocessing", exc)
         return sample, str(exc)
 
 
@@ -5064,7 +5320,7 @@ def _sync_field_approval_state(
         group_by_fields = st.session_state.get("ai_studio_group_by_fields") or []
     else:
         approved_fields = list(available_fields)
-        example_fields = list(approved_fields)
+        example_fields = []
         group_by_fields = _default_group_by_fields(sample, approved_fields, required_fields)
         st.session_state["ai_studio_field_approval_initialized"] = True
 
@@ -5099,6 +5355,20 @@ def _normalize_field_approval_state(
         _ordered_fields(available_fields, example_set),
         _ordered_fields(available_fields, group_by_set),
     )
+
+
+def _invalidate_ai_sharing_confirmation_if_scope_changed(
+    *,
+    previous_approved_fields: list[str],
+    previous_example_fields: list[str],
+    approved_fields: list[str],
+    example_fields: list[str],
+) -> None:
+    if approved_fields == previous_approved_fields and example_fields == previous_example_fields:
+        return
+    # Field approval is a fragment. Clear confirmation immediately so the
+    # still-rendered Copilot cannot use the prior sharing scope.
+    _clear_ai_sharing_confirmation()
 
 
 def _field_approval_editor_rows(

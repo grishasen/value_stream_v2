@@ -538,18 +538,26 @@ def test_copilot_tool_loop_repairs_invalid_operations_before_pending_review() ->
         prompts.append(prompt)
         return next(responses)
 
+    def validate(candidate: dict) -> tuple[bool, list[str]]:
+        ok, issues = ai_config_studio_page.validate_draft_catalog(candidate)
+        if not ok:
+            issues.append("CustomerID remains hidden")
+        return ok, issues
+
     result = run_copilot_tool_loop(
         prompt="Add Total",
         draft=_base_draft(),
         call_model=call_model,
-        validate=ai_config_studio_page.validate_draft_catalog,
+        validate=validate,
         max_iterations=3,
+        hidden_fields=["CustomerID"],
     )
 
     assert result.iterations == 2
     assert result.pending_draft is not None
     assert result.pending_draft["metrics"]["metrics"]["Total"]["source"] == "engagement"
     assert "Validation or operation errors" in prompts[1]
+    assert "CustomerID" not in prompts[1]
 
 
 @pytest.mark.unit
@@ -600,6 +608,7 @@ def test_prompt_for_copilot_includes_step_goals_history_and_contract() -> None:
         history=[
             {"role": "user", "content": "What does this step do?"},
             {"role": "assistant", "content": "It reviews metric definitions."},
+            {"role": "user", "content": "Keep CustomerID hidden."},
         ],
         user_goals="Weekly conversion by channel.",
         approved_schema=[{"column": "Channel", "dtype": "String", "unique": 3}],
@@ -621,6 +630,9 @@ def test_prompt_for_copilot_includes_step_goals_history_and_contract() -> None:
     assert "set_calculated_field" in prompt
     assert "Never invent an input field" in prompt
     assert "Return valid JSON only." in prompt
+    assert "Hidden field count: 1" in prompt
+    assert "CustomerID" not in prompt
+    assert "Keep <hidden-field> hidden." in prompt
 
 
 @pytest.mark.unit
@@ -703,12 +715,14 @@ def test_coverage_prompt_and_response_round_trip() -> None:
     prompt = prompt_for_coverage(
         user_goals="Weekly conversion by channel.\nAverage revenue per customer.",
         draft=_base_draft(),
+        hidden_fields=["CustomerID"],
     )
 
     assert "Business requirements:" in prompt
     assert "Weekly conversion by channel." in prompt
     assert "- CTR" in prompt
     assert "overview/engagement/ctr" in prompt
+    assert "CustomerID" not in prompt
 
     rows = parse_coverage_response(
         """
@@ -724,6 +738,26 @@ def test_coverage_prompt_and_response_round_trip() -> None:
     assert [row.status for row in rows] == ["covered", "missing"]
     assert rows[0].metrics == ("CTR",)
     assert rows[1].note == "No revenue metric exists."
+
+
+@pytest.mark.unit
+def test_coverage_prompt_redacts_hidden_names_from_metric_and_tile_ids() -> None:
+    draft = _base_draft()
+    metric = draft["metrics"]["metrics"].pop("CTR")
+    draft["metrics"]["metrics"]["CustomerID_metric"] = metric
+    tile = draft["dashboards"]["dashboards"][0]["pages"][0]["tiles"][0]
+    tile["id"] = "CustomerID_tile"
+    tile["metric"] = "CustomerID_metric"
+
+    prompt = prompt_for_coverage(
+        user_goals="Explain CustomerID coverage.",
+        draft=draft,
+        hidden_fields=["CustomerID"],
+    )
+
+    assert "CustomerID" not in prompt
+    assert "<hidden-field>_metric" in prompt
+    assert "<hidden-field>_tile" in prompt
 
 
 @pytest.mark.unit
