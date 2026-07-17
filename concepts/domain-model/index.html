@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -3629,10 +3657,16 @@
 - a <code>chunk_id</code> (typically derived from a filename pattern, e.g. <code>2024-08-21</code>),
 - one or more file paths whose contents combine to form the chunk's input,
 - a <code>pipeline_run_id</code> recording which run processed it,
-- a status (<code>ok | failed | skipped</code>).</p>
-<p>A chunk is processed end-to-end (read → transform → fan out to all processors → write all partials) before the next chunk starts.</p>
+- a durable ledger status (<code>ok | failed</code>).</p>
+<p>A chunk is processed end-to-end (read → transform → fan out to all processors → write all partials) before the next chunk starts.
+<code>skipped</code> is a result in the current run report when a prior committed chunk is
+reused; it does not create another durable chunk-ledger row. For a successful
+chunk, complete lineage commits before <code>status=ok</code>, making that row the durable
+chunk commit marker.</p>
 <h3 id="chunk-ledger">Chunk ledger<a class="headerlink" href="#chunk-ledger" title="Permanent link">&para;</a></h3>
-<p>The DuckDB table at <code>meta/chunks.duckdb</code> recording every chunk processed by every run.</p>
+<p>The DuckDB table at <code>meta/chunks.duckdb</code> recording every chunk processed by every run.
+Only an <code>ok</code> row whose parent run is <code>ok</code> or <code>partial</code> is query-visible and
+eligible for idempotent reuse.</p>
 <h3 id="compaction">Compaction<a class="headerlink" href="#compaction" title="Permanent link">&para;</a></h3>
 <p>The process of reducing finer-grained aggregates into coarser-grained aggregates by <code>groupby + state-merge</code>. Compaction is a pure file operation and never touches raw data. Standard chain: <code>Day → Month → Summary</code>, stored internally as <code>daily → monthly → summary</code>.</p>
 <h3 id="config-hash">Config hash<a class="headerlink" href="#config-hash" title="Permanent link">&para;</a></h3>
@@ -3691,7 +3725,13 @@ future recipe edits automatically.</p>
 <h3 id="period">Period<a class="headerlink" href="#period" title="Permanent link">&para;</a></h3>
 <p>The hive partition key used inside an aggregate directory. For <code>daily</code>, <code>monthly</code>, and the default <code>summary</code> materialization, <code>period = YYYY-MM</code>. <code>time.aggregation_levels</code> can coarsen summary storage to quarter or year. For optional grains the convention is the smallest "obviously coarser" string (<code>weekly_iso → YYYY-MM-Www</code>, <code>hourly → YYYY-MM-DD</code>).</p>
 <h3 id="pipeline-run">Pipeline run<a class="headerlink" href="#pipeline-run" title="Permanent link">&para;</a></h3>
-<p>One end-to-end execution of an ingestion against a Source. Has an id (UUID), a config hash, a status (<code>running | ok | failed | partial</code>), counts of total / ok / failed chunks, and start/end timestamps. Recorded in <code>meta/pipeline_runs.duckdb</code>.</p>
+<p>One end-to-end execution of an ingestion against a Source. Has an id (UUID), a config hash, a status (<code>running | ok | failed | partial</code>), counts of total / ok / failed chunks, and start/end timestamps. Recorded in <code>meta/pipeline_runs.duckdb</code>.
+The row is inserted as <code>running</code> after discovery and before the first chunk.
+While it is running, <code>finished_at</code> is null and none of that run's new chunks are
+visible. Normal completion transitions the same row to <code>ok</code>, <code>partial</code>, or
+<code>failed</code>. If the process dies first, the next caller holding the source lock
+verifies committed chunks and performs the terminal transition; it never
+creates a second row for the interrupted run.</p>
 <h3 id="plan">Plan<a class="headerlink" href="#plan" title="Permanent link">&para;</a></h3>
 <p>The result of the Query Layer's planner: which physical aggregate to scan, what predicates to push down, what columns to read, what derive function to apply. Deterministic for a given input + config_hash.</p>
 <h3 id="processor">Processor<a class="headerlink" href="#processor" title="Permanent link">&para;</a></h3>

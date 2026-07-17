@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../security/">
+        <link rel="prev" href="../runbook/">
       
       
-        <link rel="next" href="../../../concepts/product-overview/">
+        <link rel="next" href="../migration/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Troubleshooting - Value Stream</title>
+        <title>Performance benchmarking - Value Stream</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#troubleshooting" class="md-skip">
+        <a href="#benchmark-ingestion-performance" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +110,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Troubleshooting
+              Performance benchmarking
             
           </span>
         </div>
@@ -1065,10 +1065,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../performance-benchmarking/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1084,6 +1111,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capture-the-baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Capture the baseline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validate-the-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validate the run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compare-a-later-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compare a later change
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1177,37 +1268,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Troubleshooting
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
         
   
   
@@ -1223,59 +1287,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#symptom-table" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Symptom Table
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#escalation-data-to-capture" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Escalation Data to Capture
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-docs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related Docs
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2316,10 +2327,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#symptom-table" class="md-nav__link">
+  <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Symptom Table
+        Prerequisites
       
     </span>
   </a>
@@ -2327,10 +2338,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#escalation-data-to-capture" class="md-nav__link">
+  <a href="#capture-the-baseline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Escalation Data to Capture
+        Capture the baseline
       
     </span>
   </a>
@@ -2338,10 +2349,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#related-docs" class="md-nav__link">
+  <a href="#validate-the-run" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Related Docs
+        Validate the run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compare-a-later-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compare a later change
       
     </span>
   </a>
@@ -2365,93 +2387,86 @@
 
 
 
-<h1 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h1>
-<p>Symptom lookup for operating a Value Stream workspace, plus the data to
-capture when escalating.</p>
-<h2 id="symptom-table">Symptom Table<a class="headerlink" href="#symptom-table" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Symptom</th>
-<th>Likely cause</th>
-<th>Action</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Validation fails before UI loads</td>
-<td>YAML shape, missing metric, bad expression, or tile binding issue</td>
-<td>Run <code>valuestream validate</code>, fix reported file and location</td>
-</tr>
-<tr>
-<td>No chunks discovered</td>
-<td>Wrong source root, file pattern, or filename grouping regex</td>
-<td>Run <code>probe</code>, inspect <code>pipelines.yaml</code> reader settings</td>
-</tr>
-<tr>
-<td>Run skips data unexpectedly</td>
-<td>Ledger sees chunks as already complete</td>
-<td>Re-run with <code>--force</code> if rebuild is intended</td>
-</tr>
-<tr>
-<td>Previous run remains <code>running</code> after a crash</td>
-<td>The process ended before the terminal run update</td>
-<td>Start the same source normally. Under the source lock the engine verifies committed chunks, marks the stale run <code>partial</code>/<code>failed</code>, and reprocesses only unverified chunks; do not use <code>--force</code></td>
-</tr>
-<tr>
-<td>Interrupted run becomes <code>failed</code> and a chunk is replayed</td>
-<td>Fingerprint, lineage, physical file, or computation-hash recovery verification failed</td>
-<td>Inspect the affected chunk error in Ops; retain prior files until the new run succeeds, then preview <code>vacuum --dry-run</code></td>
-</tr>
-<tr>
-<td>Report page has no data</td>
-<td>Aggregates are missing for the metric, grain, or filter</td>
-<td>Run workspace, check Ops, inspect tile in Reports</td>
-</tr>
-<tr>
-<td>KPI tile shows <code>not ready</code> / <strong>Backfill required</strong></td>
-<td>A recipe or catalog edit added Processor state that is absent from current-hash aggregates</td>
-<td>Run ingestion for a new workspace or reprocess/backfill the affected source; old aggregate schemas are not mixed with the new state</td>
-</tr>
-<tr>
-<td>Filter has no effect on one tile</td>
-<td>Tile's backing processor does not persist that dimension</td>
-<td>Add the dimension to processor group-by and reprocess, or remove the filter expectation</td>
-</tr>
-<tr>
-<td>Export skips a metric</td>
-<td>Metric cannot be materialized at requested grain or has query errors</td>
-<td>Inspect skipped metric reason in command output</td>
-</tr>
-<tr>
-<td>Backfill imports fewer tables than expected</td>
-<td>Legacy table names do not map cleanly to catalog targets</td>
-<td>Review backfill output and migration report</td>
-</tr>
-<tr>
-<td>Streamlit shows stale state</td>
-<td>Browser or Streamlit session cache is stale</td>
-<td>Refresh page or restart <code>valuestream serve</code></td>
-</tr>
-</tbody>
-</table>
-<h2 id="escalation-data-to-capture">Escalation Data to Capture<a class="headerlink" href="#escalation-data-to-capture" title="Permanent link">&para;</a></h2>
-<p>When raising an issue, include:</p>
+<h1 id="benchmark-ingestion-performance">Benchmark ingestion performance<a class="headerlink" href="#benchmark-ingestion-performance" title="Permanent link">&para;</a></h1>
+<p>This guide produces a reproducible Value Stream ingestion baseline before a
+performance change is accepted. Activity Monitor screenshots are useful for
+diagnosis but are not benchmark evidence.</p>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Workspace path.</li>
-<li>Command and full options used.</li>
-<li>Catalog hash from the UI sidebar or command output.</li>
-<li>Validation output.</li>
-<li>Source id and chunk id if ingestion failed.</li>
-<li>Metric, grain, filters, and dashboard tile id if reporting failed.</li>
-<li>Relevant rows from the Ops page or run output.</li>
+<li>Use one fixed source snapshot for every comparison.</li>
+<li>Stop unrelated CPU- or I/O-heavy jobs.</li>
+<li>Record results on the same machine and power/thermal configuration.</li>
+<li>Start with <code>parallel=1</code>; tune process parallelism only in a separate run.</li>
+<li>Ensure the source workspace validates and its reader root is available.</li>
 </ul>
-<h2 id="related-docs">Related Docs<a class="headerlink" href="#related-docs" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../runbook/">Operations runbook</a> — the standard operating loop.</li>
-<li><a href="../../../reference/faq/">FAQ</a> — questions grouped by area, including
-  querying and performance.</li>
-</ul>
+<p>The runner reads the original source files but writes all aggregates and
+metadata into temporary workspaces. The original workspace is not mutated.</p>
+<h2 id="capture-the-baseline">Capture the baseline<a class="headerlink" href="#capture-the-baseline" title="Permanent link">&para;</a></h2>
+<p>From the repository root, run:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tests.benchmarks.run_ingestion<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--workspace<span class="w"> </span>examples/fat<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--source<span class="w"> </span>ih<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--suite<span class="w"> </span>legacy_equivalent<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--suite<span class="w"> </span>full_current<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--warmups<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--repeats<span class="w"> </span><span class="m">3</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--parallel<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output<span class="w"> </span>artifacts/benchmarks/baseline.json
+</code></pre></div>
+<p>Use the actual workspace path when benchmarking a production catalog. Generated
+results belong under the ignored <code>artifacts/benchmarks/</code> directory; attach the
+JSON to the performance review rather than committing machine-specific data.</p>
+<p>The first suite selects the five processor families corresponding to the legacy
+application. It measures those families on the current engine; it is not by
+itself an old-versus-new application comparison. The second suite selects the
+complete seven-processor IH contract. Both use the exact same physical input
+files, whose content hashes are stored in the result.</p>
+<h2 id="validate-the-run">Validate the run<a class="headerlink" href="#validate-the-run" title="Permanent link">&para;</a></h2>
+<p>For each suite, check:</p>
+<ol>
+<li><code>outputs_equivalent</code> is <code>true</code>. Exact non-binary state must have one digest;
+   approximate state is checked through decoded, deterministic probes and its
+   algorithm tolerance.</li>
+<li><code>wall_seconds_cv</code> is at most <code>0.05</code>; otherwise repeat the session.</li>
+<li>Every sample has zero failed chunks.</li>
+<li><code>fixture_id</code>, file SHA-256 values, catalog/source hashes, execution flags,
+   and major runtime versions match before comparing two sessions.</li>
+</ol>
+<p>The headline metrics are wall time, rows/s, CPU-s per million input rows, and
+peak RSS. Average cores explains whether lower wall time came from additional
+CPU saturation. Aggregate bytes/file count, the exact output digest, and
+approximate semantic probes guard against "speedups" obtained by silently
+doing less work.</p>
+<p>The exact digest keeps integer, string, date, key, and stable provenance values
+bit-exact. Scalar floats are normalized to 12 significant digits (10 for
+pooled variance) to ignore last-bit reduction-order noise. Contract v3 hashes
+those logical scalar values with a length-prefixed canonical encoding; Arrow
+buffer and StringView layout differences remain confined to the diagnostic
+<code>representation_digest</code>.</p>
+<p>Do not use <code>representation_digest</code> as a pass/fail check. Serialized CPC, HLL,
+Theta, t-digest, KLL, and Top-K payloads are not canonical: equivalent sketches
+can have different bytes because their build order or randomized compaction
+differs. <code>representations_stable=false</code> is therefore informational when
+<code>outputs_equivalent=true</code>.</p>
+<p>The runner always writes the JSON before reporting a correctness warning, so a
+long measurement is retained for diagnosis. A warning does not bless the
+timings: investigate <code>exact_outputs_deterministic</code> and
+<code>approximate_comparison_issues</code> before accepting the result.</p>
+<p>With <code>materialize_transforms: true</code>, execution has two optimizer-controlled
+stages: one source-plan collection that materializes the transformed chunk once
+(streaming when configured), then in-memory processor fan-out from the shared
+DataFrame. Without materialization, processors remain branches of the source
+lazy plan. In both cases the contract reports the honest chunk
+read-through-write boundary and the remaining sequential
+orchestration/metadata/view tail; it does not assign fictional per-node timings
+inside either <code>collect_all</code> plan.</p>
+<h2 id="compare-a-later-change">Compare a later change<a class="headerlink" href="#compare-a-later-change" title="Permanent link">&para;</a></h2>
+<p>Re-run the same command after the change and retain both JSON files. Do not
+update a correctness baseline merely because timings improved. Exact states
+must remain equivalent and approximate states must remain inside their
+documented error contracts.</p>
+<p>The benchmark runner and full field contract are documented in the repository
+file <code>tests/benchmarks/README.md</code>.</p>
 
 
 

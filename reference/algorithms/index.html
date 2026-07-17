@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -3472,10 +3500,20 @@ M = M.with_columns(Var = (ssw + ssb) / (Count - 1))
 <p><strong>Default</strong>: <code>k = 500</code>. This gives a digest of ~32 KB serialized; quantile error ≤ 0.3% at the median, ≤ 0.05% at p99.</p>
 <p><strong>Build (per group)</strong>:
 <div class="highlight"><pre><span></span><code>sketch = tdigest_double(k=500)
-sketch.update(values_array)            # bulk update with NumPy array
+if len(values) &gt;= 32:
+    values_array = writable_contiguous_float64(values)
+    sketch.update(values_array)        # native bulk update
+else:
+    for value in values:
+        sketch.update(value)           # avoid array setup for tiny groups
 return sketch.serialize()              # bytes
 </code></pre></div></p>
-<p>The bulk-update path with NumPy is essential for performance — per-element update is ~30× slower at chunk sizes.</p>
+<p>Nulls are removed before construction. The array path removes one Python-to-C
+call per value for non-trivial groups; the scalar path remains for tiny groups,
+where allocating and normalizing an array can cost more than it saves. Processor
+<code>sketch_build_mode: bulk</code> is a separate optimization: it bundles all t-digest
+and KLL fields for one group into a single Polars Python callback before calling
+these native builders.</p>
 <p><strong>Merge</strong>:
 <div class="highlight"><pre><span></span><code>merged = tdigest_double.deserialize(blobs[0])
 for b in blobs[1:]:
@@ -3483,7 +3521,9 @@ for b in blobs[1:]:
 return merged.serialize()
 </code></pre></div></p>
 <p><strong>Edge case — empty input</strong>:
-If a group has zero values for a property, the engine writes a digest containing a single dummy <code>0.0</code> (and a zero count, recorded separately) so the column dtype stays <code>Binary</code> and downstream merges don't break. Quantile queries against an empty group return <code>0.0</code>.</p>
+If a group has zero values for a property, the engine writes a serialized empty
+digest so the column dtype stays <code>Binary</code> and downstream merges remain valid.
+Quantile queries against an empty group return <code>0.0</code>.</p>
 <p><strong>Quantile query</strong>:
 <div class="highlight"><pre><span></span><code>sk = tdigest_double.deserialize(blob)
 return sk.get_quantile(q)
@@ -3500,7 +3540,9 @@ return edges, masses
 <strong>Default</strong>: <code>k = 200</code> (≈ 1.65% normalized rank error two-sided at 0.5).
 KLL is mergeable, has stronger formal error guarantees than t-digest, and serializes to ~1.5 KB.</p>
 <p>Use KLL where SLA-bound percentile errors matter; use t-digest where compactness and per-quantile speed matter.</p>
-<p>Build / merge / quantile mirror t-digest with <code>k=200</code>.</p>
+<p>Build / merge / quantile mirror t-digest with <code>k=200</code>; the native bulk array is
+contiguous writable <code>float32</code>, and groups below the same 32-value threshold use
+scalar updates.</p>
 <hr />
 <h2 id="3-variant-comparison-and-proportions">3. Variant comparison and proportions<a class="headerlink" href="#3-variant-comparison-and-proportions" title="Permanent link">&para;</a></h2>
 <p>Variant comparison is a derived metric of <code>binary_outcome</code> processors with <code>variant_column</code> set. Inputs per group: <code>Positives_T, Negatives_T, Count_T, Positives_C, Negatives_C, Count_C</code> (T = test, C = control).</p>

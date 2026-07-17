@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -2344,12 +2372,26 @@ upstream catalog behavior). A completed chunk is skipped only when both hash
 and fingerprint match; <code>--force</code> overrides. Writes use immutable run-specific
 files plus atomic rename, and query visibility is gated by successful chunk
 and run ledger rows.</p>
+<p>The run row is created as <code>running</code> before the first chunk and acts as the
+outer publication barrier. Within a chunk, atomic aggregate files are followed
+by one complete lineage transaction; only then is <code>chunks.status='ok'</code>
+inserted as the durable chunk commit marker. The existing run row is finally
+updated to <code>ok</code>, <code>partial</code>, or <code>failed</code>.</p>
+<p>After acquiring a source lock, a new invocation treats older <code>running</code> rows for
+that source as interrupted. It publishes a stale run as <code>partial</code> only after
+verifying retained chunks against current input fingerprints, source and
+processor computation hashes, lineage, physical files, and embedded
+provenance. Unverified chunks are made failed/invisible and processed again.
+This permits recovery without persisting raw rows or introducing a second
+chunk identity.</p>
 <h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>valuestream run</code> is safe for cron and humans alike; re-runs are no-ops
   unless inputs or config actually changed.</li>
 <li>A failed replacement leaves the previous successful version visible —
   readers never observe partial state.</li>
+<li>A hard-terminated run reuses already committed and verified chunks on the
+  next invocation instead of replaying them from raw input.</li>
 <li>Config changes automatically invalidate exactly the chunks whose
   computation they affect.</li>
 <li>Superseded aggregate files accumulate and require <code>vacuum</code>.</li>

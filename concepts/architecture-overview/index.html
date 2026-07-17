@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -2554,18 +2582,24 @@ detection. Canonical payloads and file lineage are persisted in metadata.</p>
 <h2 id="ingestion-path">Ingestion Path<a class="headerlink" href="#ingestion-path" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Discovery finds source files and groups them into chunks.</li>
+<li>A durable pipeline-run row is inserted with <code>status=running</code>.</li>
 <li>Readers load chunk files as Polars frames.</li>
 <li>Transforms clean, normalize, enrich, filter, and deduplicate data.</li>
 <li>Processors fan out over the transformed frame.</li>
-<li>Each processor writes mergeable aggregate state.</li>
-<li>Compaction creates configured grains.</li>
-<li>Metadata databases record the run, chunk results, lineage, and config hash.</li>
+<li>Each processor writes mergeable aggregate state and configured grains.</li>
+<li>Complete lineage commits before the chunk's final <code>status=ok</code> marker.</li>
+<li>The same run row becomes <code>ok</code>, <code>partial</code>, or <code>failed</code>, publishing only its
+   committed chunks.</li>
 </ol>
 <p>The ingestion engine is designed to be idempotent. A completed chunk is skipped
 only when its source computation hash and current input-file fingerprint match.
 Writes use immutable run-specific files plus atomic rename. Query visibility is
 gated by successful chunk and run ledger rows, so a failed replacement leaves
-the previous successful version visible.</p>
+the previous successful version visible.
+If a process dies while the run is still <code>running</code>, the next source invocation
+holds the same source lock, verifies committed chunk fingerprints, lineage,
+files, and computation hashes, finalizes the interrupted run, and reuses only
+the verified chunks.</p>
 <h2 id="processor-and-state-model">Processor and State Model<a class="headerlink" href="#processor-and-state-model" title="Permanent link">&para;</a></h2>
 <p>Processors define the durable aggregate state that metrics can query. Current
 processor families include:</p>

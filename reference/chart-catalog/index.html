@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -2996,6 +3024,24 @@ without these blocks retain an inference fallback.</p>
 <td>column name(s) on y axis</td>
 </tr>
 <tr>
+<td><code>y2</code></td>
+<td>str</td>
+<td>combo</td>
+<td>column name on the secondary y axis</td>
+</tr>
+<tr>
+<td><code>x_axis_title</code> / <code>y_axis_title</code></td>
+<td>str</td>
+<td>cartesian charts</td>
+<td>explicit primary-axis labels</td>
+</tr>
+<tr>
+<td><code>y2_axis_title</code></td>
+<td>str</td>
+<td>combo</td>
+<td>explicit secondary-axis label; otherwise the <code>y2</code> display label is used</td>
+</tr>
+<tr>
 <td><code>color</code></td>
 <td>str</td>
 <td>most</td>
@@ -3499,7 +3545,7 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <tr>
 <td><code>combo</code></td>
 <td><code>x, y, y2</code></td>
-<td>Bar + line dual-axis comparisons, e.g. spend vs revenue</td>
+<td>Bar + line dual-axis comparisons, e.g. spend vs revenue; use <code>y2_axis_title</code> to override the secondary-axis label</td>
 </tr>
 <tr>
 <td><code>interval</code></td>

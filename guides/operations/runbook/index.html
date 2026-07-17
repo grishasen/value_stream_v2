@@ -14,7 +14,7 @@
         <link rel="prev" href="../../configuration/ai-config-studio/">
       
       
-        <link rel="next" href="../migration/">
+        <link rel="next" href="../performance-benchmarking/">
       
       
         
@@ -1199,6 +1199,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#benchmark-ingestion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Ingestion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related-procedures" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1213,6 +1224,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2464,6 +2503,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#benchmark-ingestion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark Ingestion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related-procedures" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2541,6 +2591,18 @@ vacuum.</p>
 contract. The normal source run therefore reprocesses discovered chunks under
 the new hash; force is not normally required for this case. The recipe preview
 shows the hash transition and the post-install handoff names the source to run.</p>
+<p>Every run is recorded as <code>running</code> before its first chunk. If the process or
+machine stops before finalization, invoke the same normal command again; do not
+use <code>--force</code>. After acquiring the source lock, the engine verifies committed
+chunks from the interrupted run against current input fingerprints, computation
+hashes, lineage, and physical files. Verified chunks are published under a
+recovered <code>partial</code> run and skipped by the new run. An incomplete or changed
+chunk remains invisible and is processed again.</p>
+<p>Files created by older releases that have chunk/lineage metadata but no
+<code>pipeline_runs</code> row cannot be adopted automatically because their source
+computation hash was never persisted. Let the replacement run finish, inspect
+reports, and use <code>valuestream vacuum &lt;workspace&gt; --dry-run</code> before removing
+those orphan files.</p>
 <h2 id="clean-rebuild-from-data-load">Clean Rebuild from Data Load<a class="headerlink" href="#clean-rebuild-from-data-load" title="Permanent link">&para;</a></h2>
 <p>Use <strong>Data Load → Rebuild from scratch</strong> when old aggregate files should be
 replaced as part of the rebuild rather than retained for a separate vacuum.
@@ -2597,7 +2659,15 @@ to inspect it because it preserves the app's projections and formatting.</p>
 <p>Vacuum removes superseded aggregate files and orphan reader temp directories.
 Run it after successful validation and report checks. Unlike the clean rebuild
 workflow, standalone vacuum keeps the latest successful partial for each
-chunk; it does not assert that all current input chunks were rebuilt together.</p>
+chunk; it does not assert that all current input chunks were rebuilt together.
+The CLI acquires every source lock before standalone cleanup, so it refuses to
+race an active ingestion. The storage vacuum also protects final and temporary
+aggregate files tagged with a <code>running</code> run id.</p>
+<h2 id="benchmark-ingestion">Benchmark Ingestion<a class="headerlink" href="#benchmark-ingestion" title="Permanent link">&para;</a></h2>
+<p>Use <a href="../performance-benchmarking/">Benchmark ingestion performance</a> before and
+after pipeline performance changes. The contract records exact input hashes,
+execution settings, environment, throughput, CPU, RSS, output size, and a
+normalized correctness digest.</p>
 <h2 id="related-procedures">Related Procedures<a class="headerlink" href="#related-procedures" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../migration/">Migration &amp; backfill</a> — legacy TOML translation, DuckDB

@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -3619,6 +3647,12 @@
 <span class="sd">        most leave this to the metric DSL.&quot;&quot;&quot;</span>
 </code></pre></div>
 <p>The default <code>merge</code> and <code>compact</code> implementations are generic — they iterate over <code>self.states</code> and dispatch to the per-state-type merge rule. Subclasses override them only when the merge requires extra context (e.g. pooled variance needs the <code>_n_minus1_variance</code> and <code>_n_mean_diff_sq</code> temporaries documented in reference/algorithms.md §2.3).</p>
+<p>When the target uses the processor's finest physical level, <code>compact</code> first
+checks whether the prepared target keys are unique. Unique rows are projected
+directly instead of re-merging singleton sketches; duplicate keys and every
+coarser target continue through the normal state merge rules. The projected
+result is stamped with the current chunk provenance and processor config hash
+in the same way as a merged result.</p>
 <p>The 5 provenance columns are added by the engine wrapper, not by the processor itself.</p>
 <hr />
 <h2 id="2-state-types-quick-reference">2. State types — quick reference<a class="headerlink" href="#2-state-types-quick-reference" title="Permanent link">&para;</a></h2>
@@ -3977,6 +4011,7 @@ OUTPUT merge(F2)
 <span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">properties</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Outcome</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Propensity</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">FinalPropensity</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Priority</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">quantile_engine</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tdigest</span><span class="w">                </span><span class="c1"># tdigest | kll | exact</span>
+<span class="w">    </span><span class="nt">sketch_build_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">legacy</span><span class="w">               </span><span class="c1"># legacy | bulk; execution-only</span>
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span><span class="w">                                  </span><span class="c1"># template, expanded per property</span>
 <span class="w">      </span><span class="s">&quot;{prop}_Count&quot;</span><span class="p p-Indicator">:</span><span class="w">    </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt">           per_property</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="s">&quot;{prop}_Sum&quot;</span><span class="p p-Indicator">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt">       per_property</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> numeric_only</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">}</span>
@@ -3993,6 +4028,13 @@ the default <code>ResponseTime_tdigest</code>, or a CPC/HLL/Theta/Top-K sketch o
 configured source field. For non-numeric properties (e.g. <code>Outcome</code> is a
 string), only <code>Count</code> is generated unless an explicit compatible sketch state
 is configured.</p>
+<p><code>sketch_build_mode</code> controls only how t-digest/KLL states cross the Python
+callback boundary. <code>legacy</code> is the safe default for unknown or high-cardinality
+group shapes. <code>bulk</code> combines the processor's quantile-sketch construction for
+each group and is intended for a small number of large groups after a benchmark
+shows a benefit. The mode does not change state definitions, merge semantics,
+or source/processor computation hashes; the catalog hash still records the
+authored runtime choice.</p>
 <h3 id="43-source-schema-requirements">4.3 Source schema requirements<a class="headerlink" href="#43-source-schema-requirements" title="Permanent link">&para;</a></h3>
 <p>Each property in <code>properties</code> must exist in the Source's row schema. Numeric properties produce numeric states; string/categorical properties produce only <code>Count</code>. Group-by and time-grain columns must exist.</p>
 <h3 id="44-output-schema-daily-grain-abbreviated">4.4 Output schema (daily grain, abbreviated)<a class="headerlink" href="#44-output-schema-daily-grain-abbreviated" title="Permanent link">&para;</a></h3>
@@ -4116,6 +4158,7 @@ and CPC/HLL/Theta/Top-K states over configured source fields, and computes
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">model_ml_scores</span>
 <span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">score_distribution</span>
+<span class="w">    </span><span class="nt">sketch_build_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">legacy</span><span class="w">               </span><span class="c1"># legacy | bulk; execution-only</span>
 <span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">CustomerType</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
@@ -4142,6 +4185,17 @@ and CPC/HLL/Theta/Top-K states over configured source fields, and computes
 <span class="w">      </span><span class="nt">Priority_kll</span><span class="p">:</span><span class="w">                  </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">kll</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">Priority</span><span class="p p-Indicator">,</span><span class="nt"> k</span><span class="p">:</span><span class="w"> </span><span class="nv">200</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">Category_topk</span><span class="p">:</span><span class="w">                 </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">topk</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">Category</span><span class="p p-Indicator">,</span><span class="nt"> lg_max_map_size</span><span class="p">:</span><span class="w"> </span><span class="nv">10</span><span class="p p-Indicator">}</span>
 </code></pre></div>
+<p><code>sketch_build_mode</code> has the same execution-only semantics and computation-hash
+exclusion as for <code>numeric_distribution</code>. Use <code>bulk</code> only after measuring the
+processor's actual group cardinality; <code>legacy</code> remains the default.</p>
+<p>The ingestion runner assigns a hidden source-order index before transforms when
+<code>personalization</code> or <code>novelty</code> is present. Their bounded samples are restored to
+that source order inside the group callback, so Polars streaming scheduling and
+the <code>bulk</code> sketch plan cannot silently select different rows. This stabilization
+carries a score-processor algorithm revision in its computation hash and
+therefore requires a backfill for affected sources with older score-distribution
+aggregates; unrelated sources retain their existing computation hashes. The
+hidden index is discarded with the raw chunk and is never persisted.</p>
 <h3 id="53-chunk_aggregate-algorithm">5.3 chunk_aggregate algorithm<a class="headerlink" href="#53-chunk_aggregate-algorithm" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>F = lazy_frame
 F = F.filter(F[outcome.column] in (pos ∪ neg))

@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -3279,7 +3307,10 @@
 <li><code>bench</code> — performance benchmarks (skipped in local default runs).</li>
 <li><code>slow</code> — anything &gt; 5 s.</li>
 <li><strong>Hypothesis</strong> for property tests on AST evaluators, state mergers, and pooled-variance correctness.</li>
-<li><strong>pytest-benchmark</strong> for tracking ingestion throughput per phase.</li>
+<li>The end-to-end runner under <code>tests/benchmarks/</code> records fixed input hashes,
+  wall/CPU/RSS, throughput, output size, and a correctness digest in a portable
+  JSON contract. Use <code>pytest-benchmark</code> for focused in-process microbenchmarks,
+  not as the publication format for full ingestion sessions.</li>
 <li>Coverage target: ≥ 90% for <code>valuestream.processors</code>, <code>valuestream.expr</code>, <code>valuestream.engine</code>; ≥ 80% elsewhere.</li>
 </ul>
 <h3 id="25-local-quality-gates">2.5 Local quality gates<a class="headerlink" href="#25-local-quality-gates" title="Permanent link">&para;</a></h3>
@@ -3544,7 +3575,9 @@ chart and inspect the generated aggregate query.</p>
 <li>Prometheus metrics integration; Grafana dashboard JSON shipped under <code>examples/grafana/</code>.</li>
 <li>Structured JSON logs with correlation IDs.</li>
 <li><code>valuestream vacuum</code> (legacy <code>config_hash</code>s, superseded partials, orphan temp dirs).</li>
-<li>Performance benchmarks committed under <code>tests/benchmarks/</code>; run them manually before release sign-off.</li>
+<li>Performance benchmark code is committed under <code>tests/benchmarks/</code>; generated
+  data/results remain outside git. Follow the operations performance-benchmark
+  guide and run one warm-up plus three measured samples before release sign-off.</li>
 <li>Disaster-recovery runbook (backup/restore tar steps).</li>
 <li>Threat model document (<code>docs/SECURITY.md</code>).</li>
 <li>Operator's guide (<code>docs/OPERATIONS.md</code>).</li>

@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -3006,10 +3034,26 @@ source of truth.</p>
 +--------------------------------------------------------------+
 </code></pre></div>
 <h2 id="8-end-to-end-data-flow">8. End-to-end data flow<a class="headerlink" href="#8-end-to-end-data-flow" title="Permanent link">&para;</a></h2>
+<p>For sources with <code>materialize_transforms: true</code>, the reader/transform portion
+below is collected once per chunk (with the Polars streaming engine when
+<code>reader.streaming: true</code>). Processor lazy plans then fan out together from that
+shared eager frame with the in-memory engine. The shared transformed frame is
+released after fan-out, and each processor/grain frame is released after its
+immutable aggregate is written. This is an execution strategy only: no raw or
+transformed row is persisted, and streaming/materialization settings do not
+change the computation hash.</p>
+<p>Order-sensitive bounded ML samples are the exception that proves the execution
+rule: when a score processor needs personalization or novelty, ingestion adds a
+temporary scan-order index before transforms and uses it inside those callbacks.
+That keeps results invariant across streaming and in-memory scheduling without
+persisting the index.</p>
 <div class="highlight"><pre><span></span><code>[Files in source folder]
       |
       v
 [Discovery]  -- glob + group_by_filename pattern --&gt; chunk_id
+      |
+      v
+[Pipeline run row: status=running] -- durable publication barrier
       |
       v
 [Reader]     -- pega_ds_export | parquet | csv | xlsx --&gt; Polars LazyFrame
@@ -3036,7 +3080,13 @@ source of truth.</p>
 [Immutable run/chunk parquet partials written atomically]
       |
       v
-[Chunk ledger row written]  -- meta/chunks.duckdb
+[Lineage transaction committed] -- every written aggregate path
+      |
+      v
+[Chunk ledger row status=ok] -- last durable chunk commit marker
+      |
+      v
+[Pipeline run finalized] -- ok / partial / failed; committed chunks become visible
       |
       v
 === ingestion done ===
@@ -3250,7 +3300,7 @@ family into another.</p>
 <li>A <strong>clean rebuild</strong> acquires all selected source locks in deterministic order and holds them through forced ingestion, coverage validation, scoped cleanup, and aggregate-view refresh. This prevents a concurrent run from publishing files that cleanup could mistake for superseded output.</li>
 <li>Inside a run, <strong>chunks are processed sequentially by default</strong> (predictable memory profile, simpler error semantics). The <code>--parallel &lt;N&gt;</code> flag runs chunks in a process pool of N workers: partial parquet part files are per-chunk so worker writes never collide, and all ledger writes stay in the parent process (the DuckDB metadata files are single-writer). Worker processes sidestep the GIL held by Python sketch building, so the initial load scales with cores.</li>
 <li>Inside a chunk, <strong>processors fan out through one batched <code>pl.collect_all</code></strong>: every processor's <code>chunk_aggregate</code> plan collects in a single pass (sharing the scan via common-subplan elimination), with a logged sequential fallback if the batch fails.</li>
-<li>The <strong>query layer is read-only</strong>, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. A partial becomes visible only after both its successful chunk row and successful/partial run row exist; until then readers retain the previous successful version.</li>
+<li>The <strong>query layer is read-only</strong>, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. The run's durable <code>running</code> row is the outer publication barrier. Within it, atomic Parquet writes and complete lineage commit before the chunk's <code>ok</code> row, which is the chunk commit marker. A partial becomes visible only after that chunk row and a final <code>ok</code>/<code>partial</code> run row exist; until then readers retain the previous successful version.</li>
 </ul>
 <h2 id="13-caching-strategy">13. Caching strategy<a class="headerlink" href="#13-caching-strategy" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3295,6 +3345,12 @@ family into another.</p>
 <td>Fix the cause and re-run the source</td>
 </tr>
 <tr>
+<td>Process is terminated before run finalization</td>
+<td>A prior <code>running</code> row exists after the next caller acquires the source lock</td>
+<td>The interrupted run remains invisible until its committed chunks are verified</td>
+<td>The next normal source run verifies fingerprint, lineage, files, and computation hashes; valid chunks are published under a recovered <code>partial</code> run and reused, invalid chunks are reprocessed</td>
+</tr>
+<tr>
 <td>Config validation fails on load</td>
 <td>JSON-Schema error</td>
 <td>Engine refuses to start; CLI prints actionable error</td>
@@ -3314,7 +3370,15 @@ family into another.</p>
 </tr>
 </tbody>
 </table>
-<p>A <code>chunk</code> is the unit of recovery; a <code>run</code> is the unit of reporting. Successful chunks within a partially-failed run are kept, marked, and re-used on the next run.</p>
+<p>A <code>chunk</code> is the unit of recovery; a <code>run</code> is the unit of reporting and the
+outer publication barrier. Successful chunks within a partially-failed run are
+kept, marked, and re-used on the next run. After acquiring the source lock, a
+new caller treats every older <code>running</code> row for that source as interrupted: an
+<code>ok</code> chunk is retained only when its current input fingerprint, file lineage,
+physical provenance, and processor computation hashes all verify. The stale run
+becomes <code>partial</code> when at least one chunk verifies and <code>failed</code> otherwise.
+Files without a committed chunk marker remain invisible and are eligible for a
+later vacuum.</p>
 <h2 id="15-security-and-privacy">15. Security and privacy<a class="headerlink" href="#15-security-and-privacy" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

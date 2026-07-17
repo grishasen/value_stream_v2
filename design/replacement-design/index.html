@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -2526,10 +2554,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#103-backpressure-and-streaming" class="md-nav__link">
+  <a href="#103-transform-materialization-and-streaming" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.3 Backpressure and streaming
+        10.3 Transform materialization and streaming
       
     </span>
   </a>
@@ -2537,10 +2565,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#104-async-fan-out" class="md-nav__link">
+  <a href="#104-processor-fan-out" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.4 Async fan-out
+        10.4 Processor fan-out
       
     </span>
   </a>
@@ -3589,10 +3617,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#103-backpressure-and-streaming" class="md-nav__link">
+  <a href="#103-transform-materialization-and-streaming" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.3 Backpressure and streaming
+        10.3 Transform materialization and streaming
       
     </span>
   </a>
@@ -3600,10 +3628,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#104-async-fan-out" class="md-nav__link">
+  <a href="#104-processor-fan-out" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.4 Async fan-out
+        10.4 Processor fan-out
       
     </span>
   </a>
@@ -5108,31 +5136,56 @@ authentication simplicity.</p>
     <span class="n">run_id</span> <span class="o">=</span> <span class="n">uuid4</span><span class="p">()</span>
     <span class="n">config_hash</span> <span class="o">=</span> <span class="n">hash_canonical</span><span class="p">(</span><span class="n">cfg</span><span class="p">)</span>
 
-    <span class="n">write_run</span><span class="p">(</span><span class="n">pipeline_runs</span><span class="p">,</span> <span class="n">run_id</span><span class="p">,</span> <span class="n">source_id</span><span class="p">,</span> <span class="n">config_hash</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="s2">&quot;running&quot;</span><span class="p">)</span>
-
     <span class="n">files</span> <span class="o">=</span> <span class="n">discover_files</span><span class="p">(</span><span class="n">source</span><span class="o">.</span><span class="n">reader</span><span class="p">)</span>
     <span class="n">chunks</span> <span class="o">=</span> <span class="n">group_files_by_pattern</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">source</span><span class="o">.</span><span class="n">reader</span><span class="p">)</span>
-
     <span class="n">processors</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">cfg</span><span class="o">.</span><span class="n">processors</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">source</span> <span class="o">==</span> <span class="n">source_id</span><span class="p">]</span>
+    <span class="n">recover_stale_running_runs</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">chunks</span><span class="p">,</span> <span class="n">processors</span><span class="p">,</span> <span class="n">config_hash</span><span class="p">)</span>
+    <span class="n">write_run</span><span class="p">(</span>
+        <span class="n">pipeline_runs</span><span class="p">,</span>
+        <span class="n">run_id</span><span class="p">,</span>
+        <span class="n">source_id</span><span class="p">,</span>
+        <span class="n">config_hash</span><span class="p">,</span>
+        <span class="n">status</span><span class="o">=</span><span class="s2">&quot;running&quot;</span><span class="p">,</span>
+        <span class="n">chunks_total</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">chunks</span><span class="p">),</span>
+    <span class="p">)</span>
 
-    <span class="k">for</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">files</span> <span class="ow">in</span> <span class="n">chunks</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-        <span class="k">if</span> <span class="n">already_processed</span><span class="p">(</span><span class="n">source_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">config_hash</span><span class="p">):</span>
-            <span class="k">continue</span>
-        <span class="k">with</span> <span class="n">chunk_lifecycle</span><span class="p">(</span><span class="n">run_id</span><span class="p">,</span> <span class="n">source_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">):</span>
-            <span class="n">lf</span> <span class="o">=</span> <span class="n">read_files_lazy</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">source</span><span class="o">.</span><span class="n">reader</span><span class="p">)</span>
-            <span class="n">lf</span> <span class="o">=</span> <span class="n">apply_transforms</span><span class="p">(</span><span class="n">lf</span><span class="p">,</span> <span class="n">source</span><span class="o">.</span><span class="n">transforms</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">files</span> <span class="ow">in</span> <span class="n">chunks</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">already_processed</span><span class="p">(</span><span class="n">source_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">config_hash</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="k">with</span> <span class="n">chunk_lifecycle</span><span class="p">(</span><span class="n">run_id</span><span class="p">,</span> <span class="n">source_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">):</span>
+                <span class="n">lf</span> <span class="o">=</span> <span class="n">read_files_lazy</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">source</span><span class="o">.</span><span class="n">reader</span><span class="p">)</span>
+                <span class="n">lf</span> <span class="o">=</span> <span class="n">apply_transforms</span><span class="p">(</span><span class="n">lf</span><span class="p">,</span> <span class="n">source</span><span class="o">.</span><span class="n">transforms</span><span class="p">)</span>
 
-            <span class="k">for</span> <span class="n">proc</span> <span class="ow">in</span> <span class="n">processors</span><span class="p">:</span>
-                <span class="n">partial</span> <span class="o">=</span> <span class="n">proc</span><span class="o">.</span><span class="n">chunk_aggregate</span><span class="p">(</span><span class="n">lf</span><span class="p">,</span> <span class="n">ctx</span><span class="o">=</span><span class="n">ChunkCtx</span><span class="p">(</span><span class="n">run_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">))</span>
-                <span class="n">write_partial</span><span class="p">(</span><span class="n">proc</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">partial</span><span class="p">)</span>
+                <span class="n">written</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="k">for</span> <span class="n">proc</span> <span class="ow">in</span> <span class="n">processors</span><span class="p">:</span>
+                    <span class="n">partial</span> <span class="o">=</span> <span class="n">proc</span><span class="o">.</span><span class="n">chunk_aggregate</span><span class="p">(</span><span class="n">lf</span><span class="p">,</span> <span class="n">ctx</span><span class="o">=</span><span class="n">ChunkCtx</span><span class="p">(</span><span class="n">run_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">))</span>
+                    <span class="n">written</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">write_partial</span><span class="p">(</span><span class="n">proc</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">partial</span><span class="p">))</span>
 
-            <span class="n">write_chunk_meta</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+                <span class="n">write_complete_lineage</span><span class="p">(</span><span class="n">run_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">written</span><span class="p">)</span>
+                <span class="n">write_chunk_meta</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="s2">&quot;ok&quot;</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>  <span class="c1"># final chunk commit marker</span>
 
-    <span class="n">compact_grains</span><span class="p">(</span><span class="n">processors</span><span class="p">)</span>             <span class="c1"># daily -&gt; monthly -&gt; summary</span>
-    <span class="n">refresh_duckdb_views</span><span class="p">()</span>
-
-    <span class="n">finalize_run</span><span class="p">(</span><span class="n">run_id</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="s2">&quot;ok&quot;</span><span class="p">)</span>
+        <span class="n">finalize_run</span><span class="p">(</span><span class="n">run_id</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">derive_terminal_status</span><span class="p">())</span>
+        <span class="n">refresh_duckdb_views</span><span class="p">()</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">finalize_running_run_from_committed_chunks</span><span class="p">(</span><span class="n">run_id</span><span class="p">)</span>
 </code></pre></div>
+<p>The source lock is acquired outside this loop. Once held, any older <code>running</code>
+row for the same source is stale. Recovery publishes an old run as <code>partial</code>
+only after each retained <code>ok</code> chunk passes current input-fingerprint,
+source/processor computation-hash, complete-lineage, physical-file, and
+embedded-provenance checks. Invalid chunk markers are downgraded and the raw
+chunk is processed again. A stale run with no retained chunk becomes <code>failed</code>.</p>
+<p>The durable commit order is:</p>
+<ol>
+<li>write every aggregate through temporary file + atomic rename;</li>
+<li>commit lineage for every written path;</li>
+<li>insert the chunk's <code>status='ok'</code> row as the chunk commit marker;</li>
+<li>transition the existing run from <code>running</code> to <code>ok</code>, <code>partial</code>, or <code>failed</code>.</li>
+</ol>
+<p>Zero-output chunks are valid: lineage count zero and written-path count zero
+still precede the chunk marker. Files or lineage without a committed chunk row
+remain invisible and are handled by retry/vacuum.</p>
 <h3 id="102-discovery-and-grouping">10.2 Discovery and grouping<a class="headerlink" href="#102-discovery-and-grouping" title="Permanent link">&para;</a></h3>
 <p>A chunk is the unit of idempotency. <code>chunk_id</code> is derived from the filename via the <code>group_by_filename</code> regex; if the regex fails the basename is used. Multiple files can belong to one chunk (e.g. partitioned exports).</p>
 <p>Re-processing a chunk:</p>
@@ -5148,15 +5201,37 @@ performs a source-scoped vacuum that retains only the new successful run for
 each selected source. Physical aggregate files from earlier or now-absent
 chunks are removed only after those checks. DuckDB run, chunk, lineage, and
 configuration-version metadata is not deleted.</p>
-<h3 id="103-backpressure-and-streaming">10.3 Backpressure and streaming<a class="headerlink" href="#103-backpressure-and-streaming" title="Permanent link">&para;</a></h3>
-<p>Polars streaming engine is opt-in per source (<code>reader.streaming: true</code>). For very large chunks the engine collects the source LazyFrame once, aliases it through the Polars LRU cache, and fans out to processors so the IO is paid once. Memory pressure is monitored — if RSS exceeds a configured ceiling the engine spills the source DataFrame to a temporary parquet and re-scans for each processor.</p>
-<h3 id="104-async-fan-out">10.4 Async fan-out<a class="headerlink" href="#104-async-fan-out" title="Permanent link">&para;</a></h3>
-<p>Processors are independent. The engine launches them with <code>asyncio.gather</code> (one task per processor) and Polars' background collect path. This mirrors the current <code>collect_ih_metrics_data</code> design but is generalized to N processors of arbitrary kind.</p>
+<h3 id="103-transform-materialization-and-streaming">10.3 Transform materialization and streaming<a class="headerlink" href="#103-transform-materialization-and-streaming" title="Permanent link">&para;</a></h3>
+<p>Polars streaming execution is opt-in per source (<code>reader.streaming: true</code>).
+When <code>materialize_transforms: true</code> is also set, one chunk has two explicit
+execution stages:</p>
+<ol>
+<li>the reader and source-transform plans collect once with the configured
+   source engine into one eager transformed DataFrame;</li>
+<li>every processor plan fans out from that shared DataFrame with Polars'
+   in-memory engine, because sketch construction and other Python callbacks are
+   not streaming-native.</li>
+</ol>
+<p>The engine releases the shared transformed frame after processor fan-out and
+releases each collected processor frame after its aggregates are written. This
+bounds raw-frame ownership to one active chunk per worker, but it does not impose
+an RSS ceiling: the final transformed frame must still fit in memory and the
+allocator may retain freed pages for reuse. There is currently no automatic RSS
+pause or spill-to-Parquet path. Operators control memory with chunk size and
+bounded chunk-process parallelism, and verify peak RSS with the ingestion
+benchmark.</p>
+<h3 id="104-processor-fan-out">10.4 Processor fan-out<a class="headerlink" href="#104-processor-fan-out" title="Permanent link">&para;</a></h3>
+<p>Processor lazy plans are collected as one batch. With transform materialization
+they use the shared in-memory frame described above; without it they remain
+branches of the source lazy plan and use the configured source engine. If the
+batched collect fails, the chunk runner retries the processors sequentially;
+failure of that fallback fails the whole chunk.</p>
 <h3 id="105-failure-semantics">10.5 Failure semantics<a class="headerlink" href="#105-failure-semantics" title="Permanent link">&para;</a></h3>
 <ul>
-<li>A processor failure isolates to that processor. Other processors finish; the failed one is recorded in <code>chunks</code> with <code>status='failed'</code> and an error message; the run is marked <code>status='partial'</code>.</li>
+<li>A processor failure fails the whole chunk. None of that chunk's new files are published; other chunks continue. The run is <code>partial</code> when another chunk commits successfully and <code>failed</code> otherwise.</li>
 <li>Source-level failures (e.g. unreadable file) abort the chunk, not the run; subsequent chunks are processed.</li>
 <li>Re-running the source picks up only failed/missing chunks unless <code>--force</code> is set.</li>
+<li>A hard process termination leaves the run <code>running</code> and therefore invisible. The next invocation under the source lock verifies committed chunks, finalizes the stale run, refreshes views, and reuses only verified chunks.</li>
 </ul>
 <hr />
 <h2 id="11-presentation-layer">11. Presentation Layer<a class="headerlink" href="#11-presentation-layer" title="Permanent link">&para;</a></h2>

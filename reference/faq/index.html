@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -2577,9 +2605,16 @@ valuestream<span class="w"> </span>run<span class="w"> </span>--workspace<span c
 </code></pre></div>
 <p>Both surfaces are idempotent: a chunk is skipped only when the source computation hash and current input-file fingerprint match a successful prior run. Pass <code>--force</code> to re-process. The read-only HTTP API does not trigger ingestion.</p>
 <p><strong>C3. What happens when the same chunk is re-run?</strong>
-The new partial Parquet writes alongside the old one with a new <code>pipeline_run_id</code>. It becomes visible only after its successful chunk row and successful/partial run row are committed. If replacement fails, readers keep the previous successful partial. <code>valuestream vacuum</code> deletes superseded or orphaned partials.</p>
+The new partial Parquet writes alongside the old one with a new <code>pipeline_run_id</code>. Complete file lineage commits first, then the successful chunk row acts as the chunk commit marker. It becomes visible only after the parent run is finalized as successful/partial. If replacement fails, readers keep the previous successful partial. <code>valuestream vacuum</code> deletes superseded or orphaned partials.</p>
 <p><strong>C4. What if a file is corrupted mid-run?</strong>
 That chunk fails (<code>status='failed'</code> in <code>meta/chunks.duckdb</code>). The other chunks finish. The run status becomes <code>partial</code>. The operator fixes or removes the bad file and re-runs; only failed/missing chunks are processed.</p>
+<p><strong>C4a. What if the process or machine stops mid-run?</strong>
+The durable run row remains <code>running</code>, so none of its chunks are published by
+that row yet. Start the same source normally. After taking the source lock, the
+engine verifies each committed chunk's current fingerprint, computation hashes,
+lineage, physical files, and embedded provenance. Verified chunks are published
+under a recovered <code>partial</code> run and reused; incomplete or changed chunks are
+processed again. <code>--force</code> would intentionally disable that reuse.</p>
 <p><strong>C5. Can multiple ingestions run at the same time?</strong>
 Per-source: no — a filesystem advisory lock at <code>meta/source_&lt;id&gt;.lock</code> enforces one run per source. Different sources can run in parallel. Inside one run, processors fan out concurrently.</p>
 <p><strong>C6. Late-arriving files for a past chunk?</strong>
@@ -2708,7 +2743,10 @@ Indicative numbers (Polars + DuckDB on a single 8-core / 32 GB host):</p>
 </tr>
 </tbody>
 </table>
-<p>Memory pressure is bounded by <code>streaming: true</code> on readers. For very large workspaces, run multiple processes against the same store with <code>--shard &lt;hash&gt;</code>.</p>
+<p><code>streaming: true</code> reduces transient source-plan memory, but it does not impose a
+fixed RSS bound and a materialized transformed chunk must still fit in memory.
+Size the machine with the ingestion benchmark, reduce the chunk interval when
+needed, and increase chunk-process parallelism only after measuring peak RSS.</p>
 <p><strong>E5. Can I run Value Stream against a remote object store?</strong>
 Yes — the workspace path can be <code>s3://...</code> or <code>gs://...</code>. Polars and DuckDB read Parquet from object stores natively. The metadata DBs need to be local (DuckDB's WAL doesn't live well on S3) — typically mounted from a local volume.</p>
 <p><strong>E6. How do I migrate from the current app?</strong>
@@ -2730,7 +2768,13 @@ Yes — <code>processors.&lt;id&gt;.states</code> is explicit, so a workspace ca
 <p><strong>G1. What's the chunk size sweet spot?</strong>
 For Pega IH, 1 chunk per day works well. Smaller (per hour) chunks pay extra fixed cost; larger (per month) chunks bloat memory. The grouping regex is the lever.</p>
 <p><strong>G2. What's the largest chunk Value Stream can handle?</strong>
-With <code>streaming: true</code> and one processor, ~10 GB of input on a 32 GB box is comfortable. With 6 processors fanning out, ~3 GB. Beyond that, split the chunk grouping (per hour) or shard processing.</p>
+There is no input-size-only limit: in-memory size depends on selected columns,
+data types, transform expansion, group cardinality, processor states, and active
+chunk workers. Streaming reduces transient scan/transform memory, while
+<code>materialize_transforms: true</code> retains one transformed chunk through processor
+fan-out. Measure the actual catalog with the ingestion benchmark; if peak RSS is
+too high, split the grouping interval (for example, daily to hourly) and lower
+chunk-process parallelism.</p>
 <p><strong>G3. What's the largest aggregate store Value Stream can serve?</strong>
 DuckDB scans Parquet at multi-GB/s on local SSD. Aggregate stores up to a few hundred GB serve interactive dashboards comfortably; beyond that, increase the <code>monthly</code> grain's coverage and rely on summary aggregates for high-cardinality tiles.</p>
 <p><strong>G4. Why is my dashboard slow?</strong>

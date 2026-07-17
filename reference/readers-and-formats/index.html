@@ -1050,6 +1050,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/performance-benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/migration/" class="md-nav__link">
         
   
@@ -2237,10 +2265,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#10-memory-budget" class="md-nav__link">
+  <a href="#10-memory-ownership" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10. Memory budget
+        10. Memory ownership
       
     </span>
   </a>
@@ -3211,10 +3239,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#10-memory-budget" class="md-nav__link">
+  <a href="#10-memory-ownership" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10. Memory budget
+        10. Memory ownership
       
     </span>
   </a>
@@ -3682,19 +3710,22 @@ transformed LazyFrame schema before any processor writes. Missing inputs fail
 the chunk with one grouped, actionable error rather than silently dropping a
 dimension or state.</p>
 <hr />
-<h2 id="10-memory-budget">10. Memory budget<a class="headerlink" href="#10-memory-budget" title="Permanent link">&para;</a></h2>
-<p>The engine measures memory pressure between chunks (<code>psutil.Process.memory_info().rss</code>) and:</p>
-<ul>
-<li>if <code>RSS &gt; 0.7 × machine_total</code>, it spills the source's collected DataFrame to a temporary Parquet and re-scans for each processor (one extra disk pass for safety).</li>
-<li>if <code>RSS &gt; 0.9 × machine_total</code>, it pauses processing and waits for memory to free.</li>
-</ul>
-<p>These thresholds are configurable in <code>pipelines.yaml</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">defaults</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">memory</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">spill_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.7</span>
-<span class="w">    </span><span class="nt">pause_threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.9</span>
-<span class="w">    </span><span class="nt">rss_log_every_chunks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">31</span><span class="w">    </span><span class="c1"># debug RSS log every Nth chunk</span>
-</code></pre></div>
+<h2 id="10-memory-ownership">10. Memory ownership<a class="headerlink" href="#10-memory-ownership" title="Permanent link">&para;</a></h2>
+<p><code>reader.streaming: true</code> selects Polars' streaming engine for compatible source
+scan and transform operations. Streaming reduces transient execution memory but
+does not make the result of a collection lazy or guarantee a fixed RSS ceiling.</p>
+<p>With <code>materialize_transforms: true</code>, the transformed result is collected once as
+one eager DataFrame and reused by every processor. Processor plans run with the
+in-memory engine because sketch builders and other Python callbacks are not
+streaming-native. The shared frame is released immediately after processor
+fan-out, and processor output frames are released one at a time after their
+aggregate files are written. The allocator may retain released pages for later
+chunks, so process RSS need not fall immediately.</p>
+<p>There is currently no automatic RSS threshold, processing pause, or spill of a
+materialized chunk to temporary Parquet. If a transformed chunk does not fit,
+reduce the chunk grouping interval and run with lower chunk-process parallelism.
+Use the ingestion benchmark to measure peak RSS for the actual source and
+processor catalog.</p>
 <hr />
 <h2 id="11-logging">11. Logging<a class="headerlink" href="#11-logging" title="Permanent link">&para;</a></h2>
 <p>For each chunk, the reader emits structured log lines:</p>
