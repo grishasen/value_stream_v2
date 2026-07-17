@@ -286,6 +286,15 @@ __VS_ACTIVE_CSS_VARS__
             color: var(--vs-ink) !important;
         }
 
+        /*
+         * Select and multiselect menus are mounted in a body-level portal.
+         * Streamlit popovers use the same default layer, so a menu opened from
+         * inside a popover can otherwise render behind the popover contents.
+         */
+        body > div:has([data-testid="stSelectboxVirtualDropdown"]) {
+            z-index: 1000070 !important;
+        }
+
         div[class*="st-key-vs_metric_grid_"] div[data-testid="stHorizontalBlock"] {
             display: grid !important;
             grid-template-columns: repeat(var(--vs-grid-columns, 4), minmax(0, 1fr));

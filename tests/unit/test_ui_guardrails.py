@@ -318,6 +318,7 @@ def test_theme_covers_surface_gaps_native_theming_cannot_express() -> None:
         "max-width: 100rem !important",
         'div[data-testid="stBadge"]',
         'div[data-testid="stSegmentedControl"] button[aria-checked="false"]',
+        'body > div:has([data-testid="stSelectboxVirtualDropdown"])',
         'div[class*="st-key-vs_metric_grid_"] div[data-testid="stHorizontalBlock"]',
         'div[data-testid="stVerticalBlockBorderWrapper"]:has(div[data-testid="stDataFrame"])',
         'div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"]',
