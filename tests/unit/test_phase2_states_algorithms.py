@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import numpy as np
+import polars as pl
 import pytest
 
 from valuestream.algorithms.curves import calibration_from_digests, curve_from_digests
 from valuestream.states import kll, tdigest
+from valuestream.states._numeric import bulk_numeric_array
 
 
 def test_tdigest_build_merge_and_quantile() -> None:
@@ -26,6 +29,29 @@ def test_kll_build_merge_and_quantile() -> None:
 
     assert kll.count(merged) == 4
     assert kll.quantile(merged, 0.5) == pytest.approx(2.5, abs=1.0)
+
+
+def test_tiny_numeric_groups_keep_scalar_null_and_nan_semantics() -> None:
+    values = pl.Series("value", [1.0, None, float("nan")])
+
+    assert bulk_numeric_array(values, dtype=np.float64) is None
+    assert tdigest.weight(tdigest.build(values)) == 1
+    assert kll.count(kll.build(values)) == 1
+
+
+def test_bulk_numeric_array_drops_nulls_but_preserves_genuine_nan() -> None:
+    values = pl.Series(
+        "value",
+        [float(value) for value in range(32)] + [None, float("nan")],
+    )
+
+    array = bulk_numeric_array(values, dtype=np.float64)
+
+    assert array is not None
+    assert array.shape == (33,)
+    assert np.isnan(array).sum() == 1
+    assert tdigest.weight(tdigest.build(values)) == 32
+    assert kll.count(kll.build(values)) == 32
 
 
 def test_curve_and_calibration_from_separated_digests() -> None:

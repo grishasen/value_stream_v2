@@ -205,6 +205,10 @@ FIELD_HELP: dict[str, str] = {
         "Mergeable sketch used for approximate percentiles. t-digest is strong near tails; KLL has rank guarantees.",
         "tdigest",
     ),
+    "processor.sketch_build_mode": _tip(
+        "How t-digest and KLL fields cross the Python callback boundary. Bulk is the optimized default; legacy remains available for comparison or rollback.",
+        "bulk",
+    ),
     "processor.stages": _tip(
         "Comma-separated funnel stage names in business order; each stage also needs a when expression.",
         "Presented, Clicked, Converted",

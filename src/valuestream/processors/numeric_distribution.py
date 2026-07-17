@@ -88,7 +88,7 @@ class NumericDistributionProcessor:
             )
             if self.config.sketch_build_mode == "legacy":
                 agg_exprs.append(pl.col(prop).drop_nulls().alias(f"__values_{prop}"))
-        generic_sketches = self._generic_sketch_columns(existing, numeric_props)
+        generic_sketches = self._generic_sketch_columns(existing, numeric_props, schema)
         remaining_sketches = generic_sketches
         if self.config.sketch_build_mode == "bulk":
             distribution_sketches: list[p3.DistributionSketchSpec] = [
@@ -192,6 +192,7 @@ class NumericDistributionProcessor:
         self,
         existing: set[str],
         numeric_props: list[str],
+        source_schema: pl.Schema,
     ) -> list[tuple[pl.Expr, tuple[str, str, int]]]:
         columns: list[tuple[pl.Expr, tuple[str, str, int]]] = []
         standard_digest_names = {f"{prop}_{self.quantile_engine}" for prop in numeric_props}
@@ -205,6 +206,7 @@ class NumericDistributionProcessor:
                 spec,
                 existing=existing,
                 default_source_column=_state_source_column(name, spec),
+                source_dtypes=source_schema,
             )
             if expression is not None:
                 columns.append((expression, metadata))

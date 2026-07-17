@@ -334,7 +334,7 @@ processors:
       grains: [Day, Month, Summary]
     properties: [Outcome, Propensity, FinalPropensity, Priority, ResponseTime]
     quantile_engine: tdigest                # tdigest | kll | exact
-    sketch_build_mode: legacy               # legacy | bulk; execution-only
+    sketch_build_mode: bulk                 # bulk (default) | legacy; execution-only
     states:                                  # template, expanded per property
       "{prop}_Count":    {type: count,           per_property: true}
       "{prop}_Sum":      {type: value_sum,       per_property: true, numeric_only: true}
@@ -354,11 +354,12 @@ string), only `Count` is generated unless an explicit compatible sketch state
 is configured.
 
 `sketch_build_mode` controls only how t-digest/KLL states cross the Python
-callback boundary. `legacy` is the safe default for unknown or high-cardinality
-group shapes. `bulk` combines the processor's quantile-sketch construction for
-each group and is intended for a small number of large groups after a benchmark
-shows a benefit. The mode does not change state definitions, merge semantics,
-or source/processor computation hashes; the catalog hash still records the
+callback boundary. `bulk` is the default: it combines the processor's
+quantile-sketch construction for each group and reduces repeated Python
+callbacks while retaining the same state and merge contracts. `legacy` keeps
+the per-field callback plan as an explicit comparison and rollback escape
+hatch. The mode does not change state definitions, merge semantics, or
+source/processor computation hashes; the catalog hash still records the
 authored runtime choice.
 
 ### 4.3 Source schema requirements
@@ -479,7 +480,7 @@ processors:
   - id: model_ml_scores
     source: ih
     kind: score_distribution
-    sketch_build_mode: legacy               # legacy | bulk; execution-only
+    sketch_build_mode: bulk                 # bulk (default) | legacy; execution-only
     group_by: [Channel, PlacementType, Issue, Group, CustomerType]
     time:
       column: OutcomeTime
@@ -508,17 +509,22 @@ processors:
 ```
 
 `sketch_build_mode` has the same execution-only semantics and computation-hash
-exclusion as for `numeric_distribution`. Use `bulk` only after measuring the
-processor's actual group cardinality; `legacy` remains the default.
+exclusion as for `numeric_distribution`. `bulk` is the default for new and
+omitted configurations; set `legacy` explicitly to compare the former
+per-field callback plan or roll back the optimization without changing the
+logical aggregate contract.
 
 The ingestion runner assigns a hidden source-order index before transforms when
 `personalization` or `novelty` is present. Their bounded samples are restored to
 that source order inside the group callback, so Polars streaming scheduling and
 the `bulk` sketch plan cannot silently select different rows. This stabilization
-carries a score-processor algorithm revision in its computation hash and
-therefore requires a backfill for affected sources with older score-distribution
-aggregates; unrelated sources retain their existing computation hashes. The
-hidden index is discarded with the raw chunk and is never persisted.
+carries a score-processor algorithm revision in its computation hash. The
+adaptive native Polars reductions for large personalization/novelty groups carry
+a separate revision because their deterministic floating reduction can differ
+from the scalar path in insignificant trailing digits. Together these revisions
+require a replay for affected sources with older score-distribution aggregates;
+unrelated sources retain their existing computation hashes. The hidden index is
+discarded with the raw chunk and is never persisted.
 
 ### 5.3 chunk_aggregate algorithm
 
@@ -581,7 +587,10 @@ reference/algorithms.md §4 describes the curve reconstruction.
 
 - Empty positives or negatives: `ROC_AUC = 0`, `AP = 0`, calibration arrays default to `[0.0]`.
 - Highly imbalanced groups: t-digest with `k=500` is well-calibrated for `n ≥ 100` per group; the engine emits a warning when a chunk produces a group with `Count < 100`.
-- `Count < 5000` triggers full `personalization` calculation; `5000 ≤ Count < 10000` uses second-half slice; `Count ≥ 10000` uses a 5000-row middle slice. Same pattern for `novelty` with `50000` thresholds. These constants live in `reference/algorithms.md §5` and are configurable.
+- `Count < 50_000` uses the full group for `personalization` and `novelty`;
+  `50_000 ≤ Count < 100_000` uses the second-half slice; `Count ≥ 100_000`
+  uses a 50,000-row middle slice. These fixed implementation thresholds are
+  specified in `reference/algorithms.md §5`.
 
 ---
 

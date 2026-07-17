@@ -59,9 +59,10 @@ class SnapshotProcessor:
         else:
             source = self._with_periodic_as_of(source, ctx)
 
-        existing = set(source.collect_schema().names())
+        source_schema = source.collect_schema()
+        existing = set(source_schema.names())
         group_keys = self._chunk_group_keys(existing)
-        grouped = source.group_by(group_keys).agg(self._agg_exprs(existing))
+        grouped = source.group_by(group_keys).agg(self._agg_exprs(existing, source_schema))
         grouped = p3.postprocess_sketches(grouped, self._sketch_columns(existing))
         grouped = p3.ensure_state_columns(grouped, self.state_specs)
         return p3.with_provenance(
@@ -120,7 +121,7 @@ class SnapshotProcessor:
             pl.lit(self.config_hash).alias("config_hash")
         )
 
-    def _agg_exprs(self, existing: set[str]) -> list[pl.Expr]:
+    def _agg_exprs(self, existing: set[str], source_schema: pl.Schema) -> list[pl.Expr]:
         exprs: list[pl.Expr] = []
         for name, spec in self.state_specs.items():
             raw_extra = p3.spec_extra(spec)
@@ -139,6 +140,7 @@ class SnapshotProcessor:
                     spec,
                     existing=existing,
                     default_source_column=self.entity_column or "CustomerID",
+                    source_dtypes=source_schema,
                 )
                 if expr is not None:
                     exprs.append(expr)

@@ -54,6 +54,7 @@ processors:
   id: ih_response_time
   source: ih
   kind: numeric_distribution
+  sketch_build_mode: bulk
   description: Response time distribution from decision to outcome by customer, channel,
     and offer context.
   dimensions:
@@ -117,6 +118,7 @@ processors:
 - id: ih_propensity_scores
   source: ih
   kind: score_distribution
+  sketch_build_mode: bulk
   description: Distribution of propensity, final propensity, priority, and rank across
     engagement dimensions.
   time:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -291,28 +292,44 @@ def dataframe_with_search(
 
 def chunk_progress_indicator(*, include_source: bool = True) -> ChunkProgressCallback:
     """Render and return a callback for live source-run chunk progress."""
-    progress_bar = st.progress(0.0, text="Waiting for chunks...")
+    started_at = time.perf_counter()
+    progress_bar = st.progress(0.0, text="Waiting for chunks... · Elapsed 00:00:00")
     detail = st.empty()
 
     def update(progress: ChunkProgress) -> None:
         if progress.chunks_total <= 0:
             return
-        verb = "Skipping" if progress.status == "skipped" else "Processing"
+        verb = {
+            "processing": "Processing",
+            "recovering": "Verifying",
+            "skipped": "Skipping",
+        }[progress.status]
         source = f"{progress.source_id} · " if include_source else ""
         label = (
             f"{verb} {source}chunk {progress.chunk_order}/{progress.chunks_total}: "
             f"{progress.chunk_name}"
         )
+        elapsed = _format_elapsed(time.perf_counter() - started_at)
         progress_bar.progress(
             min(progress.chunk_order / progress.chunks_total, 1.0),
-            text=label,
+            text=f"{label} · Elapsed {elapsed}",
         )
+        item = "Recovery group" if progress.status == "recovering" else "Chunk"
         detail.caption(
-            f"Chunk `{progress.chunk_name}` · order {progress.chunk_order} of "
+            f"{item} `{progress.chunk_name}` · order {progress.chunk_order} of "
             f"{progress.chunks_total} · {len(progress.files)} file(s)"
         )
 
     return update
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Format a monotonic elapsed duration as ``HH:MM:SS``."""
+
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3_600)
+    minutes, remaining_seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{remaining_seconds:02d}"
 
 
 def format_count(value: int | float | None) -> str:

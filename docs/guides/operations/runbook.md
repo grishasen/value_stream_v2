@@ -75,7 +75,9 @@ use `--force`. After acquiring the source lock, the engine verifies committed
 chunks from the interrupted run against current input fingerprints, computation
 hashes, lineage, and physical files. Verified chunks are published under a
 recovered `partial` run and skipped by the new run. An incomplete or changed
-chunk remains invisible and is processed again.
+chunk remains invisible and is processed again. For large interrupted runs,
+the engine logs and reports deep-verification progress to the caller/UI by
+processor/grain group before new chunk processing begins.
 
 Files created by older releases that have chunk/lineage metadata but no
 `pipeline_runs` row cannot be adopted automatically because their source

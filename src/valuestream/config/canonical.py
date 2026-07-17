@@ -32,6 +32,7 @@ from valuestream.utils.hashing import sha256_hex
 
 COMPUTATION_SCHEMA_VERSION = 2
 _SCORE_BOUNDED_SAMPLE_ORDER_REVISION = 1
+_SCORE_NATIVE_ML_REDUCTION_REVISION = 1
 
 
 def canonicalize(value: Any) -> Any:
@@ -186,7 +187,8 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
         "novelty",
     }.intersection(model.effective_processor_states(processor)):
         payload["__valuestream_algorithm_revision"] = {
-            "bounded_ml_source_order": _SCORE_BOUNDED_SAMPLE_ORDER_REVISION
+            "bounded_ml_source_order": _SCORE_BOUNDED_SAMPLE_ORDER_REVISION,
+            "native_ml_reduction": _SCORE_NATIVE_ML_REDUCTION_REVISION,
         }
     return payload
 

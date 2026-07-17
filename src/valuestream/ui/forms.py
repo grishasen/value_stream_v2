@@ -29,6 +29,7 @@ PROCESSOR_KIND_OPTIONS = (
 )
 PROCESSOR_GRAIN_OPTIONS = ("Day", "Month", "Quarter", "Year", "Summary")
 QUANTILE_ENGINE_OPTIONS = ("tdigest", "kll")
+SKETCH_BUILD_MODE_OPTIONS = ("bulk", "legacy")
 SNAPSHOT_KIND_OPTIONS = ("periodic", "accumulating")
 SNAPSHOT_CADENCE_OPTIONS = ("", "daily", "weekly", "monthly")
 TOPK_ERROR_TYPE_OPTIONS = ("NO_FALSE_POSITIVES", "NO_FALSE_NEGATIVES")
@@ -62,6 +63,7 @@ PROCESSOR_KIND_MANAGED_FIELDS = frozenset(
         "variant_column",
         "properties",
         "quantile_engine",
+        "sketch_build_mode",
         "score_properties",
         "stages",
         "snapshot_kind",
@@ -308,7 +310,9 @@ def _score_distribution_fields(
     property_source_options = numeric_options or field_options
     current_properties = _score_properties_for_editor(processor_def, property_source_options)
     property_choices = with_current(property_source_options, current_properties)
-    properties_col, subject_col = st.columns([2, 1], gap="xsmall", vertical_alignment="bottom")
+    properties_col, subject_col, build_mode_col = st.columns(
+        [2, 1, 1], gap="xsmall", vertical_alignment="bottom"
+    )
     with properties_col:
         properties = st.multiselect(
             "Score Properties",
@@ -325,6 +329,18 @@ def _score_distribution_fields(
         subject = _subject_field(processor_def, field_options, key_prefix)
     if subject:
         settings["entities"] = {"subject": subject}
+    with build_mode_col:
+        build_mode = st.selectbox(
+            "Sketch Build Mode",
+            list(SKETCH_BUILD_MODE_OPTIONS),
+            index=builder.option_index(
+                SKETCH_BUILD_MODE_OPTIONS,
+                processor_def.get("sketch_build_mode") or "bulk",
+            ),
+            key=f"{key_prefix}_sketch_build_mode",
+            help=config_help.field_help("processor.sketch_build_mode"),
+        )
+    settings["sketch_build_mode"] = build_mode
     settings.update(
         _outcome_fields(
             processor_def,
@@ -378,7 +394,9 @@ def _numeric_distribution_fields(
     st.write("### Distribution Processor Settings")
     current = builder.string_list(processor_def.get("properties"))
     choices = with_current(numeric_options, current)
-    properties_col, engine_col = st.columns([3, 1], gap="xsmall", vertical_alignment="bottom")
+    properties_col, engine_col, build_mode_col = st.columns(
+        [2, 1, 1], gap="xsmall", vertical_alignment="bottom"
+    )
     properties = properties_col.multiselect(
         "Numeric Properties",
         choices,
@@ -394,7 +412,20 @@ def _numeric_distribution_fields(
         key=f"{key_prefix}_quantile_engine",
         help=config_help.field_help("processor.quantile_engine"),
     )
-    settings: dict[str, Any] = {"quantile_engine": engine}
+    build_mode = build_mode_col.selectbox(
+        "Sketch Build Mode",
+        list(SKETCH_BUILD_MODE_OPTIONS),
+        index=builder.option_index(
+            SKETCH_BUILD_MODE_OPTIONS,
+            processor_def.get("sketch_build_mode") or "bulk",
+        ),
+        key=f"{key_prefix}_sketch_build_mode",
+        help=config_help.field_help("processor.sketch_build_mode"),
+    )
+    settings: dict[str, Any] = {
+        "quantile_engine": engine,
+        "sketch_build_mode": build_mode,
+    }
     if properties:
         settings["properties"] = list(properties)
     return settings
@@ -989,6 +1020,7 @@ __all__ = [
     "PROCESSOR_KIND_OPTIONS",
     "QUANTILE_ENGINE_OPTIONS",
     "SET_OP_OPTIONS",
+    "SKETCH_BUILD_MODE_OPTIONS",
     "SNAPSHOT_CADENCE_OPTIONS",
     "SNAPSHOT_KIND_OPTIONS",
     "SUBJECT_PREFERRED_FIELDS",

@@ -128,10 +128,12 @@ return sketch.serialize()              # bytes
 
 Nulls are removed before construction. The array path removes one Python-to-C
 call per value for non-trivial groups; the scalar path remains for tiny groups,
-where allocating and normalizing an array can cost more than it saves. Processor
-`sketch_build_mode: bulk` is a separate optimization: it bundles all t-digest
-and KLL fields for one group into a single Polars Python callback before calling
-these native builders.
+where allocating and normalizing an array can cost more than it saves. The
+default `sketch_build_mode: bulk` is a separate optimization: it bundles all
+t-digest and KLL fields for one group into a single Polars Python callback
+before calling these native builders. `sketch_build_mode: legacy` retains the
+former per-field callback plan as an explicit comparison and rollback path;
+both modes emit merge-compatible sketch states.
 
 **Merge**:
 ```text
@@ -376,19 +378,20 @@ Definition (after Statisticianinstilettos's `recmetrics`):
 1 − mean( cosine_sim(rec_i, rec_j) over all pairs i ≠ j )
 ```
 
-Direct computation is `O(N²)`. Value Stream uses a hashed-feature trick to compute it in `O(N)`:
+Direct user-pair computation is `O(N²)`. Value Stream instead accumulates sparse
+per-customer action-count vectors and computes the same result in `O(N)` input
+work plus the observed customer/action pairs:
 
 ```text
 # Inputs: per-customer list of action names within the group.
-# Step 1: build a sparse 2^16 hashed-feature matrix R, rows = customers.
-hasher = FeatureHasher(input_type="string", n_features=2^16)
-R_sparse = hasher.transform(per_customer_action_lists)
+# Step 1: count each exact action name per customer (a sparse matrix R).
+R[customer, action] = count(customer, action)
 
 # Step 2: L2-normalize rows.
-R_norm   = sklearn.preprocessing.normalize(R_sparse, norm="l2", axis=1)
+R_norm[customer, action] = R[customer, action] / ||R[customer]||₂
 
 # Step 3: total similarity sum = || sum(R_norm, axis=0) ||²
-s = R_norm.sum(axis=0)                # 1 × 2^16
+s = R_norm.sum(axis=0)                # one value per observed action
 total_sim = sum(s_i²)
 
 # Step 4: subtract diagonals (each customer with themselves contributes 1.0).
@@ -401,6 +404,15 @@ return 1 − avg_sim
 ```
 
 Returns 0 if `N <= 1`.
+
+For small groups and repeatedly updated low-cardinality customer populations,
+the implementation uses Python `Counter` objects because their setup cost is
+lower. For Polars Series with at least 256 rows and sufficiently high customer
+cardinality, grouped counts, window norms, and action sums execute as native
+Polars expressions. Both paths implement the formula above; the native result
+is rounded to 12 significant decimal digits so parallel reduction order cannot
+change persisted bytes across repeated runs. The native-reduction algorithm
+revision is part of the score processor computation hash.
 
 **Subsampling rules** (preserve representativeness while bounding compute):
 - `N < 50_000` → use full sample.
@@ -415,12 +427,16 @@ For a group with action counts `c_a`:
 
 ```text
 unique_users   = n_distinct(CustomerID)
-total_self_info = Σ_a [ c_a · −log2( c_a / unique_users + 1e-10 ) ]
+total_self_info = Σ_a [ c_a · −(log2(c_a / unique_users) + 1e-10) ]
 max_rec_length  = max over interactions of len(actions in that interaction)
 novelty = total_self_info / (unique_users · max_rec_length)
 ```
 
 Returns 0 if `unique_users == 0` or `max_rec_length == 0`. Subsampling rules same as personalization.
+
+For Polars Series groups of at least 256 rows, distinct users, action
+frequencies, and interaction lengths are reduced with native Polars expressions;
+smaller or non-Series inputs retain the scalar compatibility path.
 
 Both metrics are stored as `pooled_mean` states with `Count` as the weight, so cross-chunk merging is just a weighted mean.
 
@@ -443,6 +459,13 @@ for v in column.drop_nulls():
     sketch.update(str(v))     # always feed a stable string representation
 return sketch.serialize()     # bytes
 ```
+
+For string, categorical/enum, integer, Boolean, date, and decimal source
+columns, the group plan performs the exact Python-string normalization with
+native Polars expressions before entering the sketch callback. This removes a
+Python `str(...)` call per distinct value. Dtypes whose Polars spelling can
+differ from Python (`Float`, datetime/time/duration, binary, and nested values)
+retain the scalar compatibility path.
 
 **Union (merge)**:
 ```text
@@ -537,6 +560,13 @@ aggregate.
 **Library**: `datasketches.frequent_strings_sketch(lg_max_map_size=10)`.
 
 Optional state for "top campaigns by count" style metrics. Merge: built-in. Output: list of `(item, estimate, lower_bound, upper_bound)` tuples.
+
+For the same safe string-normalizable dtypes used by cardinality sketches,
+Polars normalizes item strings before the callback, removing one Python
+`str(...)` call per row. The callback deliberately preserves the original item
+order and performs the same unweighted sketch updates as the compatibility
+path: frequent-items sketches are order-sensitive once cardinality exceeds
+their map capacity. Unsafe dtypes keep the original Python conversion path.
 
 ---
 

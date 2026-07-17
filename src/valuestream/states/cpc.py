@@ -21,6 +21,15 @@ def build(values: Iterable[Any], *, lg_k: int = 11) -> bytes:
     return bytes(sketch.serialize())
 
 
+def build_strings(values: Iterable[str], *, lg_k: int = 11) -> bytes:
+    """Build CPC state from values already normalized to Python strings."""
+
+    sketch = cpc_sketch(lg_k)
+    for value in values:
+        sketch.update(value)
+    return bytes(sketch.serialize())
+
+
 def merge(sketches: Iterable[bytes | bytearray | memoryview | None], *, lg_k: int = 11) -> bytes:
     """Union serialized CPC sketches and return a serialized sketch."""
     union = cpc_union(lg_k)
@@ -49,4 +58,4 @@ def bounds(
     return float(sketch.get_lower_bound(kappa)), float(sketch.get_upper_bound(kappa))
 
 
-__all__ = ["bounds", "build", "estimate", "merge"]
+__all__ = ["bounds", "build", "build_strings", "estimate", "merge"]

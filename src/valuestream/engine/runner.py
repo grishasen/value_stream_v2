@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import time
+from collections import deque
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass, field
@@ -31,7 +32,7 @@ from valuestream.processors.registry import ProcessorRuntime, create_processor
 from valuestream.readers import cleanup_temporaries, discover, read
 from valuestream.readers.discovery import Chunk
 from valuestream.store.duckdb_views import refresh_aggregate_views
-from valuestream.store.parquet import write_aggregate
+from valuestream.store.parquet import AggregateWriteReceipt, write_aggregate_with_receipts
 from valuestream.transforms import apply_transforms
 from valuestream.utils.ids import new_pipeline_run_id
 from valuestream.utils.logger import get_logger
@@ -40,7 +41,7 @@ from valuestream.utils.timer import timed
 
 _Processor: TypeAlias = ProcessorRuntime
 _CollectEngine: TypeAlias = Literal["auto", "in-memory", "streaming"]
-_ChunkProgressStatus: TypeAlias = Literal["processing", "skipped"]
+_ChunkProgressStatus: TypeAlias = Literal["processing", "recovering", "skipped"]
 logger = get_logger(__name__)
 _SUPPORTED_TARGET_GRAINS = grain_levels.SUPPORTED_TARGET_GRAINS
 
@@ -87,6 +88,7 @@ class _ChunkOutcome:
     files: tuple[Path, ...]
     started_at: dt.datetime
     finished_at: dt.datetime
+    lineage: tuple[AggregateWriteReceipt, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -258,6 +260,7 @@ def _run_source_locked(  # noqa: PLR0915
         file_hashes=fingerprints,
         expected_outputs=expected_outputs,
         finished_at=utc_now(),
+        progress_callback=_recovery_progress_adapter(progress_callback),
     )
     if recovered:
         logger.warning(
@@ -337,8 +340,8 @@ def _run_source_locked(  # noqa: PLR0915
         chunks_ok = sum(1 for chunk in chunk_results if chunk.status == "ok")
         chunks_failed = sum(1 for chunk in chunk_results if chunk.status == "failed")
         chunks_skipped = sum(1 for chunk in chunk_results if chunk.status == "skipped")
-        rows_in = sum(chunk.rows_in for chunk in chunk_results)
-        rows_kept = sum(chunk.rows_kept for chunk in chunk_results)
+        rows_in = sum(chunk.rows_in for chunk in chunk_results if chunk.status == "ok")
+        rows_kept = sum(chunk.rows_kept for chunk in chunk_results if chunk.status == "ok")
         status = (
             "failed" if chunks_failed and not chunks_ok else "partial" if chunks_failed else "ok"
         )
@@ -461,11 +464,17 @@ def _process_chunk(
                 transformed,
             )
 
+        # Transfer ownership before writing so the writer can drop each frame
+        # without mutating the list returned by the collection stage.  Keeping
+        # the original list alive would retain every processor DataFrame until
+        # all outputs had been written.
+        owned_processor_frames = deque(processor_frames)
+        del processor_frames
         written.extend(
             _write_collected_processor_outputs(
                 workspace,
                 source,
-                processors=processor_frames,
+                processors=owned_processor_frames,
                 chunk=chunk,
                 ctx=ctx,
                 run_id=run_id,
@@ -507,7 +516,12 @@ def _process_chunk(
         cleanup_temporaries()
 
 
-_ChunkFrames = tuple[int, int, list[tuple["_Processor", pl.DataFrame]], list[Path]]
+_ChunkFrames = tuple[
+    int,
+    int,
+    list[tuple["_Processor", pl.DataFrame]],
+    list[AggregateWriteReceipt],
+]
 
 
 def _collect_chunk_materialized(
@@ -535,7 +549,7 @@ def _collect_chunk_materialized(
     rows_kept = transformed_frame.height
     processor_input = transformed_frame.lazy()
     processor_frames: list[tuple[_Processor, pl.DataFrame]] = []
-    written: list[Path] = []
+    written: list[AggregateWriteReceipt] = []
     try:
         # Python sketch/map-groups nodes are not streaming-native.  The source
         # scan and transforms above use the configured engine; processor plans
@@ -569,7 +583,7 @@ def _collect_chunk_lazy(
 ) -> _ChunkFrames:
     """Collect counts and all processor plans in one batched pass."""
     processor_frames: list[tuple[_Processor, pl.DataFrame]] = []
-    written: list[Path] = []
+    written: list[AggregateWriteReceipt] = []
     try:
         processor_plans = [
             (processor, processor.chunk_aggregate_lazy(transformed, ctx))
@@ -580,6 +594,10 @@ def _collect_chunk_lazy(
             transformed.select(pl.len().alias("rows_kept")),
             *(plan for _, plan in processor_plans),
         ]
+        # Keep the source-selected engine for this unmaterialized graph. Polars
+        # places in-memory barriers around Python UDF nodes while retaining a
+        # streaming source scan; forcing the whole graph to ``in-memory`` here
+        # would silently disable the source's streaming setting.
         collected = pl.collect_all(lazy_frames, engine=engine)
         rows_in = int(collected[0]["rows_in"][0])
         rows_kept = int(collected[1]["rows_kept"][0])
@@ -613,7 +631,7 @@ def _finish_successful_chunk(
     perf_started: float,
     rows_in: int,
     rows_kept: int,
-    written: list[Path],
+    written: list[AggregateWriteReceipt],
     debugging: bool,
 ) -> _ChunkOutcome:
     finished_at = utc_now()
@@ -633,11 +651,12 @@ def _finish_successful_chunk(
             rows_in=rows_in,
             rows_kept=rows_kept,
             elapsed_ms=elapsed_ms,
-            written=tuple(written),
+            written=tuple(receipt.path for receipt in written),
         ),
         files=chunk.files,
         started_at=started_at,
         finished_at=finished_at,
+        lineage=tuple(written),
     )
 
 
@@ -649,13 +668,8 @@ def _record_chunk_outcome(
 ) -> None:
     """Commit lineage, then the chunk row, in the parent process."""
     if outcome.result.status == "ok":
-        lineage_count = ledger.insert_lineage_files(
-            workspace,
-            pipeline_run_id=run_id,
-            chunk_id=outcome.result.chunk_id,
-            paths=outcome.result.written,
-        )
-        if lineage_count != len(outcome.result.written):
+        lineage_count = ledger.insert_lineage_records(workspace, records=outcome.lineage)
+        if lineage_count != len(outcome.lineage):
             raise RuntimeError(
                 f"chunk {outcome.result.chunk_id!r} produced incomplete aggregate lineage"
             )
@@ -790,15 +804,17 @@ def _write_collected_processor_outputs(
     workspace: Path,
     source: model.Source,
     *,
-    processors: list[tuple[_Processor, pl.DataFrame]],
+    processors: deque[tuple[_Processor, pl.DataFrame]],
     chunk: Chunk,
     ctx: ChunkContext,
     run_id: str,
     debugging: bool,
-) -> list[Path]:
-    written: list[Path] = []
+) -> list[AggregateWriteReceipt]:
+    """Write and consume an owned queue of processor frames in source order."""
+
+    written: list[AggregateWriteReceipt] = []
     while processors:
-        processor, daily = processors.pop(0)
+        processor, daily = processors.popleft()
         if debugging:
             _log_processor_frame(source, chunk, processor, "base", daily)
         written.extend(
@@ -825,8 +841,8 @@ def _run_processors_sequential(
     ctx: ChunkContext,
     run_id: str,
     chunk_id: str,
-) -> list[Path]:
-    written: list[Path] = []
+) -> list[AggregateWriteReceipt]:
+    written: list[AggregateWriteReceipt] = []
     for processor in processors:
         daily = processor.chunk_aggregate(frame, ctx)
         if _debugging_enabled(source):
@@ -855,8 +871,8 @@ def _write_processor_outputs(
     ctx: ChunkContext,
     run_id: str,
     chunk_id: str,
-) -> list[Path]:
-    written: list[Path] = []
+) -> list[AggregateWriteReceipt]:
+    written: list[AggregateWriteReceipt] = []
     for grain in processor.config.grains:
         if grain not in _SUPPORTED_TARGET_GRAINS:
             continue
@@ -864,7 +880,7 @@ def _write_processor_outputs(
         if _debugging_enabled(source):
             _log_processor_frame(source, chunk_id, processor, grain, aggregate)
         written.extend(
-            write_aggregate(
+            write_aggregate_with_receipts(
                 aggregate,
                 workspace,
                 source_id=source.id,
@@ -1061,6 +1077,30 @@ def _notify_chunk_progress(
             files=chunk.files,
         )
     )
+
+
+def _recovery_progress_adapter(
+    callback: ChunkProgressCallback | None,
+) -> ledger.RecoveryProgressCallback | None:
+    if callback is None:
+        return None
+
+    def update(progress: ledger.RecoveryProgress) -> None:
+        callback(
+            ChunkProgress(
+                source_id=progress.source_id,
+                chunk_id=progress.run_id,
+                chunk_name=(
+                    f"recovery {progress.run_id[:8]} · {progress.processor_id}/{progress.grain}"
+                ),
+                chunk_order=progress.group_order,
+                chunks_total=progress.groups_total,
+                status="recovering",
+                files=progress.files,
+            )
+        )
+
+    return update
 
 
 def _debugging_enabled(source: model.Source) -> bool:

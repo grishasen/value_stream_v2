@@ -52,14 +52,15 @@ class EntitySetProcessor:
         if self.config.filter is not None:
             source = source.filter(translate(self.config.filter))
 
-        existing = set(source.collect_schema().names())
+        source_schema = source.collect_schema()
+        existing = set(source_schema.names())
         time_columns = grain_levels.chunk_time_group_columns(existing, self.config)
         group_keys = [
             column
             for column in [*self.group_by_columns, *time_columns]
             if column and column in existing
         ]
-        grouped = source.group_by(group_keys).agg(self._agg_exprs(existing))
+        grouped = source.group_by(group_keys).agg(self._agg_exprs(existing, source_schema))
         grouped = p3.postprocess_sketches(grouped, self._sketch_columns(existing))
         grouped = p3.ensure_state_columns(grouped, self.state_specs)
         return p3.with_provenance(
@@ -106,7 +107,7 @@ class EntitySetProcessor:
         """Merge rows and preserve config hash for query-time metrics."""
         return p3.merge_for_query(self.merge, frame, group_columns, self.config_hash)
 
-    def _agg_exprs(self, existing: set[str]) -> list[pl.Expr]:
+    def _agg_exprs(self, existing: set[str], source_schema: pl.Schema) -> list[pl.Expr]:
         exprs: list[pl.Expr] = []
         for name, spec in self.state_specs.items():
             raw_extra = p3.spec_extra(spec)
@@ -130,6 +131,7 @@ class EntitySetProcessor:
                     spec,
                     existing=existing,
                     default_source_column=self.entity_column,
+                    source_dtypes=source_schema,
                 )
                 if expr is not None:
                     exprs.append(expr)

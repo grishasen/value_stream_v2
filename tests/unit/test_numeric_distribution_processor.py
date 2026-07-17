@@ -176,6 +176,7 @@ def test_bulk_sketch_mode_matches_legacy_distribution_semantics(
         "group_by": ["Channel"],
         "properties": ["Value"],
         "quantile_engine": quantile_engine,
+        "sketch_build_mode": "legacy",
     }
     legacy = NumericDistributionProcessor(
         model.NumericDistributionProcessor.model_validate(base_config)

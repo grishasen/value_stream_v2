@@ -451,6 +451,7 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
     assert "avoid_for_group_by_or_filters:" in prompt
     assert "- CustomerID" in prompt
     assert "Do not emit legacy TOML-only settings such as metrics.global_filters" in prompt
+    assert "Set sketch_build_mode to bulk" in prompt
     assert "Every report/dashboard tile metric exists in metrics." in prompt
     assert "Output valid YAML only." in prompt
     assert "Return valid YAML only. Do not wrap the answer in prose or Markdown fences." in prompt
@@ -459,11 +460,7 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
 @pytest.mark.unit
 def test_expression_prompt_dictionary_covers_the_closed_dsl() -> None:
     expression_ast = ai_studio.catalog_prompt_dictionaries()["expression_ast"]
-    prompted_ops = {
-        op
-        for form in expression_ast["operator_forms"].values()
-        for op in form["ops"]
-    }
+    prompted_ops = {op for form in expression_ast["operator_forms"].values() for op in form["ops"]}
 
     assert prompted_ops == {
         "not",

@@ -90,7 +90,7 @@ class ScoreDistributionProcessor:
             for column in [*self.group_by_columns, *time_columns]
             if column and column in existing
         ]
-        grouped = source.group_by(group_keys).agg(self._agg_exprs(existing, scores))
+        grouped = source.group_by(group_keys).agg(self._agg_exprs(existing, scores, schema))
         if self.config.sketch_build_mode == "bulk":
             grouped = p3.unnest_distribution_sketches(grouped)
         frame_out = self._postprocess(grouped, existing)
@@ -143,7 +143,9 @@ class ScoreDistributionProcessor:
         """Merge rows and preserve config hash for query-time metrics."""
         return p3.merge_for_query(self.merge, frame, group_columns, self.config_hash)
 
-    def _agg_exprs(self, existing: set[str], scores: _Scores) -> list[pl.Expr]:
+    def _agg_exprs(
+        self, existing: set[str], scores: _Scores, source_schema: pl.Schema
+    ) -> list[pl.Expr]:
         exprs: list[pl.Expr] = [
             pl.len().alias("Count"),
             pl.col("__vs_positive").sum().alias("__PositiveCount"),
@@ -186,6 +188,7 @@ class ScoreDistributionProcessor:
                     spec,
                     existing=existing,
                     default_source_column="CustomerID",
+                    source_dtypes=source_schema,
                 )
                 if expression is not None:
                     exprs.append(expression)

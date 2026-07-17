@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from math import log2
 
+import polars as pl
 import pytest
 
 from valuestream.algorithms import ml_helpers
@@ -33,4 +34,21 @@ def test_novelty_uses_reference_formula() -> None:
     ) / (3 * 2)
     assert ml_helpers.novelty(customer_ids, interaction_ids, action_names) == pytest.approx(
         expected
+    )
+
+
+def test_native_group_paths_match_scalar_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    customer_ids = pl.Series([f"c{index}" for index in range(1_024)])
+    interaction_ids = pl.Series([f"i{index // 4}" for index in range(1_024)])
+    action_names = pl.Series([f"action-{(index * 7) % 19}" for index in range(1_024)])
+
+    native_personalization = ml_helpers.personalization(customer_ids, action_names)
+    native_novelty = ml_helpers.novelty(customer_ids, interaction_ids, action_names)
+    monkeypatch.setattr(ml_helpers, "_NATIVE_GROUP_MIN_ROWS", 10_000)
+
+    assert native_personalization == pytest.approx(
+        ml_helpers.personalization(customer_ids, action_names), abs=1e-12
+    )
+    assert native_novelty == pytest.approx(
+        ml_helpers.novelty(customer_ids, interaction_ids, action_names), abs=1e-10
     )

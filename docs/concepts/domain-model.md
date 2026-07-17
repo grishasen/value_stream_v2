@@ -227,6 +227,9 @@ visible. Normal completion transitions the same row to `ok`, `partial`, or
 `failed`. If the process dies first, the next caller holding the source lock
 verifies committed chunks and performs the terminal transition; it never
 creates a second row for the interrupted run.
+Run-level `rows_in` and `rows_kept` totals include only chunks whose durable
+marker finishes as `ok`; failed, recovery-rejected, and skipped chunks do not
+inflate the published-row totals shown by operational surfaces.
 
 ### Plan
 The result of the Query Layer's planner: which physical aggregate to scan, what predicates to push down, what columns to read, what derive function to apply. Deterministic for a given input + config_hash.

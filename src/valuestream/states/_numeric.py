@@ -15,22 +15,35 @@ def bulk_numeric_array(
     *,
     dtype: Any,
 ) -> np.ndarray[Any, Any] | None:
-    """Return a contiguous writable array, or ``None`` for a tiny input.
+    """Return null-free writable numeric storage, or ``None`` for a tiny input.
 
     Polars group callbacks provide ``Series`` objects, whose ``to_numpy`` path
     avoids one Python call per value.  Tiny inputs retain the scalar update
     path because array setup costs more than the native bulk call saves.
+
+    Polars numeric ``Series.to_numpy`` represents nulls as NaN, so nulls are
+    removed before conversion instead of being conflated with genuine NaN
+    values. Genuine NaNs are deliberately preserved: DataSketches ignores
+    them in both its scalar and bulk numeric update paths.
     """
 
-    if isinstance(values, Sized) and len(values) < _BULK_UPDATE_MIN_VALUES:
+    prepared = values
+    if callable(drop_nulls := getattr(values, "drop_nulls", None)):
+        prepared = drop_nulls()
+    if isinstance(prepared, Sized) and len(prepared) < _BULK_UPDATE_MIN_VALUES:
         return None
-    if isinstance(values, np.ndarray):
-        raw = values
-    elif callable(to_numpy := getattr(values, "to_numpy", None)):
+    if isinstance(prepared, np.ndarray):
+        raw = prepared
+        if raw.dtype == object:
+            raw = np.fromiter(
+                (float(value) for value in raw.reshape(-1) if value is not None),
+                dtype=dtype,
+            )
+    elif callable(to_numpy := getattr(prepared, "to_numpy", None)):
         raw = to_numpy()
     else:
         raw = np.fromiter(
-            (float(value) for value in values if value is not None),
+            (float(value) for value in prepared if value is not None),
             dtype=dtype,
         )
     array = np.asarray(raw, dtype=dtype).reshape(-1)

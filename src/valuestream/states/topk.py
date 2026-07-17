@@ -29,6 +29,15 @@ def build(values: Iterable[Any], *, lg_max_map_size: int = 10) -> bytes:
     return bytes(sketch.serialize())
 
 
+def build_strings(values: Iterable[str], *, lg_max_map_size: int = 10) -> bytes:
+    """Build top-K state from the original stream already normalized to strings."""
+
+    sketch = frequent_strings_sketch(lg_max_map_size)
+    for value in values:
+        sketch.update(value)
+    return bytes(sketch.serialize())
+
+
 def merge(
     sketches: Iterable[bytes | bytearray | memoryview | None],
     *,
@@ -70,4 +79,4 @@ def weight(payload: bytes | bytearray | memoryview | None) -> int:
     return int(frequent_strings_sketch.deserialize(bytes(payload)).total_weight)
 
 
-__all__ = ["FrequentItem", "build", "frequent_items", "merge", "weight"]
+__all__ = ["FrequentItem", "build", "build_strings", "frequent_items", "merge", "weight"]

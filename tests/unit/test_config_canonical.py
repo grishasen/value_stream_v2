@@ -161,7 +161,7 @@ class TestCatalogHash:
             if processor.id == descriptive.id
         )
         assert isinstance(changed_descriptive, model.NumericDistributionProcessor)
-        changed_descriptive.sketch_build_mode = "bulk"
+        changed_descriptive.sketch_build_mode = "legacy"
 
         assert processor_computation_hash(changed, changed_descriptive) == processor_before
         assert source_computation_hash(changed, changed_descriptive.source) == source_before
@@ -183,7 +183,10 @@ class TestCatalogHash:
         score_payload = processor_computation_config(catalog, score)["processor"]
         numeric_payload = processor_computation_config(catalog, numeric)["processor"]
 
-        assert score_payload["__valuestream_algorithm_revision"] == {"bounded_ml_source_order": 1}
+        assert score_payload["__valuestream_algorithm_revision"] == {
+            "bounded_ml_source_order": 1,
+            "native_ml_reduction": 1,
+        }
         assert "__valuestream_algorithm_revision" not in numeric_payload
 
     def test_two_yamls_same_meaning_same_hash(self, tmp_path: Path) -> None:

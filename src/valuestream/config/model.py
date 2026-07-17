@@ -388,12 +388,12 @@ class BinaryOutcomeProcessor(_ProcessorBase):
 
 class NumericDistributionProcessor(_ProcessorBase):
     kind: Literal["numeric_distribution"]
-    sketch_build_mode: Literal["legacy", "bulk"] = "legacy"
+    sketch_build_mode: Literal["legacy", "bulk"] = "bulk"
 
 
 class ScoreDistributionProcessor(_ProcessorBase):
     kind: Literal["score_distribution"]
-    sketch_build_mode: Literal["legacy", "bulk"] = "legacy"
+    sketch_build_mode: Literal["legacy", "bulk"] = "bulk"
 
 
 class EntityLifecycleProcessor(_ProcessorBase):

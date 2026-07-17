@@ -271,9 +271,10 @@ persisting the index.
       |    -- merge states by state-type rule, without rereading raw rows
       v
 [Immutable run/chunk parquet partials written atomically]
+      |    -- writer returns path/hash/rows/size/timestamp receipts
       |
       v
-[Lineage transaction committed] -- every written aggregate path
+[Lineage transaction committed] -- receipts for every written aggregate path
       |
       v
 [Chunk ledger row status=ok] -- last durable chunk commit marker
@@ -359,6 +360,12 @@ ingestion. Canonical payloads for all three identities are inserted into
 `meta/config_versions.duckdb`; each emitted aggregate file is recorded in
 `meta/lineage.duckdb` with its run, chunk, processor, grain, period, hash, row
 count, and path.
+
+The Parquet writer derives that lineage receipt from the in-memory partition
+while writing it; before the chunk marker, the ledger confirms the file still
+exists with the recorded size. The normal ingestion path does not reopen the
+new file merely to recover metadata it already knows. Recovery still
+deep-scans embedded provenance before publishing an interrupted run.
 
 ### Configuration authoring surfaces
 
@@ -453,6 +460,10 @@ physical provenance, and processor computation hashes all verify. The stale run
 becomes `partial` when at least one chunk verifies and `failed` otherwise.
 Files without a committed chunk marker remain invisible and are eligible for a
 later vacuum.
+Recovery fetches lineage once per stale run, indexes that run's physical paths
+once, and deep-scans schema-compatible processor/grain files together; embedded
+provenance verification remains mandatory. Run-level input/kept row totals sum
+only the chunks whose final durable marker is `ok`.
 
 ## 15. Security and privacy
 

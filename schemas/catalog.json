@@ -2821,7 +2821,7 @@
           "type": "string"
         },
         "sketch_build_mode": {
-          "default": "legacy",
+          "default": "bulk",
           "enum": [
             "legacy",
             "bulk"
@@ -5531,7 +5531,7 @@
           "type": "string"
         },
         "sketch_build_mode": {
-          "default": "legacy",
+          "default": "bulk",
           "enum": [
             "legacy",
             "bulk"

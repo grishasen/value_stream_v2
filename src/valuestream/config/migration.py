@@ -386,6 +386,7 @@ def _processor_for_family(
     elif kind == "numeric_distribution":
         properties = _numeric_properties(cfg)
         processor["properties"] = properties
+        processor["sketch_build_mode"] = "bulk"
         processor["quantile_engine"] = (
             "tdigest" if _boolish(cfg.get("use_t_digest", True)) else "kll"
         )
@@ -395,6 +396,7 @@ def _processor_for_family(
         processor.update(
             {
                 "score_properties": score_properties,
+                "sketch_build_mode": "bulk",
                 "outcome": {
                     "column": str(cfg.get("outcome_column", "Outcome")),
                     "positive_values": list(cfg.get("positive_model_response", ["Clicked"])),

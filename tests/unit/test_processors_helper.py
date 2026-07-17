@@ -7,7 +7,7 @@ import pytest
 
 import valuestream.processors.processors_helper as p3
 from valuestream.config import model
-from valuestream.states import tdigest
+from valuestream.states import tdigest, theta, topk
 
 
 @pytest.mark.unit
@@ -159,3 +159,106 @@ def test_compact_state_frame_uses_merge_for_coarser_level() -> None:
 
     assert calls == 1
     assert compacted.sort("g")["Count"].to_list() == [2, 3]
+
+
+@pytest.mark.unit
+def test_native_sketch_string_cast_preserves_python_boolean_spelling() -> None:
+    frame = pl.DataFrame({"g": ["A", "A", "A"], "flag": [True, True, False]})
+    spec = model.StateSpec.model_validate({"type": "theta", "source_column": "flag", "lg_k": 12})
+    expression, metadata = p3.sketch_build_expr(
+        "flags",
+        spec,
+        existing=set(frame.columns),
+        default_source_column="flag",
+        source_dtypes=frame.schema,
+    )
+    assert expression is not None
+
+    out = p3.postprocess_sketches(
+        frame.lazy().group_by("g").agg(expression),
+        [metadata],
+    ).collect()
+    payload = out["flags"][0]
+
+    assert theta.estimate(theta.intersect([payload, theta.build(["True"])])) == 1
+    assert theta.estimate(theta.intersect([payload, theta.build(["False"])])) == 1
+    assert theta.estimate(theta.intersect([payload, theta.build(["true"])])) == 0
+
+
+@pytest.mark.unit
+def test_topk_native_string_cast_preserves_original_sketch_stream() -> None:
+    frame = pl.DataFrame(
+        {
+            "g": ["A"] * 6,
+            "category": ["Web", "Web", "Web", "Mobile", "Mobile", None],
+        }
+    )
+    spec = model.StateSpec.model_validate(
+        {"type": "topk", "source_column": "category", "lg_max_map_size": 10}
+    )
+    expression, metadata = p3.sketch_build_expr(
+        "categories",
+        spec,
+        existing=set(frame.columns),
+        default_source_column="category",
+        source_dtypes=frame.schema,
+    )
+    assert expression is not None
+    grouped = frame.lazy().group_by("g").agg(expression)
+    helper_dtype = grouped.collect_schema()["__values_categories"]
+    assert helper_dtype == pl.List(pl.String)
+
+    out = p3.postprocess_sketches(grouped, [metadata]).collect()
+    payload = out["categories"][0]
+    items = {item["item"]: item["estimate"] for item in topk.frequent_items(payload)}
+
+    assert payload == topk.build(["Web", "Web", "Web", "Mobile", "Mobile"])
+    assert topk.weight(payload) == 5
+    assert items == {"Web": 3, "Mobile": 2}
+
+
+@pytest.mark.unit
+def test_topk_native_string_cast_preserves_over_capacity_update_order() -> None:
+    values = [f"k{(index * 17) % 40}" for index in range(371)]
+    frame = pl.DataFrame({"g": ["A"] * len(values), "category": values})
+    spec = model.StateSpec.model_validate(
+        {"type": "topk", "source_column": "category", "lg_max_map_size": 3}
+    )
+    expression, metadata = p3.sketch_build_expr(
+        "categories",
+        spec,
+        existing=set(frame.columns),
+        default_source_column="category",
+        source_dtypes=frame.schema,
+    )
+    assert expression is not None
+
+    payload = p3.postprocess_sketches(
+        frame.lazy().group_by("g").agg(expression),
+        [metadata],
+    ).collect()["categories"][0]
+
+    assert payload == topk.build(values, lg_max_map_size=3)
+
+
+@pytest.mark.unit
+def test_topk_keeps_per_value_python_string_fallback_when_native_cast_is_not_exact() -> None:
+    frame = pl.DataFrame({"g": ["A", "A"], "value": [0.0, -0.0]})
+    spec = model.StateSpec.model_validate(
+        {"type": "topk", "source_column": "value", "lg_max_map_size": 10}
+    )
+    expression, metadata = p3.sketch_build_expr(
+        "values",
+        spec,
+        existing=set(frame.columns),
+        default_source_column="value",
+        source_dtypes=frame.schema,
+    )
+    assert expression is not None
+    grouped = frame.lazy().group_by("g").agg(expression)
+    assert grouped.collect_schema()["__values_values"] == pl.List(pl.Float64)
+
+    out = p3.postprocess_sketches(grouped, [metadata]).collect()
+    items = {item["item"]: item["estimate"] for item in topk.frequent_items(out["values"][0])}
+
+    assert items == {"0.0": 1, "-0.0": 1}

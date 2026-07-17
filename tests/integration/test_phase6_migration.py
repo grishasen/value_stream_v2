@@ -158,6 +158,42 @@ facet_column = "PlacementType"
     assert second_tile.metric == "roc_auc"
     assert second_tile.chart == "line"
     assert second_tile.model_extra["facet_col"] == "PlacementType"
+    score_processor = next(
+        processor
+        for processor in catalog.processors.processors
+        if processor.id == "model_ml_scores"
+    )
+    assert score_processor.sketch_build_mode == "bulk"
+
+
+@pytest.mark.integration
+def test_migrate_toml_authors_bulk_mode_for_quantile_processors(tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy.toml"
+    legacy.write_text(
+        """
+[metrics.descriptive]
+properties = ["ResponseTime"]
+
+[metrics.model_ml_scores]
+score_properties = ["Propensity", "FinalPropensity"]
+positive_model_response = ["Clicked"]
+negative_model_response = ["Impression"]
+""",
+        encoding="utf-8",
+    )
+
+    catalog_dir = tmp_path / "workspace" / "catalog"
+    migrate_toml(legacy, catalog_dir)
+    processor_defs = yaml.safe_load((catalog_dir / "processors.yaml").read_text(encoding="utf-8"))[
+        "processors"
+    ]
+
+    quantile_modes = {
+        processor["id"]: processor["sketch_build_mode"]
+        for processor in processor_defs
+        if processor["kind"] in {"numeric_distribution", "score_distribution"}
+    }
+    assert quantile_modes == {"descriptive": "bulk", "model_ml_scores": "bulk"}
 
 
 @pytest.mark.integration

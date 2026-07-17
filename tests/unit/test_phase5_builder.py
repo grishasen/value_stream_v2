@@ -985,6 +985,60 @@ def test_processor_to_dict_uses_authoring_dimensions() -> None:
 
 
 @pytest.mark.unit
+def test_processor_to_dict_materializes_bulk_sketch_default() -> None:
+    processor = model.NumericDistributionProcessor.model_validate(
+        {
+            "id": "descriptive",
+            "source": "ih",
+            "kind": "numeric_distribution",
+            "properties": ["Revenue"],
+        }
+    )
+
+    data = builder.processor_to_dict(processor)
+
+    assert data["sketch_build_mode"] == "bulk"
+    assert "sketch_build_mode" in forms.PROCESSOR_KIND_MANAGED_FIELDS
+
+
+@pytest.mark.unit
+def test_quantile_processor_editors_default_to_bulk_and_keep_legacy_escape_hatch() -> None:
+    app = AppTest.from_string(
+        """
+from valuestream.ui import forms
+
+forms.processor_kind_fields(
+    {"properties": ["Revenue"]},
+    "numeric_distribution",
+    field_options=["Revenue"],
+    numeric_field_options=["Revenue"],
+    key_prefix="numeric",
+)
+forms.processor_kind_fields(
+    {
+        "score_properties": ["Propensity"],
+        "sketch_build_mode": "legacy",
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": ["Clicked"],
+            "negative_values": ["Impression"],
+        },
+    },
+    "score_distribution",
+    field_options=["CustomerID", "Outcome", "Propensity"],
+    numeric_field_options=["Propensity"],
+    key_prefix="score",
+)
+"""
+    ).run()
+
+    assert not app.exception
+    mode_selectors = [item for item in app.selectbox if item.label == "Sketch Build Mode"]
+    assert [item.value for item in mode_selectors] == ["bulk", "legacy"]
+    assert all(item.options == ["bulk", "legacy"] for item in mode_selectors)
+
+
+@pytest.mark.unit
 def test_metric_to_dict_omits_empty_base_fields() -> None:
     metric = model.FormulaMetric.model_validate(
         {

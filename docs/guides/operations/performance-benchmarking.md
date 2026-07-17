@@ -95,3 +95,9 @@ documented error contracts.
 
 The benchmark runner and full field contract are documented in the repository
 file `tests/benchmarks/README.md`.
+
+The repository's test workflow also runs a tiny two-repeat semantic smoke
+benchmark across the real processor and sketch families. It protects the
+contract from rotting, but does not compare wall time or RSS in shared CI.
+Machine-specific benchmark JSON stays ignored and should be attached to the
+performance review rather than committed as a portable baseline.

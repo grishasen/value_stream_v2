@@ -79,7 +79,8 @@ class BinaryOutcomeProcessor:
                 == pl.col("__valuestream_positive").max().over(dedup_keys)
             ).unique(subset=dedup_keys, keep="first")
 
-        existing = set(source.collect_schema().names())
+        source_schema = source.collect_schema()
+        existing = set(source_schema.names())
         time_columns = grain_levels.chunk_time_group_columns(existing, self.config)
         group_keys = [
             column
@@ -90,7 +91,7 @@ class BinaryOutcomeProcessor:
         if isinstance(variant_column, str) and variant_column in existing:
             group_keys.append(variant_column)
 
-        agg_exprs = self._agg_exprs(existing)
+        agg_exprs = self._agg_exprs(existing, source_schema)
         grouped_lazy = source.group_by(group_keys).agg(agg_exprs)
         grouped_lazy = p3.postprocess_sketches(grouped_lazy, self._sketch_columns(existing))
         grouped_lazy = self._ensure_state_columns(grouped_lazy)
@@ -141,7 +142,7 @@ class BinaryOutcomeProcessor:
         """Merge rows and preserve the current processor config hash for query-time formulas."""
         return p3.merge_for_query(self.merge, frame, group_columns, self.config_hash)
 
-    def _agg_exprs(self, existing: set[str]) -> list[pl.Expr]:
+    def _agg_exprs(self, existing: set[str], source_schema: pl.Schema) -> list[pl.Expr]:
         exprs: list[pl.Expr] = []
         sketch_helpers: list[pl.Expr] = []
         for name, spec in self.state_specs.items():
@@ -170,6 +171,7 @@ class BinaryOutcomeProcessor:
                     spec,
                     existing=existing,
                     default_source_column=name,
+                    source_dtypes=source_schema,
                 )
                 if sketch_expr is not None:
                     sketch_helpers.append(sketch_expr)

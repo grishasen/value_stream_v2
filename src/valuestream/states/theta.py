@@ -27,6 +27,15 @@ def build(values: Iterable[Any], *, lg_k: int = 12) -> bytes:
     return bytes(sketch.compact().serialize())
 
 
+def build_strings(values: Iterable[str], *, lg_k: int = 12) -> bytes:
+    """Build theta state from values already normalized to Python strings."""
+
+    sketch = update_theta_sketch(lg_k)
+    for value in values:
+        sketch.update(value)
+    return bytes(sketch.compact().serialize())
+
+
 def merge(sketches: Iterable[bytes | bytearray | memoryview | None], *, lg_k: int = 12) -> bytes:
     """Union serialized theta sketches and return a compact serialized sketch."""
     union = theta_union(lg_k)
@@ -91,4 +100,4 @@ def _deserialize(payload: bytes | bytearray | memoryview) -> compact_theta_sketc
     return compact_theta_sketch.deserialize(bytes(payload))
 
 
-__all__ = ["a_not_b", "bounds", "build", "estimate", "intersect", "merge"]
+__all__ = ["a_not_b", "bounds", "build", "build_strings", "estimate", "intersect", "merge"]

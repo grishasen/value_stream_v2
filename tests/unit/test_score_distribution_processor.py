@@ -294,6 +294,7 @@ def test_bulk_sketch_mode_matches_legacy_mixed_distribution_semantics() -> None:
         "id": "scores",
         "source": "ih",
         "kind": "score_distribution",
+        "sketch_build_mode": "legacy",
         "group_by": ["Channel"],
         "outcome": {
             "column": "Outcome",
@@ -348,7 +349,9 @@ def test_bulk_sketch_mode_matches_legacy_mixed_distribution_semantics() -> None:
 
 def test_source_order_keeps_bounded_ml_samples_invariant_across_bulk_plan() -> None:
     rows = 50_002
-    legacy = _processor()
+    legacy = ScoreDistributionProcessor(
+        _processor().config.model_copy(update={"sketch_build_mode": "legacy"})
+    )
     bulk = ScoreDistributionProcessor(
         legacy.config.model_copy(update={"sketch_build_mode": "bulk"})
     )

@@ -89,6 +89,17 @@ Peak RSS is measured in a fresh worker process. The Phase-0 baseline contract
 uses `parallel=1`; process-tree RSS sampling for later multi-process tuning is a
 separate benchmark extension.
 
+## CI smoke contract
+
+The normal test suite runs a small, generated end-to-end benchmark twice in a
+clean scratch workspace.  Its catalog uses the real binary, numeric, score,
+funnel, and entity-set processor kinds and exercises t-digest, KLL, CPC, HLL,
+Theta, and Top-K states.  CI checks successful publication and semantic output
+equivalence, but deliberately imposes no timing or RSS threshold: shared runner
+performance is too noisy to serve as a hardware baseline.  Operator benchmark
+JSON remains under the ignored `artifacts/benchmarks/` directory and is attached
+to a performance review instead of committed.
+
 With `materialize_transforms: true`, Polars first collects the transformed source
 plan once, alongside the raw input-row count and using the streaming engine when
 configured. It then runs processor fan-out with the in-memory engine over that

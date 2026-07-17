@@ -2222,6 +2222,7 @@ def _processor_preserved_fields(processor_def: dict[str, Any]) -> dict[str, Any]
         "variant_column",
         "properties",
         "quantile_engine",
+        "sketch_build_mode",
         "score_properties",
         "score_columns",
         "stages",
@@ -4333,9 +4334,7 @@ def _clear_preprocessing_widget_state(sections: set[str]) -> None:
         "calculated_fields": ("ai_studio_calculation_editor",),
     }
     widget_bases = tuple(
-        base
-        for section in sections
-        for base in section_widget_bases.get(section, ())
+        base for section in sections for base in section_widget_bases.get(section, ())
     )
     for key in list(st.session_state.keys()):
         if key in widget_bases or any(key.startswith(f"{base}_") for base in widget_bases):
@@ -4396,8 +4395,7 @@ def _store_preprocessing_sync_queue(queued: dict[str, set[str]]) -> None:
         st.session_state.pop(_PREPROCESSING_SYNC_STATE_KEY, None)
         return
     st.session_state[_PREPROCESSING_SYNC_STATE_KEY] = {
-        source_id: sorted(values, key=str.casefold)
-        for source_id, values in sorted(queued.items())
+        source_id: sorted(values, key=str.casefold) for source_id, values in sorted(queued.items())
     }
 
 
@@ -4989,9 +4987,7 @@ def _studio_status_bar(
                     "blocked" if preprocessing_error else "ready",
                     help=preprocessing_error or "Working schema is available.",
                 )
-                components.status_badge(
-                    "Field Approval", "ready" if approved_fields else "warning"
-                )
+                components.status_badge("Field Approval", "ready" if approved_fields else "warning")
                 components.status_badge(
                     "AI Draft" if ai_calls_enabled else "Draft",
                     (
@@ -5000,9 +4996,7 @@ def _studio_status_bar(
                         else ("ready" if draft else "pending")
                     ),
                     help=(
-                        "Pending AI output needs review."
-                        if ai_calls_enabled and pending
-                        else None
+                        "Pending AI output needs review." if ai_calls_enabled and pending else None
                     ),
                 )
                 components.status_badge(
@@ -5015,11 +5009,7 @@ def _studio_status_bar(
                 )
                 components.status_badge(
                     "Metrics",
-                    (
-                        "ready"
-                        if draft and draft.get("metrics", {}).get("metrics")
-                        else "pending"
-                    ),
+                    ("ready" if draft and draft.get("metrics", {}).get("metrics") else "pending"),
                 )
                 components.status_badge(
                     "Reports",

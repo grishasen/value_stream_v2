@@ -157,7 +157,8 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
     },
     "numeric_distribution": {
         "purpose": "descriptive distributions and percentiles for approved numeric properties",
-        "key_fields": ["properties", "quantile_engine"],
+        "key_fields": ["properties", "quantile_engine", "sketch_build_mode"],
+        "defaults": {"sketch_build_mode": "bulk"},
         "derived_states": [
             "<Property>_Count",
             "<Property>_Sum",
@@ -171,7 +172,8 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
     },
     "score_distribution": {
         "purpose": "model score quality, ROC/PR curves, calibration, and score summaries",
-        "key_fields": ["score_properties", "outcome"],
+        "key_fields": ["score_properties", "outcome", "sketch_build_mode"],
+        "defaults": {"sketch_build_mode": "bulk"},
         "default_states": [
             "Count",
             "<ScoreProperty>_tdigest_positives",
@@ -1171,6 +1173,7 @@ def _hard_output_rules() -> tuple[str, ...]:
         "If experiment fields or variant roles are unavailable, omit experiment processors, metrics, and reports.",
         "If CLV/lifecycle fields are unavailable, omit entity_lifecycle processors, CLV metrics, and CLV reports.",
         "If numeric descriptive properties are unavailable, omit numeric_distribution processors and descriptive reports.",
+        "Set sketch_build_mode to bulk for every numeric_distribution and score_distribution processor; legacy is an explicit rollback escape hatch.",
         "Prefer a small coherent catalog over broad speculative coverage.",
     )
 

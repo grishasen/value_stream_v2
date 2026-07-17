@@ -264,11 +264,10 @@ sources:
 """,
         encoding="utf-8",
     )
-    processors = []
-    for processor_id in SUITE_PROCESSORS["full_current"]:
-        processors.append(
-            f"""
-  - id: {processor_id}
+    (catalog / "processors.yaml").write_text(
+        """
+processors:
+  - id: engagement
     source: ih
     kind: binary_outcome
     group_by: [Channel]
@@ -280,14 +279,89 @@ sources:
       positive_values: [Clicked]
       negative_values: [Impression]
     states:
-      Count: {{type: count}}
-      Positives: {{type: count}}
-      Negatives: {{type: count}}
-      UniqueCustomers_cpc: {{type: cpc, source_column: CustomerID, lg_k: 11}}
-"""
-        )
-    (catalog / "processors.yaml").write_text(
-        "processors:\n" + "".join(processors), encoding="utf-8"
+      Count: {type: count}
+      Positives: {type: count}
+      Negatives: {type: count}
+      UniqueCustomers_cpc: {type: cpc, source_column: CustomerID, lg_k: 11}
+
+  - id: conversion
+    source: ih
+    kind: binary_outcome
+    group_by: [Channel]
+    time: {column: OutcomeTime, grains: [Day]}
+    outcome:
+      column: Outcome
+      positive_values: [Clicked]
+      negative_values: [Impression]
+    states:
+      Count: {type: count}
+      Positives: {type: count}
+      Negatives: {type: count}
+
+  - id: descriptive
+    source: ih
+    kind: numeric_distribution
+    group_by: [Channel]
+    time: {column: OutcomeTime, grains: [Day]}
+    properties: [Score]
+    quantile_engine: tdigest
+
+  - id: model_ml_scores
+    source: ih
+    kind: score_distribution
+    group_by: [Channel]
+    time: {column: OutcomeTime, grains: [Day]}
+    score_properties: [Score]
+    outcome:
+      column: Outcome
+      positive_values: [Clicked]
+      negative_values: [Impression]
+    states:
+      Count: {type: count}
+      Score_tdigest_positives:
+        {type: tdigest, source_column: Score, outcome: positive}
+      Score_tdigest_negatives:
+        {type: tdigest, source_column: Score, outcome: negative}
+      Score_kll: {type: kll, source_column: Score, k: 1024}
+      Category_topk: {type: topk, source_column: Category, lg_max_map_size: 10}
+
+  - id: experiment
+    source: ih
+    kind: binary_outcome
+    group_by: [Channel]
+    time: {column: OutcomeTime, grains: [Day]}
+    outcome:
+      column: Outcome
+      positive_values: [Clicked]
+      negative_values: [Impression]
+    states:
+      Count: {type: count}
+      Positives: {type: count}
+      Negatives: {type: count}
+
+  - id: action_funnel
+    source: ih
+    kind: funnel
+    group_by: [Channel]
+    time: {column: OutcomeTime, grains: [Day]}
+    entity: CustomerID
+    stages:
+      - name: Impression
+        when: {op: eq, column: Outcome, value: Impression}
+      - name: Clicked
+        when: {op: eq, column: Outcome, value: Clicked}
+
+  - id: audience
+    source: ih
+    kind: entity_set
+    group_by: [Channel]
+    time: {column: OutcomeTime, grains: [Day]}
+    states:
+      Customers_cpc: {type: cpc, source_column: CustomerID, lg_k: 11}
+      Customers_hll: {type: hll, source_column: CustomerID, lg_k: 12}
+      Customers_theta: {type: theta, source_column: CustomerID, lg_k: 12}
+""",
+        encoding="utf-8",
     )
     (catalog / "metrics.yaml").write_text("metrics: {}\n", encoding="utf-8")
     (catalog / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
@@ -300,7 +374,9 @@ sources:
             "CustomerID": [f"c{index}" for index in range(row_count)],
             "Rank": [1] * row_count,
             "Channel": ["Web"] * row_count,
-            "Outcome": ["Clicked"] * row_count,
+            "Outcome": ["Clicked", "Impression"] * (row_count // 2),
+            "Score": [(index % 101) / 100 for index in range(row_count)],
+            "Category": [f"category-{index % 7}" for index in range(row_count)],
         }
     ).write_parquet(data / "ih_20260716.parquet")
 

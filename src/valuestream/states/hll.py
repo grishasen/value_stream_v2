@@ -21,6 +21,15 @@ def build(values: Iterable[Any], *, lg_k: int = 12) -> bytes:
     return bytes(sketch.serialize_compact())
 
 
+def build_strings(values: Iterable[str], *, lg_k: int = 12) -> bytes:
+    """Build HLL state from values already normalized to Python strings."""
+
+    sketch = hll_sketch(lg_k, tgt_hll_type.HLL_8)
+    for value in values:
+        sketch.update(value)
+    return bytes(sketch.serialize_compact())
+
+
 def merge(sketches: Iterable[bytes | bytearray | memoryview | None], *, lg_k: int = 12) -> bytes:
     """Union serialized HLL sketches and return a compact serialized sketch."""
     union = hll_union(lg_k)
@@ -52,4 +61,4 @@ def bounds(
     )
 
 
-__all__ = ["bounds", "build", "estimate", "merge"]
+__all__ = ["bounds", "build", "build_strings", "estimate", "merge"]

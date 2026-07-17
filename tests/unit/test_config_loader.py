@@ -322,10 +322,14 @@ class TestErrorPaths:
     ) -> None:
         base = {"id": "p", "source": "s", "kind": kind}
 
-        assert processor_type.model_validate(base).sketch_build_mode == "legacy"
+        assert processor_type.model_validate(base).sketch_build_mode == "bulk"
         assert (
             processor_type.model_validate({**base, "sketch_build_mode": "bulk"}).sketch_build_mode
             == "bulk"
+        )
+        assert (
+            processor_type.model_validate({**base, "sketch_build_mode": "legacy"}).sketch_build_mode
+            == "legacy"
         )
         with pytest.raises(ValueError, match=r"legacy.*bulk"):
             processor_type.model_validate({**base, "sketch_build_mode": "adaptive"})

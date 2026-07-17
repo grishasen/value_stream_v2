@@ -1088,13 +1088,23 @@ only after each retained `ok` chunk passes current input-fingerprint,
 source/processor computation-hash, complete-lineage, physical-file, and
 embedded-provenance checks. Invalid chunk markers are downgraded and the raw
 chunk is processed again. A stale run with no retained chunk becomes `failed`.
+The implementation batches this deep verification per stale run: lineage and
+physical paths are indexed once, then schema-compatible processor/grain files
+are scanned together. Deep embedded-provenance verification is the default and
+is not weakened to an existence-only check.
 
 The durable commit order is:
 
-1. write every aggregate through temporary file + atomic rename;
-2. commit lineage for every written path;
+1. write every aggregate through temporary file + atomic rename and retain its
+   path/hash/row-count/file-size/timestamp receipt from the in-memory partition;
+2. commit those receipts as lineage for every written path, without reopening
+   the new Parquet files, after a file-exists and size stat check;
 3. insert the chunk's `status='ok'` row as the chunk commit marker;
 4. transition the existing run from `running` to `ok`, `partial`, or `failed`.
+
+Terminal run `rows_in` and `rows_kept` totals sum only chunks whose durable
+status is `ok`; failed, recovery-rejected, and skipped chunks contribute zero
+to these published-row totals.
 
 Zero-output chunks are valid: lineage count zero and written-path count zero
 still precede the chunk marker. Files or lineage without a committed chunk row

@@ -137,12 +137,40 @@ def default_group_columns(
     return [column for column in frame.columns if column not in ignored]
 
 
+def _native_python_string_expr(values: pl.Expr, dtype: pl.DataType | None) -> pl.Expr | None:
+    """Return a native cast only where it matches ``str(SeriesItem)`` exactly."""
+
+    if dtype is None:
+        return None
+    if dtype == pl.Boolean:
+        return (
+            pl.when(values.is_null())
+            .then(pl.lit(None, dtype=pl.String))
+            .when(values)
+            .then(pl.lit("True"))
+            .otherwise(pl.lit("False"))
+        )
+    base_type = dtype.base_type()
+    if (
+        dtype.is_integer()
+        or dtype.is_decimal()
+        or dtype in {pl.Date, pl.Null}
+        or base_type in {pl.String, pl.Categorical, pl.Enum}
+    ):
+        return values.cast(pl.String)
+    # Float, Datetime, Time, Duration, Binary, and nested casts do not reproduce
+    # Python's exact spelling for every value (for example 1e-05, NaN, or a
+    # trailing ``.000000``).
+    return None
+
+
 def sketch_build_expr(
     name: str,
     spec: model.StateSpec,
     *,
     existing: set[str],
     default_source_column: str,
+    source_dtypes: pl.Schema | None = None,
 ) -> tuple[pl.Expr | None, tuple[str, str, int]]:
     """Return a list-aggregation expression and sketch metadata."""
     raw_extra = spec_extra(spec)
@@ -150,7 +178,18 @@ def sketch_build_expr(
     if source_column not in existing:
         return None, (name, spec.type, _sketch_k(spec))
     helper = f"__values_{name}"
-    values = filtered_column(source_column, raw_extra).drop_nulls()
+    values = filtered_column(source_column, raw_extra)
+    string_values = (
+        _native_python_string_expr(
+            values,
+            source_dtypes[source_column] if source_dtypes is not None else None,
+        )
+        if spec.type in {"cpc", "hll", "theta", "topk"}
+        else None
+    )
+    if string_values is not None:
+        values = string_values
+    values = values.drop_nulls()
     if spec.type in {"cpc", "hll", "theta"}:
         values = values.unique()
     return values.alias(helper), (name, spec.type, _sketch_k(spec))
@@ -161,21 +200,23 @@ def postprocess_sketches(
     sketch_columns: list[tuple[str, str, int]],
 ) -> _TFrame:
     out = frame
-    columns = _frame_columns(out)
+    schema = _frame_schema(out)
+    columns = set(schema.names())
     for name, state_type, sketch_k in sketch_columns:
         helper = f"__values_{name}"
         if helper not in columns:
             continue
+        helper_dtype = schema[helper]
         build_fn: Callable[..., bytes]
         kwarg: str
         if state_type == "cpc":
-            build_fn = cpc.build
+            build_fn = cpc.build_strings if helper_dtype == pl.List(pl.String) else cpc.build
             kwarg = "lg_k"
         elif state_type == "hll":
-            build_fn = hll.build
+            build_fn = hll.build_strings if helper_dtype == pl.List(pl.String) else hll.build
             kwarg = "lg_k"
         elif state_type == "theta":
-            build_fn = theta.build
+            build_fn = theta.build_strings if helper_dtype == pl.List(pl.String) else theta.build
             kwarg = "lg_k"
         elif state_type == "tdigest":
             build_fn = tdigest.build
@@ -184,7 +225,7 @@ def postprocess_sketches(
             build_fn = kll.build
             kwarg = "k"
         elif state_type == "topk":
-            build_fn = topk.build
+            build_fn = topk.build_strings if helper_dtype == pl.List(pl.String) else topk.build
             kwarg = "lg_max_map_size"
         else:
             continue
@@ -369,6 +410,12 @@ def _frame_columns(frame: _FrameLike) -> set[str]:
     return set(frame.columns)
 
 
+def _frame_schema(frame: _FrameLike) -> pl.Schema:
+    if isinstance(frame, pl.LazyFrame):
+        return frame.collect_schema()
+    return frame.schema
+
+
 def _groups_are_unique(frame: pl.DataFrame, group_columns: list[str]) -> bool:
     if frame.height <= 1:
         return True
@@ -431,7 +478,13 @@ def series_or_list(value: Any) -> list[Any]:
 
 
 def _build_sketch(values: Any, build_fn: Callable[..., bytes], kwarg: str, k: int) -> bytes:
-    return build_fn(series_or_list(values), **{kwarg: k})
+    if values is None:
+        prepared: Any = []
+    elif isinstance(values, pl.Series | list):
+        prepared = values
+    else:
+        prepared = [values]
+    return build_fn(prepared, **{kwarg: k})
 
 
 def _build_distribution_sketches(

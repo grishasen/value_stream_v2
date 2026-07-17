@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import fcntl
 import json
-from collections.abc import Iterator, Mapping
+import logging
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,13 @@ import duckdb
 import polars as pl
 
 from valuestream.store.meta import META_DB_FILENAMES, init_meta_dbs, meta_dir
+from valuestream.store.parquet import AggregateWriteReceipt
 from valuestream.utils.hashing import sha256_chained
+
+logger = logging.getLogger(__name__)
+
+
+_RECOVERY_PATH_COLUMN = "__recovery_path"
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,46 @@ class RecoveredRun:
     status: str
     chunks_ok: int
     chunks_failed: int
+
+
+@dataclass(frozen=True)
+class RecoveryProgress:
+    """Live progress for one batched interrupted-run provenance scan."""
+
+    source_id: str
+    run_id: str
+    processor_id: str
+    grain: str
+    group_order: int
+    groups_total: int
+    files: tuple[Path, ...]
+
+
+RecoveryProgressCallback = Callable[[RecoveryProgress], None]
+
+
+@dataclass(frozen=True)
+class _RecoveryLineage:
+    """One persisted lineage record needed to verify an interrupted run."""
+
+    processor_id: str
+    grain: str
+    period: str
+    path: Path
+    config_hash: str
+    rows: int | None
+
+
+@dataclass(frozen=True)
+class _RecoveryFileSummary:
+    """Embedded provenance summarized for one aggregate part file."""
+
+    run_ids: tuple[str, ...]
+    chunk_ids: tuple[str, ...]
+    config_hashes: tuple[str, ...]
+    periods: tuple[str, ...]
+    rows: int
+    has_null_provenance: bool
 
 
 def ensure(workspace_path: str | Path) -> None:
@@ -370,6 +417,7 @@ def recover_stale_runs(
     file_hashes: Mapping[str, str],
     expected_outputs: Mapping[tuple[str, str], str],
     finished_at: object,
+    progress_callback: RecoveryProgressCallback | None = None,
 ) -> tuple[RecoveredRun, ...]:
     """Verify and finalize prior ``running`` rows while holding the source lock.
 
@@ -395,28 +443,48 @@ def recover_stale_runs(
     for raw_run_id, raw_config_hash in stale_rows:
         run_id = str(raw_run_id)
         run_hash_matches = str(raw_config_hash) == config_hash
-        for chunk_id, stored_hash in _ok_chunks_for_run(workspace_path, source_id, run_id):
-            reason: str | None = None
+        committed_chunks = _ok_chunks_for_run(workspace_path, source_id, run_id)
+        logger.info(
+            "Verifying interrupted source run: source=%s run_id=%s committed_chunks=%s",
+            source_id,
+            run_id,
+            len(committed_chunks),
+        )
+        errors: dict[str, str] = {}
+        deep_candidates: list[str] = []
+        for chunk_id, stored_hash in committed_chunks:
             if not run_hash_matches:
-                reason = "source computation hash changed before interrupted-run recovery"
+                errors[chunk_id] = "source computation hash changed before interrupted-run recovery"
             elif file_hashes.get(chunk_id) != stored_hash:
-                reason = "input fingerprint changed before interrupted-run recovery"
+                errors[chunk_id] = "input fingerprint changed before interrupted-run recovery"
             else:
-                reason = _chunk_recovery_error(
+                deep_candidates.append(chunk_id)
+        if deep_candidates:
+            errors.update(
+                _run_recovery_errors(
                     workspace_path,
                     source_id=source_id,
                     run_id=run_id,
-                    chunk_id=chunk_id,
+                    chunk_ids=tuple(deep_candidates),
                     expected_outputs=expected_outputs,
+                    progress_callback=progress_callback,
                 )
-            if reason is not None:
-                _mark_chunk_recovery_failed(
-                    workspace_path,
-                    source_id=source_id,
-                    run_id=run_id,
-                    chunk_id=chunk_id,
-                    reason=reason,
-                )
+            )
+        if errors:
+            _mark_chunk_recovery_failures(
+                workspace_path,
+                source_id=source_id,
+                run_id=run_id,
+                errors=errors,
+            )
+        logger.info(
+            "Interrupted source run verification finished: source=%s run_id=%s "
+            "retained_chunks=%s rejected_chunks=%s",
+            source_id,
+            run_id,
+            len(committed_chunks) - len(errors),
+            len(errors),
+        )
         recovered.append(
             finalize_incomplete_run(
                 workspace_path,
@@ -434,8 +502,8 @@ def _run_chunk_summary(workspace_path: str | Path, run_id: str) -> dict[str, int
         row = conn.execute(
             """
             SELECT
-                COALESCE(SUM(rows_in), 0),
-                COALESCE(SUM(rows_kept), 0),
+                COALESCE(SUM(rows_in) FILTER (WHERE status = 'ok'), 0),
+                COALESCE(SUM(rows_kept) FILTER (WHERE status = 'ok'), 0),
                 COUNT(*) FILTER (WHERE status = 'ok'),
                 COUNT(*) FILTER (WHERE status = 'failed'),
                 COUNT(*)
@@ -479,103 +547,308 @@ def _ok_chunks_for_run(
     return [(str(chunk_id), str(file_hash)) for chunk_id, file_hash in rows]
 
 
-def _chunk_recovery_error(  # noqa: PLR0911
+def _run_recovery_errors(
     workspace_path: str | Path,
     *,
     source_id: str,
     run_id: str,
-    chunk_id: str,
+    chunk_ids: tuple[str, ...],
     expected_outputs: Mapping[tuple[str, str], str],
-) -> str | None:
+    progress_callback: RecoveryProgressCallback | None,
+) -> dict[str, str]:
+    """Deep-verify retained chunks with one metadata query and batched file scans."""
+
     workspace = Path(workspace_path)
     aggregate_root = (workspace / "aggregates" / source_id).resolve()
-    lineage_db = meta_dir(workspace) / "lineage.duckdb"
+    records_by_chunk = _lineage_records_for_run(
+        workspace,
+        source_id=source_id,
+        run_id=run_id,
+    )
+    physical_path_index = _physical_recovery_path_index(aggregate_root, run_id)
+    errors: dict[str, str] = {}
+    scan_groups: dict[tuple[str, str], set[Path]] = {}
+
+    for chunk_id in chunk_ids:
+        records = records_by_chunk.get(chunk_id, ())
+        reason = _chunk_recovery_metadata_error(
+            records,
+            aggregate_root=aggregate_root,
+            run_id=run_id,
+            chunk_id=chunk_id,
+            physical_path_index=physical_path_index,
+            expected_outputs=expected_outputs,
+        )
+        if reason is not None:
+            errors[chunk_id] = reason
+            continue
+        for record in records:
+            scan_groups.setdefault((record.processor_id, record.grain), set()).add(record.path)
+
+    summaries, scan_errors = _scan_recovery_groups(
+        source_id,
+        run_id,
+        scan_groups,
+        progress_callback=progress_callback,
+    )
+    for chunk_id in chunk_ids:
+        if chunk_id in errors:
+            continue
+        for record in records_by_chunk.get(chunk_id, ()):
+            reason = _recovery_provenance_error(
+                record,
+                run_id=run_id,
+                chunk_id=chunk_id,
+                expected_hash=expected_outputs[(record.processor_id, record.grain)],
+                summaries=summaries,
+                scan_errors=scan_errors,
+            )
+            if reason is not None:
+                errors[chunk_id] = reason
+                break
+    return errors
+
+
+def _lineage_records_for_run(
+    workspace_path: str | Path,
+    *,
+    source_id: str,
+    run_id: str,
+) -> dict[str, tuple[_RecoveryLineage, ...]]:
+    """Fetch all lineage for one stale run in a single metadata query."""
+
+    lineage_db = meta_dir(workspace_path) / "lineage.duckdb"
     with duckdb.connect(str(lineage_db), read_only=True) as conn:
         rows = conn.execute(
             """
-            SELECT processor_id, grain, period, partial_path, config_hash, rows
+            SELECT chunk_id, processor_id, grain, period, partial_path, config_hash, rows
             FROM lineage
-            WHERE source_id = ? AND pipeline_run_id = ? AND chunk_id = ?
-            ORDER BY processor_id, grain, period
+            WHERE source_id = ? AND pipeline_run_id = ?
+            ORDER BY chunk_id, processor_id, grain, period
             """,
-            (source_id, run_id, chunk_id),
+            (source_id, run_id),
         ).fetchall()
+    grouped: dict[str, list[_RecoveryLineage]] = {}
+    for chunk_id, processor_id, grain, period, raw_path, config_hash, row_count in rows:
+        grouped.setdefault(str(chunk_id), []).append(
+            _RecoveryLineage(
+                processor_id=str(processor_id),
+                grain=str(grain),
+                period=str(period),
+                path=Path(str(raw_path)).resolve(),
+                config_hash=str(config_hash),
+                rows=int(row_count) if row_count is not None else None,
+            )
+        )
+    return {chunk_id: tuple(records) for chunk_id, records in grouped.items()}
 
-    lineage_paths = {Path(str(row[3])).resolve() for row in rows}
+
+def _physical_recovery_path_index(
+    aggregate_root: Path,
+    run_id: str,
+) -> dict[str, frozenset[Path]]:
+    """Index physical part paths for one stale run with a single tree traversal."""
+
     safe_run = _safe_name(run_id)
-    safe_chunk = _safe_name(chunk_id)
-    physical_paths = {
-        path.resolve()
-        for path in aggregate_root.glob(f"*/*/period=*/part-{safe_run}-{safe_chunk}.parquet")
-        if path.is_file()
-    }
+    grouped: dict[str, set[Path]] = {}
+    for path in aggregate_root.glob(f"*/*/period=*/part-{safe_run}-*.parquet"):
+        if path.is_file():
+            grouped.setdefault(path.name, set()).add(path.resolve())
+    return {name: frozenset(paths) for name, paths in grouped.items()}
+
+
+def _chunk_recovery_metadata_error(
+    records: tuple[_RecoveryLineage, ...],
+    *,
+    aggregate_root: Path,
+    run_id: str,
+    chunk_id: str,
+    physical_path_index: Mapping[str, frozenset[Path]],
+    expected_outputs: Mapping[tuple[str, str], str],
+) -> str | None:
+    """Validate lineage completeness, layout, and current computation hashes."""
+
+    expected_name = f"part-{_safe_name(run_id)}-{_safe_name(chunk_id)}.parquet"
+    physical_paths = physical_path_index.get(expected_name, frozenset())
+    lineage_paths = {record.path for record in records}
     if physical_paths != lineage_paths:
         return "physical aggregate files do not match committed lineage"
 
-    for processor_id, grain, period, raw_path, lineage_hash, lineage_rows in rows:
-        path = Path(str(raw_path)).resolve()
+    for record in records:
+        path = record.path
         if not path.is_relative_to(aggregate_root) or not path.is_file():
             return f"lineage path is missing or outside the source aggregate root: {path}"
-        expected_hash = expected_outputs.get((str(processor_id), str(grain)))
-        if expected_hash is None or str(lineage_hash) != expected_hash:
+        expected_hash = expected_outputs.get((record.processor_id, record.grain))
+        if expected_hash is None or record.config_hash != expected_hash:
             return "lineage processor/grain or computation hash is not current"
         relative = path.relative_to(aggregate_root)
         if len(relative.parts) < 4:
             return f"lineage path has an invalid aggregate layout: {path}"
         path_processor, path_grain, path_period = relative.parts[:3]
         if (
-            path_processor != str(processor_id)
-            or path_grain != str(grain)
-            or path_period != f"period={period}"
+            path_processor != record.processor_id
+            or path_grain != record.grain
+            or path_period != f"period={record.period}"
         ):
             return f"lineage metadata does not match aggregate path: {path}"
-        try:
-            summary = (
-                pl.scan_parquet(path)
-                .select(
-                    pl.col("pipeline_run_id").cast(pl.String).drop_nulls().unique().implode(),
-                    pl.col("chunk_id").cast(pl.String).drop_nulls().unique().implode(),
-                    pl.col("config_hash").cast(pl.String).drop_nulls().unique().implode(),
-                    pl.col("period").cast(pl.String).drop_nulls().unique().implode(),
-                    pl.len().alias("rows"),
-                )
-                .collect()
-                .row(0)
-            )
-        except Exception as exc:
-            return f"aggregate provenance cannot be read: {path}: {exc}"
-        run_ids, chunk_ids, config_hashes, periods, physical_rows = summary
-        if run_ids != [run_id] or chunk_ids != [chunk_id]:
-            return f"aggregate run/chunk provenance does not match lineage: {path}"
-        if config_hashes != [expected_hash] or periods != [str(period)]:
-            return f"aggregate config/period provenance does not match lineage: {path}"
-        if lineage_rows is not None and int(physical_rows) != int(lineage_rows):
-            return f"aggregate row count does not match lineage: {path}"
     return None
 
 
-def _mark_chunk_recovery_failed(
+def _scan_recovery_groups(
+    source_id: str,
+    run_id: str,
+    groups: Mapping[tuple[str, str], set[Path]],
+    *,
+    progress_callback: RecoveryProgressCallback | None,
+) -> tuple[dict[Path, _RecoveryFileSummary], dict[Path, str]]:
+    """Scan schema-compatible processor/grain files together, isolating bad files on error."""
+
+    summaries: dict[Path, _RecoveryFileSummary] = {}
+    errors: dict[Path, str] = {}
+    ordered_groups = sorted(groups.items())
+    for index, ((processor_id, grain), raw_paths) in enumerate(ordered_groups, start=1):
+        paths = tuple(sorted(raw_paths))
+        if progress_callback is not None:
+            progress_callback(
+                RecoveryProgress(
+                    source_id=source_id,
+                    run_id=run_id,
+                    processor_id=processor_id,
+                    grain=grain,
+                    group_order=index,
+                    groups_total=len(ordered_groups),
+                    files=paths,
+                )
+            )
+        logger.info(
+            "Verifying interrupted run aggregate group: run_id=%s group=%s/%s "
+            "processor=%s grain=%s files=%s",
+            run_id,
+            index,
+            len(ordered_groups),
+            processor_id,
+            grain,
+            len(paths),
+        )
+        try:
+            summaries.update(_scan_recovery_group(paths))
+        except Exception:
+            logger.warning(
+                "Batched recovery provenance scan failed; retrying files separately: "
+                "run_id=%s processor=%s grain=%s files=%s",
+                run_id,
+                processor_id,
+                grain,
+                len(paths),
+                exc_info=True,
+            )
+            for path in paths:
+                try:
+                    summaries.update(_scan_recovery_group((path,)))
+                except Exception as exc:
+                    errors[path] = str(exc)
+    return summaries, errors
+
+
+def _scan_recovery_group(paths: tuple[Path, ...]) -> dict[Path, _RecoveryFileSummary]:
+    """Read only embedded provenance columns and summarize each supplied Parquet file."""
+
+    if not paths:
+        return {}
+    frame = (
+        pl.scan_parquet(
+            [str(path) for path in paths],
+            glob=False,
+            hive_partitioning=False,
+            include_file_paths=_RECOVERY_PATH_COLUMN,
+        )
+        .group_by(_RECOVERY_PATH_COLUMN)
+        .agg(
+            pl.col("pipeline_run_id").cast(pl.String).drop_nulls().unique().sort().alias("run_ids"),
+            pl.col("chunk_id").cast(pl.String).drop_nulls().unique().sort().alias("chunk_ids"),
+            pl.col("config_hash")
+            .cast(pl.String)
+            .drop_nulls()
+            .unique()
+            .sort()
+            .alias("config_hashes"),
+            pl.col("period").cast(pl.String).drop_nulls().unique().sort().alias("periods"),
+            pl.len().alias("rows"),
+            (
+                pl.col("pipeline_run_id").is_null().any()
+                | pl.col("chunk_id").is_null().any()
+                | pl.col("config_hash").is_null().any()
+                | pl.col("period").is_null().any()
+            ).alias("has_null_provenance"),
+        )
+        .collect()
+    )
+    summaries: dict[Path, _RecoveryFileSummary] = {}
+    for row in frame.iter_rows(named=True):
+        path = Path(str(row[_RECOVERY_PATH_COLUMN])).resolve()
+        summaries[path] = _RecoveryFileSummary(
+            run_ids=tuple(str(value) for value in row["run_ids"]),
+            chunk_ids=tuple(str(value) for value in row["chunk_ids"]),
+            config_hashes=tuple(str(value) for value in row["config_hashes"]),
+            periods=tuple(str(value) for value in row["periods"]),
+            rows=int(row["rows"]),
+            has_null_provenance=bool(row["has_null_provenance"]),
+        )
+    return summaries
+
+
+def _recovery_provenance_error(  # noqa: PLR0911 - explicit invariant diagnostics
+    record: _RecoveryLineage,
+    *,
+    run_id: str,
+    chunk_id: str,
+    expected_hash: str,
+    summaries: Mapping[Path, _RecoveryFileSummary],
+    scan_errors: Mapping[Path, str],
+) -> str | None:
+    """Compare one lineage record with its batched physical-file summary."""
+
+    path = record.path
+    if path in scan_errors:
+        return f"aggregate provenance cannot be read: {path}: {scan_errors[path]}"
+    summary = summaries.get(path)
+    if summary is None:
+        return f"aggregate provenance cannot be read: {path}: file contains no rows"
+    if summary.has_null_provenance:
+        return f"aggregate provenance contains null run/chunk/config/period values: {path}"
+    if summary.run_ids != (run_id,) or summary.chunk_ids != (chunk_id,):
+        return f"aggregate run/chunk provenance does not match lineage: {path}"
+    if summary.config_hashes != (expected_hash,) or summary.periods != (record.period,):
+        return f"aggregate config/period provenance does not match lineage: {path}"
+    if record.rows is not None and summary.rows != record.rows:
+        return f"aggregate row count does not match lineage: {path}"
+    return None
+
+
+def _mark_chunk_recovery_failures(
     workspace_path: str | Path,
     *,
     source_id: str,
     run_id: str,
-    chunk_id: str,
-    reason: str,
+    errors: Mapping[str, str],
 ) -> None:
     with duckdb.connect(str(meta_dir(workspace_path) / "chunks.duckdb")) as conn:
-        conn.execute(
+        conn.executemany(
             """
             UPDATE chunks
             SET status = 'failed', error = ?
             WHERE source_id = ? AND pipeline_run_id = ? AND chunk_id = ?
             """,
-            (f"recovery verification failed: {reason}", source_id, run_id, chunk_id),
+            [
+                (f"recovery verification failed: {reason}", source_id, run_id, chunk_id)
+                for chunk_id, reason in errors.items()
+            ],
         )
 
 
 def _safe_name(value: str) -> str:
     return "".join(
-        character if character.isalnum() or character in "-_" else "_" for character in value
+        character if character.isalnum() or character in "-_." else "_" for character in value
     )
 
 
@@ -650,9 +923,10 @@ def insert_lineage_files(
     """Record complete file lineage and return the committed record count."""
 
     ensure(workspace_path)
-    aggregate_root = Path(workspace_path) / "aggregates"
+    aggregate_root = (Path(workspace_path) / "aggregates").resolve()
     records: list[tuple[object, ...]] = []
-    for path in paths:
+    for raw_path in paths:
+        path = raw_path.resolve()
         try:
             relative = path.relative_to(aggregate_root)
         except ValueError as exc:
@@ -702,8 +976,75 @@ def insert_lineage_files(
     return len(records)
 
 
+def insert_lineage_records(
+    workspace_path: str | Path,
+    *,
+    records: tuple[AggregateWriteReceipt, ...] | list[AggregateWriteReceipt],
+) -> int:
+    """Persist write-time lineage receipts without reopening aggregate files."""
+
+    ensure(workspace_path)
+    if not records:
+        return 0
+    aggregate_root = (Path(workspace_path) / "aggregates").resolve()
+    values: list[tuple[object, ...]] = []
+    for record in records:
+        path = record.path.resolve()
+        try:
+            relative = path.relative_to(aggregate_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"aggregate lineage path is outside the workspace: {record.path}"
+            ) from exc
+        expected_prefix = (
+            record.source_id,
+            record.processor_id,
+            record.grain,
+            f"period={record.period}",
+        )
+        if len(relative.parts) < 5 or relative.parts[:4] != expected_prefix:
+            raise ValueError(
+                f"aggregate write receipt does not match its physical path: {record.path}"
+            )
+        try:
+            size_bytes = path.stat().st_size
+        except FileNotFoundError as exc:
+            raise ValueError(f"aggregate write receipt path is missing: {record.path}") from exc
+        if size_bytes != record.size_bytes:
+            raise ValueError(
+                f"aggregate write receipt size does not match its physical file: {record.path}"
+            )
+        values.append(
+            (
+                record.pipeline_run_id,
+                record.chunk_id,
+                record.source_id,
+                record.processor_id,
+                record.grain,
+                record.period,
+                str(path),
+                record.config_hash,
+                record.rows,
+                record.created_at,
+            )
+        )
+    with duckdb.connect(str(meta_dir(workspace_path) / "lineage.duckdb")) as conn:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO lineage
+            (pipeline_run_id, chunk_id, source_id, processor_id, grain, period,
+             partial_path, config_hash, rows, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            values,
+        )
+    return len(values)
+
+
 __all__ = [
     "RecoveredRun",
+    "RecoveryProgress",
+    "RecoveryProgressCallback",
     "aggregate_lineage_paths",
     "chunk_done",
     "done_chunk_ids",
@@ -714,6 +1055,7 @@ __all__ = [
     "insert_chunk",
     "insert_config_version",
     "insert_lineage_files",
+    "insert_lineage_records",
     "insert_run",
     "recover_stale_runs",
     "source_run_lock",
