@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 
 from valuestream.algorithms import rfm
-from valuestream.states import theta, topk
+from valuestream.states import hll, theta, topk
 
 
 @pytest.mark.unit
@@ -19,6 +19,17 @@ def test_theta_set_algebra_exact_for_small_sets() -> None:
     assert theta.estimate(theta.merge([left, right])) == pytest.approx(4.0)
     assert theta.estimate(theta.intersect([left, right])) == pytest.approx(2.0)
     assert theta.estimate(theta.a_not_b(left, right)) == pytest.approx(1.0)
+    lower, upper = theta.bounds(left)
+    assert lower <= 3 <= upper
+
+
+@pytest.mark.unit
+def test_hll_bounds_cover_small_exact_cardinality() -> None:
+    payload = hll.build(["a", "b", "c"])
+
+    lower, upper = hll.bounds(payload)
+
+    assert lower <= 3 <= upper
 
 
 @pytest.mark.unit
@@ -29,6 +40,7 @@ def test_topk_merge_returns_frequent_items() -> None:
     merged = topk.merge([first, second])
     items = topk.frequent_items(merged)
 
+    assert topk.weight(merged) == 6
     assert items[0]["item"] in {"web", "branch"}
     assert {item["item"]: item["estimate"] for item in items}["web"] == 3
 

@@ -1574,6 +1574,15 @@
           "title": "Kind",
           "type": "string"
         },
+        "sketch_build_mode": {
+          "default": "legacy",
+          "enum": [
+            "legacy",
+            "bulk"
+          ],
+          "title": "Sketch Build Mode",
+          "type": "string"
+        },
         "source": {
           "title": "Source",
           "type": "string"
@@ -3960,6 +3969,15 @@
         "kind": {
           "const": "score_distribution",
           "title": "Kind",
+          "type": "string"
+        },
+        "sketch_build_mode": {
+          "default": "legacy",
+          "enum": [
+            "legacy",
+            "bulk"
+          ],
+          "title": "Sketch Build Mode",
           "type": "string"
         },
         "source": {

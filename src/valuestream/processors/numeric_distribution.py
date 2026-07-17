@@ -84,16 +84,40 @@ class NumericDistributionProcessor:
                     pl.col(prop).var().alias(f"{prop}_Var"),
                     pl.col(prop).min().alias(f"{prop}_Min"),
                     pl.col(prop).max().alias(f"{prop}_Max"),
-                    pl.col(prop).drop_nulls().alias(f"__values_{prop}"),
                 ]
             )
+            if self.config.sketch_build_mode == "legacy":
+                agg_exprs.append(pl.col(prop).drop_nulls().alias(f"__values_{prop}"))
         generic_sketches = self._generic_sketch_columns(existing, numeric_props)
-        agg_exprs.extend(expression for expression, _ in generic_sketches)
+        remaining_sketches = generic_sketches
+        if self.config.sketch_build_mode == "bulk":
+            distribution_sketches: list[p3.DistributionSketchSpec] = [
+                (
+                    f"{prop}_{self.quantile_engine}",
+                    self.quantile_engine,
+                    _sketch_k(self.state_specs[f"{prop}_{self.quantile_engine}"]),
+                    pl.col(prop).drop_nulls(),
+                )
+                for prop in numeric_props
+            ]
+            remaining_sketches = []
+            for expression, metadata in generic_sketches:
+                name, state_type, sketch_k = metadata
+                if state_type in {"tdigest", "kll"}:
+                    distribution_sketches.append((name, state_type, sketch_k, expression))
+                else:
+                    remaining_sketches.append((expression, metadata))
+            if distribution_sketches:
+                agg_exprs.append(p3.distribution_sketch_expr(distribution_sketches))
+        agg_exprs.extend(expression for expression, _ in remaining_sketches)
         grouped = source.group_by(group_keys).agg(agg_exprs)
-        grouped = self._postprocess_sketches(grouped, numeric_props)
+        if self.config.sketch_build_mode == "bulk":
+            grouped = p3.unnest_distribution_sketches(grouped)
+        else:
+            grouped = self._postprocess_sketches(grouped, numeric_props)
         grouped = p3.postprocess_sketches(
             grouped,
-            [metadata for _, metadata in generic_sketches],
+            [metadata for _, metadata in remaining_sketches],
         )
         grouped = self._ensure_state_columns(grouped)
         return p3.with_provenance(
@@ -118,15 +142,22 @@ class NumericDistributionProcessor:
             target_grain=target_grain,
         )
         return p3.with_static_provenance(
-            self.merge(plan.frame, group_columns=plan.group_columns),
+            p3.compact_state_frame(
+                plan.frame,
+                self.state_specs,
+                plan.group_columns,
+                self.merge,
+                identity_level=(
+                    self.config.aggregation_level_for(target_grain)
+                    == grain_levels.finest_configured_level(self.config)
+                ),
+            ),
             self.config_hash,
             ctx,
         )
 
     @timed
-    def merge(
-        self, frame: pl.DataFrame, group_columns: list[str] | None = None
-    ) -> pl.DataFrame:
+    def merge(self, frame: pl.DataFrame, group_columns: list[str] | None = None) -> pl.DataFrame:
         """Merge partial aggregate rows using Phase 2 state rules."""
         return p3.merge_state_frame(frame, self.state_specs, group_columns)
 
@@ -142,25 +173,16 @@ class NumericDistributionProcessor:
             helper = f"__values_{prop}"
             if helper not in columns:
                 continue
-            if self.quantile_engine == "kll":
-                out = out.with_columns(
-                    pl.col(helper)
-                    .map_elements(
-                        partial(_build_kll, k=_sketch_k(self.state_specs[f"{prop}_kll"])),
-                        return_dtype=pl.Binary,
-                    )
-                    .alias(f"{prop}_kll")
+            state_name = f"{prop}_{self.quantile_engine}"
+            build = _build_kll if self.quantile_engine == "kll" else _build_tdigest
+            out = out.with_columns(
+                pl.col(helper)
+                .map_elements(
+                    partial(build, k=_sketch_k(self.state_specs[state_name])),
+                    return_dtype=pl.Binary,
                 )
-            else:
-                out = out.with_columns(
-                    pl.col(helper)
-                    .map_elements(
-                        partial(_build_tdigest, k=_sketch_k(self.state_specs[f"{prop}_tdigest"])),
-                        return_dtype=pl.Binary,
-                    )
-                    .alias(f"{prop}_tdigest")
-                )
-            out = out.drop(helper)
+                .alias(state_name)
+            ).drop(helper)
         return out
 
     def _ensure_state_columns(self, frame: pl.LazyFrame) -> pl.LazyFrame:
@@ -172,9 +194,7 @@ class NumericDistributionProcessor:
         numeric_props: list[str],
     ) -> list[tuple[pl.Expr, tuple[str, str, int]]]:
         columns: list[tuple[pl.Expr, tuple[str, str, int]]] = []
-        standard_digest_names = {
-            f"{prop}_{self.quantile_engine}" for prop in numeric_props
-        }
+        standard_digest_names = {f"{prop}_{self.quantile_engine}" for prop in numeric_props}
         for name, spec in self.state_specs.items():
             if spec.type not in {"tdigest", "kll", "cpc", "hll", "theta", "topk"}:
                 continue
@@ -206,11 +226,11 @@ def _sketch_k(spec: model.StateSpec) -> int:
 
 
 def _build_tdigest(values: Any, k: int) -> bytes:
-    return tdigest.build(p3.series_or_list(values), k=k)
+    return tdigest.build(values if values is not None else [], k=k)
 
 
 def _build_kll(values: Any, k: int) -> bytes:
-    return kll.build(p3.series_or_list(values), k=k)
+    return kll.build(values if values is not None else [], k=k)
 
 
 __all__ = ["NumericDistributionProcessor"]

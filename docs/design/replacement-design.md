@@ -1047,31 +1047,58 @@ def run_source(source_id: str) -> RunReport:
     run_id = uuid4()
     config_hash = hash_canonical(cfg)
 
-    write_run(pipeline_runs, run_id, source_id, config_hash, status="running")
-
     files = discover_files(source.reader)
     chunks = group_files_by_pattern(files, source.reader)
-
     processors = [p for p in cfg.processors if p.source == source_id]
+    recover_stale_running_runs(source, chunks, processors, config_hash)
+    write_run(
+        pipeline_runs,
+        run_id,
+        source_id,
+        config_hash,
+        status="running",
+        chunks_total=len(chunks),
+    )
 
-    for chunk_id, files in chunks.items():
-        if already_processed(source_id, chunk_id, config_hash):
-            continue
-        with chunk_lifecycle(run_id, source_id, chunk_id):
-            lf = read_files_lazy(files, source.reader)
-            lf = apply_transforms(lf, source.transforms)
+    try:
+        for chunk_id, files in chunks.items():
+            if already_processed(source_id, chunk_id, config_hash):
+                continue
+            with chunk_lifecycle(run_id, source_id, chunk_id):
+                lf = read_files_lazy(files, source.reader)
+                lf = apply_transforms(lf, source.transforms)
 
-            for proc in processors:
-                partial = proc.chunk_aggregate(lf, ctx=ChunkCtx(run_id, chunk_id))
-                write_partial(proc, chunk_id, partial)
+                written = []
+                for proc in processors:
+                    partial = proc.chunk_aggregate(lf, ctx=ChunkCtx(run_id, chunk_id))
+                    written.extend(write_partial(proc, chunk_id, partial))
 
-            write_chunk_meta(...)
+                write_complete_lineage(run_id, chunk_id, written)
+                write_chunk_meta(status="ok", ...)  # final chunk commit marker
 
-    compact_grains(processors)             # daily -> monthly -> summary
-    refresh_duckdb_views()
-
-    finalize_run(run_id, status="ok")
+        finalize_run(run_id, status=derive_terminal_status())
+        refresh_duckdb_views()
+    finally:
+        finalize_running_run_from_committed_chunks(run_id)
 ```
+
+The source lock is acquired outside this loop. Once held, any older `running`
+row for the same source is stale. Recovery publishes an old run as `partial`
+only after each retained `ok` chunk passes current input-fingerprint,
+source/processor computation-hash, complete-lineage, physical-file, and
+embedded-provenance checks. Invalid chunk markers are downgraded and the raw
+chunk is processed again. A stale run with no retained chunk becomes `failed`.
+
+The durable commit order is:
+
+1. write every aggregate through temporary file + atomic rename;
+2. commit lineage for every written path;
+3. insert the chunk's `status='ok'` row as the chunk commit marker;
+4. transition the existing run from `running` to `ok`, `partial`, or `failed`.
+
+Zero-output chunks are valid: lineage count zero and written-path count zero
+still precede the chunk marker. Files or lineage without a committed chunk row
+remain invisible and are handled by retry/vacuum.
 
 ### 10.2 Discovery and grouping
 
@@ -1091,19 +1118,41 @@ each selected source. Physical aggregate files from earlier or now-absent
 chunks are removed only after those checks. DuckDB run, chunk, lineage, and
 configuration-version metadata is not deleted.
 
-### 10.3 Backpressure and streaming
+### 10.3 Transform materialization and streaming
 
-Polars streaming engine is opt-in per source (`reader.streaming: true`). For very large chunks the engine collects the source LazyFrame once, aliases it through the Polars LRU cache, and fans out to processors so the IO is paid once. Memory pressure is monitored — if RSS exceeds a configured ceiling the engine spills the source DataFrame to a temporary parquet and re-scans for each processor.
+Polars streaming execution is opt-in per source (`reader.streaming: true`).
+When `materialize_transforms: true` is also set, one chunk has two explicit
+execution stages:
 
-### 10.4 Async fan-out
+1. the reader and source-transform plans collect once with the configured
+   source engine into one eager transformed DataFrame;
+2. every processor plan fans out from that shared DataFrame with Polars'
+   in-memory engine, because sketch construction and other Python callbacks are
+   not streaming-native.
 
-Processors are independent. The engine launches them with `asyncio.gather` (one task per processor) and Polars' background collect path. This mirrors the current `collect_ih_metrics_data` design but is generalized to N processors of arbitrary kind.
+The engine releases the shared transformed frame after processor fan-out and
+releases each collected processor frame after its aggregates are written. This
+bounds raw-frame ownership to one active chunk per worker, but it does not impose
+an RSS ceiling: the final transformed frame must still fit in memory and the
+allocator may retain freed pages for reuse. There is currently no automatic RSS
+pause or spill-to-Parquet path. Operators control memory with chunk size and
+bounded chunk-process parallelism, and verify peak RSS with the ingestion
+benchmark.
+
+### 10.4 Processor fan-out
+
+Processor lazy plans are collected as one batch. With transform materialization
+they use the shared in-memory frame described above; without it they remain
+branches of the source lazy plan and use the configured source engine. If the
+batched collect fails, the chunk runner retries the processors sequentially;
+failure of that fallback fails the whole chunk.
 
 ### 10.5 Failure semantics
 
-- A processor failure isolates to that processor. Other processors finish; the failed one is recorded in `chunks` with `status='failed'` and an error message; the run is marked `status='partial'`.
+- A processor failure fails the whole chunk. None of that chunk's new files are published; other chunks continue. The run is `partial` when another chunk commits successfully and `failed` otherwise.
 - Source-level failures (e.g. unreadable file) abort the chunk, not the run; subsequent chunks are processed.
 - Re-running the source picks up only failed/missing chunks unless `--force` is set.
+- A hard process termination leaves the run `running` and therefore invisible. The next invocation under the source lock verifies committed chunks, finalizes the stale run, refreshes views, and reuses only verified chunks.
 
 ---
 

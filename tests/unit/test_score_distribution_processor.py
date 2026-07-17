@@ -10,6 +10,7 @@ import pytest
 from valuestream.algorithms.curves import curve_from_digests
 from valuestream.config import model
 from valuestream.processors.binary_outcome import ChunkContext
+from valuestream.processors.context import SOURCE_ORDER_COLUMN
 from valuestream.processors.score_distribution import ScoreDistributionProcessor
 from valuestream.states import cpc, kll, tdigest, topk
 
@@ -286,3 +287,87 @@ def test_explicit_kll_and_topk_recipe_states_are_materialized() -> None:
 
     assert kll.quantile(out["Priority_kll"][0], 0.5) == pytest.approx(3.0)
     assert topk.frequent_items(out["Category_topk"][0])[0]["item"] == "A"
+
+
+def test_bulk_sketch_mode_matches_legacy_mixed_distribution_semantics() -> None:
+    base_config = {
+        "id": "scores",
+        "source": "ih",
+        "kind": "score_distribution",
+        "group_by": ["Channel"],
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": ["Clicked"],
+            "negative_values": ["Impression"],
+        },
+        "states": {
+            "Count": {"type": "count"},
+            "Score_tdigest": {
+                "type": "tdigest",
+                "source_column": "Score",
+            },
+            "Score_kll": {
+                "type": "kll",
+                "source_column": "Score",
+                "k": 200,
+            },
+        },
+    }
+    legacy = ScoreDistributionProcessor(
+        model.ScoreDistributionProcessor.model_validate(base_config)
+    )
+    bulk = ScoreDistributionProcessor(
+        model.ScoreDistributionProcessor.model_validate(
+            {**base_config, "sketch_build_mode": "bulk"}
+        )
+    )
+    frame = pl.DataFrame(
+        {
+            "Channel": ["Web"] * 64 + ["Mobile"] * 64,
+            "Outcome": ["Clicked", "Impression"] * 64,
+            "Score": [float(value) / 128 for value in range(128)],
+        }
+    )
+
+    legacy_out = legacy.chunk_aggregate(frame.lazy(), _ctx()).sort("Channel")
+    bulk_out = bulk.chunk_aggregate(frame.lazy(), _ctx()).sort("Channel")
+
+    assert bulk_out.select("Channel", "Count").equals(legacy_out.select("Channel", "Count"))
+    for row in range(2):
+        legacy_tdigest = legacy_out["Score_tdigest"][row]
+        bulk_tdigest = bulk_out["Score_tdigest"][row]
+        legacy_kll = legacy_out["Score_kll"][row]
+        bulk_kll = bulk_out["Score_kll"][row]
+        assert tdigest.weight(bulk_tdigest) == tdigest.weight(legacy_tdigest)
+        assert tdigest.quantile(bulk_tdigest, 0.5) == pytest.approx(
+            tdigest.quantile(legacy_tdigest, 0.5), abs=0.02
+        )
+        assert kll.count(bulk_kll) == kll.count(legacy_kll)
+        assert kll.quantile(bulk_kll, 0.5) == pytest.approx(kll.quantile(legacy_kll, 0.5), abs=0.02)
+
+
+def test_source_order_keeps_bounded_ml_samples_invariant_across_bulk_plan() -> None:
+    rows = 50_002
+    legacy = _processor()
+    bulk = ScoreDistributionProcessor(
+        legacy.config.model_copy(update={"sketch_build_mode": "bulk"})
+    )
+    frame = pl.DataFrame(
+        {
+            SOURCE_ORDER_COLUMN: range(rows),
+            "Channel": ["Web"] * rows,
+            "Outcome": ["Clicked", "Impression"] * (rows // 2) + ["Clicked"] * (rows % 2),
+            "Propensity": [(index % 1_000) / 1_000 for index in range(rows)],
+            "FinalPropensity": [((index * 7) % 1_000) / 1_000 for index in range(rows)],
+            "CustomerID": [f"customer-{index % 200}" for index in range(rows)],
+            "InteractionID": [f"interaction-{index}" for index in range(rows)],
+            "Name": [f"action-{(index // 17) % 23}" for index in range(rows)],
+        }
+    )
+
+    legacy_out = legacy.chunk_aggregate(frame.lazy(), _ctx())
+    bulk_out = bulk.chunk_aggregate(frame.reverse().lazy(), _ctx())
+
+    assert bulk_out.select("Count", "personalization", "novelty").equals(
+        legacy_out.select("Count", "personalization", "novelty")
+    )

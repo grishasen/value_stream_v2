@@ -402,22 +402,25 @@ dimension or state.
 
 ---
 
-## 10. Memory budget
+## 10. Memory ownership
 
-The engine measures memory pressure between chunks (`psutil.Process.memory_info().rss`) and:
+`reader.streaming: true` selects Polars' streaming engine for compatible source
+scan and transform operations. Streaming reduces transient execution memory but
+does not make the result of a collection lazy or guarantee a fixed RSS ceiling.
 
-- if `RSS > 0.7 × machine_total`, it spills the source's collected DataFrame to a temporary Parquet and re-scans for each processor (one extra disk pass for safety).
-- if `RSS > 0.9 × machine_total`, it pauses processing and waits for memory to free.
+With `materialize_transforms: true`, the transformed result is collected once as
+one eager DataFrame and reused by every processor. Processor plans run with the
+in-memory engine because sketch builders and other Python callbacks are not
+streaming-native. The shared frame is released immediately after processor
+fan-out, and processor output frames are released one at a time after their
+aggregate files are written. The allocator may retain released pages for later
+chunks, so process RSS need not fall immediately.
 
-These thresholds are configurable in `pipelines.yaml`:
-
-```yaml
-defaults:
-  memory:
-    spill_threshold: 0.7
-    pause_threshold: 0.9
-    rss_log_every_chunks: 31    # debug RSS log every Nth chunk
-```
+There is currently no automatic RSS threshold, processing pause, or spill of a
+materialized chunk to temporary Parquet. If a transformed chunk does not fit,
+reduce the chunk grouping interval and run with lower chunk-process parallelism.
+Use the ingestion benchmark to measure peak RSS for the actual source and
+processor catalog.
 
 ---
 

@@ -116,7 +116,17 @@ class BinaryOutcomeProcessor:
             state_specs=self.state_specs,
             target_grain=target_grain,
         )
-        merged = self.merge(plan.frame, group_columns=plan.group_columns)
+        merged = p3.compact_state_frame(
+            plan.frame,
+            self.state_specs,
+            plan.group_columns,
+            self.merge,
+            identity_level=(
+                self.config.aggregation_level_for(target_grain)
+                == grain_levels.finest_configured_level(self.config)
+            ),
+        )
+        merged = self._with_negatives(merged)
         return p3.with_static_provenance(merged, self.config_hash, ctx)
 
     @timed
@@ -124,9 +134,7 @@ class BinaryOutcomeProcessor:
         """Merge partial aggregate rows using state-specific rules."""
         if frame.is_empty():
             return frame
-        return self._with_negatives(
-            p3.merge_state_frame(frame, self.state_specs, group_columns)
-        )
+        return self._with_negatives(p3.merge_state_frame(frame, self.state_specs, group_columns))
 
     @timed
     def merge_for_query(self, frame: pl.DataFrame, group_columns: list[str]) -> pl.DataFrame:
@@ -204,4 +212,6 @@ class BinaryOutcomeProcessor:
         if {"Count", "Positives"} <= columns:
             return frame.with_columns((pl.col("Count") - pl.col("Positives")).alias("Negatives"))
         return frame
+
+
 __all__ = ["PROVENANCE_COLUMNS", "BinaryOutcomeProcessor", "ChunkContext"]

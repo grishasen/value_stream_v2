@@ -15,7 +15,7 @@ from valuestream.config import model
 from valuestream.config.canonical import processor_config_hash
 from valuestream.expr.translator import translate
 from valuestream.processors import grain_levels
-from valuestream.processors.context import ChunkContext
+from valuestream.processors.context import SOURCE_ORDER_COLUMN, ChunkContext
 from valuestream.processors.outcomes import compatible_values, is_in_values, parse_outcome
 from valuestream.states import kll, tdigest
 from valuestream.utils.timer import timed
@@ -91,6 +91,8 @@ class ScoreDistributionProcessor:
             if column and column in existing
         ]
         grouped = source.group_by(group_keys).agg(self._agg_exprs(existing, scores))
+        if self.config.sketch_build_mode == "bulk":
+            grouped = p3.unnest_distribution_sketches(grouped)
         frame_out = self._postprocess(grouped, existing)
         if "__PositiveCount" in frame_out.collect_schema().names():
             frame_out = frame_out.filter(pl.col("__PositiveCount") > 0).drop("__PositiveCount")
@@ -117,7 +119,16 @@ class ScoreDistributionProcessor:
             target_grain=target_grain,
         )
         return p3.with_static_provenance(
-            self.merge(plan.frame, group_columns=plan.group_columns),
+            p3.compact_state_frame(
+                plan.frame,
+                self.state_specs,
+                plan.group_columns,
+                self.merge,
+                identity_level=(
+                    self.config.aggregation_level_for(target_grain)
+                    == grain_levels.finest_configured_level(self.config)
+                ),
+            ),
             self.config_hash,
             ctx,
         )
@@ -137,6 +148,7 @@ class ScoreDistributionProcessor:
             pl.len().alias("Count"),
             pl.col("__vs_positive").sum().alias("__PositiveCount"),
         ]
+        distribution_sketches: list[p3.DistributionSketchSpec] = []
         for name, spec in self.state_specs.items():
             extra = p3.spec_extra(spec)
             if spec.type in {"tdigest", "kll"}:
@@ -151,18 +163,23 @@ class ScoreDistributionProcessor:
                 if outcome_role in {"positive", "negative"}:
                     desired = outcome_role == "positive"
                     values = values.filter(pl.col("__vs_positive") == desired)
-                exprs.append(
-                    pl.map_groups(
-                        exprs=[values.drop_nulls()],
-                        function=partial(
-                            _build_distribution_group,
-                            state_type=spec.type,
-                            k=_sketch_k(spec),
-                        ),
-                        return_dtype=pl.Binary,
-                        returns_scalar=True,
-                    ).alias(name)
-                )
+                if self.config.sketch_build_mode == "bulk":
+                    distribution_sketches.append(
+                        (name, spec.type, _sketch_k(spec), values.drop_nulls())
+                    )
+                else:
+                    exprs.append(
+                        pl.map_groups(
+                            exprs=[values.drop_nulls()],
+                            function=partial(
+                                _build_distribution_group,
+                                state_type=spec.type,
+                                k=_sketch_k(spec),
+                            ),
+                            return_dtype=pl.Binary,
+                            returns_scalar=True,
+                        ).alias(name)
+                    )
             elif spec.type in {"cpc", "hll", "theta", "topk"}:
                 expression, _ = p3.sketch_build_expr(
                     name,
@@ -175,7 +192,7 @@ class ScoreDistributionProcessor:
         if {"CustomerID", "Name"} <= existing and "personalization" in self.state_specs:
             exprs.append(
                 pl.map_groups(
-                    exprs=["CustomerID", "Name"],
+                    exprs=_source_order_inputs(existing, "CustomerID", "Name"),
                     function=_personalization_group,
                     return_dtype=pl.Float64,
                     returns_scalar=True,
@@ -184,12 +201,14 @@ class ScoreDistributionProcessor:
         if {"CustomerID", "InteractionID", "Name"} <= existing and "novelty" in self.state_specs:
             exprs.append(
                 pl.map_groups(
-                    exprs=["CustomerID", "InteractionID", "Name"],
+                    exprs=_source_order_inputs(existing, "CustomerID", "InteractionID", "Name"),
                     function=_novelty_group,
                     return_dtype=pl.Float64,
                     returns_scalar=True,
                 ).alias("novelty")
             )
+        if distribution_sketches:
+            exprs.append(p3.distribution_sketch_expr(distribution_sketches))
         return exprs
 
     def _postprocess(self, frame: pl.LazyFrame, existing: set[str]) -> pl.LazyFrame:
@@ -276,13 +295,32 @@ def _build_distribution_group(
 def _personalization_group(values: Sequence[pl.Series]) -> float:
     if len(values) < 2:
         return 0.0
-    return ml_helpers.personalization(values[0], values[1])
+    ordered = _source_ordered_values(values, value_columns=2)
+    return ml_helpers.personalization(ordered[0], ordered[1])
 
 
 def _novelty_group(values: Sequence[pl.Series]) -> float:
     if len(values) < 3:
         return 0.0
-    return ml_helpers.novelty(values[0], values[1], values[2])
+    ordered = _source_ordered_values(values, value_columns=3)
+    return ml_helpers.novelty(ordered[0], ordered[1], ordered[2])
+
+
+def _source_ordered_values(
+    values: Sequence[pl.Series], *, value_columns: int
+) -> tuple[pl.Series, ...]:
+    selected = tuple(values[:value_columns])
+    if len(values) <= value_columns:
+        return selected
+    order = values[value_columns].arg_sort()
+    return tuple(series.gather(order) for series in selected)
+
+
+def _source_order_inputs(existing: set[str], *columns: str) -> list[str]:
+    inputs = list(columns)
+    if SOURCE_ORDER_COLUMN in existing:
+        inputs.append(SOURCE_ORDER_COLUMN)
+    return inputs
 
 
 __all__ = ["ScoreDistributionProcessor"]

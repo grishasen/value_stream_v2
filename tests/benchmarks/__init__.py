@@ -1,0 +1,1 @@
+"""Reproducible ingestion benchmark contract."""

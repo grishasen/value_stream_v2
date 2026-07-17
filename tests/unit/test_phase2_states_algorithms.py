@@ -24,6 +24,7 @@ def test_kll_build_merge_and_quantile() -> None:
 
     merged = kll.merge([left, right])
 
+    assert kll.count(merged) == 4
     assert kll.quantile(merged, 0.5) == pytest.approx(2.5, abs=1.0)
 
 

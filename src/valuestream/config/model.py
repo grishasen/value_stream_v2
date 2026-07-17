@@ -388,10 +388,12 @@ class BinaryOutcomeProcessor(_ProcessorBase):
 
 class NumericDistributionProcessor(_ProcessorBase):
     kind: Literal["numeric_distribution"]
+    sketch_build_mode: Literal["legacy", "bulk"] = "legacy"
 
 
 class ScoreDistributionProcessor(_ProcessorBase):
     kind: Literal["score_distribution"]
+    sketch_build_mode: Literal["legacy", "bulk"] = "legacy"
 
 
 class EntityLifecycleProcessor(_ProcessorBase):
@@ -580,9 +582,7 @@ def _numeric_distribution_templates(engine: str) -> dict[str, StateSpec]:
         "{prop}_Mean": StateSpec.model_validate(
             {"type": "pooled_mean", "per_property": True, "weight": "{prop}_Count"}
         ),
-        "{prop}_Var": StateSpec.model_validate(
-            {"type": "pooled_variance", "per_property": True}
-        ),
+        "{prop}_Var": StateSpec.model_validate({"type": "pooled_variance", "per_property": True}),
         "{prop}_Min": StateSpec.model_validate({"type": "min", "per_property": True}),
         "{prop}_Max": StateSpec.model_validate({"type": "max", "per_property": True}),
         f"{{prop}}_{sketch_type}": StateSpec.model_validate(

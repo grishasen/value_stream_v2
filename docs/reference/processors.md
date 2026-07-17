@@ -72,6 +72,13 @@ class Processor(Protocol):
 
 The default `merge` and `compact` implementations are generic — they iterate over `self.states` and dispatch to the per-state-type merge rule. Subclasses override them only when the merge requires extra context (e.g. pooled variance needs the `_n_minus1_variance` and `_n_mean_diff_sq` temporaries documented in reference/algorithms.md §2.3).
 
+When the target uses the processor's finest physical level, `compact` first
+checks whether the prepared target keys are unique. Unique rows are projected
+directly instead of re-merging singleton sketches; duplicate keys and every
+coarser target continue through the normal state merge rules. The projected
+result is stamped with the current chunk provenance and processor config hash
+in the same way as a merged result.
+
 The 5 provenance columns are added by the engine wrapper, not by the processor itself.
 
 ---
@@ -327,6 +334,7 @@ processors:
       grains: [Day, Month, Summary]
     properties: [Outcome, Propensity, FinalPropensity, Priority, ResponseTime]
     quantile_engine: tdigest                # tdigest | kll | exact
+    sketch_build_mode: legacy               # legacy | bulk; execution-only
     states:                                  # template, expanded per property
       "{prop}_Count":    {type: count,           per_property: true}
       "{prop}_Sum":      {type: value_sum,       per_property: true, numeric_only: true}
@@ -344,6 +352,14 @@ the default `ResponseTime_tdigest`, or a CPC/HLL/Theta/Top-K sketch over another
 configured source field. For non-numeric properties (e.g. `Outcome` is a
 string), only `Count` is generated unless an explicit compatible sketch state
 is configured.
+
+`sketch_build_mode` controls only how t-digest/KLL states cross the Python
+callback boundary. `legacy` is the safe default for unknown or high-cardinality
+group shapes. `bulk` combines the processor's quantile-sketch construction for
+each group and is intended for a small number of large groups after a benchmark
+shows a benefit. The mode does not change state definitions, merge semantics,
+or source/processor computation hashes; the catalog hash still records the
+authored runtime choice.
 
 ### 4.3 Source schema requirements
 
@@ -463,6 +479,7 @@ processors:
   - id: model_ml_scores
     source: ih
     kind: score_distribution
+    sketch_build_mode: legacy               # legacy | bulk; execution-only
     group_by: [Channel, PlacementType, Issue, Group, CustomerType]
     time:
       column: OutcomeTime
@@ -489,6 +506,19 @@ processors:
       Priority_kll:                  {type: kll, source_column: Priority, k: 200}
       Category_topk:                 {type: topk, source_column: Category, lg_max_map_size: 10}
 ```
+
+`sketch_build_mode` has the same execution-only semantics and computation-hash
+exclusion as for `numeric_distribution`. Use `bulk` only after measuring the
+processor's actual group cardinality; `legacy` remains the default.
+
+The ingestion runner assigns a hidden source-order index before transforms when
+`personalization` or `novelty` is present. Their bounded samples are restored to
+that source order inside the group callback, so Polars streaming scheduling and
+the `bulk` sketch plan cannot silently select different rows. This stabilization
+carries a score-processor algorithm revision in its computation hash and
+therefore requires a backfill for affected sources with older score-distribution
+aggregates; unrelated sources retain their existing computation hashes. The
+hidden index is discarded with the raw chunk and is never persisted.
 
 ### 5.3 chunk_aggregate algorithm
 

@@ -163,3 +163,50 @@ def test_explicit_recipe_sketches_build_alongside_default_distribution_states() 
     assert cpc.estimate(out["Channel_cpc"][0]) == pytest.approx(1, rel=0.02)
     assert kll.quantile(out["ResponseTime_kll"][0], 0.5) == pytest.approx(2.0)
     assert "ResponseTime_tdigest" in out.columns
+
+
+@pytest.mark.parametrize("quantile_engine", ["tdigest", "kll"])
+def test_bulk_sketch_mode_matches_legacy_distribution_semantics(
+    quantile_engine: str,
+) -> None:
+    base_config = {
+        "id": "descriptive",
+        "source": "ih",
+        "kind": "numeric_distribution",
+        "group_by": ["Channel"],
+        "properties": ["Value"],
+        "quantile_engine": quantile_engine,
+    }
+    legacy = NumericDistributionProcessor(
+        model.NumericDistributionProcessor.model_validate(base_config)
+    )
+    bulk = NumericDistributionProcessor(
+        model.NumericDistributionProcessor.model_validate(
+            {**base_config, "sketch_build_mode": "bulk"}
+        )
+    )
+    values = [float(value) for value in range(128)]
+    frame = pl.DataFrame(
+        {
+            "Channel": ["Web"] * 64 + ["Mobile"] * 64,
+            "Value": values,
+        }
+    )
+
+    legacy_out = legacy.chunk_aggregate(frame.lazy(), _ctx()).sort("Channel")
+    bulk_out = bulk.chunk_aggregate(frame.lazy(), _ctx()).sort("Channel")
+
+    assert bulk_out.select("Channel", "Value_Count", "Value_Sum").equals(
+        legacy_out.select("Channel", "Value_Count", "Value_Sum")
+    )
+    state_name = f"Value_{quantile_engine}"
+    for legacy_payload, bulk_payload in zip(
+        legacy_out[state_name], bulk_out[state_name], strict=True
+    ):
+        if quantile_engine == "tdigest":
+            assert tdigest.weight(bulk_payload) == tdigest.weight(legacy_payload)
+            quantile = tdigest.quantile
+        else:
+            assert kll.count(bulk_payload) == kll.count(legacy_payload)
+            quantile = kll.quantile
+        assert quantile(bulk_payload, 0.5) == pytest.approx(quantile(legacy_payload, 0.5), abs=1.0)

@@ -82,7 +82,16 @@ class EntitySetProcessor:
             target_grain=target_grain,
         )
         return p3.with_static_provenance(
-            self.merge(plan.frame, group_columns=plan.group_columns),
+            p3.compact_state_frame(
+                plan.frame,
+                self.state_specs,
+                plan.group_columns,
+                self.merge,
+                identity_level=(
+                    self.config.aggregation_level_for(target_grain)
+                    == grain_levels.finest_configured_level(self.config)
+                ),
+            ),
             self.config_hash,
             ctx,
         )

@@ -31,6 +31,7 @@ from valuestream.config import model
 from valuestream.utils.hashing import sha256_hex
 
 COMPUTATION_SCHEMA_VERSION = 2
+_SCORE_BOUNDED_SAMPLE_ORDER_REVISION = 1
 
 
 def canonicalize(value: Any) -> Any:
@@ -178,7 +179,15 @@ def _source_computation_fields(source: model.Source) -> dict[str, Any]:
 
 def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
     payload = processor.model_dump(by_alias=True, exclude_none=True)
-    payload.pop("description", None)
+    for field in ("description", "sketch_build_mode"):
+        payload.pop(field, None)
+    if isinstance(processor, model.ScoreDistributionProcessor) and {
+        "personalization",
+        "novelty",
+    }.intersection(model.effective_processor_states(processor)):
+        payload["__valuestream_algorithm_revision"] = {
+            "bounded_ml_source_order": _SCORE_BOUNDED_SAMPLE_ORDER_REVISION
+        }
     return payload
 
 

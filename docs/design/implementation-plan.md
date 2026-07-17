@@ -232,7 +232,10 @@ valuestream/
   - `bench` — performance benchmarks (skipped in local default runs).
   - `slow` — anything > 5 s.
 - **Hypothesis** for property tests on AST evaluators, state mergers, and pooled-variance correctness.
-- **pytest-benchmark** for tracking ingestion throughput per phase.
+- The end-to-end runner under `tests/benchmarks/` records fixed input hashes,
+  wall/CPU/RSS, throughput, output size, and a correctness digest in a portable
+  JSON contract. Use `pytest-benchmark` for focused in-process microbenchmarks,
+  not as the publication format for full ingestion sessions.
 - Coverage target: ≥ 90% for `valuestream.processors`, `valuestream.expr`, `valuestream.engine`; ≥ 80% elsewhere.
 
 ### 2.5 Local quality gates
@@ -540,7 +543,9 @@ Build:
 - Prometheus metrics integration; Grafana dashboard JSON shipped under `examples/grafana/`.
 - Structured JSON logs with correlation IDs.
 - `valuestream vacuum` (legacy `config_hash`s, superseded partials, orphan temp dirs).
-- Performance benchmarks committed under `tests/benchmarks/`; run them manually before release sign-off.
+- Performance benchmark code is committed under `tests/benchmarks/`; generated
+  data/results remain outside git. Follow the operations performance-benchmark
+  guide and run one warm-up plus three measured samples before release sign-off.
 - Disaster-recovery runbook (backup/restore tar steps).
 - Threat model document (`docs/SECURITY.md`).
 - Operator's guide (`docs/OPERATIONS.md`).

@@ -37,4 +37,19 @@ def estimate(payload: bytes | bytearray | memoryview | None) -> float:
     return float(hll_sketch.deserialize(bytes(payload)).get_estimate())
 
 
-__all__ = ["build", "estimate", "merge"]
+def bounds(
+    payload: bytes | bytearray | memoryview | None,
+    *,
+    num_std_dev: int = 2,
+) -> tuple[float, float]:
+    """Return lower and upper cardinality bounds."""
+    if not payload:
+        return 0.0, 0.0
+    sketch = hll_sketch.deserialize(bytes(payload))
+    return (
+        float(sketch.get_lower_bound(num_std_dev)),
+        float(sketch.get_upper_bound(num_std_dev)),
+    )
+
+
+__all__ = ["bounds", "build", "estimate", "merge"]

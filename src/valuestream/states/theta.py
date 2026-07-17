@@ -72,8 +72,23 @@ def estimate(payload: bytes | bytearray | memoryview | None) -> float:
     return float(_deserialize(payload).get_estimate())
 
 
+def bounds(
+    payload: bytes | bytearray | memoryview | None,
+    *,
+    num_std_dev: int = 2,
+) -> tuple[float, float]:
+    """Return lower and upper cardinality bounds."""
+    if not payload:
+        return 0.0, 0.0
+    sketch = _deserialize(payload)
+    return (
+        float(sketch.get_lower_bound(num_std_dev)),
+        float(sketch.get_upper_bound(num_std_dev)),
+    )
+
+
 def _deserialize(payload: bytes | bytearray | memoryview) -> compact_theta_sketch:
     return compact_theta_sketch.deserialize(bytes(payload))
 
 
-__all__ = ["a_not_b", "build", "estimate", "intersect", "merge"]
+__all__ = ["a_not_b", "bounds", "build", "estimate", "intersect", "merge"]

@@ -26,6 +26,7 @@ from valuestream.config.validate import validate_catalog
 from valuestream.engine import ledger
 from valuestream.processors import grain_levels
 from valuestream.processors.binary_outcome import ChunkContext
+from valuestream.processors.context import SOURCE_ORDER_COLUMN
 from valuestream.processors.registry import ProcessorRuntime, create_processor
 from valuestream.readers import cleanup_temporaries, discover, read
 from valuestream.readers.discovery import Chunk
@@ -38,7 +39,7 @@ from valuestream.utils.time import utc_now
 from valuestream.utils.timer import timed
 
 _Processor: TypeAlias = ProcessorRuntime
-_CollectEngine: TypeAlias = Literal["auto", "streaming"]
+_CollectEngine: TypeAlias = Literal["auto", "in-memory", "streaming"]
 _ChunkProgressStatus: TypeAlias = Literal["processing", "skipped"]
 logger = get_logger(__name__)
 _SUPPORTED_TARGET_GRAINS = grain_levels.SUPPORTED_TARGET_GRAINS
@@ -244,6 +245,29 @@ def _run_source_locked(  # noqa: PLR0915
     chunks = discover(workspace, source)
     chunks_total = len(chunks)
     fingerprints = {chunk.chunk_id: ledger.file_fingerprint(chunk.files) for chunk in chunks}
+    expected_outputs = {
+        (processor.id, grain): processor.config_hash
+        for processor in processors
+        for grain in processor.config.grains
+        if grain in _SUPPORTED_TARGET_GRAINS
+    }
+    recovered = ledger.recover_stale_runs(
+        workspace,
+        source_id=source_id,
+        config_hash=config_hash,
+        file_hashes=fingerprints,
+        expected_outputs=expected_outputs,
+        finished_at=utc_now(),
+    )
+    if recovered:
+        logger.warning(
+            "Recovered %s interrupted source run(s): source=%s runs=%s",
+            len(recovered),
+            source_id,
+            ",".join(item.run_id for item in recovered),
+        )
+        refresh_aggregate_views(workspace, catalog)
+
     done_chunks: set[str] = set()
     if not force:
         done_chunks = ledger.done_chunk_ids(
@@ -252,96 +276,130 @@ def _run_source_locked(  # noqa: PLR0915
             config_hash=config_hash,
             file_hashes=fingerprints,
         )
-    results_by_order: dict[int, ChunkRunResult] = {}
-    to_process: list[tuple[int, Chunk]] = []
-    for chunk_order, chunk in enumerate(chunks, start=1):
-        if not force and chunk.chunk_id in done_chunks:
-            _notify_chunk_progress(
-                progress_callback,
-                source=source,
-                chunk=chunk,
-                chunk_order=chunk_order,
-                chunks_total=chunks_total,
-                status="skipped",
-            )
-            logger.debug(f"Skipping already processed chunk: {chunk.chunk_id}")
-            results_by_order[chunk_order] = ChunkRunResult(
-                chunk_id=chunk.chunk_id, status="skipped"
-            )
-            continue
-        to_process.append((chunk_order, chunk))
-
-    if parallel > 1 and len(to_process) > 1:
-        _run_chunks_parallel(
-            workspace,
-            source,
-            processors,
-            to_process,
-            run_id,
-            parallel=parallel,
-            chunks_total=chunks_total,
-            progress_callback=progress_callback,
-            results_by_order=results_by_order,
-        )
-    else:
-        for chunk_order, chunk in to_process:
-            _notify_chunk_progress(
-                progress_callback,
-                source=source,
-                chunk=chunk,
-                chunk_order=chunk_order,
-                chunks_total=chunks_total,
-                status="processing",
-            )
-            outcome = _process_chunk(workspace, source, processors, chunk, run_id)
-            _record_chunk_outcome(workspace, source_id, run_id, outcome)
-            results_by_order[chunk_order] = outcome.result
-
-    chunk_results = [results_by_order[order] for order in sorted(results_by_order)]
-    finished_at = utc_now()
-    chunks_ok = sum(1 for chunk in chunk_results if chunk.status == "ok")
-    chunks_failed = sum(1 for chunk in chunk_results if chunk.status == "failed")
-    chunks_skipped = sum(1 for chunk in chunk_results if chunk.status == "skipped")
-    rows_in = sum(chunk.rows_in for chunk in chunk_results)
-    rows_kept = sum(chunk.rows_kept for chunk in chunk_results)
-    status = "failed" if chunks_failed and not chunks_ok else "partial" if chunks_failed else "ok"
-
-    ledger.insert_run(
+    ledger.start_run(
         workspace,
         run_id=run_id,
         workspace=catalog.pipelines.workspace,
         source_id=source_id,
         config_hash=config_hash,
         started_at=started_at,
-        finished_at=finished_at,
-        status=status,
-        rows_in=rows_in,
-        rows_kept=rows_kept,
-        chunks_total=len(chunk_results),
-        chunks_ok=chunks_ok,
-        chunks_failed=chunks_failed,
+        chunks_total=chunks_total,
     )
-    refresh_aggregate_views(workspace, catalog)
-    elapsed_ms = _elapsed_ms(started)
-    logger.info(
-        f"Source run finished: source={source_id}, run_id={run_id}, status={status}, "
-        f"chunks_ok={chunks_ok}, chunks_skipped={chunks_skipped}, "
-        f"chunks_failed={chunks_failed}, rows_in={rows_in}, rows_kept={rows_kept}, "
-        f"time={elapsed_ms:.03f}ms"
-    )
+    run_finalized = False
+    try:
+        results_by_order: dict[int, ChunkRunResult] = {}
+        to_process: list[tuple[int, Chunk]] = []
+        for chunk_order, chunk in enumerate(chunks, start=1):
+            if not force and chunk.chunk_id in done_chunks:
+                _notify_chunk_progress(
+                    progress_callback,
+                    source=source,
+                    chunk=chunk,
+                    chunk_order=chunk_order,
+                    chunks_total=chunks_total,
+                    status="skipped",
+                )
+                logger.debug(f"Skipping already processed chunk: {chunk.chunk_id}")
+                results_by_order[chunk_order] = ChunkRunResult(
+                    chunk_id=chunk.chunk_id, status="skipped"
+                )
+                continue
+            to_process.append((chunk_order, chunk))
 
-    return PipelineRunResult(
-        run_id=run_id,
-        source_id=source_id,
-        status=status,
-        chunks_total=len(chunk_results),
-        chunks_ok=chunks_ok,
-        chunks_failed=chunks_failed,
-        chunks_skipped=chunks_skipped,
-        rows_in=rows_in,
-        rows_kept=rows_kept,
-        chunks=tuple(chunk_results),
-    )
+        if parallel > 1 and len(to_process) > 1:
+            _run_chunks_parallel(
+                workspace,
+                source,
+                processors,
+                to_process,
+                run_id,
+                parallel=parallel,
+                chunks_total=chunks_total,
+                progress_callback=progress_callback,
+                results_by_order=results_by_order,
+            )
+        else:
+            for chunk_order, chunk in to_process:
+                _notify_chunk_progress(
+                    progress_callback,
+                    source=source,
+                    chunk=chunk,
+                    chunk_order=chunk_order,
+                    chunks_total=chunks_total,
+                    status="processing",
+                )
+                outcome = _process_chunk(workspace, source, processors, chunk, run_id)
+                _record_chunk_outcome(workspace, source_id, run_id, outcome)
+                results_by_order[chunk_order] = outcome.result
+
+        chunk_results = [results_by_order[order] for order in sorted(results_by_order)]
+        finished_at = utc_now()
+        chunks_ok = sum(1 for chunk in chunk_results if chunk.status == "ok")
+        chunks_failed = sum(1 for chunk in chunk_results if chunk.status == "failed")
+        chunks_skipped = sum(1 for chunk in chunk_results if chunk.status == "skipped")
+        rows_in = sum(chunk.rows_in for chunk in chunk_results)
+        rows_kept = sum(chunk.rows_kept for chunk in chunk_results)
+        status = (
+            "failed" if chunks_failed and not chunks_ok else "partial" if chunks_failed else "ok"
+        )
+
+        ledger.finalize_run(
+            workspace,
+            run_id=run_id,
+            finished_at=finished_at,
+            status=status,
+            rows_in=rows_in,
+            rows_kept=rows_kept,
+            chunks_total=len(chunk_results),
+            chunks_ok=chunks_ok,
+            chunks_failed=chunks_failed,
+        )
+        run_finalized = True
+        refresh_aggregate_views(workspace, catalog)
+        elapsed_ms = _elapsed_ms(started)
+        logger.info(
+            f"Source run finished: source={source_id}, run_id={run_id}, status={status}, "
+            f"chunks_ok={chunks_ok}, chunks_skipped={chunks_skipped}, "
+            f"chunks_failed={chunks_failed}, rows_in={rows_in}, rows_kept={rows_kept}, "
+            f"time={elapsed_ms:.03f}ms"
+        )
+
+        return PipelineRunResult(
+            run_id=run_id,
+            source_id=source_id,
+            status=status,
+            chunks_total=len(chunk_results),
+            chunks_ok=chunks_ok,
+            chunks_failed=chunks_failed,
+            chunks_skipped=chunks_skipped,
+            rows_in=rows_in,
+            rows_kept=rows_kept,
+            chunks=tuple(chunk_results),
+        )
+    finally:
+        if not run_finalized:
+            try:
+                interrupted = ledger.finalize_incomplete_run(
+                    workspace,
+                    run_id=run_id,
+                    finished_at=utc_now(),
+                )
+                refresh_aggregate_views(workspace, catalog)
+                logger.warning(
+                    "Finalized interrupted source run: source=%s run_id=%s status=%s "
+                    "chunks_ok=%s chunks_failed=%s",
+                    source_id,
+                    run_id,
+                    interrupted.status,
+                    interrupted.chunks_ok,
+                    interrupted.chunks_failed,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not finalize interrupted source run: source=%s run_id=%s",
+                    source_id,
+                    run_id,
+                )
 
 
 @timed
@@ -361,6 +419,11 @@ def _process_chunk(
     logger.debug(f"Processing chunk: {chunk.chunk_id}")
     try:
         raw = read(source.reader, chunk.files)
+        if _requires_stable_source_order(processors):
+            # Polars may schedule group inputs differently between the regular
+            # and streaming engines. Preserve scan order explicitly for the
+            # score processor's bounded, order-sensitive sampling helpers.
+            raw = raw.with_row_index(SOURCE_ORDER_COLUMN)
         if debugging:
             _log_chunk_schema(source, chunk, "raw", raw)
         ctx = ChunkContext(
@@ -368,18 +431,34 @@ def _process_chunk(
             chunk_id=chunk.chunk_id,
             created_at=dt.datetime.now(dt.UTC),
         )
-        engine: _CollectEngine = "streaming" if source.reader.streaming else "auto"
+        source_engine: _CollectEngine = "streaming" if source.reader.streaming else "auto"
         transformed = apply_transforms(raw, source)
         _validate_processor_input_columns(processors, transformed.collect_schema())
         if debugging:
             _log_chunk_schema(source, chunk, "transformed", transformed)
         if source.materialize_transforms:
             rows_in, rows_kept, processor_frames, written = _collect_chunk_materialized(
-                workspace, source, processors, chunk, run_id, ctx, engine, raw, transformed
+                workspace,
+                source,
+                processors,
+                chunk,
+                run_id,
+                ctx,
+                source_engine,
+                raw,
+                transformed,
             )
         else:
             rows_in, rows_kept, processor_frames, written = _collect_chunk_lazy(
-                workspace, source, processors, chunk, run_id, ctx, engine, raw, transformed
+                workspace,
+                source,
+                processors,
+                chunk,
+                run_id,
+                ctx,
+                source_engine,
+                raw,
+                transformed,
             )
 
         written.extend(
@@ -438,7 +517,7 @@ def _collect_chunk_materialized(
     chunk: Chunk,
     run_id: str,
     ctx: ChunkContext,
-    engine: _CollectEngine,
+    source_engine: _CollectEngine,
     raw: pl.LazyFrame,
     transformed: pl.LazyFrame,
 ) -> _ChunkFrames:
@@ -448,16 +527,20 @@ def _collect_chunk_materialized(
             raw.select(pl.len().alias("rows_in")),
             transformed,
         ],
-        engine=engine,
+        engine=source_engine,
     )
     rows_in = int(counts_and_transformed[0]["rows_in"][0])
     transformed_frame = counts_and_transformed[1]
+    del counts_and_transformed
     rows_kept = transformed_frame.height
     processor_input = transformed_frame.lazy()
     processor_frames: list[tuple[_Processor, pl.DataFrame]] = []
     written: list[Path] = []
     try:
-        processor_frames = _collect_processor_frames(processors, processor_input, ctx, engine)
+        # Python sketch/map-groups nodes are not streaming-native.  The source
+        # scan and transforms above use the configured engine; processor plans
+        # run on the one in-memory transformed frame with the regular engine.
+        processor_frames = _collect_processor_frames(processors, processor_input, ctx, "in-memory")
     except Exception:
         logger.warning(
             f"Batched processor collect failed for chunk {chunk.chunk_id}; "
@@ -467,6 +550,9 @@ def _collect_chunk_materialized(
         written = _run_processors_sequential(
             workspace, source, processors, processor_input, ctx, run_id, chunk.chunk_id
         )
+    finally:
+        del processor_input
+        del transformed_frame
     return rows_in, rows_kept, processor_frames, written
 
 
@@ -561,7 +647,18 @@ def _record_chunk_outcome(
     run_id: str,
     outcome: _ChunkOutcome,
 ) -> None:
-    """Write one chunk's ledger row; always runs in the parent process."""
+    """Commit lineage, then the chunk row, in the parent process."""
+    if outcome.result.status == "ok":
+        lineage_count = ledger.insert_lineage_files(
+            workspace,
+            pipeline_run_id=run_id,
+            chunk_id=outcome.result.chunk_id,
+            paths=outcome.result.written,
+        )
+        if lineage_count != len(outcome.result.written):
+            raise RuntimeError(
+                f"chunk {outcome.result.chunk_id!r} produced incomplete aggregate lineage"
+            )
     ledger.insert_chunk(
         workspace,
         source_id=source_id,
@@ -575,13 +672,6 @@ def _record_chunk_outcome(
         error=outcome.result.error,
         pipeline_run_id=run_id,
     )
-    if outcome.result.status == "ok":
-        ledger.insert_lineage_files(
-            workspace,
-            pipeline_run_id=run_id,
-            chunk_id=outcome.result.chunk_id,
-            paths=outcome.result.written,
-        )
 
 
 def _record_config_versions(
@@ -707,7 +797,8 @@ def _write_collected_processor_outputs(
     debugging: bool,
 ) -> list[Path]:
     written: list[Path] = []
-    for processor, daily in processors:
+    while processors:
+        processor, daily = processors.pop(0)
         if debugging:
             _log_processor_frame(source, chunk, processor, "base", daily)
         written.extend(
@@ -721,6 +812,7 @@ def _write_collected_processor_outputs(
                 chunk.chunk_id,
             )
         )
+        del daily
     return written
 
 
@@ -750,6 +842,7 @@ def _run_processors_sequential(
                 chunk_id,
             )
         )
+        del daily
     return written
 
 
@@ -781,6 +874,7 @@ def _write_processor_outputs(
                 chunk_id=chunk_id,
             )
         )
+        del aggregate
     return written
 
 
@@ -792,6 +886,14 @@ def _processors_for_source(catalog: model.Catalog, source_id: str) -> list[_Proc
         computation_hash = processor_computation_hash(catalog, processor)
         processors.append(create_processor(processor, computation_hash=computation_hash))
     return processors
+
+
+def _requires_stable_source_order(processors: list[_Processor]) -> bool:
+    return any(
+        isinstance(processor.config, model.ScoreDistributionProcessor)
+        and {"personalization", "novelty"}.intersection(processor.state_specs)
+        for processor in processors
+    )
 
 
 def _validate_processor_input_columns(  # noqa: PLR0912

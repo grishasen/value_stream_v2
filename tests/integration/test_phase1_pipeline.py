@@ -12,6 +12,7 @@ import polars as pl
 import pytest
 from click.testing import CliRunner
 
+import valuestream.engine.runner as runner_module
 import valuestream.query.executor as query_executor
 from valuestream.ai import sql_tool
 from valuestream.cli import main
@@ -121,6 +122,38 @@ def _seed_workspace(ws: Path) -> None:
             _row("2024-01-02", "Web", "Cards", "c4", "Impression", "i6"),
         ],
     )
+
+
+def _leave_stale_run_after_first_committed_chunk(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> str:
+    original_record = runner_module._record_chunk_outcome
+    committed = False
+
+    def record_then_abort(*args: object, **kwargs: object) -> None:
+        nonlocal committed
+        original_record(*args, **kwargs)  # type: ignore[arg-type]
+        if not committed:
+            committed = True
+            raise RuntimeError("simulated hard termination after chunk commit")
+
+    def leave_running(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("simulated process death before run finalization")
+
+    with monkeypatch.context() as crash:
+        crash.setattr(runner_module, "_record_chunk_outcome", record_then_abort)
+        crash.setattr(runner_module.ledger, "finalize_incomplete_run", leave_running)
+        with pytest.raises(RuntimeError, match="simulated hard termination"):
+            run_source(workspace, "ih")
+
+    with duckdb.connect(str(workspace / "meta" / "pipeline_runs.duckdb"), read_only=True) as conn:
+        row = conn.execute(
+            "SELECT CAST(id AS VARCHAR), status FROM pipeline_runs ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+    assert row is not None
+    assert row[1] == "running"
+    return str(row[0])
 
 
 def _row(
@@ -822,23 +855,48 @@ def test_ledger_records_input_rows_before_source_filters(tmp_path: Path) -> None
 
 
 @pytest.mark.integration
-def test_run_source_can_materialize_transforms_before_processor_fanout(tmp_path: Path) -> None:
+def test_run_source_can_materialize_transforms_before_processor_fanout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _seed_workspace(tmp_path)
     pipelines = tmp_path / "catalog" / "pipelines.yaml"
     pipelines.write_text(
-        pipelines.read_text(encoding="utf-8").replace(
+        pipelines.read_text(encoding="utf-8")
+        .replace(
+            "      group_by_filename: '(\\d{8})'\n",
+            "      group_by_filename: '(\\d{8})'\n      streaming: true\n",
+        )
+        .replace(
             "    transforms:\n",
             "    materialize_transforms: true\n    transforms:\n",
         ),
         encoding="utf-8",
     )
+    original_collect_all = pl.collect_all
+    collect_calls: list[tuple[int, str]] = []
+
+    def observed_collect_all(
+        lazy_frames: list[pl.LazyFrame], **kwargs: object
+    ) -> list[pl.DataFrame]:
+        collect_calls.append((len(lazy_frames), str(kwargs.get("engine", "auto"))))
+        return original_collect_all(lazy_frames, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_module.pl, "collect_all", observed_collect_all)
 
     result = run_source(tmp_path, "ih")
+    ingestion_collect_calls = tuple(collect_calls)
     ctr = query_metric(tmp_path, "CTR", group_by=["Channel", "Group"], grain="daily")
 
     assert result.status == "ok"
     assert result.rows_in == 6
     assert result.rows_kept == 6
+    assert ingestion_collect_calls == (
+        (2, "streaming"),
+        (1, "in-memory"),
+        (2, "streaming"),
+        (1, "in-memory"),
+    )
     web_cards = ctr.filter((pl.col("Channel") == "Web") & (pl.col("Group") == "Cards")).sort("Day")
     assert web_cards["CTR"].to_list() == [0.5, pytest.approx(2 / 3)]
 
@@ -923,6 +981,170 @@ def test_rerun_skips_done_chunks_and_new_file_processes_once(tmp_path: Path) -> 
     ctr = query_metric(tmp_path, "CTR", group_by=["Channel", "Group"], grain="summary")
     web_cards = ctr.filter((pl.col("Channel") == "Web") & (pl.col("Group") == "Cards"))
     assert web_cards["CTR"][0] == pytest.approx(4 / 5)
+
+
+@pytest.mark.integration
+def test_run_row_is_running_before_first_chunk_and_finalized_in_place(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_workspace(tmp_path)
+    original_process = runner_module._process_chunk
+    observed: list[tuple[str, object, int]] = []
+
+    def observe_running_row(*args: object, **kwargs: object) -> object:
+        with duckdb.connect(
+            str(tmp_path / "meta" / "pipeline_runs.duckdb"), read_only=True
+        ) as conn:
+            row = conn.execute(
+                """
+                SELECT status, finished_at, chunks_total
+                FROM pipeline_runs
+                ORDER BY started_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        assert row is not None
+        observed.append((str(row[0]), row[1], int(row[2])))
+        return original_process(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner_module, "_process_chunk", observe_running_row)
+
+    result = run_source(tmp_path, "ih")
+
+    assert observed == [("running", None, 2), ("running", None, 2)]
+    with duckdb.connect(str(tmp_path / "meta" / "pipeline_runs.duckdb"), read_only=True) as conn:
+        rows = conn.execute(
+            "SELECT CAST(id AS VARCHAR), status, finished_at FROM pipeline_runs"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == result.run_id
+    assert rows[0][1] == "ok"
+    assert rows[0][2] is not None
+
+
+@pytest.mark.integration
+def test_chunk_ok_is_not_committed_when_chunk_ledger_insert_fails_after_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_catalog(tmp_path)
+    _write_data(
+        tmp_path,
+        "ih_20240101000000.parquet",
+        [_row("2024-01-01", "Web", "Cards", "c1", "Clicked", "i1")],
+    )
+
+    def unavailable(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("chunk ledger unavailable")
+
+    with monkeypatch.context() as failure:
+        failure.setattr(runner_module.ledger, "insert_chunk", unavailable)
+        with pytest.raises(RuntimeError, match="chunk ledger unavailable"):
+            run_source(tmp_path, "ih")
+
+    with duckdb.connect(str(tmp_path / "meta" / "chunks.duckdb"), read_only=True) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM chunks").fetchone() == (0,)
+    with duckdb.connect(str(tmp_path / "meta" / "lineage.duckdb"), read_only=True) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lineage").fetchone() == (3,)
+    with duckdb.connect(str(tmp_path / "meta" / "pipeline_runs.duckdb"), read_only=True) as conn:
+        assert conn.execute("SELECT status FROM pipeline_runs").fetchone() == ("failed",)
+
+    resumed = run_source(tmp_path, "ih")
+    assert resumed.chunks_ok == 1
+    assert resumed.chunks_skipped == 0
+
+
+@pytest.mark.integration
+def test_next_run_recovers_and_reuses_committed_chunk_from_stale_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_workspace(tmp_path)
+    stale_run_id = _leave_stale_run_after_first_committed_chunk(tmp_path, monkeypatch)
+
+    assert runner_module.ledger.successful_chunk_keys(tmp_path, source_id="ih") == set()
+
+    resumed = run_source(tmp_path, "ih")
+
+    assert resumed.status == "ok"
+    assert resumed.chunks_ok == 1
+    assert resumed.chunks_skipped == 1
+    with duckdb.connect(str(tmp_path / "meta" / "pipeline_runs.duckdb"), read_only=True) as conn:
+        stale = conn.execute(
+            "SELECT status, chunks_ok, chunks_failed FROM pipeline_runs WHERE id = ?",
+            (stale_run_id,),
+        ).fetchone()
+    assert stale == ("partial", 1, 0)
+    result = query_metric_result(tmp_path, "CTR", grain="summary")
+    assert result.rows.get_column("CTR").to_list() == [pytest.approx(0.5)]
+    assert set(result.provenance.pipeline_run_ids) == {stale_run_id, resumed.run_id}
+
+
+@pytest.mark.integration
+def test_stale_recovery_reprocesses_chunk_with_missing_committed_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_workspace(tmp_path)
+    stale_run_id = _leave_stale_run_after_first_committed_chunk(tmp_path, monkeypatch)
+    with duckdb.connect(str(tmp_path / "meta" / "lineage.duckdb"), read_only=True) as conn:
+        row = conn.execute(
+            "SELECT partial_path FROM lineage WHERE pipeline_run_id = ? LIMIT 1",
+            (stale_run_id,),
+        ).fetchone()
+    assert row is not None
+    Path(str(row[0])).unlink()
+
+    resumed = run_source(tmp_path, "ih")
+
+    assert resumed.chunks_ok == 2
+    assert resumed.chunks_skipped == 0
+    with duckdb.connect(str(tmp_path / "meta" / "pipeline_runs.duckdb"), read_only=True) as conn:
+        stale = conn.execute(
+            "SELECT status, chunks_ok, chunks_failed FROM pipeline_runs WHERE id = ?",
+            (stale_run_id,),
+        ).fetchone()
+    assert stale == ("failed", 0, 1)
+    result = query_metric_result(tmp_path, "CTR", grain="summary")
+    assert result.rows.get_column("CTR").to_list() == [pytest.approx(0.5)]
+    assert result.provenance.pipeline_run_ids == (resumed.run_id,)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("change", ["input", "config"])
+def test_stale_recovery_rejects_changed_input_or_computation_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    _seed_workspace(tmp_path)
+    stale_run_id = _leave_stale_run_after_first_committed_chunk(tmp_path, monkeypatch)
+    if change == "input":
+        changed = tmp_path / "data" / "ih_20240102000000.parquet"
+        pl.read_parquet(changed).with_columns(pl.lit("changed").alias("CustomerID")).write_parquet(
+            changed
+        )
+    else:
+        processors = tmp_path / "catalog" / "processors.yaml"
+        processors.write_text(
+            processors.read_text(encoding="utf-8").replace(
+                "      positive_values: [Clicked]",
+                "      positive_values: [Conversion]",
+            ),
+            encoding="utf-8",
+        )
+
+    resumed = run_source(tmp_path, "ih")
+
+    assert resumed.chunks_ok == 2
+    assert resumed.chunks_skipped == 0
+    with duckdb.connect(str(tmp_path / "meta" / "pipeline_runs.duckdb"), read_only=True) as conn:
+        stale = conn.execute(
+            "SELECT status, chunks_ok, chunks_failed FROM pipeline_runs WHERE id = ?",
+            (stale_run_id,),
+        ).fetchone()
+    assert stale == ("failed", 0, 1)
 
 
 @pytest.mark.integration

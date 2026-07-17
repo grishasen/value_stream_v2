@@ -141,6 +141,23 @@ class TestFatWorkspace:
             "customer_lifecycle",
         ]
 
+    def test_enables_bulk_sketch_build_only_for_quantile_processors(self) -> None:
+        catalog = load(FAT_WS)
+
+        quantile_processors = {
+            processor.id: processor.sketch_build_mode
+            for processor in catalog.processors.processors
+            if isinstance(
+                processor,
+                model.NumericDistributionProcessor | model.ScoreDistributionProcessor,
+            )
+        }
+
+        assert quantile_processors == {
+            "descriptive": "bulk",
+            "model_ml_scores": "bulk",
+        }
+
 
 # ---------------------------------------------------------------------------
 # Error paths.
@@ -290,6 +307,28 @@ class TestErrorPaths:
             "ResponseTime_Max",
             "ResponseTime_tdigest",
         }
+
+    @pytest.mark.parametrize(
+        ("processor_type", "kind"),
+        [
+            (model.NumericDistributionProcessor, "numeric_distribution"),
+            (model.ScoreDistributionProcessor, "score_distribution"),
+        ],
+    )
+    def test_quantile_processor_sketch_build_mode_is_typed(
+        self,
+        processor_type: type[model.NumericDistributionProcessor | model.ScoreDistributionProcessor],
+        kind: str,
+    ) -> None:
+        base = {"id": "p", "source": "s", "kind": kind}
+
+        assert processor_type.model_validate(base).sketch_build_mode == "legacy"
+        assert (
+            processor_type.model_validate({**base, "sketch_build_mode": "bulk"}).sketch_build_mode
+            == "bulk"
+        )
+        with pytest.raises(ValueError, match=r"legacy.*bulk"):
+            processor_type.model_validate({**base, "sketch_build_mode": "adaptive"})
 
     def test_semantic_binary_processor_validates_formula_metrics(self) -> None:
         catalog = model.Catalog.model_validate(

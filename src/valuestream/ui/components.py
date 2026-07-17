@@ -27,6 +27,7 @@ STATUS_BADGES: dict[str, tuple[str, str]] = {
     "failed": ("red", ":material/error:"),
     "blocked": ("red", ":material/error:"),
     "error": ("red", ":material/error:"),
+    "running": ("blue", ":material/progress_activity:"),
     "pending": ("gray", ":material/hourglass_empty:"),
     "unknown": ("gray", ":material/help:"),
 }

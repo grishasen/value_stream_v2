@@ -88,6 +88,7 @@ nav:
           - AI Configuration Studio: guides/configuration/ai-config-studio.md
       - Operations:
           - Runbook: guides/operations/runbook.md
+          - Performance benchmarking: guides/operations/performance-benchmarking.md
           - Migration & backfill: guides/operations/migration.md
           - Deployment: guides/operations/deployment.md
           - Security: guides/operations/security.md

@@ -6,6 +6,7 @@ import fcntl
 import json
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import duckdb
@@ -13,6 +14,16 @@ import polars as pl
 
 from valuestream.store.meta import META_DB_FILENAMES, init_meta_dbs, meta_dir
 from valuestream.utils.hashing import sha256_chained
+
+
+@dataclass(frozen=True)
+class RecoveredRun:
+    """Summary of one interrupted run finalized under the source lock."""
+
+    run_id: str
+    status: str
+    chunks_ok: int
+    chunks_failed: int
 
 
 def ensure(workspace_path: str | Path) -> None:
@@ -249,6 +260,325 @@ def insert_run(
         )
 
 
+def start_run(
+    workspace_path: str | Path,
+    *,
+    run_id: str,
+    workspace: str,
+    source_id: str,
+    config_hash: str,
+    started_at: object,
+    chunks_total: int,
+) -> None:
+    """Create the durable ``running`` publication barrier for a source run."""
+
+    insert_run(
+        workspace_path,
+        run_id=run_id,
+        workspace=workspace,
+        source_id=source_id,
+        config_hash=config_hash,
+        started_at=started_at,
+        finished_at=None,
+        status="running",
+        rows_in=0,
+        rows_kept=0,
+        chunks_total=chunks_total,
+        chunks_ok=0,
+        chunks_failed=0,
+    )
+
+
+def finalize_run(
+    workspace_path: str | Path,
+    *,
+    run_id: str,
+    finished_at: object,
+    status: str,
+    rows_in: int,
+    rows_kept: int,
+    chunks_total: int,
+    chunks_ok: int,
+    chunks_failed: int,
+) -> None:
+    """Finalize an existing run row without changing its immutable identity."""
+
+    if status not in {"ok", "partial", "failed"}:
+        raise ValueError(f"invalid final pipeline run status: {status!r}")
+    ensure(workspace_path)
+    with duckdb.connect(str(meta_dir(workspace_path) / "pipeline_runs.duckdb")) as conn:
+        exists = conn.execute(
+            "SELECT COUNT(*) FROM pipeline_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if not exists or exists[0] != 1:
+            raise ValueError(f"pipeline run {run_id!r} does not exist")
+        conn.execute(
+            """
+            UPDATE pipeline_runs
+            SET finished_at = ?, status = ?, rows_in = ?, rows_kept = ?,
+                chunks_total = ?, chunks_ok = ?, chunks_failed = ?
+            WHERE id = ?
+            """,
+            (
+                finished_at,
+                status,
+                rows_in,
+                rows_kept,
+                chunks_total,
+                chunks_ok,
+                chunks_failed,
+                run_id,
+            ),
+        )
+
+
+def finalize_incomplete_run(
+    workspace_path: str | Path,
+    *,
+    run_id: str,
+    finished_at: object,
+) -> RecoveredRun:
+    """Finalize an interrupted in-process run from its committed chunk rows."""
+
+    summary = _run_chunk_summary(workspace_path, run_id)
+    status = "partial" if summary["chunks_ok"] else "failed"
+    finalize_run(
+        workspace_path,
+        run_id=run_id,
+        finished_at=finished_at,
+        status=status,
+        rows_in=summary["rows_in"],
+        rows_kept=summary["rows_kept"],
+        chunks_total=summary["chunks_total"],
+        chunks_ok=summary["chunks_ok"],
+        chunks_failed=summary["chunks_failed"],
+    )
+    return RecoveredRun(
+        run_id=run_id,
+        status=status,
+        chunks_ok=summary["chunks_ok"],
+        chunks_failed=summary["chunks_failed"],
+    )
+
+
+def recover_stale_runs(
+    workspace_path: str | Path,
+    *,
+    source_id: str,
+    config_hash: str,
+    file_hashes: Mapping[str, str],
+    expected_outputs: Mapping[tuple[str, str], str],
+    finished_at: object,
+) -> tuple[RecoveredRun, ...]:
+    """Verify and finalize prior ``running`` rows while holding the source lock.
+
+    A successful chunk row is the durable commit marker, but recovery still
+    validates its current input fingerprint, lineage, physical file set, and
+    embedded provenance before publishing the stale run as ``partial``.
+    """
+
+    ensure(workspace_path)
+    runs_db = meta_dir(workspace_path) / "pipeline_runs.duckdb"
+    with duckdb.connect(str(runs_db), read_only=True) as conn:
+        stale_rows = conn.execute(
+            """
+            SELECT CAST(id AS VARCHAR), config_hash
+            FROM pipeline_runs
+            WHERE source_id = ? AND status = 'running'
+            ORDER BY started_at, id
+            """,
+            (source_id,),
+        ).fetchall()
+
+    recovered: list[RecoveredRun] = []
+    for raw_run_id, raw_config_hash in stale_rows:
+        run_id = str(raw_run_id)
+        run_hash_matches = str(raw_config_hash) == config_hash
+        for chunk_id, stored_hash in _ok_chunks_for_run(workspace_path, source_id, run_id):
+            reason: str | None = None
+            if not run_hash_matches:
+                reason = "source computation hash changed before interrupted-run recovery"
+            elif file_hashes.get(chunk_id) != stored_hash:
+                reason = "input fingerprint changed before interrupted-run recovery"
+            else:
+                reason = _chunk_recovery_error(
+                    workspace_path,
+                    source_id=source_id,
+                    run_id=run_id,
+                    chunk_id=chunk_id,
+                    expected_outputs=expected_outputs,
+                )
+            if reason is not None:
+                _mark_chunk_recovery_failed(
+                    workspace_path,
+                    source_id=source_id,
+                    run_id=run_id,
+                    chunk_id=chunk_id,
+                    reason=reason,
+                )
+        recovered.append(
+            finalize_incomplete_run(
+                workspace_path,
+                run_id=run_id,
+                finished_at=finished_at,
+            )
+        )
+    return tuple(recovered)
+
+
+def _run_chunk_summary(workspace_path: str | Path, run_id: str) -> dict[str, int]:
+    chunks_db = meta_dir(workspace_path) / "chunks.duckdb"
+    runs_db = meta_dir(workspace_path) / "pipeline_runs.duckdb"
+    with duckdb.connect(str(chunks_db), read_only=True) as conn:
+        row = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(rows_in), 0),
+                COALESCE(SUM(rows_kept), 0),
+                COUNT(*) FILTER (WHERE status = 'ok'),
+                COUNT(*) FILTER (WHERE status = 'failed'),
+                COUNT(*)
+            FROM chunks
+            WHERE pipeline_run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+    with duckdb.connect(str(runs_db), read_only=True) as conn:
+        total_row = conn.execute(
+            "SELECT chunks_total FROM pipeline_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+    if row is None or total_row is None:
+        raise ValueError(f"pipeline run {run_id!r} does not exist")
+    recorded_total = int(total_row[0] or 0)
+    return {
+        "rows_in": int(row[0] or 0),
+        "rows_kept": int(row[1] or 0),
+        "chunks_ok": int(row[2] or 0),
+        "chunks_failed": int(row[3] or 0),
+        "chunks_total": max(recorded_total, int(row[4] or 0)),
+    }
+
+
+def _ok_chunks_for_run(
+    workspace_path: str | Path,
+    source_id: str,
+    run_id: str,
+) -> list[tuple[str, str]]:
+    with duckdb.connect(str(meta_dir(workspace_path) / "chunks.duckdb"), read_only=True) as conn:
+        rows = conn.execute(
+            """
+            SELECT chunk_id, file_hash
+            FROM chunks
+            WHERE source_id = ? AND pipeline_run_id = ? AND status = 'ok'
+            ORDER BY chunk_id
+            """,
+            (source_id, run_id),
+        ).fetchall()
+    return [(str(chunk_id), str(file_hash)) for chunk_id, file_hash in rows]
+
+
+def _chunk_recovery_error(  # noqa: PLR0911
+    workspace_path: str | Path,
+    *,
+    source_id: str,
+    run_id: str,
+    chunk_id: str,
+    expected_outputs: Mapping[tuple[str, str], str],
+) -> str | None:
+    workspace = Path(workspace_path)
+    aggregate_root = (workspace / "aggregates" / source_id).resolve()
+    lineage_db = meta_dir(workspace) / "lineage.duckdb"
+    with duckdb.connect(str(lineage_db), read_only=True) as conn:
+        rows = conn.execute(
+            """
+            SELECT processor_id, grain, period, partial_path, config_hash, rows
+            FROM lineage
+            WHERE source_id = ? AND pipeline_run_id = ? AND chunk_id = ?
+            ORDER BY processor_id, grain, period
+            """,
+            (source_id, run_id, chunk_id),
+        ).fetchall()
+
+    lineage_paths = {Path(str(row[3])).resolve() for row in rows}
+    safe_run = _safe_name(run_id)
+    safe_chunk = _safe_name(chunk_id)
+    physical_paths = {
+        path.resolve()
+        for path in aggregate_root.glob(f"*/*/period=*/part-{safe_run}-{safe_chunk}.parquet")
+        if path.is_file()
+    }
+    if physical_paths != lineage_paths:
+        return "physical aggregate files do not match committed lineage"
+
+    for processor_id, grain, period, raw_path, lineage_hash, lineage_rows in rows:
+        path = Path(str(raw_path)).resolve()
+        if not path.is_relative_to(aggregate_root) or not path.is_file():
+            return f"lineage path is missing or outside the source aggregate root: {path}"
+        expected_hash = expected_outputs.get((str(processor_id), str(grain)))
+        if expected_hash is None or str(lineage_hash) != expected_hash:
+            return "lineage processor/grain or computation hash is not current"
+        relative = path.relative_to(aggregate_root)
+        if len(relative.parts) < 4:
+            return f"lineage path has an invalid aggregate layout: {path}"
+        path_processor, path_grain, path_period = relative.parts[:3]
+        if (
+            path_processor != str(processor_id)
+            or path_grain != str(grain)
+            or path_period != f"period={period}"
+        ):
+            return f"lineage metadata does not match aggregate path: {path}"
+        try:
+            summary = (
+                pl.scan_parquet(path)
+                .select(
+                    pl.col("pipeline_run_id").cast(pl.String).drop_nulls().unique().implode(),
+                    pl.col("chunk_id").cast(pl.String).drop_nulls().unique().implode(),
+                    pl.col("config_hash").cast(pl.String).drop_nulls().unique().implode(),
+                    pl.col("period").cast(pl.String).drop_nulls().unique().implode(),
+                    pl.len().alias("rows"),
+                )
+                .collect()
+                .row(0)
+            )
+        except Exception as exc:
+            return f"aggregate provenance cannot be read: {path}: {exc}"
+        run_ids, chunk_ids, config_hashes, periods, physical_rows = summary
+        if run_ids != [run_id] or chunk_ids != [chunk_id]:
+            return f"aggregate run/chunk provenance does not match lineage: {path}"
+        if config_hashes != [expected_hash] or periods != [str(period)]:
+            return f"aggregate config/period provenance does not match lineage: {path}"
+        if lineage_rows is not None and int(physical_rows) != int(lineage_rows):
+            return f"aggregate row count does not match lineage: {path}"
+    return None
+
+
+def _mark_chunk_recovery_failed(
+    workspace_path: str | Path,
+    *,
+    source_id: str,
+    run_id: str,
+    chunk_id: str,
+    reason: str,
+) -> None:
+    with duckdb.connect(str(meta_dir(workspace_path) / "chunks.duckdb")) as conn:
+        conn.execute(
+            """
+            UPDATE chunks
+            SET status = 'failed', error = ?
+            WHERE source_id = ? AND pipeline_run_id = ? AND chunk_id = ?
+            """,
+            (f"recovery verification failed: {reason}", source_id, run_id, chunk_id),
+        )
+
+
+def _safe_name(value: str) -> str:
+    return "".join(
+        character if character.isalnum() or character in "-_" else "_" for character in value
+    )
+
+
 def insert_chunk(
     workspace_path: str | Path,
     *,
@@ -316,8 +646,8 @@ def insert_lineage_files(
     pipeline_run_id: str,
     chunk_id: str,
     paths: tuple[Path, ...] | list[Path],
-) -> None:
-    """Record file-level lineage for successfully produced aggregate partials."""
+) -> int:
+    """Record complete file lineage and return the committed record count."""
 
     ensure(workspace_path)
     aggregate_root = Path(workspace_path) / "aggregates"
@@ -325,10 +655,10 @@ def insert_lineage_files(
     for path in paths:
         try:
             relative = path.relative_to(aggregate_root)
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise ValueError(f"aggregate lineage path is outside the workspace: {path}") from exc
         if len(relative.parts) < 5 or not relative.parts[3].startswith("period="):
-            continue
+            raise ValueError(f"aggregate lineage path has an invalid layout: {path}")
         source_id, processor_id, grain = relative.parts[:3]
         period = relative.parts[3].removeprefix("period=")
         summary = (
@@ -355,8 +685,10 @@ def insert_lineage_files(
                 summary["created_at"],
             )
         )
+    if len(records) != len(paths):
+        raise RuntimeError("not every aggregate path produced a lineage record")
     if not records:
-        return
+        return 0
     with duckdb.connect(str(meta_dir(workspace_path) / "lineage.duckdb")) as conn:
         conn.executemany(
             """
@@ -367,18 +699,24 @@ def insert_lineage_files(
             """,
             records,
         )
+    return len(records)
 
 
 __all__ = [
+    "RecoveredRun",
     "aggregate_lineage_paths",
     "chunk_done",
     "done_chunk_ids",
     "ensure",
     "file_fingerprint",
+    "finalize_incomplete_run",
+    "finalize_run",
     "insert_chunk",
     "insert_config_version",
     "insert_lineage_files",
     "insert_run",
+    "recover_stale_runs",
     "source_run_lock",
+    "start_run",
     "successful_chunk_keys",
 ]

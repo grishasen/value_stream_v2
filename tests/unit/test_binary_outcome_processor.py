@@ -185,3 +185,47 @@ def test_compact_and_merge_edge_branches() -> None:
 
     merged = processor.merge(daily.drop(["Channel", "day", "period"]), group_columns=[])
     assert merged.select("Count", "Positives", "Negatives").row(0) == (2, 1, 1)
+
+
+def test_daily_compaction_fast_path_restamps_provenance() -> None:
+    processor = _processor(
+        {
+            "id": "p",
+            "source": "ih",
+            "kind": "binary_outcome",
+            "group_by": ["Channel"],
+            "states": {
+                "Count": {"type": "count"},
+                "Positives": {"type": "count"},
+                "Negatives": {"type": "count"},
+            },
+        }
+    )
+    daily = pl.DataFrame(
+        {
+            "Channel": ["Web"],
+            "day": [dt.date(2024, 1, 1)],
+            "period": ["stale"],
+            "Count": [2],
+            "Positives": [1],
+            "Negatives": [999],
+            "pipeline_run_id": ["old-run"],
+            "chunk_id": ["old-chunk"],
+            "created_at": [dt.datetime(2023, 1, 1, tzinfo=dt.UTC)],
+            "config_hash": ["old-hash"],
+        }
+    )
+    ctx = ChunkContext(
+        pipeline_run_id="new-run",
+        chunk_id="new-chunk",
+        created_at=dt.datetime(2024, 1, 2, tzinfo=dt.UTC),
+    )
+
+    compacted = processor.compact(daily, "daily", ctx)
+
+    assert compacted.select("Count", "Positives", "Negatives").row(0) == (2, 1, 1)
+    assert compacted["period"].to_list() == ["2024-01"]
+    assert compacted["pipeline_run_id"].to_list() == ["new-run"]
+    assert compacted["chunk_id"].to_list() == ["new-chunk"]
+    assert compacted["created_at"].to_list() == [ctx.created_at]
+    assert compacted["config_hash"].to_list() == [processor.config_hash]

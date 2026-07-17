@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import traceback
+from contextlib import ExitStack
 from pathlib import Path
 
 import click
@@ -18,7 +19,7 @@ from valuestream.config import model as config_model
 from valuestream.config.loader import CatalogLoadError, load
 from valuestream.config.migration import migrate_toml
 from valuestream.config.validate import CatalogIssue, CatalogValidationResult, validate_catalog
-from valuestream.engine import PipelineRunResult, probe_source, run_source, run_workspace
+from valuestream.engine import PipelineRunResult, ledger, probe_source, run_source, run_workspace
 from valuestream.generators import PegaDummyGenerationConfig, generate_pega_dummy_data
 from valuestream.mcp.server import run_stdio as run_mcp_stdio
 from valuestream.query import query_metric
@@ -289,14 +290,17 @@ def vacuum(workspace_dir: str, *, include_tmp: bool, dry_run: bool) -> None:
     console = Console()
     try:
         catalog = load(workspace_dir)
-        result = vacuum_workspace(
-            workspace_dir,
-            catalog,
-            include_tmp=include_tmp,
-            dry_run=dry_run,
-        )
-        if not dry_run:
-            refresh_aggregate_views(workspace_dir, catalog)
+        with ExitStack() as locks:
+            for source in sorted(catalog.pipelines.sources, key=lambda item: item.id):
+                locks.enter_context(ledger.source_run_lock(workspace_dir, source.id))
+            result = vacuum_workspace(
+                workspace_dir,
+                catalog,
+                include_tmp=include_tmp,
+                dry_run=dry_run,
+            )
+            if not dry_run:
+                refresh_aggregate_views(workspace_dir, catalog)
     except Exception as exc:
         print(traceback.format_exc())
         raise click.ClickException(str(exc)) from exc

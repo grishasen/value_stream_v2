@@ -117,11 +117,21 @@ Numerical caveat: when `Count = 1`, `Var = 0` produces `NaN` after division. Gua
 **Build (per group)**:
 ```text
 sketch = tdigest_double(k=500)
-sketch.update(values_array)            # bulk update with NumPy array
+if len(values) >= 32:
+    values_array = writable_contiguous_float64(values)
+    sketch.update(values_array)        # native bulk update
+else:
+    for value in values:
+        sketch.update(value)           # avoid array setup for tiny groups
 return sketch.serialize()              # bytes
 ```
 
-The bulk-update path with NumPy is essential for performance — per-element update is ~30× slower at chunk sizes.
+Nulls are removed before construction. The array path removes one Python-to-C
+call per value for non-trivial groups; the scalar path remains for tiny groups,
+where allocating and normalizing an array can cost more than it saves. Processor
+`sketch_build_mode: bulk` is a separate optimization: it bundles all t-digest
+and KLL fields for one group into a single Polars Python callback before calling
+these native builders.
 
 **Merge**:
 ```text
@@ -132,7 +142,9 @@ return merged.serialize()
 ```
 
 **Edge case — empty input**:
-If a group has zero values for a property, the engine writes a digest containing a single dummy `0.0` (and a zero count, recorded separately) so the column dtype stays `Binary` and downstream merges don't break. Quantile queries against an empty group return `0.0`.
+If a group has zero values for a property, the engine writes a serialized empty
+digest so the column dtype stays `Binary` and downstream merges remain valid.
+Quantile queries against an empty group return `0.0`.
 
 **Quantile query**:
 ```text
@@ -157,7 +169,9 @@ KLL is mergeable, has stronger formal error guarantees than t-digest, and serial
 
 Use KLL where SLA-bound percentile errors matter; use t-digest where compactness and per-quantile speed matter.
 
-Build / merge / quantile mirror t-digest with `k=200`.
+Build / merge / quantile mirror t-digest with `k=200`; the native bulk array is
+contiguous writable `float32`, and groups below the same 32-value threshold use
+scalar updates.
 
 ---
 

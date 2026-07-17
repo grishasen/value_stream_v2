@@ -72,9 +72,10 @@ def vacuum_workspace(
             raise ValueError("retained_run_ids must cover exactly the vacuum source scope")
     deleted_files: list[Path] = []
     deleted_dirs: list[Path] = []
+    running_run_ids = _running_run_ids(workspace, scoped_source_ids)
 
     bytes_deleted = _remove_files(
-        _aggregate_temp_files(workspace, scoped_source_ids),
+        _aggregate_temp_files(workspace, scoped_source_ids, running_run_ids),
         deleted_files,
         dry_run,
     )
@@ -84,6 +85,7 @@ def vacuum_workspace(
         current_hashes,
         source_ids=scoped_source_ids,
         retained_run_ids=retained,
+        running_run_ids=running_run_ids,
     )
     bytes_deleted += _remove_files(stale, deleted_files, dry_run)
     bytes_deleted += _remove_files(
@@ -108,6 +110,7 @@ def _partition_aggregate_files(
     *,
     source_ids: Set[str] | None = None,
     retained_run_ids: Mapping[str, str] | None = None,
+    running_run_ids: Mapping[str, frozenset[str]] | None = None,
 ) -> tuple[dict[tuple[str, str, str, str, str, str], list[_Candidate]], list[Path]]:
     candidates: dict[tuple[str, str, str, str, str, str], list[_Candidate]] = {}
     stale: list[Path] = []
@@ -119,6 +122,8 @@ def _partition_aggregate_files(
         source_id, processor_id, grain, period = identity
         current_hash = current_hashes.get((source_id, processor_id))
         metadata = _file_metadata(path)
+        if metadata.run_ids.intersection((running_run_ids or {}).get(source_id, frozenset())):
+            continue
         if (
             current_hash is None
             or not metadata.config_hashes
@@ -177,15 +182,33 @@ def _aggregate_files(workspace: Path, source_ids: Set[str] | None = None) -> lis
     )
 
 
-def _aggregate_temp_files(workspace: Path, source_ids: Set[str] | None = None) -> list[Path]:
+def _aggregate_temp_files(
+    workspace: Path,
+    source_ids: Set[str] | None = None,
+    running_run_ids: Mapping[str, frozenset[str]] | None = None,
+) -> list[Path]:
     root = workspace / "aggregates"
     if not root.exists():
         return []
     return sorted(
         path
         for path in root.glob("**/*.tmp")
-        if path.is_file() and _path_is_in_source_scope(root, path, source_ids)
+        if path.is_file()
+        and _path_is_in_source_scope(root, path, source_ids)
+        and not _temp_belongs_to_running_run(root, path, running_run_ids or {})
     )
+
+
+def _temp_belongs_to_running_run(
+    root: Path,
+    path: Path,
+    running_run_ids: Mapping[str, frozenset[str]],
+) -> bool:
+    try:
+        source_id = path.relative_to(root).parts[0]
+    except (IndexError, ValueError):
+        return False
+    return any(run_id in path.name for run_id in running_run_ids.get(source_id, frozenset()))
 
 
 def _path_is_in_source_scope(root: Path, path: Path, source_ids: Set[str] | None) -> bool:
@@ -272,6 +295,33 @@ def _successful_chunk_keys(workspace: Path, source_id: str) -> set[tuple[str, st
             (source_id,),
         ).fetchall()
     return {(str(run_id), str(chunk_id)) for run_id, chunk_id in rows}
+
+
+def _running_run_ids(
+    workspace: Path,
+    source_ids: Set[str] | None,
+) -> dict[str, frozenset[str]]:
+    runs_db = meta_dir(workspace) / "pipeline_runs.duckdb"
+    if not runs_db.exists():
+        return {}
+    with duckdb.connect(str(runs_db), read_only=True) as conn:
+        if source_ids is None:
+            rows = conn.execute(
+                "SELECT source_id, CAST(id AS VARCHAR) FROM pipeline_runs WHERE status = 'running'"
+            ).fetchall()
+        elif not source_ids:
+            rows = []
+        else:
+            placeholders = ", ".join("?" for _ in source_ids)
+            rows = conn.execute(
+                f"SELECT source_id, CAST(id AS VARCHAR) FROM pipeline_runs "
+                f"WHERE status = 'running' AND source_id IN ({placeholders})",
+                tuple(sorted(source_ids)),
+            ).fetchall()
+    grouped: dict[str, set[str]] = {}
+    for source_id, run_id in rows:
+        grouped.setdefault(str(source_id), set()).add(str(run_id))
+    return {source_id: frozenset(run_ids) for source_id, run_ids in grouped.items()}
 
 
 def _pega_temp_dirs(catalog: model.Catalog) -> list[Path]:

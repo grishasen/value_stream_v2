@@ -224,11 +224,29 @@ source of truth.
 
 ## 8. End-to-end data flow
 
+For sources with `materialize_transforms: true`, the reader/transform portion
+below is collected once per chunk (with the Polars streaming engine when
+`reader.streaming: true`). Processor lazy plans then fan out together from that
+shared eager frame with the in-memory engine. The shared transformed frame is
+released after fan-out, and each processor/grain frame is released after its
+immutable aggregate is written. This is an execution strategy only: no raw or
+transformed row is persisted, and streaming/materialization settings do not
+change the computation hash.
+
+Order-sensitive bounded ML samples are the exception that proves the execution
+rule: when a score processor needs personalization or novelty, ingestion adds a
+temporary scan-order index before transforms and uses it inside those callbacks.
+That keeps results invariant across streaming and in-memory scheduling without
+persisting the index.
+
 ```
 [Files in source folder]
       |
       v
 [Discovery]  -- glob + group_by_filename pattern --> chunk_id
+      |
+      v
+[Pipeline run row: status=running] -- durable publication barrier
       |
       v
 [Reader]     -- pega_ds_export | parquet | csv | xlsx --> Polars LazyFrame
@@ -255,7 +273,13 @@ source of truth.
 [Immutable run/chunk parquet partials written atomically]
       |
       v
-[Chunk ledger row written]  -- meta/chunks.duckdb
+[Lineage transaction committed] -- every written aggregate path
+      |
+      v
+[Chunk ledger row status=ok] -- last durable chunk commit marker
+      |
+      v
+[Pipeline run finalized] -- ok / partial / failed; committed chunks become visible
       |
       v
 === ingestion done ===
@@ -397,7 +421,7 @@ Optional/future:
 - A **clean rebuild** acquires all selected source locks in deterministic order and holds them through forced ingestion, coverage validation, scoped cleanup, and aggregate-view refresh. This prevents a concurrent run from publishing files that cleanup could mistake for superseded output.
 - Inside a run, **chunks are processed sequentially by default** (predictable memory profile, simpler error semantics). The `--parallel <N>` flag runs chunks in a process pool of N workers: partial parquet part files are per-chunk so worker writes never collide, and all ledger writes stay in the parent process (the DuckDB metadata files are single-writer). Worker processes sidestep the GIL held by Python sketch building, so the initial load scales with cores.
 - Inside a chunk, **processors fan out through one batched `pl.collect_all`**: every processor's `chunk_aggregate` plan collects in a single pass (sharing the scan via common-subplan elimination), with a logged sequential fallback if the batch fails.
-- The **query layer is read-only**, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. A partial becomes visible only after both its successful chunk row and successful/partial run row exist; until then readers retain the previous successful version.
+- The **query layer is read-only**, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. The run's durable `running` row is the outer publication barrier. Within it, atomic Parquet writes and complete lineage commit before the chunk's `ok` row, which is the chunk commit marker. A partial becomes visible only after that chunk row and a final `ok`/`partial` run row exist; until then readers retain the previous successful version.
 
 ## 13. Caching strategy
 
@@ -415,11 +439,20 @@ There is **no cache below the storage layer** (no in-memory copy of the aggregat
 | Processor exception | Exception inside `chunk_aggregate` | The chunk fails and none of that run's partials become query-visible; the previous successful chunk version remains visible | Operator fixes config or code; re-run the source |
 | Partial Parquet write incomplete | Write done atomically (write-then-rename) | Incomplete file never visible to readers | None needed |
 | Grain materialization fails | Exception while deriving a configured grain | The chunk remains unpublished at every grain; previous successful data remains visible | Fix the cause and re-run the source |
+| Process is terminated before run finalization | A prior `running` row exists after the next caller acquires the source lock | The interrupted run remains invisible until its committed chunks are verified | The next normal source run verifies fingerprint, lineage, files, and computation hashes; valid chunks are published under a recovered `partial` run and reused, invalid chunks are reprocessed |
 | Config validation fails on load | JSON-Schema error | Engine refuses to start; CLI prints actionable error | Operator fixes YAML |
 | Clean rebuild safety check fails | Empty discovery, incomplete source run, missing published path, or catalog hash change | Scoped cleanup does not start; prior aggregate files and audit metadata remain | Fix discovery/config/run failure and retry the clean rebuild |
 | Query layer error | Exception during plan/execute | UI/CLI surface returns a structured error; API returns a governed 4xx/5xx | Operator inspects logs |
 
-A `chunk` is the unit of recovery; a `run` is the unit of reporting. Successful chunks within a partially-failed run are kept, marked, and re-used on the next run.
+A `chunk` is the unit of recovery; a `run` is the unit of reporting and the
+outer publication barrier. Successful chunks within a partially-failed run are
+kept, marked, and re-used on the next run. After acquiring the source lock, a
+new caller treats every older `running` row for that source as interrupted: an
+`ok` chunk is retained only when its current input fingerprint, file lineage,
+physical provenance, and processor computation hashes all verify. The stale run
+becomes `partial` when at least one chunk verifies and `failed` otherwise.
+Files without a committed chunk marker remain invisible and are eligible for a
+later vacuum.
 
 ## 15. Security and privacy
 

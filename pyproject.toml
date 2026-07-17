@@ -11,6 +11,7 @@ authors = [
 ]
 dependencies = [
     "polars>=1.41.0",
+    "numpy>=2.0",
     "duckdb>=1.5",
     "pyarrow>=19",
     "datasketches>=5.2.0",
@@ -37,6 +38,7 @@ api = [
 ]
 dev = [
     "pytest>=8.3",
+    "pytest-benchmark>=4.0",
     "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
     "hypothesis>=6.112",

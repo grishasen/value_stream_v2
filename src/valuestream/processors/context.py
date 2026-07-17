@@ -10,6 +10,7 @@ import datetime as dt
 from dataclasses import dataclass
 
 PROVENANCE_COLUMNS = ["pipeline_run_id", "chunk_id", "period", "created_at", "config_hash"]
+SOURCE_ORDER_COLUMN = "__valuestream_source_order"
 
 
 @dataclass(frozen=True)
@@ -21,4 +22,4 @@ class ChunkContext:
     created_at: dt.datetime
 
 
-__all__ = ["PROVENANCE_COLUMNS", "ChunkContext"]
+__all__ = ["PROVENANCE_COLUMNS", "SOURCE_ORDER_COLUMN", "ChunkContext"]

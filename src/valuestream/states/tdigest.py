@@ -5,15 +5,22 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+import numpy as np
 from datasketches import tdigest_double  # type: ignore[import-untyped]
+
+from valuestream.states._numeric import bulk_numeric_array
 
 
 def build(values: Iterable[Any], *, k: int = 500) -> bytes:
     """Return a serialized t-digest for non-null numeric values."""
     sketch = tdigest_double(k)
-    for value in values:
-        if value is not None:
-            sketch.update(float(value))
+    array = bulk_numeric_array(values, dtype=np.float64)
+    if array is not None:
+        sketch.update(array)
+    else:
+        for value in values:
+            if value is not None:
+                sketch.update(float(value))
     return bytes(sketch.serialize())
 
 

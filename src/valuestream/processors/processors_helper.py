@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import partial
 from typing import Any, TypeVar, cast
 
@@ -17,6 +17,8 @@ from valuestream.states import cpc, hll, kll, tdigest, theta, topk
 
 _FrameLike = pl.DataFrame | pl.LazyFrame
 _TFrame = TypeVar("_TFrame", pl.DataFrame, pl.LazyFrame)
+DistributionSketchSpec = tuple[str, str, int, pl.Expr]
+_DISTRIBUTION_SKETCH_STRUCT = "__valuestream_distribution_sketches"
 
 
 def group_by_columns(config: model.Processor) -> list[str]:
@@ -197,6 +199,26 @@ def postprocess_sketches(
     return out
 
 
+def distribution_sketch_expr(sketches: list[DistributionSketchSpec]) -> pl.Expr:
+    """Build all t-digest/KLL states for a group through one Python callback."""
+
+    metadata = tuple((name, state_type, k) for name, state_type, k, _ in sketches)
+    return pl.map_groups(
+        exprs=[expression for _, _, _, expression in sketches],
+        function=partial(_build_distribution_sketches, metadata=metadata),
+        return_dtype=pl.Struct([pl.Field(name, pl.Binary) for name, _, _ in metadata]),
+        returns_scalar=True,
+    ).alias(_DISTRIBUTION_SKETCH_STRUCT)
+
+
+def unnest_distribution_sketches(frame: _TFrame) -> _TFrame:
+    """Unnest the shared distribution-sketch struct when it is present."""
+
+    if _DISTRIBUTION_SKETCH_STRUCT not in _frame_columns(frame):
+        return frame
+    return frame.unnest(_DISTRIBUTION_SKETCH_STRUCT)
+
+
 def merge_for_query(
     merge: Callable[..., pl.DataFrame],
     frame: pl.DataFrame,
@@ -208,6 +230,29 @@ def merge_for_query(
     return merge(working, group_columns=group_columns).with_columns(
         pl.lit(config_hash).alias("config_hash")
     )
+
+
+def compact_state_frame(
+    frame: pl.DataFrame,
+    state_specs: dict[str, model.StateSpec],
+    group_columns: list[str],
+    merge: Callable[..., pl.DataFrame],
+    *,
+    identity_level: bool,
+) -> pl.DataFrame:
+    """Project unique finest-grain state rows, otherwise use the normal merge.
+
+    A chunk aggregate already has one row per finest-grain key.  Re-merging
+    such singleton groups needlessly deserializes and serializes every sketch.
+    The native duplicate check keeps this shortcut safe for callers that pass
+    arbitrary or already-concatenated partial frames to ``compact``.
+    """
+
+    if identity_level and _groups_are_unique(frame, group_columns):
+        return frame.select(
+            [*group_columns, *_identity_state_expressions(frame, state_specs, group_columns)]
+        )
+    return merge(frame, group_columns=group_columns)
 
 
 def merge_state_frame(  # noqa: PLR0912
@@ -324,6 +369,57 @@ def _frame_columns(frame: _FrameLike) -> set[str]:
     return set(frame.columns)
 
 
+def _groups_are_unique(frame: pl.DataFrame, group_columns: list[str]) -> bool:
+    if frame.height <= 1:
+        return True
+    if not group_columns:
+        return False
+    return not frame.select(group_columns).is_duplicated().any()
+
+
+def _identity_state_expressions(
+    frame: pl.DataFrame,
+    state_specs: dict[str, model.StateSpec],
+    group_columns: list[str],
+) -> list[pl.Expr]:
+    expressions: list[pl.Expr] = []
+    for name, spec in state_specs.items():
+        if name not in frame.columns or name in group_columns:
+            continue
+        if spec.type == "pooled_mean":
+            weight = str(spec_extra(spec).get("weight", "Count"))
+            if weight in frame.columns:
+                expressions.append(_singleton_weighted_mean_expr(name, weight).alias(name))
+            continue
+        if spec.type == "pooled_variance":
+            mean_col, count_col = _variance_companions(name, spec)
+            if mean_col not in frame.columns or count_col not in frame.columns:
+                raise ValueError(
+                    f"pooled_variance state {name!r} requires companion mean column "
+                    f"{mean_col!r} and weight column {count_col!r}; set them via the "
+                    "state's 'mean'/'weight' fields"
+                )
+            count = pl.col(count_col)
+            group_mean = _singleton_weighted_mean_expr(mean_col, count_col)
+            within = ((count - 1) * pl.col(name).fill_null(0)).fill_null(0)
+            between = (count * (pl.col(mean_col) - group_mean).pow(2)).fill_null(0)
+            count_sum = count.fill_null(0)
+            expressions.append(
+                pl.when(count_sum > 1)
+                .then((within + between) / (count_sum - 1))
+                .otherwise(None)
+                .alias(name)
+            )
+            continue
+        expressions.append(pl.col(name))
+    return expressions
+
+
+def _singleton_weighted_mean_expr(value_col: str, weight_col: str) -> pl.Expr:
+    weight = pl.col(weight_col)
+    return (pl.col(value_col) * weight).fill_null(0.0) / weight.fill_null(0)
+
+
 def series_or_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -336,6 +432,18 @@ def series_or_list(value: Any) -> list[Any]:
 
 def _build_sketch(values: Any, build_fn: Callable[..., bytes], kwarg: str, k: int) -> bytes:
     return build_fn(series_or_list(values), **{kwarg: k})
+
+
+def _build_distribution_sketches(
+    values: Sequence[pl.Series],
+    *,
+    metadata: tuple[tuple[str, str, int], ...],
+) -> dict[str, bytes]:
+    sketches: dict[str, bytes] = {}
+    for series, (name, state_type, k) in zip(values, metadata, strict=True):
+        build_fn = kll.build if state_type == "kll" else tdigest.build
+        sketches[name] = build_fn(series, k=k)
+    return sketches
 
 
 def _merge_sketch_column(
@@ -383,8 +491,11 @@ def _sketch_k(spec: model.StateSpec) -> int:
 
 
 __all__ = [
+    "DistributionSketchSpec",
+    "compact_state_frame",
     "count_expr",
     "default_group_columns",
+    "distribution_sketch_expr",
     "ensure_state_columns",
     "expression",
     "extra",
@@ -399,6 +510,7 @@ __all__ = [
     "sketch_build_expr",
     "spec_extra",
     "time_column",
+    "unnest_distribution_sketches",
     "value_sum_expr",
     "weighted_mean_expr",
     "where_expr",

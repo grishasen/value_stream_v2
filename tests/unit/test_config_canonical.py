@@ -16,6 +16,7 @@ from valuestream.config.canonical import (
     canonicalize,
     catalog_config_hash,
     config_hash,
+    processor_computation_config,
     processor_computation_hash,
     processor_config_hash,
     serialize,
@@ -141,6 +142,49 @@ class TestCatalogHash:
             processor_computation_hash(presentation_changed, changed_processor) == processor_before
         )
         assert source_computation_hash(presentation_changed, "ih") == source_before
+
+    def test_computation_hash_excludes_sketch_build_mode(self) -> None:
+        catalog = load(DEMO_WS)
+        descriptive = next(
+            processor
+            for processor in catalog.processors.processors
+            if isinstance(processor, model.NumericDistributionProcessor)
+        )
+        processor_before = processor_computation_hash(catalog, descriptive)
+        source_before = source_computation_hash(catalog, descriptive.source)
+        catalog_before = catalog_config_hash(catalog)
+
+        changed = catalog.model_copy(deep=True)
+        changed_descriptive = next(
+            processor
+            for processor in changed.processors.processors
+            if processor.id == descriptive.id
+        )
+        assert isinstance(changed_descriptive, model.NumericDistributionProcessor)
+        changed_descriptive.sketch_build_mode = "bulk"
+
+        assert processor_computation_hash(changed, changed_descriptive) == processor_before
+        assert source_computation_hash(changed, changed_descriptive.source) == source_before
+        assert catalog_config_hash(changed) != catalog_before
+
+    def test_bounded_ml_order_revision_is_scoped_to_score_processors(self) -> None:
+        catalog = load(DEMO_WS)
+        score = next(
+            processor
+            for processor in catalog.processors.processors
+            if isinstance(processor, model.ScoreDistributionProcessor)
+        )
+        numeric = next(
+            processor
+            for processor in catalog.processors.processors
+            if isinstance(processor, model.NumericDistributionProcessor)
+        )
+
+        score_payload = processor_computation_config(catalog, score)["processor"]
+        numeric_payload = processor_computation_config(catalog, numeric)["processor"]
+
+        assert score_payload["__valuestream_algorithm_revision"] == {"bounded_ml_source_order": 1}
+        assert "__valuestream_algorithm_revision" not in numeric_payload
 
     def test_two_yamls_same_meaning_same_hash(self, tmp_path: Path) -> None:
         """A YAML file rewritten with reordered keys hashes identically."""

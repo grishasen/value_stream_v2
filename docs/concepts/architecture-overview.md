@@ -63,18 +63,24 @@ detection. Canonical payloads and file lineage are persisted in metadata.
 ## Ingestion Path
 
 1. Discovery finds source files and groups them into chunks.
-2. Readers load chunk files as Polars frames.
-3. Transforms clean, normalize, enrich, filter, and deduplicate data.
-4. Processors fan out over the transformed frame.
-5. Each processor writes mergeable aggregate state.
-6. Compaction creates configured grains.
-7. Metadata databases record the run, chunk results, lineage, and config hash.
+2. A durable pipeline-run row is inserted with `status=running`.
+3. Readers load chunk files as Polars frames.
+4. Transforms clean, normalize, enrich, filter, and deduplicate data.
+5. Processors fan out over the transformed frame.
+6. Each processor writes mergeable aggregate state and configured grains.
+7. Complete lineage commits before the chunk's final `status=ok` marker.
+8. The same run row becomes `ok`, `partial`, or `failed`, publishing only its
+   committed chunks.
 
 The ingestion engine is designed to be idempotent. A completed chunk is skipped
 only when its source computation hash and current input-file fingerprint match.
 Writes use immutable run-specific files plus atomic rename. Query visibility is
 gated by successful chunk and run ledger rows, so a failed replacement leaves
 the previous successful version visible.
+If a process dies while the run is still `running`, the next source invocation
+holds the same source lock, verifies committed chunk fingerprints, lineage,
+files, and computation hashes, finalizes the interrupted run, and reuses only
+the verified chunks.
 
 ## Processor and State Model
 

@@ -69,6 +69,20 @@ contract. The normal source run therefore reprocesses discovered chunks under
 the new hash; force is not normally required for this case. The recipe preview
 shows the hash transition and the post-install handoff names the source to run.
 
+Every run is recorded as `running` before its first chunk. If the process or
+machine stops before finalization, invoke the same normal command again; do not
+use `--force`. After acquiring the source lock, the engine verifies committed
+chunks from the interrupted run against current input fingerprints, computation
+hashes, lineage, and physical files. Verified chunks are published under a
+recovered `partial` run and skipped by the new run. An incomplete or changed
+chunk remains invisible and is processed again.
+
+Files created by older releases that have chunk/lineage metadata but no
+`pipeline_runs` row cannot be adopted automatically because their source
+computation hash was never persisted. Let the replacement run finish, inspect
+reports, and use `valuestream vacuum <workspace> --dry-run` before removing
+those orphan files.
+
 ## Clean Rebuild from Data Load
 
 Use **Data Load → Rebuild from scratch** when old aggregate files should be
@@ -153,6 +167,16 @@ Vacuum removes superseded aggregate files and orphan reader temp directories.
 Run it after successful validation and report checks. Unlike the clean rebuild
 workflow, standalone vacuum keeps the latest successful partial for each
 chunk; it does not assert that all current input chunks were rebuilt together.
+The CLI acquires every source lock before standalone cleanup, so it refuses to
+race an active ingestion. The storage vacuum also protects final and temporary
+aggregate files tagged with a `running` run id.
+
+## Benchmark Ingestion
+
+Use [Benchmark ingestion performance](performance-benchmarking.md) before and
+after pipeline performance changes. The contract records exact input hashes,
+execution settings, environment, throughput, CPU, RSS, output size, and a
+normalized correctness digest.
 
 ## Related Procedures
 

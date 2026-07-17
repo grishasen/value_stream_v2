@@ -143,10 +143,18 @@ ws.run_source("ih")
 Both surfaces are idempotent: a chunk is skipped only when the source computation hash and current input-file fingerprint match a successful prior run. Pass `--force` to re-process. The read-only HTTP API does not trigger ingestion.
 
 **C3. What happens when the same chunk is re-run?**
-The new partial Parquet writes alongside the old one with a new `pipeline_run_id`. It becomes visible only after its successful chunk row and successful/partial run row are committed. If replacement fails, readers keep the previous successful partial. `valuestream vacuum` deletes superseded or orphaned partials.
+The new partial Parquet writes alongside the old one with a new `pipeline_run_id`. Complete file lineage commits first, then the successful chunk row acts as the chunk commit marker. It becomes visible only after the parent run is finalized as successful/partial. If replacement fails, readers keep the previous successful partial. `valuestream vacuum` deletes superseded or orphaned partials.
 
 **C4. What if a file is corrupted mid-run?**
 That chunk fails (`status='failed'` in `meta/chunks.duckdb`). The other chunks finish. The run status becomes `partial`. The operator fixes or removes the bad file and re-runs; only failed/missing chunks are processed.
+
+**C4a. What if the process or machine stops mid-run?**
+The durable run row remains `running`, so none of its chunks are published by
+that row yet. Start the same source normally. After taking the source lock, the
+engine verifies each committed chunk's current fingerprint, computation hashes,
+lineage, physical files, and embedded provenance. Verified chunks are published
+under a recovered `partial` run and reused; incomplete or changed chunks are
+processed again. `--force` would intentionally disable that reuse.
 
 **C5. Can multiple ingestions run at the same time?**
 Per-source: no — a filesystem advisory lock at `meta/source_<id>.lock` enforces one run per source. Different sources can run in parallel. Inside one run, processors fan out concurrently.
@@ -289,7 +297,10 @@ Indicative numbers (Polars + DuckDB on a single 8-core / 32 GB host):
 | Medium (NBS) | 5–20 GB | minutes |
 | Large (BDT, RBB) | 50–200 GB | tens of minutes |
 
-Memory pressure is bounded by `streaming: true` on readers. For very large workspaces, run multiple processes against the same store with `--shard <hash>`.
+`streaming: true` reduces transient source-plan memory, but it does not impose a
+fixed RSS bound and a materialized transformed chunk must still fit in memory.
+Size the machine with the ingestion benchmark, reduce the chunk interval when
+needed, and increase chunk-process parallelism only after measuring peak RSS.
 
 **E5. Can I run Value Stream against a remote object store?**
 Yes — the workspace path can be `s3://...` or `gs://...`. Polars and DuckDB read Parquet from object stores natively. The metadata DBs need to be local (DuckDB's WAL doesn't live well on S3) — typically mounted from a local volume.
@@ -324,7 +335,13 @@ Yes — `processors.<id>.states` is explicit, so a workspace can omit any `cpc`,
 For Pega IH, 1 chunk per day works well. Smaller (per hour) chunks pay extra fixed cost; larger (per month) chunks bloat memory. The grouping regex is the lever.
 
 **G2. What's the largest chunk Value Stream can handle?**
-With `streaming: true` and one processor, ~10 GB of input on a 32 GB box is comfortable. With 6 processors fanning out, ~3 GB. Beyond that, split the chunk grouping (per hour) or shard processing.
+There is no input-size-only limit: in-memory size depends on selected columns,
+data types, transform expansion, group cardinality, processor states, and active
+chunk workers. Streaming reduces transient scan/transform memory, while
+`materialize_transforms: true` retains one transformed chunk through processor
+fan-out. Measure the actual catalog with the ingestion benchmark; if peak RSS is
+too high, split the grouping interval (for example, daily to hourly) and lower
+chunk-process parallelism.
 
 **G3. What's the largest aggregate store Value Stream can serve?**
 DuckDB scans Parquet at multi-GB/s on local SSD. Aggregate stores up to a few hundred GB serve interactive dashboards comfortably; beyond that, increase the `monthly` grain's coverage and rely on summary aggregates for high-cardinality tiles.

@@ -130,12 +130,18 @@ The unit of idempotent work in the ingestion engine. A chunk consists of:
 - a `chunk_id` (typically derived from a filename pattern, e.g. `2024-08-21`),
 - one or more file paths whose contents combine to form the chunk's input,
 - a `pipeline_run_id` recording which run processed it,
-- a status (`ok | failed | skipped`).
+- a durable ledger status (`ok | failed`).
 
 A chunk is processed end-to-end (read → transform → fan out to all processors → write all partials) before the next chunk starts.
+`skipped` is a result in the current run report when a prior committed chunk is
+reused; it does not create another durable chunk-ledger row. For a successful
+chunk, complete lineage commits before `status=ok`, making that row the durable
+chunk commit marker.
 
 ### Chunk ledger
 The DuckDB table at `meta/chunks.duckdb` recording every chunk processed by every run.
+Only an `ok` row whose parent run is `ok` or `partial` is query-visible and
+eligible for idempotent reuse.
 
 ### Compaction
 The process of reducing finer-grained aggregates into coarser-grained aggregates by `groupby + state-merge`. Compaction is a pure file operation and never touches raw data. Standard chain: `Day → Month → Summary`, stored internally as `daily → monthly → summary`.
@@ -215,6 +221,12 @@ The hive partition key used inside an aggregate directory. For `daily`, `monthly
 
 ### Pipeline run
 One end-to-end execution of an ingestion against a Source. Has an id (UUID), a config hash, a status (`running | ok | failed | partial`), counts of total / ok / failed chunks, and start/end timestamps. Recorded in `meta/pipeline_runs.duckdb`.
+The row is inserted as `running` after discovery and before the first chunk.
+While it is running, `finished_at` is null and none of that run's new chunks are
+visible. Normal completion transitions the same row to `ok`, `partial`, or
+`failed`. If the process dies first, the next caller holding the source lock
+verifies committed chunks and performs the terminal transition; it never
+creates a second row for the interrupted run.
 
 ### Plan
 The result of the Query Layer's planner: which physical aggregate to scan, what predicates to push down, what columns to read, what derive function to apply. Deterministic for a given input + config_hash.

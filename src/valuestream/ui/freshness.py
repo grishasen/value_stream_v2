@@ -159,7 +159,7 @@ def recent_runs(workspace_path: str | Path, *, limit: int = 20) -> pl.DataFrame:
             SELECT id, source_id, status, started_at, finished_at, rows_in, rows_kept,
                    chunks_total, chunks_ok, chunks_failed
             FROM pipeline_runs
-            ORDER BY finished_at DESC
+            ORDER BY COALESCE(finished_at, started_at) DESC, started_at DESC
             LIMIT ?
             """,
             (limit,),
@@ -180,7 +180,7 @@ def latest_run(workspace_path: str | Path, *, source_id: str | None = None) -> d
                    chunks_total, chunks_ok, chunks_failed
             FROM pipeline_runs
             {where}
-            ORDER BY finished_at DESC
+            ORDER BY COALESCE(finished_at, started_at) DESC, started_at DESC
             LIMIT 1
             """,
             params,

@@ -63,4 +63,11 @@ def frequent_items(
     ]
 
 
-__all__ = ["FrequentItem", "build", "frequent_items", "merge"]
+def weight(payload: bytes | bytearray | memoryview | None) -> int:
+    """Return the total update weight represented by ``payload``."""
+    if not payload:
+        return 0
+    return int(frequent_strings_sketch.deserialize(bytes(payload)).total_weight)
+
+
+__all__ = ["FrequentItem", "build", "frequent_items", "merge", "weight"]

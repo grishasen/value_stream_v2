@@ -9,6 +9,7 @@ from typing import Any, cast
 import polars as pl
 import pytest
 
+from valuestream.engine.ledger import start_run
 from valuestream.store import vacuum
 
 
@@ -125,3 +126,51 @@ def test_vacuum_rejects_incomplete_retained_run_scope(tmp_path: Path) -> None:
             source_ids={"a", "b"},
             retained_run_ids={"a": "new"},
         )
+
+
+@pytest.mark.unit
+def test_vacuum_preserves_final_and_temporary_files_for_running_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = "11111111-1111-4111-8111-111111111111"
+    base = tmp_path / "aggregates" / "a" / "processor" / "daily" / "period=2026-07"
+    base.mkdir(parents=True)
+    final = base / f"part-{run_id}-chunk.parquet"
+    temporary = base / f".part-{run_id}-chunk.parquet.tmp"
+    final.write_bytes(b"aggregate")
+    temporary.write_bytes(b"temporary")
+    start_run(
+        tmp_path,
+        run_id=run_id,
+        workspace="test",
+        source_id="a",
+        config_hash="source-hash",
+        started_at=dt.datetime(2026, 7, 16, tzinfo=dt.UTC),
+        chunks_total=1,
+    )
+    monkeypatch.setattr(
+        vacuum,
+        "_current_processor_hashes",
+        lambda catalog, source_ids=None: {("a", "processor"): "processor-hash"},
+    )
+    monkeypatch.setattr(
+        vacuum,
+        "_file_metadata",
+        lambda path: vacuum._FileMetadata(
+            config_hashes=frozenset({"processor-hash"}),
+            chunk_ids=frozenset({"chunk"}),
+            run_ids=frozenset({run_id}),
+            created_order_ns=1,
+        ),
+    )
+
+    result = vacuum.vacuum_workspace(
+        tmp_path,
+        cast(Any, object()),
+        include_tmp=False,
+    )
+
+    assert result.files_deleted == 0
+    assert final.exists()
+    assert temporary.exists()
