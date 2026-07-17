@@ -59,6 +59,9 @@ The chart factory receives `(rows: pl.DataFrame, tile: dict, plan: PlanInfo)` an
 |---|---|---|---|
 | `x` | str | most | column name on x axis |
 | `y` | str / list[str] | most | column name(s) on y axis |
+| `y2` | str | combo | column name on the secondary y axis |
+| `x_axis_title` / `y_axis_title` | str | cartesian charts | explicit primary-axis labels |
+| `y2_axis_title` | str | combo | explicit secondary-axis label; otherwise the `y2` display label is used |
 | `color` | str | most | column name to map to color |
 | `size` | str | scatter | column name for marker size |
 | `path` | list[str] | treemap | hierarchy of group-by columns |
@@ -429,7 +432,7 @@ primitives except for the native Streamlit table on the Reports surface:
 | `pareto` | `x, y` | Top campaigns/offers plus cumulative share |
 | `cohort_heatmap` | `x, y, color` | Cohort or retention matrix |
 | `sankey` | `source, target, value` | Journey/path flow between stages or channels |
-| `combo` | `x, y, y2` | Bar + line dual-axis comparisons, e.g. spend vs revenue |
+| `combo` | `x, y, y2` | Bar + line dual-axis comparisons, e.g. spend vs revenue; use `y2_axis_title` to override the secondary-axis label |
 | `interval` | `x, y` plus optional `error_y` | Lift/estimate with uncertainty interval |
 | `donut` | `names, values` | Simple share-of-total for small category sets |
 | `geo_map` | `locations, value` or `lat, lon, value` | Country/region/city performance |

@@ -196,6 +196,36 @@ def test_supported_charts_validate_plotly_6_json(
 
 
 @pytest.mark.unit
+def test_combo_chart_preserves_secondary_axis_semantics() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Day": [dt.date(2024, 1, 1), dt.date(2024, 1, 2)],
+                "Clicked_Count": [12, 15],
+                "Impression_Count": [120, 150],
+            }
+        ),
+        {
+            "id": "clicks_and_impressions",
+            "metric": "FunnelClicks",
+            "chart": "combo",
+            "x": "Day",
+            "y": "Clicked_Count",
+            "y2": "Impression_Count",
+            "labels": {
+                "Clicked_Count": "Clicked Count",
+                "Impression_Count": "Impression Count",
+            },
+            "y_axis_title": "Clicked Count (clicks)",
+            "y2_axis_title": "Impressions",
+        },
+    )
+
+    assert figure.layout.yaxis.title.text == "Clicked Count (clicks)"
+    assert figure.layout.yaxis2.title.text == "Impressions"
+
+
+@pytest.mark.unit
 def test_table_chart_expands_topk_items_into_ranked_rows() -> None:
     rows = pl.DataFrame(
         {

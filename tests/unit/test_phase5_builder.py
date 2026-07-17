@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import plotly.io as pio  # type: ignore[import-untyped]
 import polars as pl
 import pytest
 import streamlit as st
@@ -1549,6 +1550,108 @@ def test_start_new_tile_editor_uses_blank_seed_and_fresh_token() -> None:
 
     assert state["builder_tile_seed"] == (None, None, {})
     assert state["builder_tile_editor_token"] == "new_2"
+
+
+@pytest.mark.unit
+def test_report_library_groups_every_supported_chart_once() -> None:
+    categorized = [
+        chart_type
+        for group in config_builder.REPORT_LIBRARY_GROUPS.values()
+        for chart_type in group.chart_types
+    ]
+
+    assert len(categorized) == len(set(categorized))
+    assert set(categorized) == set(builder.CHART_REQUIRED_FIELDS)
+    assert set(config_builder.REPORT_LIBRARY_CHART_DESCRIPTIONS) == set(
+        builder.CHART_REQUIRED_FIELDS
+    )
+
+
+@pytest.mark.unit
+def test_report_library_plotly_previews_cover_every_supported_chart() -> None:
+    for chart_type in builder.CHART_REQUIRED_FIELDS:
+        figure = config_builder._chart_library_preview(chart_type, theme_base="light")
+
+        assert figure.data
+        assert pio.to_json(figure, validate=True)
+
+
+@pytest.mark.unit
+def test_report_library_searches_business_and_technical_tile_context(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    catalog = load(tmp_path)
+
+    options = config_builder._report_library_options(
+        catalog,
+        search="holdings",
+        metric_filter="All",
+        chart_filter="All",
+    )
+
+    assert [config_builder._tile_option_key(option) for option in options] == [
+        "overview/portfolio/holdings_value",
+        "overview/portfolio/holdings_rate",
+    ]
+
+
+@pytest.mark.unit
+def test_visual_report_library_replaces_inventory_dataframe(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.config.loader import load  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import (  # noqa: PLC0415
+            _render_report_library_browser,
+        )
+
+        catalog = load(workspace)
+        _render_report_library_browser(catalog, sorted(catalog.metrics.metrics))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+
+    assert not rendered.exception
+    assert not rendered.dataframe
+    assert rendered.get("plotly_chart")
+    assert rendered.segmented_control[0].value == "summary"
+    assert rendered.pills
+
+
+@pytest.mark.unit
+def test_large_report_type_group_uses_compact_selector() -> None:
+    tile_options = [
+        (
+            "overview",
+            "executive",
+            f"kpi_{index}",
+            {
+                "id": f"kpi_{index}",
+                "title": f"KPI {index}",
+                "metric": "CTR",
+                "chart": "kpi_card",
+                "value": "CTR",
+            },
+        )
+        for index in range(config_builder.REPORT_LIBRARY_PILLS_MAX + 1)
+    ]
+
+    def app(options: list[tuple[str, str, str, dict]]) -> None:
+        from valuestream.ui.pages.config_builder import (  # noqa: PLC0415
+            _render_report_library_chart_group,
+            _tile_option_key,
+        )
+
+        _render_report_library_chart_group(
+            "kpi_card",
+            options,
+            selected_tile_key=_tile_option_key(options[0]),
+            theme_base="light",
+        )
+
+    rendered = AppTest.from_function(app, kwargs={"options": tile_options}).run()
+
+    assert not rendered.exception
+    assert not rendered.pills
+    assert rendered.selectbox[0].label == "Open KPI card report"
 
 
 @pytest.mark.unit

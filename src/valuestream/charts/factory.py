@@ -2200,16 +2200,41 @@ def _apply_label_overrides(fig: go.Figure, tile: Mapping[str, Any]) -> None:
     if x_title and not _has_facets(tile):
         axis_layout["title_text"] = x_title
     fig.update_xaxes(**axis_layout)
+    _apply_y_axis_labels(fig, tile, y_title=y_title, standoff=standoff)
+    if _has_facets(tile):
+        _apply_outer_facet_axis_titles(fig, x_title=x_title, y_title=y_title)
+    if legend_title:
+        fig.update_layout(legend_title_text=legend_title)
+
+
+def _apply_y_axis_labels(
+    fig: go.Figure,
+    tile: Mapping[str, Any],
+    *,
+    y_title: str | None,
+    standoff: int | None,
+) -> None:
+    """Apply primary and secondary labels without crossing dual-axis semantics."""
+
     axis_layout = {"automargin": True}
     if standoff is not None:
         axis_layout["title_standoff"] = standoff
     if y_title and not _has_facets(tile):
         axis_layout["title_text"] = y_title
-    fig.update_yaxes(**axis_layout)
-    if _has_facets(tile):
-        _apply_outer_facet_axis_titles(fig, x_title=x_title, y_title=y_title)
-    if legend_title:
-        fig.update_layout(legend_title_text=legend_title)
+    chart = str(tile.get("chart", ""))
+    if chart in {"combo", "pareto"}:
+        fig.update_yaxes(**axis_layout, secondary_y=False)
+        secondary_axis_layout: dict[str, Any] = {"automargin": True}
+        if standoff is not None:
+            secondary_axis_layout["title_standoff"] = standoff
+        if chart == "combo":
+            secondary_field = "y2" if tile.get("y2") else "line_y"
+            y2_title = _axis_title(tile, secondary_field, "y2_axis_title")
+            if y2_title:
+                secondary_axis_layout["title_text"] = y2_title
+        fig.update_yaxes(**secondary_axis_layout, secondary_y=True)
+    else:
+        fig.update_yaxes(**axis_layout)
 
 
 def _apply_theme(fig: go.Figure, theme: Mapping[str, Any], tile: Mapping[str, Any]) -> None:

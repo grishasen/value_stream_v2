@@ -5,10 +5,11 @@ from __future__ import annotations
 import datetime as dt
 import secrets
 from collections.abc import Mapping, MutableMapping
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+import plotly.graph_objects as go  # type: ignore[import-untyped]
 import polars as pl
 import streamlit as st
 import yaml
@@ -35,7 +36,12 @@ from valuestream.ui import (
 )
 from valuestream.ui.context import ValueStreamContext, catalog_counts, processors_for_source
 from valuestream.ui.data import query_tile
-from valuestream.ui.theme import dashboard_theme
+from valuestream.ui.presentation import humanize_identifier
+from valuestream.ui.theme import (
+    PLOTLY_DARK_COLORWAY,
+    PLOTLY_LIGHT_COLORWAY,
+    dashboard_theme,
+)
 from valuestream.utils.logger import get_logger
 from valuestream.utils.names import capitalize_fields
 
@@ -71,6 +77,147 @@ BUILDER_PHASES = {
     "Chat Review": "Review",
     "Settings": "Review",
     "Save & Export": "Export",
+}
+
+
+@dataclass(frozen=True)
+class ReportLibraryGroup:
+    """Purpose-led group of chart types shown in the report library."""
+
+    label: str
+    icon: str
+    description: str
+    chart_types: tuple[str, ...]
+
+
+REPORT_LIBRARY_GROUPS = {
+    "summary": ReportLibraryGroup(
+        label="Summary & detail",
+        icon=":material/dashboard:",
+        description="Headline values, progress indicators, and exact supporting detail.",
+        chart_types=("kpi_card", "gauge", "table"),
+    ),
+    "trend": ReportLibraryGroup(
+        label="Trends over time",
+        icon=":material/show_chart:",
+        description="Change, seasonality, and two-measure movement across time.",
+        chart_types=(
+            "line",
+            "stacked_area",
+            "combo",
+            "calendar_heatmap",
+            "descriptive_line",
+        ),
+    ),
+    "compare": ReportLibraryGroup(
+        label="Compare & rank",
+        icon=":material/leaderboard:",
+        description="Category comparisons, contribution, ranking, and uncertainty.",
+        chart_types=(
+            "bar",
+            "waterfall",
+            "pareto",
+            "interval",
+            "bar_polar",
+            "experiment_z_score",
+            "experiment_odds_ratio",
+        ),
+    ),
+    "explore": ReportLibraryGroup(
+        label="Distributions & models",
+        icon=":material/query_stats:",
+        description="Relationships, distributions, diagnostic curves, and model quality.",
+        chart_types=(
+            "scatter",
+            "heatmap",
+            "cohort_heatmap",
+            "boxplot",
+            "histogram",
+            "corr",
+            "rfm_density",
+            "descriptive_boxplot",
+            "descriptive_histogram",
+            "descriptive_heatmap",
+            "calibration_curve",
+            "roc_curve",
+            "precision_recall_curve",
+            "gain_curve",
+            "lift_curve",
+            "model",
+        ),
+    ),
+    "flow": ReportLibraryGroup(
+        label="Flow & composition",
+        icon=":material/account_tree:",
+        description="Mix, hierarchy, geography, journeys, and lifecycle progression.",
+        chart_types=(
+            "treemap",
+            "clv_treemap",
+            "donut",
+            "geo_map",
+            "sankey",
+            "funnel",
+            "descriptive_funnel",
+            "exposure",
+        ),
+    ),
+}
+
+REPORT_LIBRARY_GROUP_BY_CHART = {
+    chart_type: group_id
+    for group_id, group in REPORT_LIBRARY_GROUPS.items()
+    for chart_type in group.chart_types
+}
+
+REPORT_LIBRARY_CHART_DESCRIPTIONS = {
+    "bar": "Compare magnitudes across discrete categories.",
+    "bar_polar": "Compare cyclical or directional categories around a circle.",
+    "boxplot": "Compare medians, spread, and outliers between groups.",
+    "calendar_heatmap": "Reveal daily activity and seasonality on a calendar grid.",
+    "calibration_curve": "Compare predicted probabilities with observed outcomes.",
+    "clv_treemap": "Show customer-value hierarchy through nested area.",
+    "cohort_heatmap": "Compare retention or behavior across cohort periods.",
+    "combo": "Place two measures on coordinated bar and line axes.",
+    "corr": "Scan the strength and direction of pairwise relationships.",
+    "descriptive_boxplot": "Compare aggregate distribution summaries by group.",
+    "descriptive_funnel": "Follow aggregate descriptive measures through ordered stages.",
+    "descriptive_heatmap": "Compare an aggregate statistic across two dimensions.",
+    "descriptive_histogram": "Show the distribution of an aggregate numeric property.",
+    "descriptive_line": "Track an aggregate statistic over time or ordered categories.",
+    "donut": "Show a small set of parts as shares of a whole.",
+    "experiment_odds_ratio": "Compare experiment effects with confidence intervals.",
+    "experiment_z_score": "Compare standardized experiment effects around zero.",
+    "exposure": "Show how populations progress through exposure levels.",
+    "funnel": "Show volume retained through ordered journey stages.",
+    "gain_curve": "Show cumulative positives captured as coverage increases.",
+    "gauge": "Show a current value against a reference or operating range.",
+    "geo_map": "Compare a measure across geographic locations.",
+    "heatmap": "Compare intensity across two categorical dimensions.",
+    "histogram": "Show how numeric observations are distributed across bins.",
+    "interval": "Compare estimates together with their uncertainty bounds.",
+    "kpi_card": "Present one decision-ready value with optional comparison context.",
+    "lift_curve": "Show improvement over random selection as coverage increases.",
+    "line": "Track one or more measures across time or an ordered axis.",
+    "model": "Summarize model performance across thresholds or score bands.",
+    "pareto": "Rank contributors and show their cumulative share.",
+    "precision_recall_curve": "Show the precision-recall tradeoff across thresholds.",
+    "rfm_density": "Map customer density across recency and frequency/value space.",
+    "roc_curve": "Show true-positive versus false-positive performance by threshold.",
+    "sankey": "Show volume flowing between stages or categories.",
+    "scatter": "Explore the relationship between two numeric measures.",
+    "stacked_area": "Show total change over time together with category composition.",
+    "table": "Inspect exact ranked or operational values in native tabular form.",
+    "treemap": "Show hierarchical composition through nested area.",
+    "waterfall": "Explain how positive and negative contributions build a total.",
+}
+
+REPORT_LIBRARY_PILLS_MAX = 12
+REPORT_LIBRARY_CHART_LABELS = {
+    "clv_treemap": "CLV treemap",
+    "kpi_card": "KPI card",
+    "precision_recall_curve": "Precision-recall curve",
+    "rfm_density": "RFM density",
+    "roc_curve": "ROC curve",
 }
 
 
@@ -2421,6 +2568,473 @@ def _start_new_tile_editor(session_state: MutableMapping[str, Any]) -> None:
     session_state["builder_tile_editor_token"] = f"new_{counter}"
 
 
+TileOption = tuple[str, str, str, dict[str, Any]]
+
+
+def _report_library_options(
+    catalog: model.Catalog,
+    *,
+    search: str,
+    metric_filter: str,
+    chart_filter: str,
+) -> list[TileOption]:
+    """Return configured tiles matching the compact library controls."""
+
+    options: list[TileOption] = []
+    normalized_search = search.strip().casefold()
+    for dashboard in catalog.dashboards.dashboards:
+        for page in dashboard.pages:
+            for tile in page.tiles:
+                if metric_filter not in ("All", tile.metric):
+                    continue
+                if chart_filter not in ("All", tile.chart):
+                    continue
+                searchable = " ".join(
+                    (
+                        dashboard.id,
+                        dashboard.title,
+                        page.id,
+                        page.title,
+                        tile.id,
+                        tile.title,
+                        tile.metric,
+                        tile.chart,
+                    )
+                ).casefold()
+                if normalized_search and normalized_search not in searchable:
+                    continue
+                options.append(
+                    (
+                        dashboard.id,
+                        page.id,
+                        tile.id,
+                        tile.model_dump(mode="json", exclude_none=True),
+                    )
+                )
+    return options
+
+
+def _tile_option_key(option: TileOption) -> str:
+    return f"{option[0]}/{option[1]}/{option[2]}"
+
+
+def _report_library_tile_label(option: TileOption) -> str:
+    tile = option[3]
+    title = str(tile.get("title") or option[2])
+    return f"{title} · {humanize_identifier(option[1])}"
+
+
+def _report_library_chart_label(chart_type: str) -> str:
+    return REPORT_LIBRARY_CHART_LABELS.get(chart_type, humanize_identifier(chart_type))
+
+
+def _select_report_library_tile(widget_key: str) -> None:
+    selected = st.session_state.get(widget_key)
+    if selected:
+        st.session_state["builder_tile_selection_override"] = selected
+
+
+def _render_report_library_browser(
+    catalog: model.Catalog,
+    metric_names: list[str],
+) -> tuple[list[TileOption], str]:
+    """Render a purpose-led visual tile picker and return its visible selection."""
+
+    st.write("### Report library")
+    configured_chart_types = sorted(
+        {
+            tile.chart
+            for dashboard in catalog.dashboards.dashboards
+            for page in dashboard.pages
+            for tile in page.tiles
+        }
+    )
+    filter_columns = st.columns([2, 1, 1], vertical_alignment="bottom")
+    with filter_columns[0]:
+        search = st.text_input(
+            "Search",
+            key="builder_tile_search",
+            placeholder="Title, dashboard, page, metric, or chart type",
+            help=config_help.field_help("report.library_search"),
+        )
+    with filter_columns[1]:
+        metric_filter = st.selectbox(
+            "Metric",
+            ["All", *metric_names],
+            key="builder_metric_filter",
+            help=config_help.field_help("report.metric_filter"),
+        )
+    with filter_columns[2]:
+        chart_filter = st.selectbox(
+            "Chart type",
+            ["All", *configured_chart_types],
+            key="builder_chart_filter",
+            help=config_help.field_help("report.chart_filter"),
+        )
+
+    filtered_options = _report_library_options(
+        catalog,
+        search=search,
+        metric_filter=metric_filter,
+        chart_filter=chart_filter,
+    )
+    if not filtered_options:
+        st.caption("No existing report tiles match these filters.")
+        return [], NEW_TILE_KEY
+
+    available_groups = [
+        group_id
+        for group_id, group in REPORT_LIBRARY_GROUPS.items()
+        if any(option[3].get("chart") in group.chart_types for option in filtered_options)
+    ]
+    selected_before_grouping = _selected_tile(
+        filtered_options,
+        st.session_state.get("builder_selected_tile_key"),
+    )
+    selected_group = (
+        REPORT_LIBRARY_GROUP_BY_CHART.get(str(selected_before_grouping[3].get("chart")))
+        if selected_before_grouping is not None
+        else None
+    )
+    purpose_key = "builder_report_library_purpose"
+    if st.session_state.get(purpose_key) not in available_groups:
+        st.session_state[purpose_key] = (
+            selected_group if selected_group in available_groups else available_groups[0]
+        )
+    purpose = st.segmented_control(
+        "Purpose",
+        available_groups,
+        key=purpose_key,
+        required=True,
+        width="stretch",
+        format_func=lambda group_id: (
+            f"{REPORT_LIBRARY_GROUPS[group_id].icon} "
+            f"{REPORT_LIBRARY_GROUPS[group_id].label}"
+        ),
+        help=config_help.field_help("report.library_purpose"),
+    )
+    purpose = str(purpose or available_groups[0])
+    group = REPORT_LIBRARY_GROUPS[purpose]
+    st.caption(group.description)
+
+    visible_options = [
+        option for option in filtered_options if option[3].get("chart") in group.chart_types
+    ]
+    visible_keys = [_tile_option_key(option) for option in visible_options]
+    selected_tile_key = str(st.session_state.get("builder_selected_tile_key", ""))
+    if selected_tile_key not in visible_keys:
+        selected_tile_key = visible_keys[0]
+        st.session_state["builder_selected_tile_key"] = selected_tile_key
+
+    visible_chart_types = [
+        chart_type
+        for chart_type in group.chart_types
+        if any(option[3].get("chart") == chart_type for option in visible_options)
+    ]
+    theme_base = str(dashboard_theme().get("base", "light"))
+    for chart_type in visible_chart_types:
+        chart_options = [
+            option for option in visible_options if option[3].get("chart") == chart_type
+        ]
+        _render_report_library_chart_group(
+            chart_type,
+            chart_options,
+            selected_tile_key=selected_tile_key,
+            theme_base=theme_base,
+        )
+    return visible_options, selected_tile_key
+
+
+def _render_report_library_chart_group(
+    chart_type: str,
+    tile_options: list[TileOption],
+    *,
+    selected_tile_key: str,
+    theme_base: str,
+) -> None:
+    """Render one compact chart-type preview with selectable report tiles."""
+
+    with st.container(border=True):
+        preview_column, report_column = st.columns([1, 4], vertical_alignment="top")
+        with preview_column:
+            st.plotly_chart(
+                _chart_library_preview(chart_type, theme_base=theme_base),
+                width="stretch",
+                height=140,
+                theme=None,
+                key=f"builder_report_library_preview_{chart_type}",
+                config={"displayModeBar": False, "staticPlot": True, "responsive": True},
+            )
+        with report_column:
+            with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+                st.markdown(f"**{_report_library_chart_label(chart_type)}**")
+                st.badge(
+                    f"{len(tile_options)} report{'s' if len(tile_options) != 1 else ''}",
+                    color="gray",
+                )
+            st.caption(
+                REPORT_LIBRARY_CHART_DESCRIPTIONS.get(
+                    chart_type,
+                    "Use this chart type to present the selected metric.",
+                )
+            )
+            tile_keys = [_tile_option_key(option) for option in tile_options]
+            tile_labels = {
+                _tile_option_key(option): _report_library_tile_label(option)
+                for option in tile_options
+            }
+            default = selected_tile_key if selected_tile_key in tile_keys else None
+            if len(tile_keys) > REPORT_LIBRARY_PILLS_MAX:
+                widget_key = f"builder_report_library_select_{chart_type}"
+                if widget_key in st.session_state and st.session_state[widget_key] != default:
+                    del st.session_state[widget_key]
+                widget_has_state = widget_key in st.session_state
+                st.selectbox(
+                    f"Open {_report_library_chart_label(chart_type)} report",
+                    tile_keys,
+                    index=(
+                        None
+                        if widget_has_state or default is None
+                        else tile_keys.index(default)
+                    ),
+                    key=widget_key,
+                    format_func=lambda tile_key: tile_labels[tile_key],
+                    placeholder=f"Choose from {len(tile_keys)} reports",
+                    help="Choose a configured report tile to open in the editor below.",
+                    on_change=_select_report_library_tile,
+                    args=(widget_key,),
+                )
+            else:
+                widget_key = f"builder_report_library_pills_{chart_type}"
+                if widget_key in st.session_state and st.session_state[widget_key] != default:
+                    del st.session_state[widget_key]
+                widget_has_state = widget_key in st.session_state
+                st.pills(
+                    f"Open {_report_library_chart_label(chart_type)} report",
+                    tile_keys,
+                    key=widget_key,
+                    default=None if widget_has_state else default,
+                    format_func=lambda tile_key: tile_labels[tile_key],
+                    label_visibility="collapsed",
+                    width="stretch",
+                    on_change=_select_report_library_tile,
+                    args=(widget_key,),
+                )
+
+
+def _chart_library_preview(  # noqa: PLR0912, PLR0915
+    chart_type: str, *, theme_base: str = "light"
+) -> go.Figure:
+    """Return a small representative Plotly figure for one chart kind."""
+
+    dark = theme_base == "dark"
+    colors = PLOTLY_DARK_COLORWAY if dark else PLOTLY_LIGHT_COLORWAY
+    ink = "#f0f3f0" if dark else "#1a1a1a"
+    soft = "#171c18" if dark else "#e8ebe6"
+    transparent = "rgba(0,0,0,0)"
+    x = [0, 1, 2, 3, 4]
+    y = [1.0, 2.8, 2.1, 4.2, 3.6]
+    figure = go.Figure()
+
+    if chart_type == "kpi_card":
+        figure.add_trace(
+            go.Indicator(
+                mode="number+delta",
+                value=72,
+                number={"suffix": "%", "font": {"size": 28}},
+                delta={"reference": 64, "position": "bottom"},
+            )
+        )
+    elif chart_type == "gauge":
+        figure.add_trace(
+            go.Indicator(
+                mode="gauge+number",
+                value=72,
+                number={"font": {"size": 22}},
+                gauge={
+                    "axis": {"range": [0, 100], "visible": False},
+                    "bar": {"color": colors[0]},
+                    "bgcolor": soft,
+                },
+            )
+        )
+    elif chart_type == "table":
+        figure.add_trace(
+            go.Table(
+                header={"values": ["Rank", "Value"], "fill_color": soft},
+                cells={"values": [[1, 2, 3], [42, 31, 19]], "fill_color": transparent},
+            )
+        )
+    elif chart_type == "stacked_area":
+        figure.add_trace(go.Scatter(x=x, y=y, stackgroup="one", line={"color": colors[0]}))
+        figure.add_trace(
+            go.Scatter(
+                x=x,
+                y=[1.8, 1.2, 2.0, 1.4, 2.1],
+                stackgroup="one",
+                line={"color": colors[1]},
+            )
+        )
+    elif chart_type == "combo":
+        figure.add_trace(go.Bar(x=x, y=[2, 4, 3, 5, 4], marker_color=colors[0]))
+        figure.add_trace(
+            go.Scatter(
+                x=x,
+                y=[35, 48, 43, 62, 58],
+                mode="lines+markers",
+                line={"color": colors[1], "width": 3},
+                yaxis="y2",
+            )
+        )
+        figure.update_layout(yaxis2={"overlaying": "y", "side": "right", "visible": False})
+    elif chart_type in {"calendar_heatmap", "heatmap", "cohort_heatmap", "corr", "rfm_density", "descriptive_heatmap"}:
+        figure.add_trace(
+            go.Heatmap(
+                z=[[1, 2, 4, 3], [2, 5, 3, 1], [4, 3, 2, 5]],
+                colorscale=[[0, soft], [1, colors[0]]],
+                showscale=False,
+            )
+        )
+    elif chart_type in {"bar", "experiment_z_score"}:
+        figure.add_trace(go.Bar(x=["A", "B", "C", "D"], y=[4, 7, 5, 8], marker_color=colors[0]))
+    elif chart_type == "waterfall":
+        figure.add_trace(
+            go.Waterfall(
+                x=["Start", "+", "-", "End"],
+                y=[5, 3, -2, 0],
+                measure=["absolute", "relative", "relative", "total"],
+                increasing={"marker": {"color": colors[2]}},
+                decreasing={"marker": {"color": colors[1]}},
+            )
+        )
+    elif chart_type == "pareto":
+        figure.add_trace(go.Bar(x=["A", "B", "C", "D"], y=[8, 5, 3, 2], marker_color=colors[0]))
+        figure.add_trace(
+            go.Scatter(
+                x=["A", "B", "C", "D"],
+                y=[0.44, 0.72, 0.89, 1.0],
+                mode="lines+markers",
+                line={"color": colors[1], "width": 3},
+                yaxis="y2",
+            )
+        )
+        figure.update_layout(yaxis2={"overlaying": "y", "side": "right", "visible": False})
+    elif chart_type in {"interval", "experiment_odds_ratio"}:
+        figure.add_trace(
+            go.Scatter(
+                x=[1.2, 2.1, 2.8, 3.7],
+                y=["A", "B", "C", "D"],
+                mode="markers",
+                marker={"color": colors[0], "size": 9},
+                error_x={"type": "data", "array": [0.3, 0.5, 0.4, 0.6]},
+            )
+        )
+    elif chart_type == "bar_polar":
+        figure.add_trace(
+            go.Barpolar(theta=[0, 72, 144, 216, 288], r=[4, 7, 5, 8, 6], marker_color=colors[0])
+        )
+    elif chart_type == "scatter":
+        figure.add_trace(
+            go.Scatter(
+                x=[1, 2, 2.6, 3.5, 4.2, 4.8],
+                y=[1.2, 2.8, 2.1, 4.0, 3.5, 5.0],
+                mode="markers",
+                marker={"size": [7, 11, 8, 14, 10, 13], "color": colors[0]},
+            )
+        )
+    elif chart_type in {"boxplot", "descriptive_boxplot"}:
+        figure.add_trace(
+            go.Box(y=[1.0, 1.5, 1.8, 2.1, 2.3, 3.8], marker_color=colors[0], boxpoints="outliers")
+        )
+    elif chart_type in {"histogram", "descriptive_histogram"}:
+        figure.add_trace(
+            go.Histogram(x=[1, 1, 2, 2, 2, 3, 3, 4, 5], marker_color=colors[0], nbinsx=5)
+        )
+    elif chart_type in {"treemap", "clv_treemap"}:
+        figure.add_trace(
+            go.Treemap(
+                labels=["All", "A", "B", "C"],
+                parents=["", "All", "All", "All"],
+                values=[10, 5, 3, 2],
+                marker={"colors": [soft, colors[0], colors[1], colors[2]]},
+            )
+        )
+    elif chart_type == "donut":
+        figure.add_trace(
+            go.Pie(values=[52, 29, 19], labels=["A", "B", "C"], hole=0.55, marker_colors=colors[:3])
+        )
+    elif chart_type == "geo_map":
+        figure.add_trace(
+            go.Scattergeo(
+                lon=[-100, 10, 138],
+                lat=[38, 51, 36],
+                mode="markers",
+                marker={"size": [13, 9, 11], "color": colors[:3]},
+            )
+        )
+        figure.update_geos(
+            showcoastlines=False,
+            showframe=False,
+            showland=True,
+            landcolor=soft,
+            bgcolor=transparent,
+            projection_type="natural earth",
+        )
+    elif chart_type == "sankey":
+        figure.add_trace(
+            go.Sankey(
+                node={"label": ["A", "B", "C"], "color": colors[:3], "pad": 8},
+                link={"source": [0, 0, 1], "target": [1, 2, 2], "value": [5, 2, 3]},
+            )
+        )
+    elif chart_type in {"funnel", "descriptive_funnel"}:
+        figure.add_trace(
+            go.Funnel(y=["Visit", "Engage", "Convert"], x=[100, 62, 27], marker_color=colors[:3])
+        )
+    elif chart_type == "exposure":
+        figure.add_trace(
+            go.Bar(x=["1", "2", "3", "4+"], y=[100, 72, 43, 21], marker_color=colors[0])
+        )
+    else:
+        figure.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="lines+markers",
+                line={"color": colors[0], "width": 3, "shape": "spline"},
+                marker={"size": 6},
+            )
+        )
+        if chart_type in {
+            "calibration_curve",
+            "roc_curve",
+            "precision_recall_curve",
+            "gain_curve",
+            "lift_curve",
+        }:
+            figure.add_trace(
+                go.Scatter(
+                    x=[0, 4],
+                    y=[0, 4],
+                    mode="lines",
+                    line={"color": colors[1], "dash": "dot", "width": 1},
+                )
+            )
+
+    figure.update_layout(
+        height=132,
+        margin={"l": 5, "r": 5, "t": 5, "b": 5},
+        showlegend=False,
+        hovermode=False,
+        paper_bgcolor=transparent,
+        plot_bgcolor=transparent,
+        font={"color": ink, "size": 10},
+    )
+    figure.update_xaxes(visible=False, fixedrange=True)
+    figure.update_yaxes(visible=False, fixedrange=True)
+    return figure
+
+
 @st.fragment()
 def _tile_builder(  # noqa: PLR0912, PLR0915
     workspace: Path, catalog: model.Catalog, save_slot: Any
@@ -2441,67 +3055,8 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         st.session_state["builder_selected_tile_key"] = selected_tile_override
 
     with st.container(border=True):
-        st.write("### Report Library")
-        search = st.text_input(
-            "Search",
-            key="builder_tile_search",
-            help=config_help.field_help("report.library_search"),
-        )
-        metric_filter = st.selectbox(
-            "Metric Filter",
-            ["All", *metric_names],
-            key="builder_metric_filter",
-            help=config_help.field_help("report.metric_filter"),
-        )
-        chart_filter = st.selectbox(
-            "Chart Filter",
-            ["All", *sorted(builder.CHART_REQUIRED_FIELDS)],
-            key="builder_chart_filter",
-            help=config_help.field_help("report.chart_filter"),
-        )
-        rows = []
-        tile_options: list[tuple[str, str, str, dict[str, Any]]] = []
-        for dashboard in catalog.dashboards.dashboards:
-            for page in dashboard.pages:
-                for tile in page.tiles:
-                    if metric_filter not in ("All", tile.metric):
-                        continue
-                    if chart_filter not in ("All", tile.chart):
-                        continue
-                    label = f"{dashboard.title} / {page.title} · {tile.title}"
-                    if search and search.casefold() not in label.casefold():
-                        continue
-                    tile_dict = tile.model_dump(mode="json", exclude_none=True)
-                    tile_options.append((dashboard.id, page.id, tile.id, tile_dict))
-                    rows.append(
-                        {
-                            "Dashboard": dashboard.id,
-                            "Page": page.id,
-                            "Tile": tile.id,
-                            "Metric": tile.metric,
-                            "Chart": tile.chart,
-                        }
-                    )
-        st.dataframe(rows, hide_index=True, width="stretch", height=360)
-        selected_tile_key = NEW_TILE_KEY
-        if tile_options:
-            tile_labels = {
-                f"{dashboard_id}/{page_id}/{tile_id}": f"{dashboard_id} / {page_id} · {tile_id}"
-                for dashboard_id, page_id, tile_id, _ in tile_options
-            }
-            tile_keys = [*tile_labels, NEW_TILE_KEY]
-            labels = {**tile_labels, NEW_TILE_KEY: NEW_TILE_LABEL}
-            if st.session_state.get("builder_selected_tile_key") not in tile_keys:
-                st.session_state["builder_selected_tile_key"] = tile_keys[0]
-            selected_tile_key = st.selectbox(
-                "Open Tile",
-                tile_keys,
-                format_func=lambda value: labels[value],
-                key="builder_selected_tile_key",
-                help=config_help.field_help("report.open_tile"),
-            )
-        else:
-            st.caption("No existing tiles match the current filters.")
+        tile_options, selected_tile_key = _render_report_library_browser(catalog, metric_names)
+        st.session_state["builder_selected_tile_key"] = selected_tile_key
         if selected_tile_key != st.session_state.get("builder_tile_last_selected_key"):
             st.session_state["builder_tile_last_selected_key"] = selected_tile_key
             if selected_tile_key == NEW_TILE_KEY:
@@ -2510,21 +3065,26 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             else:
                 st.session_state.pop("builder_tile_seed", None)
                 st.session_state.pop("builder_tile_editor_token", None)
-        action_cols = st.columns(3)
         selected_seed = _selected_tile(tile_options, selected_tile_key)
-        if action_cols[0].button("New", icon=":material/add_2:", key="builder_new_tile"):
-            _start_new_tile_editor(st.session_state)
-            st.session_state["builder_tile_selection_override"] = NEW_TILE_KEY
-            st.rerun()
-        if (
-            action_cols[1].button(
+        with st.container(horizontal=True, horizontal_alignment="distribute"):
+            new_tile = st.button("New", icon=":material/add_2:", key="builder_new_tile")
+            duplicate_tile = st.button(
                 "Duplicate",
                 icon=":material/content_copy:",
                 key="builder_duplicate_tile",
                 disabled=selected_seed is None,
             )
-            and selected_seed is not None
-        ):
+            delete_tile = st.button(
+                "Delete",
+                icon=":material/delete:",
+                key="builder_delete_tile",
+                disabled=selected_seed is None,
+            )
+        if new_tile:
+            _start_new_tile_editor(st.session_state)
+            st.session_state["builder_tile_selection_override"] = NEW_TILE_KEY
+            st.rerun()
+        if duplicate_tile and selected_seed is not None:
             counter = int(st.session_state.get("builder_tile_new_counter", 0)) + 1
             st.session_state["builder_tile_new_counter"] = counter
             seed = dict(selected_seed[3])
@@ -2532,15 +3092,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             seed["title"] = f"{seed.get('title', 'Tile')} Copy"
             st.session_state["builder_tile_seed"] = (selected_seed[0], selected_seed[1], seed)
             st.session_state["builder_tile_editor_token"] = f"new_{counter}"
-        if (
-            action_cols[2].button(
-                "Delete",
-                icon=":material/delete:",
-                key="builder_delete_tile",
-                disabled=selected_seed is None,
-            )
-            and selected_seed is not None
-        ):
+        if delete_tile and selected_seed is not None:
             deleted = builder.delete_tile_definition(
                 workspace,
                 dashboard_id=selected_seed[0],

@@ -368,6 +368,9 @@ FIELD_HELP: dict[str, str] = {
     "report.library_search": _tip(
         "Filter the report library by dashboard, page, or tile title.", "engagement"
     ),
+    "report.library_purpose": _tip(
+        "Group report tiles by the business question their chart is designed to answer."
+    ),
     "report.metric_filter": _tip("Show only tiles that use the selected metric."),
     "report.chart_filter": _tip("Show only tiles rendered with the selected chart kind."),
     "report.open_tile": _tip("Choose an existing tile to edit or start a new tile draft."),

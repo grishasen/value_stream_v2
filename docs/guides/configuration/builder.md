@@ -28,7 +28,13 @@ checklist.
    maintenance.
 7. Author page filters/time presets and KPI comparison, target, or sparkline
    behavior. On Reports / Tiles, the one top save action writes the current
-   tile and its page settings together inside a rollback boundary.
+   tile and its page settings together inside a rollback boundary. The Report
+   library groups existing tiles by purpose and chart type. Each chart type has
+   one compact synthetic Plotly preview, while its configured report tiles are
+   selectable as pills. Chart types with more than twelve configured tiles use
+   one compact selector instead of an unbounded pill list. The previous
+   always-visible inventory table is not rendered. Search, metric, and
+   chart-type filters narrow the visual groups.
 8. Review chat metric readiness and edit chat-only prompt/description guidance.
 9. Update workspace defaults and dashboard theme settings.
 10. Export the already-saved YAML from Save & Export.
