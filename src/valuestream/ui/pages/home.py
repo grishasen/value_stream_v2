@@ -9,6 +9,7 @@ import streamlit as st
 
 from valuestream.ui import components
 from valuestream.ui.context import ValueStreamContext, catalog_counts, recent_runs_frame
+from valuestream.ui.feature_flags import authoring_v2_enabled
 
 
 def render(ctx: ValueStreamContext) -> None:
@@ -120,6 +121,22 @@ def _render_workspace_summary(ctx: ValueStreamContext) -> None:
 
 
 def _render_workflow_cards(ctx: ValueStreamContext) -> None:
+    cards = _workspace_flow_cards(ctx)
+    with components.bordered_panel(
+        "Workspace Flow",
+        "Primary areas in the sidebar navigation.",
+    ):
+        for title, description, status in cards:
+            top = st.columns([0.62, 0.38], vertical_alignment="center")
+            top[0].write(f"**{title}**")
+            with top[1]:
+                components.status_badge("OK" if status == "ok" else status.title(), status)
+            st.caption(description)
+
+
+def _workspace_flow_cards(ctx: ValueStreamContext) -> list[tuple[str, str, str]]:
+    """Describe the visible sidebar areas for the active authoring rollout."""
+
     counts = catalog_counts(ctx)
     cards = [
         (
@@ -132,27 +149,33 @@ def _render_workflow_cards(ctx: ValueStreamContext) -> None:
             "Ask questions over aggregate metrics.",
             "ready" if counts["Metrics"] else "pending",
         ),
-        (
-            "Data Integration",
-            "Load source files and inspect pipeline runs.",
-            "ready" if counts["Sources"] else "pending",
-        ),
-        (
-            "Settings",
-            "Review catalog, config builders, and AI-assisted drafts.",
-            "ok" if ctx.validation.ok else "warning",
-        ),
     ]
-    with components.bordered_panel(
-        "Workspace Flow",
-        "Primary areas in the sidebar navigation.",
-    ):
-        for title, description, status in cards:
-            top = st.columns([0.62, 0.38], vertical_alignment="center")
-            top[0].write(f"**{title}**")
-            with top[1]:
-                components.status_badge("OK" if status == "ok" else status.title(), status)
-            st.caption(description)
+    if authoring_v2_enabled():
+        cards.append(
+            (
+                "Build",
+                "Guided authoring: Configuration Builder and AI Studio.",
+                "ok" if ctx.validation.ok else "warning",
+            )
+        )
+        settings_description = "Review the applied catalog and workspace configuration."
+    else:
+        settings_description = "Review catalog, config builders, and AI-assisted drafts."
+    cards.extend(
+        [
+            (
+                "Settings",
+                settings_description,
+                "ok" if ctx.validation.ok else "warning",
+            ),
+            (
+                "Data Integration",
+                "Load source files and inspect pipeline runs.",
+                "ready" if counts["Sources"] else "pending",
+            ),
+        ]
+    )
+    return cards
 
 
 def _recent_runs_display(runs: pl.DataFrame) -> pl.DataFrame:

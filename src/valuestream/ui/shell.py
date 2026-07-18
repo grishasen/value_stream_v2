@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -69,7 +70,7 @@ def render_navigation(ctx: ValueStreamContext) -> None:
     with st.sidebar:
         with st.container(key="vs_brand"):
             st.markdown("Value Stream")
-        st.caption(f"Workspace · {ctx.catalog.pipelines.workspace}")
+        st.caption(f"Workspace · {_workspace_identity_label(ctx)}")
         with st.popover(
             "Workspace details",
             icon=":material/info:",
@@ -253,6 +254,14 @@ def _active_navigation_section(
 def _page_matches(page: NavigationPage, query: str) -> bool:
     searchable = f"{page.section} {page.title}".casefold()
     return query in searchable
+
+
+def _workspace_identity_label(ctx: ValueStreamContext) -> str:
+    """Disambiguate the catalog identity from its filesystem directory."""
+
+    catalog_name = str(ctx.catalog.pipelines.workspace)
+    directory = Path(ctx.workspace).name or str(ctx.workspace)
+    return f"{catalog_name} · {directory}"
 
 
 def _page(

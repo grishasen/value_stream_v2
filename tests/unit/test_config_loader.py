@@ -949,6 +949,45 @@ class TestErrorPaths:
 
 
 @pytest.mark.unit
+def test_validator_rejects_variant_column_duplicated_in_group_by() -> None:
+    catalog = model.Catalog.model_validate(
+        {
+            "pipelines": {
+                "workspace": "duplicate_variant",
+                "sources": [
+                    {
+                        "id": "events",
+                        "reader": {"kind": "parquet", "file_pattern": "*.parquet"},
+                    }
+                ],
+            },
+            "processors": {
+                "processors": [
+                    {
+                        "id": "engagement",
+                        "source": "events",
+                        "kind": "binary_outcome",
+                        "group_by": ["Channel", "ModelControlGroup"],
+                        "variant_column": "ModelControlGroup",
+                    }
+                ]
+            },
+            "metrics": {"metrics": {}},
+            "dashboards": {"dashboards": []},
+        }
+    )
+
+    result = validate_catalog(catalog)
+
+    assert not result.ok
+    assert any(
+        issue.location == "processors[engagement].variant_column"
+        and "already present in group_by" in issue.message
+        for issue in result.issues
+    )
+
+
+@pytest.mark.unit
 class TestSchemaParity:
     def test_disk_matches_models(self) -> None:
         on_disk = {

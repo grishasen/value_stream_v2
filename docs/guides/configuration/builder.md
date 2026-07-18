@@ -68,13 +68,68 @@ definitions are shared with AI Configuration Studio and the KPI recipe library.
 The Processor editor groups short identity fields into compact rows and gives
 dimension selectors more room. Source-field selectors combine discovered
 schema fields with fields referenced by source transforms and processors,
-including the `entities.subject` field. Human-readable labels lead selectors;
-technical IDs remain available where they disambiguate an object.
+including the `entities.subject` field. Selectors that open an object for
+editing lead with its stable technical ID, followed by a concise human label
+and kind. Review, metric-binding, and report selectors remain human-first, with
+the stable ID shown second when it helps disambiguate similar names.
+
+New processor templates derive the Subject Entity Field from the selected
+source's first natural-key field. If no natural key exists, the Builder may use
+an identity-like field observed in the source sample; otherwise the field stays
+explicitly empty and the editor asks you to select an existing source field.
+
+Source schema discovery and dimension profiling share one bounded inspection.
+The first uncached read shows an **Inspecting source** status; later controls
+reuse the bounded transformed sample while the workspace, source definition,
+and discovered file identity remain unchanged. If inspection fails, the inline
+message names the source and path pattern. Correct the reader, path, transform,
+or permissions issue, then choose **Retry source inspection** to invalidate only
+that source inspection.
+
+### Adding a source
+
+Choose **Add source** on **Sources** to open AI Configuration Studio in its
+deterministic, sample-first mode. The handoff stays on the active workspace and
+keeps the current Builder authoring journey. The reviewed revision carries the
+existing catalog forward and adds the generated source bundle; a duplicate
+Source ID is rejected instead of silently editing the existing source.
+
+Choose **Cancel and return to Builder** before Apply, or **Return to
+Configuration Builder** from the revision receipt after Apply. Applying the
+source definition still does not run data.
+
+### Recovering unapplied drafts
+
+While at least one recoverable draft exists, Configuration Builder atomically
+writes `meta/config_builder_checkpoint.json`. The checkpoint contains the
+current step, a UTC timestamp, the full base-catalog hash, and only JSON-safe,
+non-secret draft/widget data. Chat guidance and any draft containing prompt,
+provider, API credential, token, password, sample/upload, bytes, DataFrame, or
+raw-provider state that cannot be removed without making the draft incomplete
+are not checkpointed.
+
+On the next browser session or Streamlit start, choose **Restore checkpoint**
+or **Discard checkpoint**. Restore imports the safe registry only; each object
+still has to match its current baseline and pass the normal validation gate
+before **Apply to workspace** becomes available. If the catalog hash changed,
+Builder shows **Reconciliation required** and never silently applies the older
+draft.
+
+Checkpoints expire after seven days. Expired or malformed files are removed on
+the next Builder visit. Applying or discarding the last recoverable draft also
+deletes the file. **Discard checkpoint** deletes it immediately; operators may
+also delete `meta/config_builder_checkpoint.json` while Builder is not running.
+Deleting a checkpoint never changes the applied YAML catalog.
 
 Dimension recommendations are ranked as **Recommended**, **Review**, or
 **Avoid**. Recommended and Review candidates may be selected for the draft by
 default. Avoid candidates are never preselected; adding one must be an explicit
 choice.
+
+Dimension Packs present available, selected, and missing source fields as
+responsive chips. One-Click Promotion leads with recommendation, group-by
+safety, cardinality, null percentage, and the review reason. Exact profile and
+pack values remain available as collapsed JSON technical detail.
 
 ## Metrics
 
@@ -100,18 +155,33 @@ The collapsed **Report inventory** is searchable and uses dashboard, page,
 tile, metric, and chart labels designed for recognition. Enable technical IDs
 only when exact catalog identity is needed. The visual report library groups
 tiles by purpose and chart type and keeps large groups behind a compact
-selector.
+selector. Its chart labels and purposes are shared with both chart selectors;
+the persisted chart kind remains visible only as secondary technical detail and
+continues to round-trip unchanged.
 
-## Removing a source
+## Removing catalog definitions
 
-Select a source on **Sources** and choose **Delete source** beside the selector.
-The confirmation previews the complete catalog cascade: processors, metrics
-including transitive `depends_on` metrics, report tiles, and page filters that
-would otherwise have no remaining tile support. The deletion updates all
-affected catalog files and related `ai.yaml` descriptions in one rollback
-boundary, then validates the resulting workspace. Dashboard and page
-containers are retained. Aggregate Parquet files and run history are not
-deleted.
+Deletion always starts from the explicitly selected object and shows exact
+`dashboard/page/tile` paths before it can change the workspace.
+
+- On **Sources**, **Delete source** previews its processors, direct and
+  transitive dependent metrics, report tiles, and page filters that would have
+  no remaining tile support.
+- On **Processors** in **Edit Existing Processor**, **Delete processor** keeps
+  the source and every other processor while cascading the selected
+  processor's direct and transitive dependent metrics, tiles, and unsupported
+  page filters.
+- On **Metrics** in **Edit Existing Metric**, **Delete metric** never selects a
+  neighboring metric implicitly. Metrics with `depends_on` references block
+  the deletion until those references are resolved. If report tiles use the
+  metric, you must separately choose to cascade those exact tiles before the
+  final confirmation becomes available.
+
+Each confirmed deletion updates the affected catalog files and related
+`ai.yaml` descriptions in one rollback boundary, then validates the resulting
+workspace. Dashboard and page containers are retained. Aggregate Parquet files
+and run history are not deleted by catalog CRUD; use the separate
+`valuestream vacuum` lifecycle when persisted files are eligible for removal.
 
 ## Exporting
 

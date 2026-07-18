@@ -255,6 +255,47 @@ states:
 
 The `where` predicate is itself an expression node — same grammar.
 
+### 5.7 Authoring calculated fields in Configuration Builder
+
+The Source step keeps calculated fields in a compact overview grid. `Name`,
+`Enabled`, and `Mode` remain visible there; the Expression column is a read-only
+preview. Rows added through the grid default to `Enabled: true`, including when
+the browser reports the new checkbox as blank.
+
+For `AST YAML` and `Polars` modes, select the calculated row in the focused
+expression editor below the grid:
+
+1. Edit the expression in the multiline input.
+2. Resolve the live, field-level validation messages.
+3. Choose **Apply expression** to copy the working text into the calculated row,
+   or **Cancel changes** to restore that row's current expression.
+
+The working text is session-local until Apply expression is chosen. Grid reruns
+do not overwrite it, and the UI labels unapplied expression work explicitly.
+Workspace Apply is disabled while a focused expression remains unapplied, so a
+different grid edit cannot silently discard the working text.
+Raw parser or Pydantic details remain available in a collapsed **Technical
+details** disclosure.
+
+Conditional branches require a complete expression under `cond` and use
+`else`, not `otherwise`:
+
+```yaml
+op: case
+when:
+  - cond: {op: gt, column: Revenue, value: 100}
+    then: {lit: High}
+else: {lit: Standard}
+```
+
+Direct Polars mode accepts the guarded expression subset documented by the
+translator. It must return a `polars.Expr` and only the `pl` namespace is
+available:
+
+```python
+pl.col("Revenue") - pl.col("Cost")
+```
+
 ---
 
 ## 6. Validation rules

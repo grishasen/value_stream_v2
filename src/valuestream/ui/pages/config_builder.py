@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
-import secrets
+import json
+from collections import OrderedDict
 from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 import plotly.graph_objects as go  # type: ignore[import-untyped]
@@ -21,11 +24,14 @@ from valuestream.ai.settings import (
     write_chat_with_data_config,
 )
 from valuestream.charts import render_chart
+from valuestream.config import canonical as config_canonical
 from valuestream.config import model
 from valuestream.readers.discovery import discover
 from valuestream.readers.io import cleanup_temporaries, read
+from valuestream.transforms import apply_transforms
 from valuestream.ui import (
     builder,
+    builder_checkpoint,
     components,
     config_help,
     dimension_profile,
@@ -55,10 +61,17 @@ from valuestream.utils.names import capitalize_fields
 logger = get_logger(__name__)
 
 PROCESSOR_KINDS = list(forms.PROCESSOR_KIND_OPTIONS)
+ENTITY_SUBJECT_PROCESSOR_KINDS = frozenset(
+    {"binary_outcome", "score_distribution", "entity_lifecycle", "entity_set"}
+)
 METRIC_ACTION_CREATE = "Create Metric"
 METRIC_ACTION_EDIT = "Edit Existing Metric"
 METRIC_CREATE_LIBRARY = "From Recipe Library"
 METRIC_CREATE_SCRATCH = "From Scratch"
+BUILDER_ADD_SOURCE_URL = (
+    "/ai_configuration_studio?mode=deterministic&from=configuration_builder"
+    "&intent=add_source&return_to=configuration_builder"
+)
 NEW_TILE_KEY = "__new_tile_draft__"
 NEW_TILE_LABEL = "New tile draft"
 NEW_DASHBOARD_KEY = "__new_dashboard__"
@@ -104,6 +117,16 @@ BUILDER_STEP_BY_LABEL = {step.label: step for step in BUILDER_STEP_DEFINITIONS}
 BUILDER_LAST_OUTCOME_KEY = "builder_last_apply_outcome"
 BUILDER_DIMENSION_PROPOSALS_KEY = "builder_dimension_pending_proposals"
 BUILDER_PENDING_TILE_DELETE_KEY = "builder_tile_delete_draft"
+BUILDER_POST_APPLY_CLEANUP_KEY = "builder_post_apply_cleanup"
+BUILDER_SOURCE_INSPECTION_SCOPE_KEY = "builder_source_inspection_scope"
+BUILDER_CHECKPOINT_CONTEXT_KEY = "builder_checkpoint_context"
+BUILDER_CHECKPOINT_LOADED_WORKSPACE_KEY = "builder_checkpoint_loaded_workspace"
+BUILDER_CHECKPOINT_PENDING_KEY = "builder_checkpoint_pending"
+BUILDER_CHECKPOINT_BASE_HASH_KEY = "builder_checkpoint_base_catalog_hash"
+BUILDER_CHECKPOINT_RECONCILIATION_KEY = "builder_checkpoint_reconciliation"
+BUILDER_CHECKPOINT_NOTICE_KEY = "builder_checkpoint_notice"
+SOURCE_INSPECTION_SAMPLE_ROWS = dimension_profile.PROFILE_SAMPLE_ROWS
+SOURCE_INSPECTION_CACHE_SIZE = 32
 
 
 @dataclass(frozen=True)
@@ -114,6 +137,39 @@ class ReportLibraryGroup:
     icon: str
     description: str
     chart_types: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SourceFileIdentity:
+    """Path metadata that invalidates a bounded source inspection."""
+
+    path: str
+    size: int
+    modified_ns: int
+
+
+@dataclass(frozen=True)
+class SourceInspectionKey:
+    """Complete identity for one bounded inspection cache entry."""
+
+    workspace: str
+    source_hash: str
+    files: tuple[SourceFileIdentity, ...]
+    limit: int
+
+
+@dataclass(frozen=True)
+class SourceInspectionResult:
+    """Only typed schema metadata and a bounded transformed sample."""
+
+    key: SourceInspectionKey
+    raw_schema: tuple[tuple[str, str], ...]
+    sample: pl.DataFrame | None
+    error_kind: str | None = None
+
+
+_SOURCE_INSPECTION_CACHE: OrderedDict[SourceInspectionKey, SourceInspectionResult] = OrderedDict()
+_SOURCE_INSPECTION_CACHE_LOCK = RLock()
 
 
 REPORT_LIBRARY_GROUPS = {
@@ -195,56 +251,9 @@ REPORT_LIBRARY_GROUP_BY_CHART = {
     for chart_type in group.chart_types
 }
 
-REPORT_LIBRARY_CHART_DESCRIPTIONS = {
-    "bar": "Compare magnitudes across discrete categories.",
-    "bar_polar": "Compare cyclical or directional categories around a circle.",
-    "boxplot": "Compare medians, spread, and outliers between groups.",
-    "calendar_heatmap": "Reveal daily activity and seasonality on a calendar grid.",
-    "calibration_curve": "Compare predicted probabilities with observed outcomes.",
-    "clv_treemap": "Show customer-value hierarchy through nested area.",
-    "cohort_heatmap": "Compare retention or behavior across cohort periods.",
-    "combo": "Place two measures on coordinated bar and line axes.",
-    "corr": "Scan the strength and direction of pairwise relationships.",
-    "descriptive_boxplot": "Compare aggregate distribution summaries by group.",
-    "descriptive_funnel": "Follow aggregate descriptive measures through ordered stages.",
-    "descriptive_heatmap": "Compare an aggregate statistic across two dimensions.",
-    "descriptive_histogram": "Show the distribution of an aggregate numeric property.",
-    "descriptive_line": "Track an aggregate statistic over time or ordered categories.",
-    "donut": "Show a small set of parts as shares of a whole.",
-    "experiment_odds_ratio": "Compare experiment effects with confidence intervals.",
-    "experiment_z_score": "Compare standardized experiment effects around zero.",
-    "exposure": "Show how populations progress through exposure levels.",
-    "funnel": "Show volume retained through ordered journey stages.",
-    "gain_curve": "Show cumulative positives captured as coverage increases.",
-    "gauge": "Show a current value against a reference or operating range.",
-    "geo_map": "Compare a measure across geographic locations.",
-    "heatmap": "Compare intensity across two categorical dimensions.",
-    "histogram": "Show how numeric observations are distributed across bins.",
-    "interval": "Compare estimates together with their uncertainty bounds.",
-    "kpi_card": "Present one decision-ready value with optional comparison context.",
-    "lift_curve": "Show improvement over random selection as coverage increases.",
-    "line": "Track one or more measures across time or an ordered axis.",
-    "model": "Summarize model performance across thresholds or score bands.",
-    "pareto": "Rank contributors and show their cumulative share.",
-    "precision_recall_curve": "Show the precision-recall tradeoff across thresholds.",
-    "rfm_density": "Map customer density across recency and frequency/value space.",
-    "roc_curve": "Show true-positive versus false-positive performance by threshold.",
-    "sankey": "Show volume flowing between stages or categories.",
-    "scatter": "Explore the relationship between two numeric measures.",
-    "stacked_area": "Show total change over time together with category composition.",
-    "table": "Inspect exact ranked or operational values in native tabular form.",
-    "treemap": "Show hierarchical composition through nested area.",
-    "waterfall": "Explain how positive and negative contributions build a total.",
-}
-
+REPORT_LIBRARY_CHART_DESCRIPTIONS = builder.CHART_DISPLAY_PURPOSES
 REPORT_LIBRARY_PILLS_MAX = 12
-REPORT_LIBRARY_CHART_LABELS = {
-    "clv_treemap": "CLV treemap",
-    "kpi_card": "KPI card",
-    "precision_recall_curve": "Precision-recall curve",
-    "rfm_density": "RFM density",
-    "roc_curve": "ROC curve",
-}
+REPORT_LIBRARY_CHART_LABELS = builder.CHART_DISPLAY_LABELS
 
 
 def render(ctx: ValueStreamContext) -> None:
@@ -275,7 +284,218 @@ def render(ctx: ValueStreamContext) -> None:
     _builder_steps(ctx)
 
 
+def _initialize_builder_checkpoint(ctx: ValueStreamContext) -> None:
+    """Load one workspace checkpoint candidate without mutating live drafts."""
+
+    workspace = str(Path(ctx.workspace).resolve())
+    catalog_hash = config_canonical.catalog_config_hash(ctx.catalog)
+    previous = st.session_state.get(BUILDER_CHECKPOINT_CONTEXT_KEY)
+    previous_workspace = previous.get("workspace") if isinstance(previous, Mapping) else None
+    if previous_workspace and previous_workspace != workspace:
+        _persist_builder_checkpoint()
+        st.session_state.pop(builder.BUILDER_DRAFTS_KEY, None)
+        st.session_state.pop(BUILDER_CHECKPOINT_PENDING_KEY, None)
+        st.session_state.pop(BUILDER_CHECKPOINT_BASE_HASH_KEY, None)
+        st.session_state.pop(BUILDER_CHECKPOINT_RECONCILIATION_KEY, None)
+        st.session_state.pop(BUILDER_CHECKPOINT_LOADED_WORKSPACE_KEY, None)
+
+    st.session_state[BUILDER_CHECKPOINT_CONTEXT_KEY] = {
+        "workspace": workspace,
+        "catalog_hash": catalog_hash,
+    }
+    registry = st.session_state.get(builder.BUILDER_DRAFTS_KEY)
+    if isinstance(registry, dict) and registry:
+        base_hash = st.session_state.get(BUILDER_CHECKPOINT_BASE_HASH_KEY)
+        if not isinstance(base_hash, str):
+            st.session_state[BUILDER_CHECKPOINT_BASE_HASH_KEY] = catalog_hash
+        elif base_hash != catalog_hash:
+            st.session_state[BUILDER_CHECKPOINT_RECONCILIATION_KEY] = {
+                "saved_hash": base_hash,
+                "current_hash": catalog_hash,
+            }
+        else:
+            st.session_state.pop(BUILDER_CHECKPOINT_RECONCILIATION_KEY, None)
+    else:
+        st.session_state.pop(BUILDER_CHECKPOINT_BASE_HASH_KEY, None)
+        st.session_state.pop(BUILDER_CHECKPOINT_RECONCILIATION_KEY, None)
+
+    if st.session_state.get(BUILDER_CHECKPOINT_LOADED_WORKSPACE_KEY) == workspace:
+        return
+    st.session_state[BUILDER_CHECKPOINT_LOADED_WORKSPACE_KEY] = workspace
+    if isinstance(registry, dict) and registry:
+        return
+
+    result = builder_checkpoint.load_builder_checkpoint(
+        workspace,
+        current_catalog_hash=catalog_hash,
+        allowed_steps=BUILDER_STEPS,
+    )
+    if result.checkpoint is not None:
+        checkpoint = result.checkpoint
+        st.session_state[BUILDER_CHECKPOINT_PENDING_KEY] = {
+            "workspace": workspace,
+            "status": result.status,
+            "saved_at": checkpoint.saved_at,
+            "base_catalog_hash": checkpoint.base_catalog_hash,
+            "current_step": checkpoint.current_step,
+            "drafts": copy.deepcopy(checkpoint.drafts),
+        }
+    elif result.status == "expired":
+        st.session_state[BUILDER_CHECKPOINT_NOTICE_KEY] = (
+            "An expired Configuration Builder checkpoint was removed."
+        )
+    elif result.status == "invalid":
+        st.session_state[BUILDER_CHECKPOINT_NOTICE_KEY] = (
+            "An unreadable Configuration Builder checkpoint was removed."
+        )
+
+
+def _render_builder_checkpoint_recovery() -> None:
+    """Offer an explicit restore/discard decision for a loaded checkpoint."""
+
+    pending = st.session_state.get(BUILDER_CHECKPOINT_PENDING_KEY)
+    if not isinstance(pending, Mapping):
+        return
+    drafts = pending.get("drafts")
+    draft_count = len(drafts) if isinstance(drafts, Mapping) else 0
+    reconciliation = pending.get("status") == "reconciliation"
+    saved_at = pending.get("saved_at")
+    saved_label = (
+        saved_at.astimezone(dt.UTC).strftime("%Y-%m-%d %H:%M UTC")
+        if isinstance(saved_at, dt.datetime)
+        else "an earlier session"
+    )
+    with st.container(border=True):
+        if reconciliation:
+            st.warning("Reconciliation required before restoring this Builder checkpoint.")
+            st.caption(
+                "The workspace catalog changed after the checkpoint was saved. Restore it for "
+                "review only: every object must still match its baseline and validate before Apply."
+            )
+        else:
+            st.info("An unapplied Configuration Builder checkpoint is available.")
+            st.caption("Restore it to review each draft against the current catalog before Apply.")
+        st.caption(f"Saved {saved_label} · {draft_count} draft{'s' if draft_count != 1 else ''}.")
+        restore_col, discard_col = st.columns(2)
+        restore_col.button(
+            "Restore checkpoint",
+            icon=":material/restore:",
+            type="primary",
+            width="stretch",
+            on_click=_restore_builder_checkpoint,
+        )
+        discard_col.button(
+            "Discard checkpoint",
+            icon=":material/delete_sweep:",
+            width="stretch",
+            on_click=_discard_builder_checkpoint,
+        )
+
+
+def _render_builder_checkpoint_notice() -> None:
+    notice = st.session_state.pop(BUILDER_CHECKPOINT_NOTICE_KEY, None)
+    if notice:
+        st.info(str(notice))
+
+
+def _render_builder_checkpoint_reconciliation() -> None:
+    reconciliation = st.session_state.get(BUILDER_CHECKPOINT_RECONCILIATION_KEY)
+    registry = st.session_state.get(builder.BUILDER_DRAFTS_KEY)
+    if not isinstance(reconciliation, Mapping) or not isinstance(registry, dict) or not registry:
+        return
+    st.warning(
+        "Reconciliation required: the catalog changed since these drafts were checkpointed. "
+        "Open each draft and confirm its current baseline and validation result before Apply, "
+        "or discard it."
+    )
+
+
+def _restore_builder_checkpoint() -> None:
+    """Restore only the safe registry; object widgets retain their baseline gate."""
+
+    pending = st.session_state.get(BUILDER_CHECKPOINT_PENDING_KEY)
+    context = st.session_state.get(BUILDER_CHECKPOINT_CONTEXT_KEY)
+    if not isinstance(pending, Mapping) or not isinstance(context, Mapping):
+        return
+    if pending.get("workspace") != context.get("workspace"):
+        return
+    drafts = pending.get("drafts")
+    base_hash = pending.get("base_catalog_hash")
+    current_step = pending.get("current_step")
+    if not isinstance(drafts, Mapping) or not isinstance(base_hash, str):
+        return
+    st.session_state[builder.BUILDER_DRAFTS_KEY] = copy.deepcopy(dict(drafts))
+    st.session_state[BUILDER_CHECKPOINT_BASE_HASH_KEY] = base_hash
+    if current_step in BUILDER_STEPS:
+        st.session_state["builder_step"] = current_step
+        st.session_state["builder_step_jump"] = current_step
+    if pending.get("status") == "reconciliation":
+        st.session_state[BUILDER_CHECKPOINT_RECONCILIATION_KEY] = {
+            "saved_hash": base_hash,
+            "current_hash": str(context.get("catalog_hash", "")),
+        }
+    else:
+        st.session_state.pop(BUILDER_CHECKPOINT_RECONCILIATION_KEY, None)
+    st.session_state.pop(BUILDER_CHECKPOINT_PENDING_KEY, None)
+
+
+def _discard_builder_checkpoint() -> None:
+    """Delete a pending checkpoint without importing it into the live session."""
+
+    context = st.session_state.get(BUILDER_CHECKPOINT_CONTEXT_KEY)
+    if isinstance(context, Mapping):
+        workspace = context.get("workspace")
+        if isinstance(workspace, str):
+            builder_checkpoint.discard_builder_checkpoint(workspace)
+    st.session_state.pop(BUILDER_CHECKPOINT_PENDING_KEY, None)
+    st.session_state.pop(BUILDER_CHECKPOINT_BASE_HASH_KEY, None)
+    st.session_state.pop(BUILDER_CHECKPOINT_RECONCILIATION_KEY, None)
+
+
+def _persist_builder_checkpoint() -> None:
+    """Synchronize safe live drafts to the active workspace checkpoint."""
+
+    context = st.session_state.get(BUILDER_CHECKPOINT_CONTEXT_KEY)
+    if not isinstance(context, Mapping):
+        return
+    workspace = context.get("workspace")
+    current_hash = context.get("catalog_hash")
+    if not isinstance(workspace, str) or not isinstance(current_hash, str):
+        return
+    pending = st.session_state.get(BUILDER_CHECKPOINT_PENDING_KEY)
+    if isinstance(pending, Mapping) and pending.get("workspace") == workspace:
+        return
+    registry = st.session_state.get(builder.BUILDER_DRAFTS_KEY)
+    if not isinstance(registry, dict) or not registry:
+        builder_checkpoint.discard_builder_checkpoint(workspace)
+        st.session_state.pop(BUILDER_CHECKPOINT_BASE_HASH_KEY, None)
+        st.session_state.pop(BUILDER_CHECKPOINT_RECONCILIATION_KEY, None)
+        return
+    base_hash = st.session_state.get(BUILDER_CHECKPOINT_BASE_HASH_KEY)
+    if not isinstance(base_hash, str):
+        base_hash = current_hash
+        st.session_state[BUILDER_CHECKPOINT_BASE_HASH_KEY] = base_hash
+    current_step = str(st.session_state.get("builder_step", BUILDER_STEPS[0]))
+    try:
+        builder_checkpoint.write_builder_checkpoint(
+            workspace,
+            drafts=registry,
+            current_step=current_step if current_step in BUILDER_STEPS else BUILDER_STEPS[0],
+            base_catalog_hash=base_hash,
+        )
+    except (OSError, TypeError, ValueError):
+        logger.exception("Failed to persist Configuration Builder checkpoint")
+        st.session_state[BUILDER_CHECKPOINT_NOTICE_KEY] = (
+            "This session draft is still available, but its recovery checkpoint could not be saved."
+        )
+
+
 def _builder_steps(ctx: ValueStreamContext) -> None:
+    _initialize_builder_checkpoint(ctx)
+    _consume_builder_post_apply_cleanup()
+    _render_builder_checkpoint_recovery()
+    _render_builder_checkpoint_notice()
+    _render_builder_checkpoint_reconciliation()
     steps = list(BUILDER_STEPS)
     next_step = st.session_state.pop("builder_next_step", None)
     if next_step in steps:
@@ -287,6 +507,7 @@ def _builder_steps(ctx: ValueStreamContext) -> None:
         current_step = steps[0]
         st.session_state["builder_step"] = current_step
     st.session_state["builder_step"] = current_step
+    _persist_builder_checkpoint()
     if st.session_state.get("builder_step_jump") != current_step:
         st.session_state["builder_step_jump"] = current_step
 
@@ -359,6 +580,7 @@ def _set_builder_step(step: str) -> None:
     """Synchronize contextual Builder navigation before Streamlit reruns."""
     st.session_state["builder_step"] = step
     st.session_state["builder_step_jump"] = step
+    _persist_builder_checkpoint()
 
 
 def _apply_builder_jump() -> None:
@@ -366,6 +588,7 @@ def _apply_builder_jump() -> None:
     selected = st.session_state.get("builder_step_jump")
     if selected in BUILDER_STEPS:
         st.session_state["builder_step"] = selected
+        _persist_builder_checkpoint()
 
 
 def _next_builder_step() -> str | None:
@@ -374,6 +597,13 @@ def _next_builder_step() -> str | None:
         return BUILDER_STEPS[0]
     index = BUILDER_STEPS.index(current)
     return BUILDER_STEPS[index + 1] if index + 1 < len(BUILDER_STEPS) else None
+
+
+def _builder_primary_action_key() -> str:
+    """Return one stable primary-action key for the current Builder step."""
+
+    step = str(st.session_state.get("builder_step", "step"))
+    return f"builder_primary_{builder.widget_key_fragment(step)}"
 
 
 def _render_continue_primary(save_slot: Any) -> None:
@@ -386,7 +616,7 @@ def _render_continue_primary(save_slot: Any) -> None:
         icon=":material/arrow_forward:",
         disabled=next_step is None,
         width="stretch",
-        key=f"builder_primary_continue_{st.session_state.get('builder_step', 'step')}",
+        key=_builder_primary_action_key(),
     )
     if clicked and next_step is not None:
         # Most editors render this action from inside a fragment. An on_click
@@ -396,6 +626,7 @@ def _render_continue_primary(save_slot: Any) -> None:
         # already instantiated for this run, and _builder_steps re-syncs it
         # before the widget is created on the next run.
         st.session_state["builder_step"] = next_step
+        _persist_builder_checkpoint()
         st.rerun(scope="app")
 
 
@@ -430,6 +661,7 @@ def _render_editor_primary_action(
     valid: bool,
     widget_prefixes: tuple[str, ...],
     help_text: str,
+    preserve_widget_keys: tuple[str, ...] = (),
 ) -> bool:
     """Render one canonical draft status and the single active apply action."""
     registered = builder.registered_builder_draft(st.session_state, status.key)
@@ -442,6 +674,7 @@ def _render_editor_primary_action(
                 status=status,
                 registered=registered,
                 widget_prefixes=widget_prefixes,
+                preserve_widget_keys=preserve_widget_keys,
             )
         return False
 
@@ -450,6 +683,7 @@ def _render_editor_primary_action(
         status,
         widget_prefixes=widget_prefixes,
     )
+    _persist_builder_checkpoint()
     if valid:
         _record_builder_valid_proposal()
     restored = st.session_state.pop("builder_restored_draft_key", None) == status.key
@@ -468,7 +702,7 @@ def _render_editor_primary_action(
             width="stretch",
             key=f"builder_discard_{builder.widget_key_fragment(status.key)}",
             on_click=_discard_registered_builder_draft,
-            args=(status.key, widget_prefixes),
+            args=(status.key, widget_prefixes, preserve_widget_keys),
         )
 
     save_slot.empty()
@@ -479,7 +713,7 @@ def _render_editor_primary_action(
         disabled=not valid,
         help=help_text,
         width="stretch",
-        key=f"builder_apply_{builder.widget_key_fragment(status.key)}",
+        key=_builder_primary_action_key(),
     )
     if apply_requested:
         _record_builder_reviewed()
@@ -492,6 +726,7 @@ def _render_registered_draft(
     status: builder.BuilderDraftStatus,
     registered: Mapping[str, Any],
     widget_prefixes: tuple[str, ...],
+    preserve_widget_keys: tuple[str, ...],
 ) -> None:
     """Offer an explicit restore when Streamlit cleaned step-local widget state."""
     revision = str(registered.get("revision", "saved") or "saved")
@@ -524,7 +759,7 @@ def _render_registered_draft(
             width="stretch",
             key=f"builder_discard_available_{builder.widget_key_fragment(status.key)}",
             on_click=_discard_registered_builder_draft,
-            args=(status.key, widget_prefixes),
+            args=(status.key, widget_prefixes, preserve_widget_keys),
         )
 
 
@@ -537,13 +772,51 @@ def _restore_registered_builder_draft(key: str) -> None:
 def _discard_registered_builder_draft(
     key: str,
     widget_prefixes: tuple[str, ...],
+    preserve_widget_keys: tuple[str, ...] = (),
 ) -> None:
     """Discard a registered proposal before the editor widgets rerender."""
     builder.discard_builder_draft(
         st.session_state,
         key,
         widget_prefixes=widget_prefixes,
+        preserve_widget_keys=preserve_widget_keys,
     )
+    _persist_builder_checkpoint()
+
+
+def _queue_builder_post_apply_cleanup(
+    *,
+    status: builder.BuilderDraftStatus,
+    widget_prefixes: tuple[str, ...] = (),
+    preserve_widget_keys: tuple[str, ...] = (),
+    state_updates: Mapping[str, Any] | None = None,
+) -> None:
+    """Queue widget cleanup for the full rerun after a successful apply."""
+
+    st.session_state[BUILDER_POST_APPLY_CLEANUP_KEY] = {
+        "draft_key": status.key,
+        "widget_prefixes": tuple(widget_prefixes),
+        "preserve_widget_keys": tuple(preserve_widget_keys),
+        "state_updates": dict(state_updates or {}),
+    }
+
+
+def _consume_builder_post_apply_cleanup() -> None:
+    """Re-baseline the next full render against the newly applied catalog."""
+
+    raw = st.session_state.pop(BUILDER_POST_APPLY_CLEANUP_KEY, None)
+    if not isinstance(raw, Mapping):
+        return
+    builder.discard_builder_draft(
+        st.session_state,
+        str(raw.get("draft_key", "")),
+        widget_prefixes=tuple(raw.get("widget_prefixes", ())),
+        preserve_widget_keys=tuple(raw.get("preserve_widget_keys", ())),
+    )
+    updates = raw.get("state_updates")
+    if isinstance(updates, Mapping):
+        st.session_state.update(updates)
+    _persist_builder_checkpoint()
 
 
 def _complete_builder_apply(
@@ -553,6 +826,9 @@ def _complete_builder_apply(
     label: str,
     source_ids: list[str] | tuple[str, ...] = (),
     message: str,
+    widget_prefixes: tuple[str, ...] = (),
+    preserve_widget_keys: tuple[str, ...] = (),
+    state_updates: Mapping[str, Any] | None = None,
 ) -> None:
     """Record a safe outcome and refresh the catalog after a successful apply."""
     requires_data_run = builder.builder_requires_data_run(
@@ -571,6 +847,13 @@ def _complete_builder_apply(
     registry = dict(raw) if isinstance(raw, dict) else {}
     registry.pop(status.key, None)
     st.session_state[builder.BUILDER_DRAFTS_KEY] = registry
+    _persist_builder_checkpoint()
+    _queue_builder_post_apply_cleanup(
+        status=status,
+        widget_prefixes=widget_prefixes,
+        preserve_widget_keys=preserve_widget_keys,
+        state_updates=state_updates,
+    )
     st.session_state["builder_apply_notice"] = message
     st.rerun(scope="app")
 
@@ -766,7 +1049,7 @@ def _report_inventory_rows(
                         "Page": page.title or humanize_identifier(page.id),
                         "Report": tile.title or humanize_identifier(tile.id),
                         "Metric": display_label or humanize_identifier(tile.metric),
-                        "Chart": humanize_identifier(tile.chart),
+                        "Chart": builder.chart_kind_label(tile.chart),
                     }
                 )
     return rows
@@ -827,7 +1110,6 @@ def _health(ctx: ValueStreamContext, save_slot: Any) -> None:
                 components.status_badge(label, status)
 
 
-@st.fragment()
 def _render_default_values_editor(
     rows_key: str,
     editor_key: str,
@@ -874,14 +1156,16 @@ def _render_default_values_editor(
                 help=config_help.field_help("default.value"),
             ),
             "Enabled": st.column_config.CheckboxColumn(
-                "Enabled", width="small", help=config_help.field_help("row.enabled")
+                "Enabled",
+                width="small",
+                default=True,
+                help=config_help.field_help("row.enabled"),
             ),
         },
     )
     st.session_state[rows_key] = builder.normalize_editor_rows(edited_defaults)
 
 
-@st.fragment()
 def _render_filter_rows_editor(
     rows_key: str,
     editor_key: str,
@@ -917,7 +1201,10 @@ def _render_filter_rows_editor(
                 "Value", width=value_width, help=config_help.field_help("filter.value")
             ),
             "Enabled": st.column_config.CheckboxColumn(
-                "Enabled", width="small", help=config_help.field_help("row.enabled")
+                "Enabled",
+                width="small",
+                default=True,
+                help=config_help.field_help("row.enabled"),
             ),
         },
     )
@@ -930,12 +1217,11 @@ def _render_filter_rows_editor(
         st.error(str(exc))
 
 
-@st.fragment()
 def _render_calculated_rows_editor(
     calc_key: str,
     editor_key: str,
     calculation_frame: Any,
-) -> None:
+) -> bool:
     if getattr(calculation_frame, "is_empty", lambda: False)():
         st.info("No calculated fields yet — add a row below when you need one.")
     edited_calcs = st.data_editor(
@@ -951,6 +1237,7 @@ def _render_calculated_rows_editor(
             "Mode": st.column_config.SelectboxColumn(
                 "Mode",
                 options=builder.CALCULATION_MODES,
+                default="AST YAML",
                 width="medium",
                 help=config_help.field_help("calculation.mode"),
             ),
@@ -960,6 +1247,7 @@ def _render_calculated_rows_editor(
             "Right Kind": st.column_config.SelectboxColumn(
                 "Right Kind",
                 options=["Field", "Literal"],
+                default="Field",
                 width="small",
                 help=config_help.field_help("calculation.right_kind"),
             ),
@@ -967,30 +1255,279 @@ def _render_calculated_rows_editor(
                 "Right", width="medium", help=config_help.field_help("calculation.right")
             ),
             "Expression": st.column_config.TextColumn(
-                "Expression",
+                "Expression preview",
                 width="large",
+                disabled=True,
                 help=config_help.field_help("calculation.expression"),
             ),
             "Enabled": st.column_config.CheckboxColumn(
-                "Enabled", width="small", help=config_help.field_help("row.enabled")
+                "Enabled",
+                width="small",
+                default=True,
+                help=config_help.field_help("row.enabled"),
             ),
         },
     )
-    st.session_state[calc_key] = builder.normalize_editor_rows(edited_calcs)
-    try:
+    rows = builder.normalize_editor_rows(edited_calcs)
+    st.session_state[calc_key] = rows
+    excluded = [
+        str(row.get("Name", "")).strip() or f"row {index + 1}"
+        for index, row in enumerate(rows)
+        if not builder.editor_row_enabled(row.get("Enabled"))
+    ]
+    if excluded:
+        st.caption("Excluded from generated YAML: " + ", ".join(excluded))
+
+    validations = _calculated_expression_validations(rows)
+    active_index = _render_focused_calculated_expression_editor(
+        calc_key,
+        editor_key,
+        rows,
+        validations,
+    )
+    st.session_state[f"{calc_key}_expression_pending"] = any(
+        _calculated_expression_has_pending_draft(editor_key, index, row)
+        for index, row in enumerate(rows)
+    )
+    for row_index, validation in validations.items():
+        if validation.valid or row_index == active_index:
+            continue
+        label = str(rows[row_index].get("Name", "")).strip() or f"row {row_index + 1}"
+        for message in validation.messages:
+            st.error(f"{label}: {message}")
+
+    valid = all(validation.valid for validation in validations.values())
+    if valid:
         _technical_yaml(
             "Generated calculated transforms",
             yaml.safe_dump(
-                {"transforms": builder.build_derive_column_transforms(st.session_state[calc_key])},
+                {"transforms": builder.build_derive_column_transforms(rows)},
                 sort_keys=False,
             ),
         )
-    except Exception as exc:
-        logger.exception("Failed to build calculated field transforms: editor_key=%s", editor_key)
-        st.error(str(exc))
+    return valid
 
 
-@st.fragment()
+def _calculated_expression_validations(
+    rows: list[dict[str, Any]],
+) -> dict[int, builder.CalculatedExpressionValidation]:
+    """Validate enabled custom-expression rows that have a field name."""
+
+    return {
+        index: builder.validate_calculated_expression(
+            str(row.get("Mode", "") or "AST YAML"),
+            str(row.get("Expression", "") or ""),
+        )
+        for index, row in enumerate(rows)
+        if builder.editor_row_enabled(row.get("Enabled"))
+        and str(row.get("Name", "")).strip()
+        and str(row.get("Mode", "") or "AST YAML") in {"AST YAML", "Polars"}
+    }
+
+
+def _render_focused_calculated_expression_editor(  # noqa: PLR0912
+    calc_key: str,
+    editor_key: str,
+    rows: list[dict[str, Any]],
+    validations: Mapping[int, builder.CalculatedExpressionValidation],
+) -> int | None:
+    """Render a multiline, explicit-commit editor for custom expressions."""
+
+    expression_rows = [
+        index
+        for index, row in enumerate(rows)
+        if str(row.get("Mode", "") or "AST YAML") in {"AST YAML", "Polars"}
+    ]
+    if not expression_rows:
+        st.caption("Choose AST YAML or Polars mode on a row to open its expression editor.")
+        return None
+
+    notice_key = f"{editor_key}_expression_notice"
+    notice = st.session_state.pop(notice_key, None)
+    if isinstance(notice, tuple) and len(notice) == 2:
+        level, message = notice
+        if level == "success":
+            st.success(str(message), icon=":material/check_circle:")
+        else:
+            st.error(str(message))
+
+    selection_key = f"{editor_key}_expression_row"
+    if st.session_state.get(selection_key) not in expression_rows:
+        st.session_state.pop(selection_key, None)
+    first_invalid = next(
+        (
+            index
+            for index in expression_rows
+            if index in validations and not validations[index].valid
+        ),
+        expression_rows[0],
+    )
+    pending_count = sum(
+        _calculated_expression_has_pending_draft(editor_key, index, row)
+        for index, row in enumerate(rows)
+    )
+    with st.container(border=True):
+        st.write("#### Focused expression editor")
+        st.caption(
+            "The grid keeps a read-only preview. Work here is preserved across reruns and "
+            "changes the calculated row only when you choose Apply expression."
+        )
+        if pending_count:
+            st.warning(
+                f"{pending_count} unapplied expression edit"
+                f"{'s are' if pending_count != 1 else ' is'} preserved in this step."
+            )
+        selection_has_state = selection_key in st.session_state
+        active_index = st.selectbox(
+            "Calculated field",
+            expression_rows,
+            index=None if selection_has_state else expression_rows.index(first_invalid),
+            format_func=lambda index: _calculated_expression_row_label(index, rows[index]),
+            key=selection_key,
+            help="Choose the row whose AST YAML or Polars expression you want to edit.",
+        )
+        row = rows[int(active_index)]
+        mode = str(row.get("Mode", "") or "AST YAML")
+        draft_key = _calculated_expression_draft_key(editor_key, int(active_index))
+        input_key = f"{draft_key}_input"
+        current_expression = str(row.get("Expression", "") or "")
+        if draft_key not in st.session_state:
+            st.session_state[draft_key] = current_expression
+        if input_key not in st.session_state:
+            st.session_state[input_key] = st.session_state[draft_key]
+        working_expression = st.text_area(
+            f"{mode} expression",
+            height=260,
+            key=input_key,
+            placeholder=builder.calculated_expression_example(mode),
+            help=config_help.field_help("calculation.expression"),
+            on_change=_capture_calculated_expression_draft,
+            args=(input_key, draft_key),
+        )
+        validation = builder.validate_calculated_expression(mode, working_expression)
+        changed = str(working_expression) != current_expression
+        if changed:
+            st.warning("Working expression is not applied yet. Apply it or cancel explicitly.")
+        if validation.valid:
+            st.success(
+                "Expression is valid and ready to apply."
+                if changed
+                else "The applied expression is valid.",
+                icon=":material/check_circle:",
+            )
+        else:
+            for message in validation.messages:
+                st.error(message)
+            if validation.technical_details:
+                with st.expander("Technical details", expanded=False):
+                    st.code(validation.technical_details, language="text")
+
+        st.caption("Copy-ready example")
+        st.code(
+            builder.calculated_expression_example(mode),
+            language="python" if mode == "Polars" else "yaml",
+        )
+        cancel_col, apply_col = st.columns(2)
+        cancel_col.button(
+            "Cancel changes",
+            icon=":material/close:",
+            disabled=not changed,
+            width="stretch",
+            key=f"{editor_key}_expression_cancel_{active_index}",
+            on_click=_cancel_calculated_expression_draft,
+            args=(draft_key, input_key),
+        )
+        apply_col.button(
+            "Apply expression",
+            type="primary",
+            icon=":material/check:",
+            disabled=not changed or not validation.valid,
+            width="stretch",
+            key=f"{editor_key}_expression_apply_{active_index}",
+            on_click=_apply_calculated_expression_draft,
+            args=(
+                calc_key,
+                editor_key,
+                int(active_index),
+                draft_key,
+                input_key,
+                notice_key,
+            ),
+        )
+    return int(active_index)
+
+
+def _calculated_expression_row_label(index: int, row: Mapping[str, Any]) -> str:
+    name = str(row.get("Name", "")).strip() or f"Untitled row {index + 1}"
+    mode = str(row.get("Mode", "") or "AST YAML")
+    status = "excluded" if not builder.editor_row_enabled(row.get("Enabled")) else mode
+    return f"{name} · {status}"
+
+
+def _calculated_expression_draft_key(editor_key: str, row_index: int) -> str:
+    return f"{editor_key}_expression_draft_{row_index}"
+
+
+def _calculated_expression_has_pending_draft(
+    editor_key: str,
+    row_index: int,
+    row: Mapping[str, Any],
+) -> bool:
+    draft_key = _calculated_expression_draft_key(editor_key, row_index)
+    return draft_key in st.session_state and str(st.session_state[draft_key]) != str(
+        row.get("Expression", "") or ""
+    )
+
+
+def _capture_calculated_expression_draft(input_key: str, draft_key: str) -> None:
+    """Shadow the textarea value so navigation cannot trigger widget cleanup loss."""
+
+    st.session_state[draft_key] = str(st.session_state.get(input_key, "") or "")
+
+
+def _cancel_calculated_expression_draft(draft_key: str, input_key: str) -> None:
+    """Discard only the focused textarea's working value."""
+
+    st.session_state.pop(draft_key, None)
+    st.session_state.pop(input_key, None)
+
+
+def _apply_calculated_expression_draft(
+    calc_key: str,
+    editor_key: str,
+    row_index: int,
+    draft_key: str,
+    input_key: str,
+    notice_key: str,
+) -> None:
+    """Commit one validated textarea draft to the calculated-row overview."""
+
+    rows = builder.normalize_editor_rows(st.session_state.get(calc_key, []))
+    if row_index < 0 or row_index >= len(rows):
+        st.session_state[notice_key] = (
+            "error",
+            "That calculated row no longer exists. Reopen the intended row and try again.",
+        )
+        return
+    row = rows[row_index]
+    mode = str(row.get("Mode", "") or "AST YAML")
+    working_expression = str(st.session_state.get(draft_key, "") or "")
+    validation = builder.validate_calculated_expression(mode, working_expression)
+    if not validation.valid:
+        st.session_state[notice_key] = (
+            "error",
+            "The expression is still invalid. Resolve the highlighted issue before applying it.",
+        )
+        return
+    row["Expression"] = working_expression
+    row["Enabled"] = builder.editor_row_enabled(row.get("Enabled"))
+    st.session_state[calc_key] = rows
+    st.session_state.pop(editor_key, None)
+    st.session_state.pop(draft_key, None)
+    st.session_state.pop(input_key, None)
+    st.session_state[notice_key] = ("success", "Expression applied to the calculated row.")
+
+
 def _render_state_rows_editor(
     state_key: str,
     editor_key: str,
@@ -1024,7 +1561,10 @@ def _render_state_rows_editor(
                 help=config_help.field_help("state.derived_from"),
             ),
             "Enabled": st.column_config.CheckboxColumn(
-                "Enabled", width="small", help=config_help.field_help("row.enabled")
+                "Enabled",
+                width="small",
+                default=True,
+                help=config_help.field_help("row.enabled"),
             ),
         },
     )
@@ -1098,6 +1638,179 @@ def _delete_source_dialog(ctx: ValueStreamContext, source_id: str) -> None:
         st.rerun()
 
 
+@st.dialog(
+    "Delete processor and dependencies",
+    width="medium",
+    icon=":material/delete_forever:",
+    on_dismiss="rerun",
+)
+def _delete_processor_dialog(ctx: ValueStreamContext, processor_id: str) -> None:
+    try:
+        plan = builder.processor_cascade_plan(ctx.catalog, processor_id)
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+
+    processor = next(
+        (
+            candidate
+            for candidate in ctx.catalog.processors.processors
+            if candidate.id == plan.processor_id
+        ),
+        None,
+    )
+    label = _processor_choice_label_human(processor) if processor is not None else plan.processor_id
+    st.warning(
+        f"Processor **{label}** and every catalog definition that depends on it will be "
+        "removed from the active workspace."
+    )
+    components.metric_cards(
+        [
+            {"label": "Metrics", "value": len(plan.metric_ids)},
+            {"label": "Report tiles", "value": len(plan.tile_locations)},
+            {"label": "Page filters", "value": len(plan.page_filter_locations)},
+        ],
+        columns=3,
+    )
+    with st.expander("Definitions to remove", expanded=True):
+        st.markdown("**Dependent metrics**")
+        metric_labels = [
+            f"{_metric_choice_label(ctx.catalog, metric_id)} (`{metric_id}`)"
+            for metric_id in plan.metric_ids
+        ]
+        st.code("\n".join(metric_labels) or "None")
+        st.markdown("**Report tiles** (`dashboard/page/tile`)")
+        st.code("\n".join(plan.tile_locations) or "None")
+        if plan.page_filter_locations:
+            st.markdown("**Unsupported page filters** (`dashboard/page/field`)")
+            st.code("\n".join(plan.page_filter_locations))
+    st.caption(
+        "The selected source and every other processor are kept. Related Chat descriptions "
+        "are removed. Aggregate folders and run history remain until a separate `valuestream "
+        "vacuum` operation removes eligible files."
+    )
+    confirmed = st.checkbox(
+        f"I understand that processor `{plan.processor_id}` and the definitions above "
+        "will be deleted.",
+        key=f"builder_delete_processor_confirm_{plan.processor_id}",
+    )
+    cancel_col, delete_col = st.columns(2)
+    if cancel_col.button(
+        "Cancel",
+        width="stretch",
+        key=f"builder_delete_processor_cancel_{plan.processor_id}",
+    ):
+        st.rerun()
+    if delete_col.button(
+        "Delete processor and dependencies",
+        type="primary",
+        icon=":material/delete_forever:",
+        disabled=not confirmed,
+        width="stretch",
+        key=f"builder_delete_processor_action_{plan.processor_id}",
+    ):
+        try:
+            deleted = builder.delete_processor_cascade(ctx.workspace, plan.processor_id)
+        except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
+            logger.exception("Failed to delete processor cascade: processor=%s", plan.processor_id)
+            st.error(str(exc))
+            return
+        st.session_state["builder_processor_delete_notice"] = (
+            f"Deleted processor `{deleted.processor_id}`, {len(deleted.metric_ids)} metric(s), "
+            f"and {len(deleted.tile_locations)} tile(s)."
+        )
+        st.session_state.pop("builder_processor_select", None)
+        st.rerun()
+
+
+@st.dialog(
+    "Delete metric",
+    width="medium",
+    icon=":material/delete_forever:",
+    on_dismiss="rerun",
+)
+def _delete_metric_dialog(workspace: Path, catalog: model.Catalog, metric_id: str) -> None:
+    try:
+        plan = builder.metric_delete_plan(catalog, metric_id)
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+
+    label = _metric_choice_label(catalog, plan.metric_id)
+    st.warning(f"Delete **{label}** (`{plan.metric_id}`) from the active workspace?")
+    if plan.dependent_metric_ids:
+        st.error(
+            "This metric cannot be deleted yet because other metrics depend on it. "
+            "Edit or delete those metrics first."
+        )
+        st.markdown("**Blocking dependent metrics**")
+        st.code(
+            "\n".join(
+                f"{_metric_choice_label(catalog, name)} (`{name}`)"
+                for name in plan.dependent_metric_ids
+            )
+        )
+
+    cascade_tiles = False
+    if plan.tile_locations:
+        st.markdown("**Dependent report tiles** (`dashboard/page/tile`)")
+        st.code("\n".join(plan.tile_locations))
+        cascade_tiles = st.checkbox(
+            f"Also delete these {len(plan.tile_locations)} dependent report tile(s).",
+            key=f"builder_delete_metric_tiles_{plan.metric_id}",
+            help="Tiles are never removed implicitly when deleting a metric.",
+        )
+    else:
+        st.info("No report tiles use this metric.")
+    if plan.page_filter_locations:
+        st.caption(
+            "The tile cascade also removes these filters because no remaining tile supports "
+            "them: " + ", ".join(f"`{path}`" for path in plan.page_filter_locations)
+        )
+    st.caption(
+        "The metric's processor, other metrics, aggregate folders, and run history are kept."
+    )
+    confirmed = st.checkbox(
+        f"I understand that metric `{plan.metric_id}` will be deleted.",
+        key=f"builder_delete_metric_confirm_{plan.metric_id}",
+    )
+    delete_enabled = bool(
+        confirmed and not plan.dependent_metric_ids and (not plan.tile_locations or cascade_tiles)
+    )
+    cancel_col, delete_col = st.columns(2)
+    if cancel_col.button(
+        "Cancel",
+        width="stretch",
+        key=f"builder_delete_metric_cancel_{plan.metric_id}",
+    ):
+        st.rerun()
+    if delete_col.button(
+        "Delete metric" + (" and tiles" if plan.tile_locations else ""),
+        type="primary",
+        icon=":material/delete_forever:",
+        disabled=not delete_enabled,
+        width="stretch",
+        key=f"builder_delete_metric_action_{plan.metric_id}",
+    ):
+        try:
+            deleted = builder.delete_metric_definition(
+                workspace,
+                plan.metric_id,
+                cascade_tiles=cascade_tiles,
+            )
+        except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
+            logger.exception("Failed to delete metric: metric=%s", plan.metric_id)
+            st.error(str(exc))
+            return
+        st.session_state["builder_metric_delete_notice"] = (
+            f"Deleted metric `{deleted.metric_id}` and {len(deleted.tile_locations)} tile(s)."
+        )
+        st.session_state.pop("builder_metric_selected_id", None)
+        st.rerun()
+
+
 @st.fragment()
 def _source_builder(  # noqa: PLR0912, PLR0915
     ctx: ValueStreamContext,
@@ -1105,24 +1818,45 @@ def _source_builder(  # noqa: PLR0912, PLR0915
     draft_slot: Any,
 ) -> None:
     _claim_fragment_action_slots(save_slot, draft_slot)
+    _begin_source_inspection_scope()
     delete_notice = st.session_state.pop("builder_source_delete_notice", None)
     if delete_notice:
         st.session_state.pop("builder_source_select", None)
         st.toast(str(delete_notice), icon=":material/delete_sweep:")
     if not ctx.catalog.pipelines.sources:
         st.info("No sources configured.")
+        st.link_button(
+            "Add source",
+            BUILDER_ADD_SOURCE_URL,
+            icon=":material/add_circle:",
+            type="primary",
+            help=(
+                "Open the deterministic, sample-first Studio for this active workspace. "
+                "The Studio provides a direct return here after apply or cancel."
+            ),
+        )
         _render_continue_primary(save_slot)
         return
 
-    source_col, delete_col = st.columns([8, 2], vertical_alignment="bottom")
+    source_col, add_col, delete_col = st.columns([6, 2, 2], vertical_alignment="bottom")
     with source_col:
         source = st.selectbox(
             "Source",
             ctx.catalog.pipelines.sources,
-            format_func=_source_choice_label,
+            format_func=_source_choice_label_edit,
             key="builder_source_select",
             help=config_help.field_help("source.selector"),
         )
+    add_col.link_button(
+        "Add source",
+        BUILDER_ADD_SOURCE_URL,
+        icon=":material/add_circle:",
+        width="stretch",
+        help=(
+            "Open the deterministic, sample-first Studio for this active workspace. "
+            "The Studio provides a direct return here after apply or cancel."
+        ),
+    )
     if delete_col.button(
         "Delete source",
         icon=":material/delete_forever:",
@@ -1342,7 +2076,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         st.session_state[calc_key] = calc_rows
         calculation_frame = builder.editor_frame(
             calc_rows,
-            ["Name", "Mode", "Left", "Right Kind", "Right", "Expression", "Enabled"],
+            ["Name", "Enabled", "Mode", "Expression", "Left", "Right Kind", "Right"],
             builder.blank_calculated_row,
         )
         with st.popover("Examples", icon=":material/flare:"):
@@ -1358,17 +2092,14 @@ def _source_builder(  # noqa: PLR0912, PLR0915
                 'pl.col("Revenue") - pl.col("Cost")',
                 language="python",
             )
-        _render_calculated_rows_editor(
+        calculated_rows_valid = _render_calculated_rows_editor(
             calc_key,
             f"builder_source_calcs_editor_{source.id}",
             calculation_frame,
         )
-        calculated_rows_valid = True
-        try:
-            builder.build_derive_column_transforms(st.session_state[calc_key])
-        except Exception:
-            logger.exception("Failed to validate source calculated rows: source=%s", source.id)
-            calculated_rows_valid = False
+        calculated_expression_pending = bool(
+            st.session_state.get(f"{calc_key}_expression_pending", False)
+        )
 
     source_def = _build_source_definition(
         source=source,
@@ -1411,7 +2142,9 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         save_slot=save_slot,
         draft_slot=draft_slot,
         status=draft_status,
-        valid=bool(source_id.strip()) and calculated_rows_valid,
+        valid=(
+            bool(source_id.strip()) and calculated_rows_valid and not calculated_expression_pending
+        ),
         widget_prefixes=("builder_source_",),
         help_text=f"Validate and apply source {source.id!r} to the active workspace.",
     ):
@@ -1424,6 +2157,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
                 label=description.strip() or humanize_identifier(source_id.strip()),
                 source_ids=[source_id.strip()],
                 message="Source applied to the workspace.",
+                widget_prefixes=("builder_source_",),
             )
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
@@ -1436,6 +2170,7 @@ def _dimensions_builder(  # noqa: PLR0912, PLR0915
     ctx: ValueStreamContext, save_slot: Any, draft_slot: Any
 ) -> None:
     _claim_fragment_action_slots(save_slot, draft_slot)
+    _begin_source_inspection_scope()
     with components.bordered_panel(
         "Dimension Coverage", "Review and update processor group-by fields."
     ):
@@ -1458,7 +2193,7 @@ def _dimensions_builder(  # noqa: PLR0912, PLR0915
     processor = st.selectbox(
         "Processor To Edit",
         ctx.catalog.processors.processors,
-        format_func=_processor_choice_label_human,
+        format_func=_processor_choice_label_edit,
         key="builder_dimension_processor",
         help=config_help.field_help("dimension.processor"),
     )
@@ -1585,7 +2320,7 @@ def _dimension_profile_panel(
         "Dimension Profiler",
         "Profile source fields before promoting them into aggregate dimensions.",
     ):
-        sample = dimension_profile.source_profile_sample(ctx, source)
+        sample = _source_profile_sample(ctx, source)
         if sample is None or sample.is_empty():
             st.info(
                 "No source sample is available. Add source files or use Data Load before profiling."
@@ -1651,6 +2386,51 @@ def _dimension_profile_panel(
     return sample, rows
 
 
+def _dimension_pack_summary(
+    pack_fields: list[str],
+    current_fields: list[str],
+    missing_fields: list[str],
+) -> dict[str, tuple[str, ...]]:
+    """Return stable field groups for the Dimension Pack presentation."""
+
+    return {
+        "Available in source": tuple(pack_fields),
+        "Already selected": tuple(field for field in pack_fields if field in current_fields),
+        "Missing from source": tuple(missing_fields),
+    }
+
+
+def _render_dimension_field_badges(
+    label: str,
+    fields: tuple[str, ...],
+    *,
+    color: str,
+) -> None:
+    """Render a responsive, non-interactive field-chip group."""
+
+    st.caption(label)
+    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+        if fields:
+            for field in fields:
+                st.badge(field, color=color)  # type: ignore[arg-type]
+        else:
+            st.badge("None", color="gray")
+
+
+def _dimension_promotion_summary(
+    row: dimension_profile.DimensionProfileRow,
+) -> dict[str, str | int]:
+    """Return the compact business summary shown before dimension promotion."""
+
+    return {
+        "Recommendation": row.recommendation,
+        "Group-by safety": row.safe_for_group_by,
+        "Cardinality": row.cardinality,
+        "Null values": f"{row.null_rate * 100:.1f}%",
+        "Reason": row.reason,
+    }
+
+
 def _dimension_pack_panel(
     processor: model.Processor,
     options: list[str],
@@ -1679,14 +2459,27 @@ def _dimension_pack_panel(
             for field in dimension_profile.DIMENSION_PACKS.get(pack_name, ())
             if field.casefold() not in {option.casefold() for option in options}
         ]
-        st.write(
-            {
-                "Available pack fields": ", ".join(pack_fields) or "None",
-                "Already selected": ", ".join([field for field in pack_fields if field in current])
-                or "None",
-                "Missing from source": ", ".join(missing) or "None",
-            }
+        summary = _dimension_pack_summary(pack_fields, current, missing)
+        _render_dimension_field_badges(
+            "Available in source",
+            summary["Available in source"],
+            color="blue",
         )
+        _render_dimension_field_badges(
+            "Already selected",
+            summary["Already selected"],
+            color="green",
+        )
+        _render_dimension_field_badges(
+            "Missing from source",
+            summary["Missing from source"],
+            color="orange",
+        )
+        with st.expander("Technical details · Dimension pack", expanded=False):
+            st.code(
+                json.dumps({"pack": pack_name, **summary}, indent=2),
+                language="json",
+            )
         if st.button(
             f"Add {pack_name} dimensions",
             icon=":material/library_add:",
@@ -1738,15 +2531,50 @@ def _dimension_promotion_panel(
             )
             return
         row = profile_by_field[field]
-        st.write(
-            {
-                "Recommendation": row.recommendation,
-                "Safe For Group-By": row.safe_for_group_by,
-                "Cardinality": row.cardinality,
-                "Null %": round(row.null_rate * 100, 1),
-                "Reason": row.reason,
-            }
+        summary = _dimension_promotion_summary(row)
+        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+            components.status_badge(
+                row.recommendation,
+                {
+                    "Recommended": "ready",
+                    "Review": "warning",
+                    "Avoid": "blocked",
+                    "Active": "ok",
+                }.get(row.recommendation, "unknown"),
+            )
+            components.status_badge(
+                f"Group-by: {row.safe_for_group_by}",
+                {
+                    "Yes": "ready",
+                    "Review": "warning",
+                    "No": "blocked",
+                }.get(row.safe_for_group_by, "unknown"),
+            )
+        components.key_value_strip(
+            [
+                {"label": label, "value": value}
+                for label, value in summary.items()
+                if label != "Reason"
+            ]
         )
+        st.caption(f"Why: {summary['Reason']}")
+        with st.expander("Technical details · Field profile", expanded=False):
+            st.code(
+                json.dumps(
+                    {
+                        "field": row.field,
+                        "dtype": row.dtype,
+                        "recommendation": row.recommendation,
+                        "safe_for_group_by": row.safe_for_group_by,
+                        "cardinality": row.cardinality,
+                        "cardinality_rate": row.cardinality_rate,
+                        "null_rate": row.null_rate,
+                        "reason": row.reason,
+                    },
+                    indent=2,
+                ),
+                language="json",
+            )
         if row.safe_for_group_by == "No":
             st.warning(
                 "This field is flagged before promotion because it can explode aggregates or expose sensitive detail."
@@ -2267,7 +3095,11 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     ctx: ValueStreamContext, save_slot: Any, draft_slot: Any
 ) -> None:
     _claim_fragment_action_slots(save_slot, draft_slot)
+    _begin_source_inspection_scope()
     processors = ctx.catalog.processors.processors
+    delete_notice = st.session_state.pop("builder_processor_delete_notice", None)
+    if delete_notice:
+        st.toast(str(delete_notice), icon=":material/delete_sweep:")
     if not ctx.catalog.pipelines.sources:
         st.info("No sources configured.")
         _render_continue_primary(save_slot)
@@ -2289,15 +3121,28 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     )
     creating = mode == "Create New Processor"
     if creating:
-        processor = _new_processor_template(ctx)
+        processor = _new_processor_template(ctx, _selected_new_processor_source_id(ctx))
     else:
-        processor = st.selectbox(
+        processor_col, delete_col = st.columns([8, 2], vertical_alignment="bottom")
+        processor = processor_col.selectbox(
             "Processor",
             processors,
-            format_func=_processor_choice_label_human,
+            format_func=_processor_choice_label_edit,
             key="builder_processor_select",
             help=config_help.field_help("processor.selector"),
         )
+        if delete_col.button(
+            "Delete processor",
+            icon=":material/delete_forever:",
+            width="stretch",
+            key="builder_delete_processor",
+            help=(
+                "Preview and remove only this processor together with its dependent metrics "
+                "and report definitions."
+            ),
+        ):
+            st.session_state[f"builder_delete_processor_confirm_{processor.id}"] = False
+            _delete_processor_dialog(ctx, processor.id)
     source = next(
         (
             candidate
@@ -2306,8 +3151,16 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         ),
         None,
     )
-    field_options = _source_field_options(ctx, source) if source else list(processor.group_by)
-    field_mapping = _source_rename_mapping(ctx, source, True) if source else {}
+    field_options = (
+        _source_field_options(ctx, source, include_processor_fields=not creating)
+        if source
+        else list(processor.group_by)
+    )
+    field_mapping = (
+        _source_rename_mapping(ctx, source, True)
+        if source and _source_has_transform(source, "rename_capitalize")
+        else {}
+    )
     processor_def = builder.processor_to_dict(processor)
 
     with components.bordered_panel(
@@ -2325,11 +3178,16 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             help=config_help.field_help("processor.id"),
         )
         source_ids = [source.id for source in ctx.catalog.pipelines.sources]
+        sources_by_id = {source.id: source for source in ctx.catalog.pipelines.sources}
+        source_key = (
+            "builder_processor_new_source" if creating else f"builder_proc_source_{processor.id}"
+        )
         source_id = source_col.selectbox(
             "Source",
             source_ids,
             index=source_ids.index(processor.source),
-            key=f"builder_proc_source_{processor.id}",
+            format_func=lambda value: _source_choice_label_edit(sources_by_id[value]),
+            key=source_key,
             help=config_help.field_help("processor.source"),
         )
         kind = kind_col.selectbox(
@@ -2385,6 +3243,14 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             field_options,
             field_mapping,
         )
+        entities = kind_settings.get("entities")
+        subject = str(entities.get("subject", "") or "") if isinstance(entities, dict) else ""
+        if creating and kind in ENTITY_SUBJECT_PROCESSOR_KINDS and not subject:
+            st.warning(
+                "No subject/entity field could be inferred from the selected source's natural "
+                "key or observed sample schema. The field is intentionally empty; choose an "
+                "existing source field before applying if this processor uses entity identity."
+            )
 
     state_key = f"builder_proc_states_{processor.id}"
     if state_key not in st.session_state:
@@ -2492,17 +3358,26 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         "Generated processor YAML",
         yaml.safe_dump({"processors": [processor_def]}, sort_keys=False),
     )
-    draft_status = builder.builder_draft_status(
-        f"processor:{'new' if creating else processor.id}",
-        None if creating else builder.processor_to_dict(processor),
-        processor_def,
-    )
+    if creating:
+        draft_status = builder.builder_template_draft_status(
+            st.session_state,
+            "processor:new",
+            f"builder_proc_template_baseline_{processor.id}",
+            processor_def,
+        )
+    else:
+        draft_status = builder.builder_draft_status(
+            f"processor:{processor.id}",
+            builder.processor_to_dict(processor),
+            processor_def,
+        )
     if _render_editor_primary_action(
         save_slot=save_slot,
         draft_slot=draft_slot,
         status=draft_status,
         valid=bool(processor_id.strip()),
         widget_prefixes=("builder_processor_", "builder_proc_"),
+        preserve_widget_keys=("builder_processor_mode",),
         help_text=(
             "Validate and apply this processor to the active workspace. "
             "Use Data Load separately to materialize aggregates."
@@ -2518,6 +3393,9 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
                 label=description.strip() or humanize_identifier(processor_id.strip()),
                 source_ids=[source_id],
                 message=message + " Use Data Load to refresh matching aggregates.",
+                widget_prefixes=("builder_processor_", "builder_proc_"),
+                preserve_widget_keys=("builder_processor_mode",),
+                state_updates={"builder_processor_mode": "Edit Existing Processor"},
             )
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
@@ -2574,6 +3452,9 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
     draft_slot: Any,
 ) -> None:
     _claim_fragment_action_slots(save_slot, draft_slot)
+    delete_notice = st.session_state.pop("builder_metric_delete_notice", None)
+    if delete_notice:
+        st.toast(str(delete_notice), icon=":material/delete_sweep:")
     processors = catalog.processors.processors
     if not processors:
         st.info("No processors configured.")
@@ -2727,6 +3608,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             )
             if not editable_processors:
                 st.info("No editable metrics are available.")
+                _render_continue_primary(save_slot)
                 return
             current_metric = st.session_state.get(
                 "builder_metric_selected_id",
@@ -2751,6 +3633,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             metric_kinds = _metric_kinds_for_source(metric_defs_by_name, processor.id)
             if not metric_kinds:
                 st.info("Selected processor has no editable metric kinds.")
+                _render_continue_primary(save_slot)
                 return
             current_kind = (
                 str(current_metric_def.get("kind", "") or "")
@@ -2771,12 +3654,14 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             )
             if not metric_choices:
                 st.info("Selected processor and kind have no editable metrics.")
+                _render_continue_primary(save_slot)
                 return
             metric_key = f"builder_metric_select_{processor.id}_{metric_kind}"
             if st.session_state.get(metric_key) not in metric_choices:
                 st.session_state.pop(metric_key, None)
                 current_metric = None
-            selected_metric_name = st.selectbox(
+            metric_col, delete_col = st.columns([3, 1], vertical_alignment="bottom")
+            selected_metric_name = metric_col.selectbox(
                 "Metric",
                 metric_choices,
                 index=builder.option_index(metric_choices, current_metric),
@@ -2784,6 +3669,19 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 key=metric_key,
                 help=config_help.field_help("metric.selector"),
             )
+            if delete_col.button(
+                "Delete metric",
+                icon=":material/delete_forever:",
+                width="stretch",
+                key="builder_delete_metric",
+                help=(
+                    "Preview this exact metric's dependent report tiles. Other metrics are "
+                    "never selected implicitly."
+                ),
+            ):
+                st.session_state[f"builder_delete_metric_confirm_{selected_metric_name}"] = False
+                st.session_state[f"builder_delete_metric_tiles_{selected_metric_name}"] = False
+                _delete_metric_dialog(workspace, catalog, selected_metric_name)
             st.session_state["builder_metric_selected_id"] = selected_metric_name
             seed_metric_def = metric_defs_by_name[selected_metric_name]
             seed_kind = metric_kind
@@ -2806,11 +3704,13 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             )
             if not processor_choice:
                 st.info("Select a processor to create a metric.")
+                _render_continue_primary(save_slot)
                 return
             processor = processors_by_id[str(processor_choice)]
             metric_kind_options = builder.metric_kind_options(processor)
             if not metric_kind_options:
                 st.warning("Selected processor has no executable metric kinds yet.")
+                _render_continue_primary(save_slot)
                 return
             metric_kind = st.selectbox(
                 "Metric Kind",
@@ -2824,27 +3724,45 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             )
             if not metric_kind:
                 st.info("Select a metric kind to continue.")
+                _render_continue_primary(save_slot)
                 return
             st.caption(builder.metric_kind_help(metric_kind))
             metric_token = f"{create_token}_{processor.id}_{metric_kind}"
             metric_label = st.text_input(
-                "Metric Name",
+                "Metric Display Name",
                 value="",
                 placeholder=builder.title_from_identifier(
                     builder.default_metric_name(processor, metric_kind)
                 ),
                 key=f"builder_metric_name_{metric_token}_{processor.id}_{metric_kind}",
-                help=config_help.field_help("metric.id"),
+                help="Human-readable name used in reports, confirmations, and selectors.",
             )
-            if metric_label.strip():
-                metric_name = builder.generated_catalog_id(
+            suggested_metric_id = (
+                builder.stable_catalog_id(
                     metric_label,
-                    _stable_random_suffix(
-                        st.session_state, f"builder_metric_id_suffix_{metric_token}"
-                    ),
                     fallback="metric",
+                    parent_id=processor.id,
+                    existing_ids=metric_names,
                 )
-                st.caption(f"Metric ID: `{metric_name}`")
+                if metric_label.strip()
+                else ""
+            )
+            entered_metric_id = st.text_input(
+                "Metric ID",
+                value="",
+                placeholder=suggested_metric_id or "Enter a display name to generate an ID",
+                key=f"builder_metric_id_{metric_token}_{processor.id}_{metric_kind}",
+                help=(
+                    "Stable technical reference used in YAML. Leave blank to use the "
+                    "readable suggestion; letters, numbers, and underscores are supported."
+                ),
+            )
+            metric_name = entered_metric_id.strip() or suggested_metric_id
+            if metric_name and not builder.catalog_id_is_safe(metric_name):
+                st.error(
+                    "Metric ID must start with an ASCII letter and contain only ASCII "
+                    "letters, numbers, and underscores."
+                )
         description = st.text_area(
             "Description",
             value=str(seed_metric_def.get("description", "") or ""),
@@ -2870,6 +3788,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             key_suffix=f"{metric_token}_{processor.id}_{metric_kind}",
         )
         if metric_def is None:
+            _render_continue_primary(save_slot)
             return
         if description.strip():
             metric_def["description"] = description.strip()
@@ -2878,20 +3797,46 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             metric_def["depends_on"] = dependencies
         if display:
             metric_def["display"] = display
+        if not editing and metric_label.strip():
+            metric_display = dict(metric_def.get("display", {}))
+            metric_display.setdefault("label", metric_label.strip())
+            metric_def["display"] = metric_display
         if editing:
             metric_def = _preserve_untouched_metric_definition(seed_metric_def, metric_def)
-        metric_ready = bool(metric_name.strip()) and (editing or bool(metric_label.strip()))
-        draft_status = builder.builder_draft_status(
-            f"metric:{selected_metric_name or metric_name or 'new'}",
-            seed_metric_def if editing else None,
-            metric_def if metric_ready else {"metric": metric_def, "name": metric_name},
+        metric_display_name = str(
+            (metric_def.get("display") or {}).get("label")
+            or metric_label
+            or humanize_identifier(metric_name)
+        ).strip()
+        metric_ready = (
+            bool(metric_name.strip())
+            and builder.catalog_id_is_safe(metric_name.strip())
+            and (editing or bool(metric_label.strip()))
         )
+        if editing:
+            draft_status = builder.builder_draft_status(
+                f"metric:{selected_metric_name}",
+                seed_metric_def,
+                metric_def,
+            )
+        else:
+            draft_status = builder.builder_template_draft_status(
+                st.session_state,
+                f"metric:new:{metric_token}",
+                f"builder_metric_template_baseline_{metric_token}",
+                {"metric": metric_def, "name": metric_name},
+            )
         if _render_editor_primary_action(
             save_slot=save_slot,
             draft_slot=draft_slot,
             status=draft_status,
             valid=metric_ready,
             widget_prefixes=("builder_metric_",),
+            preserve_widget_keys=(
+                "builder_metric_mode",
+                "builder_metric_creation_method",
+                "builder_metric_pending_refresh",
+            ),
             help_text=(
                 "Validate and apply this metric to the active workspace. Existing aggregate "
                 "states can be used without running data."
@@ -2903,17 +3848,25 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                     return
                 with builder.validated_catalog_transaction(workspace):
                     builder.write_metric_definition(workspace, metric_name.strip(), metric_def)
-                apply_outcome = builder.builder_apply_outcome(
-                    humanize_identifier(metric_name.strip())
-                )
+                apply_outcome = builder.builder_apply_outcome(metric_display_name)
                 _store_builder_apply_outcome(apply_outcome)
                 _record_builder_applied(apply_outcome)
                 raw_registry = st.session_state.get(builder.BUILDER_DRAFTS_KEY)
                 registry = dict(raw_registry) if isinstance(raw_registry, dict) else {}
                 registry.pop(draft_status.key, None)
                 st.session_state[builder.BUILDER_DRAFTS_KEY] = registry
+                _persist_builder_checkpoint()
                 st.session_state["builder_apply_notice"] = (
-                    f"Metric {humanize_identifier(metric_name.strip())!r} applied."
+                    f"Metric {metric_display_name!r} applied."
+                )
+                _queue_builder_post_apply_cleanup(
+                    status=draft_status,
+                    widget_prefixes=("builder_metric_",),
+                    preserve_widget_keys=(
+                        "builder_metric_mode",
+                        "builder_metric_creation_method",
+                        "builder_metric_pending_refresh",
+                    ),
                 )
                 _queue_metric_refresh(
                     st.session_state,
@@ -3132,8 +4085,17 @@ def _report_library_tile_label(option: TileOption) -> str:
     return f"{title} · {humanize_identifier(option[1])}"
 
 
+def _tile_delete_button_label(option: TileOption | None) -> str:
+    """Name the exact configured tile targeted by the library delete action."""
+
+    if option is None:
+        return "Delete tile"
+    title = str(option[3].get("title") or option[2])
+    return f"Delete {title!r}"
+
+
 def _report_library_chart_label(chart_type: str) -> str:
-    return REPORT_LIBRARY_CHART_LABELS.get(chart_type, humanize_identifier(chart_type))
+    return builder.chart_kind_label(chart_type)
 
 
 def _select_report_library_tile(widget_key: str) -> None:
@@ -3177,7 +4139,12 @@ def _render_report_library_browser(
             "Chart type",
             ["All", *configured_chart_types],
             key="builder_chart_filter",
+            format_func=builder.chart_kind_selector_label,
             help=config_help.field_help("report.chart_filter"),
+        )
+    if chart_filter != "All":
+        st.caption(
+            f"{builder.chart_kind_purpose(chart_filter)} Technical chart kind: `{chart_filter}`."
         )
 
     filtered_options = _report_library_options(
@@ -3278,6 +4245,11 @@ def _render_report_library_chart_group(
                 st.badge(
                     f"{len(tile_options)} report{'s' if len(tile_options) != 1 else ''}",
                     color="gray",
+                )
+                st.badge(
+                    chart_type,
+                    color="gray",
+                    help="Technical chart kind",
                 )
             st.caption(
                 REPORT_LIBRARY_CHART_DESCRIPTIONS.get(
@@ -3577,6 +4549,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                 st.session_state.pop("builder_tile_seed", None)
                 st.session_state.pop("builder_tile_editor_token", None)
         selected_seed = _selected_tile(tile_options, selected_tile_key)
+        delete_label = _tile_delete_button_label(selected_seed)
         with st.container(horizontal=True, horizontal_alignment="distribute"):
             new_tile = st.button("New", icon=":material/add_2:", key="builder_new_tile")
             duplicate_tile = st.button(
@@ -3586,10 +4559,15 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                 disabled=selected_seed is None,
             )
             delete_tile = st.button(
-                "Delete",
+                delete_label,
                 icon=":material/delete:",
                 key="builder_delete_tile",
                 disabled=selected_seed is None,
+                help=(
+                    f"Stage deletion of {_tile_option_key(selected_seed)!r}."
+                    if selected_seed is not None
+                    else "Select a configured tile to delete."
+                ),
             )
         if new_tile:
             _start_new_tile_editor(st.session_state)
@@ -3624,9 +4602,10 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             == selected_seed[:3]
         ):
             tile_label = str(pending_delete.get("title", selected_seed[2]))
+            tile_path = _tile_option_key(selected_seed)
             st.warning(
-                f"Tile {tile_label!r} is staged for deletion. Apply to workspace to remove it, "
-                "or discard this draft to keep it."
+                f"Tile {tile_label!r} at {tile_path!r} is staged for deletion. "
+                "Apply to workspace to remove it, or discard this draft to keep it."
             )
             deletion_status = builder.builder_draft_status(
                 f"report-delete:{selected_seed[0]}/{selected_seed[1]}/{selected_seed[2]}",
@@ -3658,6 +4637,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                         scope="report",
                         label=tile_label,
                         message="Tile removed from the workspace.",
+                        widget_prefixes=(BUILDER_PENDING_TILE_DELETE_KEY,),
                     )
                 except Exception as exc:  # pragma: no cover - Streamlit display path
                     _record_builder_apply_failed(exc)
@@ -3721,9 +4701,13 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             placeholder="Select chart" if metric_name else "Select metric first",
             disabled=not metric_name,
             key=f"builder_tile_chart_{editor_token}",
+            format_func=builder.chart_kind_selector_label,
             help=config_help.field_help("report.chart"),
         )
         if metric_name and chart_kind:
+            st.caption(
+                f"{builder.chart_kind_purpose(chart_kind)} Technical chart kind: `{chart_kind}`."
+            )
             components.key_value_strip(
                 [
                     {"label": key, "value": value}
@@ -3783,12 +4767,10 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                 key=f"builder_dashboard_name_{editor_token}",
                 help=config_help.field_help("report.dashboard_id"),
             )
-            dashboard_id = _generated_catalog_id(
+            dashboard_id = builder.stable_catalog_id(
                 dashboard_title,
-                _stable_random_suffix(
-                    st.session_state, f"builder_dashboard_id_suffix_{editor_token}"
-                ),
                 fallback="dashboard",
+                existing_ids=dashboards_by_id,
             )
             existing_dashboard = None
         else:
@@ -3818,10 +4800,11 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                 key=f"builder_page_name_{editor_token}_{dashboard_id}",
                 help=config_help.field_help("report.page_id"),
             )
-            page_id = _generated_catalog_id(
+            page_id = builder.stable_catalog_id(
                 page_title,
-                _stable_random_suffix(st.session_state, f"builder_page_id_suffix_{editor_token}"),
                 fallback="page",
+                parent_id=dashboard_id,
+                existing_ids=pages_by_id,
             )
         else:
             page = pages_by_id[str(page_choice)]
@@ -3853,10 +4836,11 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         tile_id = (
             str(seed_tile["id"])
             if seed_tile.get("id") and not is_new_tile
-            else _generated_catalog_id(
+            else builder.stable_catalog_id(
                 title.strip() or str(metric_name or chart_kind or "tile"),
-                _stable_random_suffix(st.session_state, f"builder_tile_id_suffix_{editor_token}"),
                 fallback="tile",
+                parent_id=page_id,
+                existing_ids=([tile.id for tile in existing_page.tiles] if existing_page else []),
             )
         )
 
@@ -3932,19 +4916,28 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             "filters": page_filters,
             "time_filter": page_time_filter,
         }
-        draft_status = builder.builder_draft_status(
-            f"report:{selected_tile_key}",
-            {
-                "dashboard_id": seed_dashboard,
-                "page": baseline_page,
-                "tile": seed_tile if selected_seed is not None else None,
-            },
-            {
-                "dashboard_id": dashboard_id.strip(),
-                "page": proposed_page,
-                "tile": built_tile,
-            },
-        )
+        proposed_report = {
+            "dashboard_id": dashboard_id.strip(),
+            "page": proposed_page,
+            "tile": built_tile,
+        }
+        if is_new_tile:
+            draft_status = builder.builder_template_draft_status(
+                st.session_state,
+                f"report:new:{editor_token}",
+                f"builder_tile_template_baseline_{editor_token}",
+                proposed_report,
+            )
+        else:
+            draft_status = builder.builder_draft_status(
+                f"report:{selected_tile_key}",
+                {
+                    "dashboard_id": seed_dashboard,
+                    "page": baseline_page,
+                    "tile": seed_tile if selected_seed is not None else None,
+                },
+                proposed_report,
+            )
         report_ready = bool(
             built_tile and dashboard_id.strip() and page_id.strip() and page_settings_ready
         )
@@ -3989,6 +4982,17 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                     scope="report",
                     label=title.strip() or humanize_identifier(str(built_tile.get("id", ""))),
                     message="Report tile and page settings applied.",
+                    widget_prefixes=(
+                        "builder_tile_",
+                        "builder_dashboard_",
+                        "builder_page_",
+                        "builder_report_",
+                    ),
+                    state_updates={
+                        "builder_tile_selection_override": (
+                            f"{dashboard_id.strip()}/{page_id.strip()}/{built_tile.get('id', '')}"
+                        )
+                    },
                 )
             except Exception as exc:  # pragma: no cover - Streamlit display path
                 _record_builder_apply_failed(exc)
@@ -5089,16 +6093,80 @@ def _processor_choice_label(value: str, processors_by_id: dict[str, model.Proces
     return _processor_choice_label_human(processor)
 
 
-def _source_choice_label(source: model.Source) -> str:
-    """Show the human source name before reader and technical identity."""
-    label = source.description.strip() or humanize_identifier(source.id)
-    return f"{label} · {humanize_identifier(source.reader.kind)}"
+def _artifact_choice_label(
+    artifact_id: str,
+    description: str,
+    kind: str,
+    *,
+    technical_first: bool,
+) -> str:
+    """Format artifact identity consistently for editing or recognition tasks."""
+
+    human_label = _concise_artifact_label(description, artifact_id)
+    kind_label = humanize_identifier(kind)
+    if technical_first:
+        return f"{artifact_id} — {human_label} · {kind_label}"
+    return f"{human_label} — {artifact_id} · {kind_label}"
+
+
+def _concise_artifact_label(description: str, artifact_id: str, *, limit: int = 64) -> str:
+    text = " ".join(description.split()).strip()
+    if not text:
+        return humanize_identifier(artifact_id)
+    sentence_breaks = [
+        index + 1 for marker in (". ", "! ", "? ") if (index := text.find(marker)) >= 0
+    ]
+    if sentence_breaks:
+        text = text[: min(sentence_breaks)]
+    text = text.rstrip(" .!?")
+    if len(text) <= limit:
+        return text
+    shortened = text[: limit - 1].rsplit(" ", 1)[0].rstrip(" .,:;")
+    return f"{shortened or text[: limit - 1]}…"
+
+
+def _source_choice_label_edit(source: model.Source) -> str:
+    """Lead with the operative source ID in an editing selector."""
+
+    return _artifact_choice_label(
+        source.id,
+        source.description,
+        source.reader.kind,
+        technical_first=True,
+    )
+
+
+def _source_choice_label_human(source: model.Source) -> str:
+    """Lead with the source title in review and recognition selectors."""
+
+    return _artifact_choice_label(
+        source.id,
+        source.description,
+        source.reader.kind,
+        technical_first=False,
+    )
+
+
+def _processor_choice_label_edit(processor: model.Processor) -> str:
+    """Lead with the operative processor ID in an editing selector."""
+
+    return _artifact_choice_label(
+        processor.id,
+        processor.description,
+        processor.kind,
+        technical_first=True,
+    )
 
 
 def _processor_choice_label_human(processor: model.Processor) -> str:
-    """Show the human processor name before its technical kind."""
-    label = processor.description.strip() or humanize_identifier(processor.id)
-    return f"{label} · {humanize_identifier(processor.kind)}"
+    """Lead with the processor title in review and recognition selectors."""
+
+    return _artifact_choice_label(
+        processor.id,
+        processor.description,
+        processor.kind,
+        technical_first=False,
+    )
 
 
 def _metric_processors_for_definitions(
@@ -5162,19 +6230,6 @@ def _metric_choice_label(catalog: model.Catalog, metric_name: str) -> str:
     return f"{label} · {builder.metric_kind_label(kind)} · {humanize_identifier(source)}"
 
 
-def _stable_random_suffix(session_state: MutableMapping[str, Any], key: str) -> str:
-    existing = session_state.get(key)
-    if isinstance(existing, str) and existing:
-        return existing
-    suffix = secrets.token_hex(8)
-    session_state[key] = suffix
-    return suffix
-
-
-def _generated_catalog_id(name: str, suffix: str, *, fallback: str) -> str:
-    return builder.generated_catalog_id(name, suffix, fallback=fallback)
-
-
 def _digest_state_label(processor: model.Processor, state_name: str) -> str:
     spec = model.effective_processor_states(processor).get(state_name)
     if spec is None:
@@ -5201,6 +6256,8 @@ def _source_field_options(
     source: model.Source | None,
     *,
     rename_capitalize: bool | None = None,
+    sample_columns: list[str] | None = None,
+    include_processor_fields: bool = True,
 ) -> list[str]:
     if source is None:
         return []
@@ -5210,7 +6267,11 @@ def _source_field_options(
         else rename_capitalize
     )
     fields: list[str] = []
-    fields.extend(_source_sample_columns(ctx, source, rename_capitalize=use_rename_capitalize))
+    fields.extend(
+        sample_columns
+        if sample_columns is not None
+        else _source_sample_columns(ctx, source, rename_capitalize=use_rename_capitalize)
+    )
     if source.schema_.timestamp_column:
         fields.append(
             _rename_capitalize_field(source.schema_.timestamp_column, use_rename_capitalize)
@@ -5236,15 +6297,34 @@ def _source_field_options(
         elif isinstance(transform, model.Coalesce):
             fields.extend(_rename_capitalize_fields(transform.columns, use_rename_capitalize))
             fields.append(transform.output)
-    for processor in processors_for_source(ctx, source.id):
-        fields.extend(processor.group_by)
-        if processor.time and processor.time.column:
-            fields.append(processor.time.column)
-        fields.extend(dimension_profile.processor_field_references(processor))
+    fields.extend(
+        _processor_source_field_references(
+            ctx,
+            source.id,
+            enabled=include_processor_fields,
+        )
+    )
     return sorted(
         builder.dedupe([str(field) for field in fields if field]),
         key=lambda field: (field.casefold(), field),
     )
+
+
+def _processor_source_field_references(
+    ctx: ValueStreamContext,
+    source_id: str,
+    *,
+    enabled: bool,
+) -> list[str]:
+    if not enabled:
+        return []
+    fields: list[str] = []
+    for processor in processors_for_source(ctx, source_id):
+        fields.extend(processor.group_by)
+        if processor.time and processor.time.column:
+            fields.append(processor.time.column)
+        fields.extend(dimension_profile.processor_field_references(processor))
+    return fields
 
 
 def _source_sample_columns(
@@ -5253,17 +6333,242 @@ def _source_sample_columns(
     *,
     rename_capitalize: bool = False,
 ) -> list[str]:
-    try:
-        chunks = discover(ctx.workspace, source)
-        if not chunks:
-            return []
-        frame = read(source.reader, chunks[0].files)
-        return _rename_capitalize_fields(frame.collect_schema().names(), rename_capitalize)
-    except Exception:
-        logger.exception("Failed to inspect source sample columns: source=%s", source.id)
-        return []
-    finally:
+    inspection = _source_inspection(ctx, source)
+    columns = [name for name, _dtype in inspection.raw_schema]
+    return _rename_capitalize_fields(columns, rename_capitalize)
+
+
+def _source_profile_sample(
+    ctx: ValueStreamContext,
+    source: model.Source,
+) -> pl.DataFrame | None:
+    """Return an isolated copy of the shared bounded transformed sample."""
+
+    sample = _source_inspection(ctx, source).sample
+    return sample.clone() if sample is not None else None
+
+
+def _begin_source_inspection_scope() -> None:
+    """Reset per-fragment memoization while retaining bounded cache entries."""
+
+    st.session_state[BUILDER_SOURCE_INSPECTION_SCOPE_KEY] = {
+        "keys": {},
+        "rendered_failures": set(),
+    }
+
+
+def _source_inspection_scope() -> dict[str, Any]:
+    raw = st.session_state.get(BUILDER_SOURCE_INSPECTION_SCOPE_KEY)
+    if isinstance(raw, dict):
+        return raw
+    _begin_source_inspection_scope()
+    return st.session_state[BUILDER_SOURCE_INSPECTION_SCOPE_KEY]
+
+
+def _source_inspection(
+    ctx: ValueStreamContext,
+    source: model.Source,
+    *,
+    limit: int = SOURCE_INSPECTION_SAMPLE_ROWS,
+) -> SourceInspectionResult:
+    """Discover once per fragment and reuse a bounded, identity-keyed inspection."""
+
+    base_key = _source_inspection_base_key(ctx.workspace, source, limit)
+    scope = _source_inspection_scope()
+    scope_keys = scope.setdefault("keys", {})
+    memoized_key = scope_keys.get(base_key)
+    if isinstance(memoized_key, SourceInspectionKey):
+        memoized = _cached_source_inspection(memoized_key)
+        if memoized is not None:
+            _render_source_inspection_failure_once(source, memoized, scope)
+            return memoized
+
+    key, files, preparation_error = _prepare_source_inspection(
+        ctx.workspace,
+        source,
+        limit,
+    )
+    scope_keys[base_key] = key
+    cached = _cached_source_inspection(key)
+    if cached is not None:
         cleanup_temporaries()
+        _render_source_inspection_failure_once(source, cached, scope)
+        return cached
+
+    path_pattern = _source_path_pattern(source)
+    with st.status(
+        f"Inspecting source `{source.id}` · `{path_pattern}`",
+        expanded=False,
+    ) as status:
+        result = _load_source_inspection(
+            key,
+            source,
+            files,
+            preparation_error=preparation_error,
+        )
+        if result.error_kind and status is not None:
+            status.update(
+                label=f"Source inspection needs attention · {source.id}",
+                state="error",
+            )
+        elif status is not None:
+            status.update(
+                label=f"Source inspection ready · {source.id}",
+                state="complete",
+            )
+    _cache_source_inspection(result)
+    _render_source_inspection_failure_once(source, result, scope)
+    return result
+
+
+def _source_inspection_base_key(
+    workspace: str | Path,
+    source: model.Source,
+    limit: int,
+) -> tuple[str, str, int]:
+    return (
+        str(Path(workspace).resolve()),
+        config_canonical.config_hash(source),
+        limit,
+    )
+
+
+def _prepare_source_inspection(
+    workspace: str | Path,
+    source: model.Source,
+    limit: int,
+) -> tuple[SourceInspectionKey, tuple[Path, ...], str | None]:
+    workspace_key, source_hash, _limit = _source_inspection_base_key(workspace, source, limit)
+    try:
+        chunks = discover(workspace, source)
+    except Exception:
+        logger.exception("Failed to discover source for inspection: source=%s", source.id)
+        return SourceInspectionKey(workspace_key, source_hash, (), limit), (), "discovery"
+    if not chunks:
+        return SourceInspectionKey(workspace_key, source_hash, (), limit), (), "no_files"
+    files = tuple(chunks[0].files)
+    try:
+        identities = _source_file_identities(files)
+    except Exception:
+        logger.exception("Failed to identify source files for inspection: source=%s", source.id)
+        return SourceInspectionKey(workspace_key, source_hash, (), limit), (), "file_identity"
+    return SourceInspectionKey(workspace_key, source_hash, identities, limit), files, None
+
+
+def _source_file_identities(paths: tuple[Path, ...]) -> tuple[SourceFileIdentity, ...]:
+    identities: list[SourceFileIdentity] = []
+    for path in paths:
+        candidates = (
+            sorted(item for item in path.rglob("*") if item.is_file()) if path.is_dir() else [path]
+        )
+        if not candidates:
+            candidates = [path]
+        for candidate in candidates:
+            stat = candidate.stat()
+            identities.append(
+                SourceFileIdentity(
+                    path=str(candidate.resolve()),
+                    size=int(stat.st_size),
+                    modified_ns=int(stat.st_mtime_ns),
+                )
+            )
+    return tuple(identities)
+
+
+def _load_source_inspection(
+    key: SourceInspectionKey,
+    source: model.Source,
+    files: tuple[Path, ...],
+    *,
+    preparation_error: str | None,
+) -> SourceInspectionResult:
+    raw_frame: pl.LazyFrame | None = None
+    try:
+        if preparation_error:
+            return SourceInspectionResult(key, (), None, preparation_error)
+        raw_frame = read(source.reader, files)
+        raw_schema = tuple((name, str(dtype)) for name, dtype in raw_frame.collect_schema().items())
+        sample = apply_transforms(raw_frame, source).limit(key.limit).collect()
+        return SourceInspectionResult(key, raw_schema, sample)
+    except Exception:
+        logger.exception("Failed to read bounded source inspection: source=%s", source.id)
+        return SourceInspectionResult(key, (), None, "read")
+    finally:
+        raw_frame = None
+        cleanup_temporaries()
+
+
+def _cached_source_inspection(key: SourceInspectionKey) -> SourceInspectionResult | None:
+    with _SOURCE_INSPECTION_CACHE_LOCK:
+        result = _SOURCE_INSPECTION_CACHE.get(key)
+        if result is not None:
+            _SOURCE_INSPECTION_CACHE.move_to_end(key)
+        return result
+
+
+def _cache_source_inspection(result: SourceInspectionResult) -> None:
+    with _SOURCE_INSPECTION_CACHE_LOCK:
+        _SOURCE_INSPECTION_CACHE[result.key] = result
+        _SOURCE_INSPECTION_CACHE.move_to_end(result.key)
+        while len(_SOURCE_INSPECTION_CACHE) > SOURCE_INSPECTION_CACHE_SIZE:
+            _SOURCE_INSPECTION_CACHE.popitem(last=False)
+
+
+def _invalidate_source_inspection_cache_entry(key: SourceInspectionKey) -> None:
+    """Invalidate exactly one Retry target and its current fragment memo."""
+
+    with _SOURCE_INSPECTION_CACHE_LOCK:
+        _SOURCE_INSPECTION_CACHE.pop(key, None)
+    scope = _source_inspection_scope()
+    scope_keys = scope.get("keys")
+    if isinstance(scope_keys, dict):
+        for base_key, memoized_key in list(scope_keys.items()):
+            if memoized_key == key:
+                scope_keys.pop(base_key, None)
+    rendered = scope.get("rendered_failures")
+    if isinstance(rendered, set):
+        rendered.discard(key)
+
+
+def _clear_source_inspection_cache() -> None:
+    """Clear bounded inspection state for deterministic tests."""
+
+    with _SOURCE_INSPECTION_CACHE_LOCK:
+        _SOURCE_INSPECTION_CACHE.clear()
+    _begin_source_inspection_scope()
+
+
+def _render_source_inspection_failure_once(
+    source: model.Source,
+    result: SourceInspectionResult,
+    scope: dict[str, Any],
+) -> None:
+    if not result.error_kind:
+        return
+    rendered = scope.setdefault("rendered_failures", set())
+    if result.key in rendered:
+        return
+    rendered.add(result.key)
+    pattern = _source_path_pattern(source)
+    if result.error_kind == "no_files":
+        guidance = "Add a matching file or update Root / File Pattern, then retry."
+    else:
+        guidance = "Check reader settings, transforms, and file permissions, then retry."
+    st.error(f"Could not inspect source `{source.id}` with path pattern `{pattern}`. {guidance}")
+    st.button(
+        "Retry source inspection",
+        icon=":material/refresh:",
+        key=f"builder_source_inspection_retry_{result.key.source_hash[:16]}",
+        on_click=_invalidate_source_inspection_cache_entry,
+        args=(result.key,),
+    )
+
+
+def _source_path_pattern(source: model.Source) -> str:
+    extra = dict(source.reader.model_extra or {})
+    root = str(extra.get("root") or extra.get("base_dir") or "").strip().rstrip("/")
+    pattern = str(source.reader.file_pattern or "").strip()
+    return f"{root}/{pattern}" if root else pattern
 
 
 def _rename_capitalize_field(field: str, enabled: bool) -> str:
@@ -5328,11 +6633,43 @@ def _source_rename_mapping(
     return {renamed: field for field, renamed in forward.items()}
 
 
-def _new_processor_template(ctx: ValueStreamContext) -> model.BinaryOutcomeProcessor:
-    source = ctx.catalog.pipelines.sources[0]
-    fields = _source_field_options(ctx, source)
-    field_mapping = _source_rename_mapping(ctx, source, True)
-    time_column = field_remap.remap_field_name(source.schema_.timestamp_column or "", field_mapping)
+def _selected_new_processor_source_id(ctx: ValueStreamContext) -> str:
+    source_ids = [source.id for source in ctx.catalog.pipelines.sources]
+    selected = str(st.session_state.get("builder_processor_new_source", "") or "")
+    if selected in source_ids:
+        return selected
+    st.session_state.pop("builder_processor_new_source", None)
+    return source_ids[0]
+
+
+def _new_processor_template(
+    ctx: ValueStreamContext,
+    source_id: str | None = None,
+) -> model.BinaryOutcomeProcessor:
+    sources = ctx.catalog.pipelines.sources
+    source = next((item for item in sources if item.id == source_id), sources[0])
+    use_rename_capitalize = _source_has_transform(source, "rename_capitalize")
+    sample_fields = _source_sample_columns(
+        ctx,
+        source,
+        rename_capitalize=use_rename_capitalize,
+    )
+    fields = _source_field_options(
+        ctx,
+        source,
+        rename_capitalize=use_rename_capitalize,
+        sample_columns=sample_fields,
+        include_processor_fields=True,
+    )
+    natural_key_fields = _rename_capitalize_fields(
+        source.schema_.natural_key,
+        use_rename_capitalize,
+    )
+    subject_field = _new_processor_subject_field(natural_key_fields, sample_fields)
+    time_column = _rename_capitalize_field(
+        source.schema_.timestamp_column or "",
+        use_rename_capitalize,
+    )
     outcome_column = _first_matching_field(fields, "Outcome")
     data: dict[str, Any] = {
         "id": _next_processor_id(ctx, source.id),
@@ -5350,6 +6687,8 @@ def _new_processor_template(ctx: ValueStreamContext) -> model.BinaryOutcomeProce
             "Negatives": {"type": "count"},
         },
     }
+    if subject_field:
+        data["entities"] = {"subject": subject_field}
     if outcome_column:
         data["outcome"] = {
             "column": outcome_column,
@@ -5357,6 +6696,25 @@ def _new_processor_template(ctx: ValueStreamContext) -> model.BinaryOutcomeProce
             "negative_values": [0, "Impression", "Pending"],
         }
     return model.BinaryOutcomeProcessor.model_validate(data)
+
+
+def _new_processor_subject_field(
+    natural_key_fields: list[str],
+    observed_sample_fields: list[str],
+) -> str:
+    """Choose an entity field only from declared or observed source evidence."""
+
+    for field in natural_key_fields:
+        if field:
+            return field
+    return next(
+        (
+            field
+            for field in observed_sample_fields
+            if dimension_profile.looks_like_identity_field(field)
+        ),
+        "",
+    )
 
 
 def _next_processor_id(ctx: ValueStreamContext, source_id: str) -> str:
@@ -5620,7 +6978,7 @@ def _build_state_defs(
     }
     out: dict[str, dict[str, Any]] = {}
     for row in rows:
-        if not row.get("Enabled", True):
+        if not builder.editor_row_enabled(row.get("Enabled")):
             continue
         state_name = str(row.get("State", "")).strip()
         state_type = str(row.get("Type", "")).strip()

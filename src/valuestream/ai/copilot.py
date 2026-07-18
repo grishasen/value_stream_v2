@@ -24,6 +24,7 @@ from valuestream.ai.studio import (
     prompt_draft_sections,
     redact_hidden_field_mentions,
     tile_keys,
+    validate_draft_catalog,
 )
 from valuestream.config import model
 from valuestream.recipes import (
@@ -376,6 +377,10 @@ def install_recipe_request_in_draft(
                 "tile": request.tile_def,
             },
         )
+    ok, issues = validate_draft_catalog(updated)
+    if not ok:
+        detail = "; ".join(issues[:5])
+        raise ValueError(f"Recipe installation would create an invalid draft: {detail}")
     return updated
 
 

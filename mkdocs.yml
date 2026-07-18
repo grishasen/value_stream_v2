@@ -122,5 +122,7 @@ nav:
       - Implementation plan: design/implementation-plan.md
       - Reporting backlog: design/reporting-backlog.md
       - KPI recipe backlog: design/kpi-recipe-backlog.md
+      - Configuration Studios remediation backlog: design/ai-studio-remediation-backlog.md
+      - Configuration Editor QA evidence: design/config-editor-qa-backlog.md
       - Kickoff prompt: design/kickoff-prompt.md
       - Documentation guide: meta/documentation-guide.md

@@ -61,6 +61,7 @@ Read the concepts pages first for orientation, then go deep in this order.
 | 10 | [Implementation plan](../design/implementation-plan.md) | Repo layout, tooling, phased delivery | 30 min |
 | 11 | [Reporting backlog](../design/reporting-backlog.md) | Current reporting-usability delivery backlog | 15 min |
 | 12 | [KPI recipe backlog](../design/kpi-recipe-backlog.md) | Shared KPI catalog and workflow delivery backlog | 15 min |
+| 13 | [Configuration Studios remediation backlog](../design/ai-studio-remediation-backlog.md) | Unified audit-driven correctness, UX, and release backlog for Configuration Builder and AI Configuration Studio | 20 min |
 
 Visual sketches (sitemap, ingestion flow, dashboard, tile anatomy, Builder,
 Pipelines) live in [`design/mockups/`](../design/mockups/index.html).

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -87,6 +89,15 @@ def test_navigation_flag_restores_legacy_authoring_group(monkeypatch) -> None:
     assert not [page for page in pages if page.section == "Build"]
     settings = [page.title for page in pages if page.section == "Settings"]
     assert settings == ["Configuration Builder", "AI Configuration Studio", "Catalog"]
+
+
+def test_workspace_identity_label_includes_catalog_name_and_directory() -> None:
+    context = SimpleNamespace(
+        workspace=Path("/srv/value-stream/test_config_editor"),
+        catalog=SimpleNamespace(pipelines=SimpleNamespace(workspace="fat")),
+    )
+
+    assert shell._workspace_identity_label(context) == "fat · test_config_editor"
 
 
 def test_build_landing_starts_both_authoring_paths_in_the_main_canvas() -> None:

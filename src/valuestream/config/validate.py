@@ -919,6 +919,20 @@ def _validate_processor_config(
     source_schema: Mapping[str, expr_ast.Dtype],
     issues: list[CatalogIssue],
 ) -> None:
+    variant_column = (processor.model_extra or {}).get("variant_column")
+    if isinstance(variant_column, str) and any(
+        _dimension_key(variant_column) == _dimension_key(column) for column in processor.group_by
+    ):
+        issues.append(
+            CatalogIssue(
+                location=f"processors[{processor.id}].variant_column",
+                message=(
+                    f"variant column {variant_column!r} is already present in group_by; "
+                    "keep it only as variant_column because the processor persists it automatically"
+                ),
+            )
+        )
+
     if not isinstance(processor, model.FunnelProcessor):
         return
     raw_stages = (processor.model_extra or {}).get("stages")

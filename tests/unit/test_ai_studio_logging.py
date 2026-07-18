@@ -9,8 +9,26 @@ from pathlib import Path
 import pytest
 
 from valuestream.ai import studio as ai_studio
-from valuestream.ai.studio import AICallSettings, call_litellm
+from valuestream.ai.studio import (
+    AICallSettings,
+    AIProviderCallError,
+    AIProviderFailureCategory,
+    call_litellm,
+)
 from valuestream.ui.pages import ai_config_studio as ai_config_studio_page
+
+
+class _ProviderSignalError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        code: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
 
 
 @pytest.mark.unit
@@ -133,8 +151,9 @@ def test_call_litellm_preserves_permission_guidance_without_raw_provider_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_completion(**kwargs: object) -> object:
-        raise RuntimeError(
-            "insufficient permissions; request=PRIVATE-CUSTOMER-42; key=sk-provider-secret"
+        raise _ProviderSignalError(
+            "request=PRIVATE-CUSTOMER-42; key=sk-provider-secret",
+            status_code=403,
         )
 
     monkeypatch.setattr(ai_studio, "litellm_completion", fake_completion)
@@ -145,6 +164,197 @@ def test_call_litellm_preserves_permission_guidance_without_raw_provider_text(
     assert error.value.__context__ is None
     assert "PRIVATE-CUSTOMER-42" not in str(error.value)
     assert "sk-provider-secret" not in str(error.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("signal", "expected_category", "expected_retryable"),
+    [
+        (400, AIProviderFailureCategory.CONFIGURATION, False),
+        (401, AIProviderFailureCategory.AUTHENTICATION, False),
+        (403, AIProviderFailureCategory.AUTHORIZATION, False),
+        (429, AIProviderFailureCategory.RATE_LIMIT, True),
+        ("timeout", AIProviderFailureCategory.TIMEOUT, True),
+        ("network", AIProviderFailureCategory.NETWORK, True),
+        (503, AIProviderFailureCategory.PROVIDER, True),
+        ("unknown", AIProviderFailureCategory.INTERNAL, False),
+    ],
+    ids=[
+        "configuration-400",
+        "authentication-401",
+        "authorization-403",
+        "rate-limit-429",
+        "timeout-type",
+        "network-type",
+        "provider-503",
+        "unknown-type",
+    ],
+)
+def test_call_litellm_classifies_provider_failures_without_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    signal: int | str,
+    expected_category: AIProviderFailureCategory,
+    expected_retryable: bool,
+) -> None:
+    secret = "PRIVATE-CUSTOMER-42 sk-provider-secret /Users/alice/provider.log"
+    if isinstance(signal, int):
+        provider_error: Exception = _ProviderSignalError(secret, status_code=signal)
+    elif signal == "timeout":
+        provider_error = TimeoutError(secret)
+    elif signal == "network":
+        provider_error = ConnectionError(secret)
+    else:
+        provider_error = RuntimeError(secret)
+
+    def fake_completion(**kwargs: object) -> object:
+        raise provider_error
+
+    monkeypatch.setattr(ai_studio, "litellm_completion", fake_completion)
+    caplog.set_level(logging.INFO, logger=ai_studio.__name__)
+
+    with pytest.raises(AIProviderCallError) as raised:
+        call_litellm(
+            AICallSettings(model="openai/gpt-5.1", api_key="sk-provider-secret"),
+            "Prompt with PRIVATE-CUSTOMER-42",
+        )
+
+    failure = raised.value
+    assert failure.category is expected_category
+    assert failure.retryable is expected_retryable
+    assert failure.permission_denied is (
+        expected_category
+        in {
+            AIProviderFailureCategory.AUTHENTICATION,
+            AIProviderFailureCategory.AUTHORIZATION,
+        }
+    )
+    assert failure.__context__ is None
+    assert re.fullmatch(r"[0-9a-f]{12}", failure.call_id)
+    assert f"call_id={failure.call_id}" in caplog.text
+    assert f"failure_category={expected_category}" in caplog.text
+    assert f"retryable={expected_retryable}" in caplog.text
+    assert "PRIVATE-CUSTOMER-42" not in str(failure)
+    assert "sk-provider-secret" not in str(failure)
+    assert "/Users/alice/provider.log" not in str(failure)
+    assert "PRIVATE-CUSTOMER-42" not in caplog.text
+    assert "sk-provider-secret" not in caplog.text
+    assert "/Users/alice/provider.log" not in caplog.text
+
+
+@pytest.mark.unit
+def test_call_litellm_classifies_provider_error_code_without_message_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_completion(**kwargs: object) -> object:
+        raise _ProviderSignalError(
+            "not a classification hint: PRIVATE-CUSTOMER-42",
+            code="rate-limit-exceeded",
+        )
+
+    monkeypatch.setattr(ai_studio, "litellm_completion", fake_completion)
+
+    with pytest.raises(AIProviderCallError) as raised:
+        call_litellm(AICallSettings(model="openai/gpt-5.1"), "Safe prompt")
+
+    assert raised.value.category is AIProviderFailureCategory.RATE_LIMIT
+    assert raised.value.retryable is True
+    assert "PRIVATE-CUSTOMER-42" not in str(raised.value)
+
+
+@pytest.mark.unit
+def test_call_litellm_classifies_invalid_response_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ai_studio, "litellm_completion", lambda **kwargs: {"choices": []})
+
+    with pytest.raises(AIProviderCallError) as raised:
+        call_litellm(AICallSettings(model="openai/gpt-5.1"), "Safe prompt")
+
+    assert raised.value.category is AIProviderFailureCategory.RESPONSE_VALIDATION
+    assert raised.value.retryable is True
+
+
+@pytest.mark.unit
+def test_ai_provider_call_error_legacy_constructor_remains_supported() -> None:
+    failure = AIProviderCallError(
+        call_id="legacy-call",
+        error_type="RuntimeError",
+        permission_denied=False,
+    )
+
+    assert failure.category is AIProviderFailureCategory.PROVIDER
+    assert failure.retryable is True
+    assert str(failure) == "AI provider call failed (RuntimeError). Reference: legacy-call."
+
+
+@pytest.mark.unit
+def test_provider_preflight_rejects_missing_configuration_without_calling_provider() -> None:
+    called = False
+
+    def fail_if_called(*args: object, **kwargs: object) -> str:
+        nonlocal called
+        called = True
+        raise AssertionError("provider must not be called for missing local configuration")
+
+    with pytest.raises(AIProviderCallError) as raised:
+        ai_studio.preflight_ai_provider(
+            AICallSettings(model="openai/gpt-5.1"),
+            call=fail_if_called,
+        )
+
+    assert called is False
+    assert raised.value.category is AIProviderFailureCategory.CONFIGURATION
+    assert raised.value.retryable is False
+    assert re.fullmatch(r"[0-9a-f]{12}", raised.value.call_id)
+
+
+@pytest.mark.unit
+def test_provider_preflight_uses_independent_five_second_ready_call() -> None:
+    captured: dict[str, object] = {}
+
+    def ready_call(
+        settings: AICallSettings,
+        prompt: str,
+        **kwargs: object,
+    ) -> str:
+        captured["settings"] = settings
+        captured["prompt"] = prompt
+        captured.update(kwargs)
+        return " READY\n"
+
+    settings = AICallSettings(
+        model="ollama/llama3.1",
+        custom_llm_provider="ollama",
+        timeout_seconds=90,
+    )
+    receipt = ai_studio.preflight_ai_provider(settings, call=ready_call)
+
+    assert settings.timeout_seconds == 90
+    assert isinstance(captured["settings"], AICallSettings)
+    assert captured["settings"].timeout_seconds == 5
+    assert captured["prompt"] == "Reply with READY."
+    assert "Do not request or infer data" in str(captured["system_prompt"])
+    assert receipt.timeout_seconds == 5
+    assert re.fullmatch(r"[0-9a-f]{12}", receipt.reference)
+
+
+@pytest.mark.unit
+def test_provider_preflight_classifies_unexpected_reply_without_logging_payload(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=ai_studio.__name__)
+
+    with pytest.raises(AIProviderCallError) as raised:
+        ai_studio.preflight_ai_provider(
+            AICallSettings(model="ollama/llama3.1", custom_llm_provider="ollama"),
+            call=lambda *args, **kwargs: "PRIVATE-CUSTOMER-42 is not READY",
+        )
+
+    assert raised.value.category is AIProviderFailureCategory.RESPONSE_VALIDATION
+    assert raised.value.retryable is True
+    assert "PRIVATE-CUSTOMER-42" not in str(raised.value)
+    assert "PRIVATE-CUSTOMER-42" not in caplog.text
 
 
 @pytest.mark.unit

@@ -50,9 +50,43 @@ Applying configuration does not run the source. After a source, processor, or
 dimension Apply, choose the separate **Run data** handoff when you are ready to
 refresh aggregates.
 
+To add another source, choose **Add source**. The Studio opens in deterministic,
+sample-first mode for the same active workspace. Select a workspace sample,
+review the additive source bundle, and either choose **Cancel and return to
+Builder** or apply it and use **Return to Configuration Builder** on the
+revision receipt. Enter a unique Source ID: this path never turns Add into an
+implicit edit of an existing source.
+
+To remove a processor, switch to **Edit Existing Processor**, select the exact
+processor, and choose **Delete processor**. Review the dependent metric and
+`dashboard/page/tile` paths, confirm the cascade, and apply it. The source and
+other processors remain. Existing aggregate folders remain until a separate
+`valuestream vacuum` operation removes eligible files.
+
+On **Sources**, the Calculated Fields grid is a compact overview. Add a row,
+keep **Enabled** selected, and choose either a guided calculation mode or **AST
+YAML** / **Polars**. For a custom mode, select the row in the focused expression
+editor below the grid. Author the expression in the multiline input and use the
+copy-ready example and live validation beside it. The grid preview is read-only:
+**Apply expression** commits the working text to the row, while **Cancel
+changes** restores the row's applied expression. An unapplied working expression
+survives ordinary reruns and is called out explicitly. When the Source has
+other edits, **Apply to workspace** stays disabled until every working
+expression is applied or cancelled.
+
+Friendly errors appear next to the multiline input. For a conditional AST, each
+`cond` is a complete expression and the fallback key is `else`, not
+`otherwise`. Expand **Technical details** only when you need the underlying
+parser path and error code.
+
 Dimension recommendations are grouped as Recommended, Review, and Avoid.
 Inspect Avoid candidates before selecting them: the Builder never preselects
 them.
+
+Dimension Packs show available, already-selected, and missing fields as compact
+chips. One-Click Promotion shows its recommendation, group-by safety,
+cardinality, and null percentage in a plain summary before you add the field.
+The exact profile values remain in the collapsed **Technical details** section.
 
 ## 3. Create or edit a metric
 
@@ -76,6 +110,12 @@ After Apply, the Builder reloads the catalog and opens the saved metric for
 editing. A formula or display-only metric based on existing aggregate state can
 usually proceed directly to **Open report**. If the recipe added processor
 state, use **Run data** to materialize it first.
+
+To remove a metric, use **Edit Existing Metric**, select it, and choose **Delete
+metric**. Dependent metrics are shown as blockers rather than deleted
+implicitly. When report tiles use the metric, review their exact paths and
+explicitly select **Also delete these dependent report tiles** before the final
+confirmation is enabled. Cancel leaves the catalog unchanged.
 
 | Change | Requires a data run? |
 |---|---|
@@ -109,6 +149,10 @@ target, sparkline grain, and point count. Line and stacked-area tiles can use
 absolute, index-100, or percent-change scales. Tile descriptions and value
 format overrides are available for compatible charts. The Builder never
 guesses an aggregation to turn another chart into a KPI.
+
+Chart selectors use the same friendly names and purpose descriptions as the
+visual report library. The stored catalog kind, such as `bar_polar`, appears as
+secondary technical detail and is unchanged when you save the tile.
 
 Choose the one **Apply to workspace** action. The tile and page settings are
 written and validated together. Then choose **Open report**. Browse the

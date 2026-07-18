@@ -1047,6 +1047,8 @@ def test_copilot_panel_holds_operations_in_pending_review(
     from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
 
     def fake_call_litellm(settings: object, prompt: str, **kwargs: object) -> str:
+        if prompt == "Reply with READY.":
+            return "READY"
         return (
             '{"reply": "Added a total metric.", '
             '"operations": [{"op": "set_metric", "name": "Total", '
@@ -1204,6 +1206,8 @@ def test_copilot_panel_renders_clarifying_question_options(
     from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
 
     def fake_call_litellm(settings: object, prompt: str, **kwargs: object) -> str:
+        if prompt == "Reply with READY.":
+            return "READY"
         return (
             '{"reply": "Which grain should the metric use?", "operations": [], '
             '"questions": [{"question": "Which time grain?", "options": ["Day", "Month"]}]}'
@@ -1295,6 +1299,8 @@ def test_pending_review_allows_read_only_copilot_and_preserves_pending(
 
     def fake_call(settings: object, prompt: str, **kwargs: object) -> str:
         prompts.append(prompt)
+        if prompt == "Reply with READY.":
+            return "READY"
         return '{"reply":"This proposal adds one metric.","operations":[],"questions":[]}'
 
     monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call)

@@ -1108,6 +1108,71 @@
       "title": "KpiRecipe",
       "type": "object"
     },
+    "KpiSpec": {
+      "additionalProperties": false,
+      "description": "Explicit scalar-card comparison, target, and sparkline behavior.",
+      "properties": {
+        "comparison": {
+          "default": "none",
+          "enum": [
+            "none",
+            "previous_period"
+          ],
+          "title": "Comparison",
+          "type": "string"
+        },
+        "comparison_period": {
+          "default": "month",
+          "enum": [
+            "day",
+            "week",
+            "month",
+            "quarter",
+            "year"
+          ],
+          "title": "Comparison Period",
+          "type": "string"
+        },
+        "sparkline_grain": {
+          "anyOf": [
+            {
+              "enum": [
+                "daily",
+                "weekly",
+                "monthly"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sparkline Grain"
+        },
+        "sparkline_points": {
+          "default": 30,
+          "maximum": 366,
+          "minimum": 2,
+          "title": "Sparkline Points",
+          "type": "integer"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        }
+      },
+      "title": "KpiSpec",
+      "type": "object"
+    },
     "LifecycleSummaryMetric": {
       "additionalProperties": true,
       "properties": {
@@ -3959,9 +4024,15 @@
           "type": "string"
         },
         "kpi": {
-          "additionalProperties": true,
-          "title": "Kpi",
-          "type": "object"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KpiSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "placement": {
           "default": "kpi_strip",

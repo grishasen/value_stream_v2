@@ -1225,6 +1225,12 @@ in either **Open report** or an explicit **Run data** handoff. Validation and
 review status are summarized in Workspace Health rather than duplicated above
 every step. Shared report/home metric cards use breakpoint-aware grids, and
 both UI and Plotly themes use explicit light/dark surface and contrast tokens.
+While safe drafts exist, Builder also maintains an atomic seven-day recovery
+checkpoint under workspace `meta/`. It contains only JSON-safe, non-secret
+registry state, step, timestamp, and full base-catalog hash. Catalog drift
+requires explicit reconciliation, all restored objects retain their normal
+baseline/validation gates, and an empty or explicitly discarded registry
+removes the checkpoint.
 
 AI Configuration Studio remains a separate guided workflow because it starts from a sample file rather than an existing catalog:
 

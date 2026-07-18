@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import polars as pl
 import pytest
 
+import valuestream.ai.chat as chat_module
 from valuestream.ai.chat import (
     ChartIntent,
     ChatIntent,
@@ -16,7 +18,9 @@ from valuestream.ai.chat import (
     chart_tile_from_intent,
     chat_pin_tile,
     chat_starter_questions,
+    deterministic_chat_starters,
     execute_chat_intent,
+    execute_deterministic_chat_query,
     parse_chat_intent,
     prompt_for_chat_intent,
 )
@@ -383,6 +387,95 @@ def test_chat_starter_questions_are_metric_grounded() -> None:
     assert all(isinstance(question, str) and question for question in questions)
     # Starters reference real dimensions or time axes, not raw metric ids.
     assert any("by" in question.lower() or "overall" in question.lower() for question in questions)
+
+
+@pytest.mark.unit
+def test_deterministic_starters_cover_supported_test_ai_studio_contracts() -> None:
+    catalog = load(Path("examples/test_ai_studio"))
+
+    starters = deterministic_chat_starters(catalog)
+    by_key = {starter.key: starter for starter in starters}
+
+    assert list(by_key) == ["count", "rate", "unique", "channel", "date_range"]
+    assert by_key["count"].intent.metric == "Studio_Count"
+    assert by_key["rate"].intent.metric in {"Studio_CTR", "VS_Engagement_Rate"}
+    assert by_key["unique"].intent.metric == "VS_Unique_Entities"
+    assert by_key["unique"].intent.metric in catalog.metrics.metrics
+    assert by_key["channel"].intent.group_by == ["Channel"]
+    assert by_key["channel"].intent.chart is not None
+    assert by_key["channel"].intent.chart.x == "Channel"
+    assert by_key["date_range"].intent.grain == "daily"
+
+
+@pytest.mark.unit
+def test_deterministic_starters_execute_through_governed_demo_aggregates(
+    demo_workspace: Path,
+) -> None:
+    catalog = load(demo_workspace)
+    results = {
+        starter.key: execute_deterministic_chat_query(demo_workspace, catalog, starter)
+        for starter in deterministic_chat_starters(catalog)
+    }
+
+    assert set(results) == {"count", "rate", "unique", "channel", "date_range"}
+    assert all(result.query_summary.startswith("query_metric(") for result in results.values())
+    assert all(result.freshness for result in results.values())
+    assert results["count"].rows.height == 1
+    assert results["rate"].rows.height == 1
+    assert results["unique"].rows.height == 1
+    assert "Channel" in results["channel"].rows.columns
+    assert results["channel"].rows.height == 3
+    assert results["date_range"].rows.to_dicts() == [
+        {
+            "Available from": "2026-01-05",
+            "Available through": "2026-04-20",
+            "Grain": "daily",
+        }
+    ]
+
+
+@pytest.mark.unit
+def test_date_range_template_reads_only_query_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    catalog = load(Path("examples/test_ai_studio"))
+    starter = next(
+        item for item in deterministic_chat_starters(catalog) if item.key == "date_range"
+    )
+    calls: list[tuple[object, str, dict[str, object]]] = []
+
+    def fake_query(workspace: object, metric: str, **kwargs: object) -> pl.DataFrame:
+        calls.append((workspace, metric, kwargs))
+        return pl.DataFrame(
+            {
+                "Day": ["2024-08-31", "2024-08-30"],
+                metric: [20, 10],
+            }
+        )
+
+    monkeypatch.setattr(chat_module, "query_metric", fake_query)
+    monkeypatch.setattr(chat_module, "metric_freshness", lambda *args, **kwargs: object())
+    monkeypatch.setattr(chat_module, "freshness_label", lambda value: "fresh")
+
+    result = execute_deterministic_chat_query("/tmp/aggregate-only", catalog, starter)
+
+    assert calls == [
+        (
+            "/tmp/aggregate-only",
+            "Studio_Count",
+            {
+                "group_by": [],
+                "filters": {},
+                "grain": "daily",
+                "include_curve_columns": True,
+            },
+        )
+    ]
+    assert result.rows.to_dicts() == [
+        {
+            "Available from": "2024-08-30",
+            "Available through": "2024-08-31",
+            "Grain": "daily",
+        }
+    ]
 
 
 @pytest.mark.unit

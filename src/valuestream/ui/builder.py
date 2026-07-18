@@ -24,6 +24,7 @@ from valuestream.config import model
 from valuestream.config.loader import CatalogLoadError, load
 from valuestream.config.validate import validate_catalog
 from valuestream.expr import parser as expr_parser
+from valuestream.expr import translator as expr_translator
 
 FILTER_OPERATORS = [
     "==",
@@ -117,6 +118,15 @@ class BuilderApplyOutcome:
         return self.action == "run_data"
 
 
+@dataclass(frozen=True)
+class CalculatedExpressionValidation:
+    """Human-facing validation result for one calculated-field expression."""
+
+    valid: bool
+    messages: tuple[str, ...] = ()
+    technical_details: str = ""
+
+
 def builder_draft_status(
     key: str,
     baseline: Any,
@@ -135,6 +145,30 @@ def builder_draft_status(
         dirty=baseline_hash != draft_hash,
         baseline_payload=baseline_payload,
         draft_payload=draft_payload,
+    )
+
+
+def builder_template_draft_status(
+    session_state: MutableMapping[str, Any],
+    key: str,
+    baseline_key: str,
+    draft: Any,
+) -> BuilderDraftStatus:
+    """Compare a create-mode editor with its first untouched template.
+
+    Create editors do not have an applied catalog object to use as a baseline.
+    Capturing the fully rendered template on first entry keeps the editor clean
+    until the user actually changes one of its values.  The baseline lives
+    beside the editor widgets so Discard and post-apply cleanup can remove it
+    with the same prefix.
+    """
+
+    if baseline_key not in session_state:
+        session_state[baseline_key] = copy.deepcopy(config_canonical.canonicalize(draft))
+    return builder_draft_status(
+        key,
+        session_state[baseline_key],
+        draft,
     )
 
 
@@ -201,6 +235,7 @@ def discard_builder_draft(
     key: str,
     *,
     widget_prefixes: Iterable[str] = (),
+    preserve_widget_keys: Iterable[str] = (),
 ) -> None:
     """Discard one registered proposal and its step-local widget state."""
     raw = session_state.get(BUILDER_DRAFTS_KEY)
@@ -208,10 +243,11 @@ def discard_builder_draft(
     registry.pop(key, None)
     session_state[BUILDER_DRAFTS_KEY] = registry
     prefixes = tuple(widget_prefixes)
+    preserved = {str(widget_key) for widget_key in preserve_widget_keys}
     if not prefixes:
         return
     for widget_key in list(session_state):
-        if widget_key == BUILDER_DRAFTS_KEY:
+        if widget_key == BUILDER_DRAFTS_KEY or str(widget_key) in preserved:
             continue
         if any(str(widget_key).startswith(prefix) for prefix in prefixes):
             session_state.pop(widget_key, None)
@@ -462,6 +498,90 @@ CHART_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "clv_treemap": ("path",),
 }
 
+CHART_DISPLAY_LABELS: dict[str, str] = {
+    "bar": "Bar",
+    "bar_polar": "Polar bar",
+    "boxplot": "Box plot",
+    "calendar_heatmap": "Calendar heatmap",
+    "calibration_curve": "Calibration curve",
+    "clv_treemap": "CLV treemap",
+    "cohort_heatmap": "Cohort heatmap",
+    "combo": "Combo",
+    "corr": "Correlation",
+    "descriptive_boxplot": "Descriptive box plot",
+    "descriptive_funnel": "Descriptive funnel",
+    "descriptive_heatmap": "Descriptive heatmap",
+    "descriptive_histogram": "Descriptive histogram",
+    "descriptive_line": "Descriptive line",
+    "donut": "Donut",
+    "experiment_odds_ratio": "Experiment odds ratio",
+    "experiment_z_score": "Experiment z-score",
+    "exposure": "Exposure",
+    "funnel": "Funnel",
+    "gain_curve": "Gain curve",
+    "gauge": "Gauge",
+    "geo_map": "Geographic map",
+    "heatmap": "Heatmap",
+    "histogram": "Histogram",
+    "interval": "Interval",
+    "kpi_card": "KPI card",
+    "lift_curve": "Lift curve",
+    "line": "Line",
+    "model": "Model performance",
+    "pareto": "Pareto",
+    "precision_recall_curve": "Precision-recall curve",
+    "rfm_density": "RFM density",
+    "roc_curve": "ROC curve",
+    "sankey": "Sankey",
+    "scatter": "Scatter",
+    "stacked_area": "Stacked area",
+    "table": "Table",
+    "treemap": "Treemap",
+    "waterfall": "Waterfall",
+}
+
+CHART_DISPLAY_PURPOSES: dict[str, str] = {
+    "bar": "Compare magnitudes across discrete categories.",
+    "bar_polar": "Compare cyclical or directional categories around a circle.",
+    "boxplot": "Compare medians, spread, and outliers between groups.",
+    "calendar_heatmap": "Reveal daily activity and seasonality on a calendar grid.",
+    "calibration_curve": "Compare predicted probabilities with observed outcomes.",
+    "clv_treemap": "Show customer-value hierarchy through nested area.",
+    "cohort_heatmap": "Compare retention or behavior across cohort periods.",
+    "combo": "Place two measures on coordinated bar and line axes.",
+    "corr": "Scan the strength and direction of pairwise relationships.",
+    "descriptive_boxplot": "Compare aggregate distribution summaries by group.",
+    "descriptive_funnel": "Follow aggregate descriptive measures through ordered stages.",
+    "descriptive_heatmap": "Compare an aggregate statistic across two dimensions.",
+    "descriptive_histogram": "Show the distribution of an aggregate numeric property.",
+    "descriptive_line": "Track an aggregate statistic over time or ordered categories.",
+    "donut": "Show a small set of parts as shares of a whole.",
+    "experiment_odds_ratio": "Compare experiment effects with confidence intervals.",
+    "experiment_z_score": "Compare standardized experiment effects around zero.",
+    "exposure": "Show how populations progress through exposure levels.",
+    "funnel": "Show volume retained through ordered journey stages.",
+    "gain_curve": "Show cumulative positives captured as coverage increases.",
+    "gauge": "Show a current value against a reference or operating range.",
+    "geo_map": "Compare a measure across geographic locations.",
+    "heatmap": "Compare intensity across two categorical dimensions.",
+    "histogram": "Show how numeric observations are distributed across bins.",
+    "interval": "Compare estimates together with their uncertainty bounds.",
+    "kpi_card": "Present one decision-ready value with optional comparison context.",
+    "lift_curve": "Show improvement over random selection as coverage increases.",
+    "line": "Track one or more measures across time or an ordered axis.",
+    "model": "Summarize model performance across thresholds or score bands.",
+    "pareto": "Rank contributors and show their cumulative share.",
+    "precision_recall_curve": "Show the precision-recall tradeoff across thresholds.",
+    "rfm_density": "Map customer density across recency and frequency/value space.",
+    "roc_curve": "Show true-positive versus false-positive performance by threshold.",
+    "sankey": "Show volume flowing between stages or categories.",
+    "scatter": "Explore the relationship between two numeric measures.",
+    "stacked_area": "Show total change over time together with category composition.",
+    "table": "Inspect exact ranked or operational values in native tabular form.",
+    "treemap": "Show hierarchical composition through nested area.",
+    "waterfall": "Explain how positive and negative contributions build a total.",
+}
+
 CHART_OPTIONAL_FIELDS: dict[str, tuple[str, ...]] = {
     "line": ("color", "facet_row", "facet_col"),
     "stacked_area": ("facet_row", "facet_col"),
@@ -565,6 +685,30 @@ def blank_calculated_row() -> dict[str, Any]:
     }
 
 
+def editor_row_enabled(value: Any) -> bool:
+    """Normalize a grid checkbox without treating missing values as excluded.
+
+    Streamlit reports a newly appended checkbox as ``None`` on some reruns.
+    Missing/blank values therefore use the visible editor default (enabled),
+    while explicit false values remain excluded.  String handling is strict so
+    values such as ``"False"`` are not accidentally truthy.
+    """
+
+    if _is_missing_editor_value(value) or value == "":
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    return True
+
+
 def normalize_editor_rows(frame: Any) -> list[dict[str, Any]]:
     """Convert Streamlit/Pandas/Polars editor output into plain row dicts."""
     if hasattr(frame, "to_dicts"):
@@ -574,7 +718,16 @@ def normalize_editor_rows(frame: Any) -> list[dict[str, Any]]:
     else:
         rows = list(frame or [])
     return [
-        {key: ("" if _is_missing_editor_value(value) else value) for key, value in row.items()}
+        {
+            key: (
+                editor_row_enabled(value)
+                if key == "Enabled"
+                else ""
+                if _is_missing_editor_value(value)
+                else value
+            )
+            for key, value in row.items()
+        }
         for row in rows
     ]
 
@@ -590,7 +743,7 @@ def editor_frame(
     series = []
     for column in columns:
         values = [
-            bool(row.get(column, False))
+            editor_row_enabled(row.get(column))
             if column == "Enabled"
             else _editor_text_value(row.get(column, ""))
             for row in editor_rows
@@ -640,7 +793,7 @@ def _default_row_has_content(row: dict[str, Any]) -> bool:
     return bool(
         str(row.get("Field", "")).strip()
         or str(row.get("Default Value", "")).strip()
-        or row.get("Enabled") is False
+        or not editor_row_enabled(row.get("Enabled"))
     )
 
 
@@ -648,7 +801,7 @@ def build_default_values(default_rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Build a source defaults map from editor rows."""
     out: dict[str, Any] = {}
     for row in default_rows:
-        if not row.get("Enabled", True):
+        if not editor_row_enabled(row.get("Enabled")):
             continue
         field = str(row.get("Field", "")).strip()
         if field:
@@ -691,6 +844,153 @@ def parse_expression_yaml(text: str) -> dict[str, Any]:
     return expr_parser.to_dict(expr_parser.parse(loaded))
 
 
+def calculated_expression_example(mode: str) -> str:
+    """Return one copy-ready example for the focused expression editor."""
+
+    if mode == "Polars":
+        return 'pl.col("Revenue") - pl.col("Cost")'
+    return (
+        "op: case\n"
+        "when:\n"
+        "  - cond: {op: gt, column: Revenue, value: 100}\n"
+        "    then: {lit: High}\n"
+        "else: {lit: Standard}"
+    )
+
+
+def validate_calculated_expression(mode: str, text: str) -> CalculatedExpressionValidation:
+    """Validate custom calculated-field text with concise remediation messages."""
+
+    expression_text = str(text or "").strip()
+    if not expression_text:
+        return CalculatedExpressionValidation(
+            valid=False,
+            messages=(f"Enter a {mode} expression before applying it.",),
+        )
+    if mode == "Polars":
+        return _validate_polars_calculated_expression(expression_text)
+    return _validate_ast_calculated_expression(expression_text)
+
+
+def _validate_polars_calculated_expression(text: str) -> CalculatedExpressionValidation:
+    try:
+        expr_translator.translate(expr_parser.parse({"polars": text}))
+    except (expr_parser.ParseError, expr_translator.TranslationError) as exc:
+        return CalculatedExpressionValidation(
+            valid=False,
+            messages=(_friendly_polars_expression_error(exc),),
+            technical_details=str(exc),
+        )
+    return CalculatedExpressionValidation(valid=True)
+
+
+def _validate_ast_calculated_expression(text: str) -> CalculatedExpressionValidation:
+    """Parse AST YAML while retaining structured errors for friendly mapping."""
+
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        location = (
+            f" near line {mark.line + 1}, column {mark.column + 1}" if mark is not None else ""
+        )
+        return CalculatedExpressionValidation(
+            valid=False,
+            messages=(
+                f"Expression YAML is not valid{location}. Check indentation, colons, and brackets.",
+            ),
+            technical_details=str(exc),
+        )
+    if not isinstance(loaded, dict):
+        return CalculatedExpressionValidation(
+            valid=False,
+            messages=("Expression YAML must be a mapping such as `col: Revenue` or `op: add`.",),
+            technical_details=f"Parsed YAML value has type {type(loaded).__name__}: {loaded!r}",
+        )
+    try:
+        expr_parser.parse(loaded)
+    except expr_parser.ParseError as exc:
+        return CalculatedExpressionValidation(
+            valid=False,
+            messages=_friendly_ast_expression_errors(exc, loaded),
+            technical_details=str(exc),
+        )
+    return CalculatedExpressionValidation(valid=True)
+
+
+def _friendly_polars_expression_error(exc: ValueError) -> str:
+    detail = str(exc)
+    lowered = detail.casefold()
+    if "invalid polars expression syntax" in lowered:
+        return "Polars expression syntax is invalid. Check brackets, quotes, and operators."
+    if "unsupported name" in lowered:
+        return "Only the `pl` namespace is available in a Polars expression."
+    if "private" in lowered:
+        return "Private Polars attributes and methods are not allowed."
+    if (
+        "unsupported polars function" in lowered
+        or "unsupported polars expression method" in lowered
+    ):
+        return "That Polars function or method is not supported by calculated fields."
+    if "must evaluate to a polars.expr" in lowered:
+        return 'The expression must return a Polars expression such as `pl.col("Revenue")`.'
+    return "Polars could not validate this expression. Review the supported syntax and example."
+
+
+def _friendly_ast_expression_errors(
+    exc: expr_parser.ParseError,
+    loaded: dict[str, Any],
+) -> tuple[str, ...]:
+    cause = exc.__cause__
+    raw_errors = cause.errors() if cause is not None and hasattr(cause, "errors") else []
+    messages: list[str] = []
+    for error in raw_errors:
+        location = tuple(error.get("loc", ()))
+        path = _expression_error_path(location, loaded)
+        error_type = str(error.get("type", ""))
+        leaf = str(location[-1]) if location else ""
+        if leaf == "cond" and error_type in {"union_tag_not_found", "union_tag_invalid"}:
+            message = (
+                f"`{path}` must be a condition such as `{{op: gt, column: Revenue, value: 100}}`."
+            )
+        elif leaf == "else" and error_type == "missing":
+            message = "`else` is required for a `case` expression."
+        elif leaf == "otherwise":
+            message = "`otherwise` is not supported for `case`; use `else:` instead."
+        elif error_type in {"union_tag_not_found", "union_tag_invalid"}:
+            message = (
+                f"`{path}` must start with `col`, `lit`, `param`, `polars`, or a supported `op`."
+            )
+        elif error_type == "missing":
+            message = f"`{path}` is required."
+        elif error_type == "extra_forbidden":
+            message = f"`{path}` is not supported here; remove it or check the example."
+        elif error_type in {"too_short", "list_too_short"}:
+            message = f"`{path}` needs more items for this operation."
+        elif error_type == "literal_error":
+            message = f"`{path}` contains an unsupported value."
+        else:
+            message = f"`{path}` is invalid. Check the expression example and required fields."
+        if message not in messages:
+            messages.append(message)
+    return tuple(messages) or (
+        "Expression structure is invalid. Check the example and required fields.",
+    )
+
+
+def _expression_error_path(location: tuple[Any, ...], loaded: dict[str, Any]) -> str:
+    parts = list(location)
+    if parts and parts[0] == loaded.get("op"):
+        parts.pop(0)
+    path = ""
+    for part in parts:
+        if isinstance(part, int):
+            path += f"[{part}]"
+        else:
+            path += ("." if path else "") + str(part)
+    return path or "expression"
+
+
 def calculated_rows_from_source(source: model.Source) -> list[dict[str, Any]]:
     """Return editor rows for source-level derived columns."""
     rows: list[dict[str, Any]] = []
@@ -730,7 +1030,7 @@ def calculated_rows_for_editor(rows: list[dict[str, Any]]) -> list[dict[str, Any
                 "Right Kind": str(row.get("Right Kind", "") or "Field"),
                 "Right": str(row.get("Right", "") or ""),
                 "Expression": str(row.get("Expression") or row.get("Expression YAML", "") or ""),
-                "Enabled": bool(row.get("Enabled", True)),
+                "Enabled": editor_row_enabled(row.get("Enabled")),
             }
         )
     return normalized
@@ -740,7 +1040,7 @@ def build_derive_column_transforms(rows: list[dict[str, Any]]) -> list[dict[str,
     """Build ``derive_column`` transforms from calculated-field editor rows."""
     transforms: list[dict[str, Any]] = []
     for row in rows:
-        if not row.get("Enabled", True):
+        if not editor_row_enabled(row.get("Enabled")):
             continue
         name = str(row.get("Name", "")).strip()
         expression = _calculated_expression(row)
@@ -862,6 +1162,29 @@ def first_filter_expression(source: model.Source | model.Processor) -> dict[str,
     if filter_expression is not None:
         return expr_parser.to_dict(filter_expression)
     return None
+
+
+def chart_kind_label(chart_kind: str) -> str:
+    """Return the shared chart-catalog display label for a technical kind."""
+
+    return CHART_DISPLAY_LABELS.get(chart_kind, title_from_identifier(chart_kind))
+
+
+def chart_kind_purpose(chart_kind: str) -> str:
+    """Return the shared plain-language purpose for a technical chart kind."""
+
+    return CHART_DISPLAY_PURPOSES.get(
+        chart_kind,
+        "Present the selected metric in a configured report tile.",
+    )
+
+
+def chart_kind_selector_label(chart_kind: str) -> str:
+    """Format a chart select option without replacing its stored technical value."""
+
+    if chart_kind == "All":
+        return "All chart types"
+    return chart_kind_label(chart_kind)
 
 
 def chart_recipe_summary(
@@ -1633,6 +1956,41 @@ def random_catalog_id(name: str, *, fallback: str) -> str:
     return generated_catalog_id(name, secrets.token_hex(8), fallback=fallback)
 
 
+def stable_catalog_id(
+    name: str,
+    *,
+    fallback: str,
+    parent_id: str = "",
+    existing_ids: Iterable[str] = (),
+    preferred_id: str = "",
+) -> str:
+    """Build a readable, deterministic catalog id with numeric collision suffixes.
+
+    A valid existing id wins so changing a display title cannot break references.
+    New ids include the artifact type and a bounded parent hint, which keeps page
+    and tile anchors understandable without leaking random hashes into the UI.
+    """
+
+    used = {str(value) for value in existing_ids if str(value)}
+    preferred = str(preferred_id).strip()
+    if preferred and catalog_id_is_safe(preferred) and preferred not in used:
+        return preferred
+
+    semantic = _catalog_id_slug(name) or fallback
+    parent = _catalog_id_slug(parent_id)
+    parts = [parent[:32].strip("_") if parent else "", _catalog_id_slug(fallback), semantic]
+    base = "_".join(part for part in parts if part)[:64].strip("_") or fallback
+    if not base[0].isalpha():
+        base = f"{fallback}_{base}"[:64].strip("_") or fallback
+    candidate = base
+    counter = 2
+    while candidate in used:
+        suffix = f"_{counter}"
+        candidate = f"{base[: 64 - len(suffix)].rstrip('_')}{suffix}"
+        counter += 1
+    return candidate
+
+
 def _catalog_id_stem(name: str, *, fallback: str) -> str:
     stem = _catalog_id_slug(name)[:20].strip("_") or fallback
     if not stem[0].isalpha():
@@ -1644,6 +2002,17 @@ def _catalog_id_slug(value: str) -> str:
     text = str(value).strip().lower()
     chars = [char if char.isalnum() else "_" for char in text]
     return "_".join("".join(chars).split("_")).strip("_")
+
+
+def catalog_id_is_safe(value: str) -> bool:
+    """Return whether an id is ASCII, letter-prefixed, and YAML-reference safe."""
+
+    return (
+        bool(value)
+        and value[0].isascii()
+        and value[0].isalpha()
+        and all(char.isascii() and (char.isalnum() or char == "_") for char in value)
+    )
 
 
 def metric_yaml(metric_name: str, metric_def: dict[str, Any]) -> str:
@@ -1670,6 +2039,89 @@ class SourceCascadePlan:
     page_filter_locations: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ProcessorCascadePlan:
+    """Catalog definitions removed together with one processor."""
+
+    processor_id: str
+    metric_ids: tuple[str, ...]
+    tile_locations: tuple[str, ...]
+    page_filter_locations: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MetricDeletePlan:
+    """Exact dependencies considered before deleting one metric."""
+
+    metric_id: str
+    dependent_metric_ids: tuple[str, ...]
+    tile_locations: tuple[str, ...]
+    page_filter_locations: tuple[str, ...]
+
+
+def _transitive_metric_dependants(
+    catalog: model.Catalog,
+    metric_ids: set[str],
+) -> set[str]:
+    """Return ``metric_ids`` plus every metric that transitively depends on them."""
+
+    closure = set(metric_ids)
+    while True:
+        dependants = {
+            name
+            for name, metric in catalog.metrics.metrics.items()
+            if name not in closure
+            and any(dependency in closure for dependency in metric.depends_on)
+        }
+        if not dependants:
+            return closure
+        closure.update(dependants)
+
+
+def _dashboard_dependency_locations(
+    catalog: model.Catalog,
+    *,
+    metric_ids: set[str],
+    processor_ids: set[str] | None = None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return tile and newly unsupported-filter paths for a metric removal."""
+
+    removed_processors = processor_ids or set()
+    remaining_metrics = {
+        name: metric for name, metric in catalog.metrics.metrics.items() if name not in metric_ids
+    }
+    remaining_processors = {
+        processor.id: processor
+        for processor in catalog.processors.processors
+        if processor.id not in removed_processors
+    }
+    tile_locations: list[str] = []
+    page_filter_locations: list[str] = []
+    for dashboard in catalog.dashboards.dashboards:
+        for page in dashboard.pages:
+            remaining_tiles = [tile for tile in page.tiles if tile.metric not in metric_ids]
+            tile_locations.extend(
+                f"{dashboard.id}/{page.id}/{tile.id}"
+                for tile in page.tiles
+                if tile.metric in metric_ids
+            )
+            page_filter_locations.extend(
+                f"{dashboard.id}/{page.id}/{filter_spec.field}"
+                for filter_spec in page.filters
+                if not _page_filter_has_support(
+                    filter_spec.field,
+                    remaining_tiles,
+                    remaining_metrics,
+                    remaining_processors,
+                )
+            )
+    sort_key = str.casefold
+    return (
+        tuple(sorted(tile_locations, key=sort_key)),
+        tuple(sorted(page_filter_locations, key=sort_key)),
+    )
+
+
 def source_cascade_plan(catalog: model.Catalog, source_id: str) -> SourceCascadePlan:
     """Return the complete, deterministic catalog cascade for ``source_id``."""
 
@@ -1685,50 +2137,68 @@ def source_cascade_plan(catalog: model.Catalog, source_id: str) -> SourceCascade
     metric_ids = {
         name for name, metric in catalog.metrics.metrics.items() if metric.source in processor_ids
     }
-    while True:
-        dependants = {
-            name
-            for name, metric in catalog.metrics.metrics.items()
-            if name not in metric_ids and any(dep in metric_ids for dep in metric.depends_on)
-        }
-        if not dependants:
-            break
-        metric_ids.update(dependants)
-
-    tile_locations: list[str] = []
-    page_filter_locations: list[str] = []
-    remaining_metrics = {
-        name: metric for name, metric in catalog.metrics.metrics.items() if name not in metric_ids
-    }
-    remaining_processors = {
-        processor.id: processor
-        for processor in catalog.processors.processors
-        if processor.id not in processor_ids
-    }
-    for dashboard in catalog.dashboards.dashboards:
-        for page in dashboard.pages:
-            remaining_tiles = [tile for tile in page.tiles if tile.metric not in metric_ids]
-            tile_locations.extend(
-                f"{dashboard.id}/{page.id}/{tile.id}"
-                for tile in page.tiles
-                if tile.metric in metric_ids
-            )
-            for filter_spec in page.filters:
-                if not _page_filter_has_support(
-                    filter_spec.field,
-                    remaining_tiles,
-                    remaining_metrics,
-                    remaining_processors,
-                ):
-                    page_filter_locations.append(f"{dashboard.id}/{page.id}/{filter_spec.field}")
+    metric_ids = _transitive_metric_dependants(catalog, metric_ids)
+    tile_locations, page_filter_locations = _dashboard_dependency_locations(
+        catalog,
+        metric_ids=metric_ids,
+        processor_ids=processor_ids,
+    )
 
     sort_key = str.casefold
     return SourceCascadePlan(
         source_id=normalized_source_id,
         processor_ids=tuple(sorted(processor_ids, key=sort_key)),
         metric_ids=tuple(sorted(metric_ids, key=sort_key)),
-        tile_locations=tuple(sorted(tile_locations, key=sort_key)),
-        page_filter_locations=tuple(sorted(page_filter_locations, key=sort_key)),
+        tile_locations=tile_locations,
+        page_filter_locations=page_filter_locations,
+    )
+
+
+def processor_cascade_plan(
+    catalog: model.Catalog,
+    processor_id: str,
+) -> ProcessorCascadePlan:
+    """Return the complete, deterministic catalog cascade for one processor."""
+
+    normalized_processor_id = str(processor_id).strip()
+    if normalized_processor_id not in {processor.id for processor in catalog.processors.processors}:
+        raise ValueError(f"unknown processor {normalized_processor_id!r}")
+    direct_metrics = {
+        name
+        for name, metric in catalog.metrics.metrics.items()
+        if metric.source == normalized_processor_id
+    }
+    metric_ids = _transitive_metric_dependants(catalog, direct_metrics)
+    tile_locations, page_filter_locations = _dashboard_dependency_locations(
+        catalog,
+        metric_ids=metric_ids,
+        processor_ids={normalized_processor_id},
+    )
+    return ProcessorCascadePlan(
+        processor_id=normalized_processor_id,
+        metric_ids=tuple(sorted(metric_ids, key=str.casefold)),
+        tile_locations=tile_locations,
+        page_filter_locations=page_filter_locations,
+    )
+
+
+def metric_delete_plan(catalog: model.Catalog, metric_id: str) -> MetricDeletePlan:
+    """Return exact blockers and report dependencies for one metric deletion."""
+
+    normalized_metric_id = str(metric_id).strip()
+    if normalized_metric_id not in catalog.metrics.metrics:
+        raise ValueError(f"unknown metric {normalized_metric_id!r}")
+    closure = _transitive_metric_dependants(catalog, {normalized_metric_id})
+    dependent_metric_ids = closure - {normalized_metric_id}
+    tile_locations, page_filter_locations = _dashboard_dependency_locations(
+        catalog,
+        metric_ids={normalized_metric_id},
+    )
+    return MetricDeletePlan(
+        metric_id=normalized_metric_id,
+        dependent_metric_ids=tuple(sorted(dependent_metric_ids, key=str.casefold)),
+        tile_locations=tile_locations,
+        page_filter_locations=page_filter_locations,
     )
 
 
@@ -1812,6 +2282,130 @@ def delete_source_cascade(
     return plan
 
 
+def delete_processor_cascade(
+    workspace: str | Path,
+    processor_id: str,
+) -> ProcessorCascadePlan:
+    """Delete exactly one processor and every catalog definition that depends on it.
+
+    Persisted aggregates and run metadata intentionally remain untouched. The
+    catalog and Chat-description writes share one rollback boundary and the
+    resulting workspace is validated before commit.
+    """
+
+    catalog = load(workspace)
+    plan = processor_cascade_plan(catalog, processor_id)
+    metric_ids = set(plan.metric_ids)
+
+    with workspace_configuration_transaction(workspace):
+        processors_path = _catalog_file(workspace, "processors.yaml")
+        processors = _read_yaml(processors_path)
+        processor_defs = processors.get("processors", [])
+        if not isinstance(processor_defs, list):
+            raise ValueError("processors.yaml must contain a list at `processors`")
+        processors["processors"] = [
+            processor for processor in processor_defs if processor.get("id") != plan.processor_id
+        ]
+
+        metrics_path = _catalog_file(workspace, "metrics.yaml")
+        metrics = _read_yaml(metrics_path)
+        metric_defs = metrics.get("metrics", {})
+        if not isinstance(metric_defs, dict):
+            raise ValueError("metrics.yaml must contain a mapping at `metrics`")
+        metrics["metrics"] = {
+            name: definition for name, definition in metric_defs.items() if name not in metric_ids
+        }
+
+        dashboards_path = _catalog_file(workspace, "dashboards.yaml")
+        dashboards = _read_yaml(dashboards_path)
+        _remove_source_dashboard_dependencies(
+            dashboards,
+            metric_ids=metric_ids,
+            remaining_metrics={
+                name: metric
+                for name, metric in catalog.metrics.metrics.items()
+                if name not in metric_ids
+            },
+            remaining_processors={
+                processor.id: processor
+                for processor in catalog.processors.processors
+                if processor.id != plan.processor_id
+            },
+        )
+
+        model.Processors.model_validate(processors)
+        model.Metrics.model_validate(metrics)
+        model.Dashboards.model_validate(dashboards)
+
+        _write_yaml(dashboards_path, dashboards)
+        _write_yaml(metrics_path, metrics)
+        _write_yaml(processors_path, processors)
+        _remove_chat_descriptions(
+            workspace,
+            processor_ids={plan.processor_id},
+            metric_ids=metric_ids,
+        )
+        require_valid_workspace(workspace)
+    return plan
+
+
+def delete_metric_definition(
+    workspace: str | Path,
+    metric_id: str,
+    *,
+    cascade_tiles: bool,
+) -> MetricDeletePlan:
+    """Delete exactly one metric after explicit handling of its dependencies.
+
+    Metrics that depend on the target are blockers rather than implicit cascade
+    targets. Report tiles may be removed only when ``cascade_tiles`` is true.
+    """
+
+    catalog = load(workspace)
+    plan = metric_delete_plan(catalog, metric_id)
+    if plan.dependent_metric_ids:
+        names = ", ".join(plan.dependent_metric_ids)
+        raise ValueError(f"metric {plan.metric_id!r} is required by dependent metric(s): {names}")
+    if plan.tile_locations and not cascade_tiles:
+        raise ValueError(
+            f"metric {plan.metric_id!r} is used by report tiles; choose the tile cascade explicitly"
+        )
+
+    with workspace_configuration_transaction(workspace):
+        metrics_path = _catalog_file(workspace, "metrics.yaml")
+        metrics = _read_yaml(metrics_path)
+        metric_defs = metrics.get("metrics", {})
+        if not isinstance(metric_defs, dict):
+            raise ValueError("metrics.yaml must contain a mapping at `metrics`")
+        metrics["metrics"] = {
+            name: definition for name, definition in metric_defs.items() if name != plan.metric_id
+        }
+
+        dashboards_path = _catalog_file(workspace, "dashboards.yaml")
+        dashboards = _read_yaml(dashboards_path)
+        if cascade_tiles:
+            _remove_source_dashboard_dependencies(
+                dashboards,
+                metric_ids={plan.metric_id},
+                remaining_metrics={
+                    name: metric
+                    for name, metric in catalog.metrics.metrics.items()
+                    if name != plan.metric_id
+                },
+                remaining_processors={
+                    processor.id: processor for processor in catalog.processors.processors
+                },
+            )
+
+        model.Metrics.model_validate(metrics)
+        model.Dashboards.model_validate(dashboards)
+        _write_yaml(dashboards_path, dashboards)
+        _write_yaml(metrics_path, metrics)
+        _remove_chat_descriptions(workspace, metric_ids={plan.metric_id})
+        require_valid_workspace(workspace)
+    return plan
+
+
 def _dimension_key(value: str) -> str:
     return "".join(character for character in str(value).casefold() if character.isalnum())
 
@@ -1877,9 +2471,27 @@ def _remove_source_chat_descriptions(
     processor_ids: set[str],
     metric_ids: set[str],
 ) -> None:
+    _remove_chat_descriptions(
+        workspace,
+        source_ids={source_id},
+        processor_ids=processor_ids,
+        metric_ids=metric_ids,
+    )
+
+
+def _remove_chat_descriptions(
+    workspace: str | Path,
+    *,
+    source_ids: set[str] | None = None,
+    processor_ids: set[str] | None = None,
+    metric_ids: set[str] | None = None,
+) -> None:
     path = Path(workspace) / "ai.yaml"
     if not path.exists():
         return
+    source_ids = source_ids or set()
+    processor_ids = processor_ids or set()
+    metric_ids = metric_ids or set()
     data = _read_yaml(path)
     blocks: list[dict[str, Any]] = []
     top_level = data.get("chat_with_data")
@@ -1893,9 +2505,11 @@ def _remove_source_chat_descriptions(
     changed = False
     for block in blocks:
         dataset_descriptions = block.get("dataset_descriptions")
-        if isinstance(dataset_descriptions, dict) and source_id in dataset_descriptions:
-            dataset_descriptions.pop(source_id)
-            changed = True
+        if isinstance(dataset_descriptions, dict):
+            for identifier in source_ids:
+                if identifier in dataset_descriptions:
+                    dataset_descriptions.pop(identifier)
+                    changed = True
         metric_descriptions = block.get("metric_descriptions")
         if isinstance(metric_descriptions, dict):
             for identifier in processor_ids | metric_ids:
@@ -2346,7 +2960,7 @@ def _split_values(value: Any) -> list[Any]:
 
 
 def _compile_filter_row(row: dict[str, Any]) -> dict[str, Any] | None:  # noqa: PLR0911
-    if not row.get("Enabled", True):
+    if not editor_row_enabled(row.get("Enabled")):
         return None
     field = str(row.get("Field", "")).strip()
     operator = str(row.get("Operator", "")).strip()
@@ -2651,6 +3265,8 @@ def digest_pair_option_label(option: tuple[str, str, str]) -> str:
 __all__ = [
     "BUILDER_DRAFTS_KEY",
     "CALCULATION_MODES",
+    "CHART_DISPLAY_LABELS",
+    "CHART_DISPLAY_PURPOSES",
     "CHART_OPTIONAL_FIELDS",
     "CHART_REQUIRED_FIELDS",
     "CHART_SETTING_FIELDS",
@@ -2661,6 +3277,7 @@ __all__ = [
     "STATE_TYPES",
     "BuilderApplyOutcome",
     "BuilderDraftStatus",
+    "CalculatedExpressionValidation",
     "blank_calculated_row",
     "blank_default_row",
     "blank_filter_row",
@@ -2682,11 +3299,17 @@ __all__ = [
     "builder_apply_outcome",
     "builder_draft_status",
     "builder_requires_data_run",
+    "builder_template_draft_status",
+    "calculated_expression_example",
     "calculated_rows_for_editor",
     "calculated_rows_from_source",
+    "catalog_id_is_safe",
     "chart_choices_for_metric",
     "chart_field_controls",
     "chart_field_options",
+    "chart_kind_label",
+    "chart_kind_purpose",
+    "chart_kind_selector_label",
     "chart_recipe_summary",
     "compile_filter_rows",
     "csv_text_to_list",
@@ -2707,6 +3330,7 @@ __all__ = [
     "discard_builder_draft",
     "display_grain",
     "editor_frame",
+    "editor_row_enabled",
     "ensure_minimum_workspace",
     "expression_yaml",
     "filter_rows_from_expression",
@@ -2733,6 +3357,7 @@ __all__ = [
     "score_properties_from_definition",
     "source_defaults",
     "source_to_dict",
+    "stable_catalog_id",
     "stage_names_missing_when",
     "state_columns",
     "state_columns_by_type",
@@ -2741,6 +3366,7 @@ __all__ = [
     "tile_yaml",
     "title_from_identifier",
     "update_builder_draft_registry",
+    "validate_calculated_expression",
     "validate_workspace",
     "widget_key_fragment",
     "write_dashboards_definition",

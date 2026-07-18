@@ -370,7 +370,7 @@ show that a first run or backfill is required. Optional backfill for a widening
 therefore refers to historical coverage, not permission to derive a missing
 state from old aggregate files.
 
-### Authoring revision (session-local)
+### Authoring revision (UI-local)
 
 An authoring revision is a UI lifecycle object, not another catalog entity and
 not a durable raw-data store. It consists of a canonical proposed catalog
@@ -378,6 +378,13 @@ object or multi-file bundle, its revision digest, one validation verdict for
 that digest, and explicit review state. Editing changes the digest and clears
 the prior verdict/review. Applying a reviewed revision produces ordinary YAML
 catalog files and a new catalog hash inside the catalog transaction.
+
+Configuration Builder may checkpoint the non-secret, JSON-safe subset of its
+draft registry under workspace `meta/` for seven days. The checkpoint is
+recovery metadata rather than a Catalog entity: it never includes prompts,
+credentials, provider/sample payloads, bytes, or DataFrames, and restore still
+requires current-baseline reconciliation and validation before Apply. Removing
+the final recoverable draft removes the checkpoint.
 
 | Displayed state | Domain evidence | Permitted transition |
 |---|---|---|

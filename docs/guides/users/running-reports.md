@@ -60,6 +60,10 @@ under `meta/` remain available for audit.
 2. Select a dashboard and page from the sidebar.
 3. Use the compact toolbar for Presentation/Inspect mode, Advanced mode, and Filters.
 4. Choose a date preset and up to three primary business filters; open More filters for secondary controls.
+   Relative presets such as Last 30 days and Year to date are anchored to the
+   latest available aggregate period when the workspace contains historical
+   data. Reports states when it has applied this clamp. Custom date ranges are
+   always used exactly as entered.
 5. Read the highlighted calendar chip for the active date preset and exact date
    range (for example, `Last 90 days · Apr 16–Jul 14, 2026`). Click it to reset
    the time range to all time across every report page. Other active chips show
@@ -69,6 +73,13 @@ under `meta/` remain available for audit.
 7. Use a tile's action menu for Inspect, Expand, and export actions. Chart tiles
    also offer View data. Table tiles are already native sortable dataframes and
    export their displayed rows directly to CSV.
+
+An empty tile distinguishes two cases. If the active date range or filters
+exclude all aggregate rows, the tile names that scope and offers **Show all
+available data**; this is an explicit action and never rewrites a custom range
+silently. If the all-time, unfiltered query is empty, the tile instead reports
+that the metric/grain is not materialized and directs you to Data Load or the
+freshness receipt. Unsupported filters are named separately from both states.
 
 Summary metric cards use compact display values such as `349K` and `120M`
 when no explicit catalog `value_format` is configured. Help text and report
@@ -89,6 +100,8 @@ by the first plot that has data; an empty or not-yet-ready plot falls through to
 the next compatible plot. This avoids querying and combining every chart just
 to open the filter panel. You can also type a value that is not suggested, and
 the control remains editable when no aggregate suggestions are available.
+An empty selection means **All**; All is not stored as a concrete filter value
+and therefore cannot coexist with a subset.
 
 If a filter has no effect on one tile, the tile's backing processor does not
 persist that dimension — see

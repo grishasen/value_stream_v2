@@ -20,6 +20,7 @@ from valuestream.ui.freshness import freshness_label, metric_freshness
 from valuestream.utils.logger import get_logger
 
 ResponseKind = Literal["text", "table", "chart", "clarify", "sql"]
+DeterministicStarterKey = Literal["count", "rate", "unique", "channel", "date_range"]
 ChartKind = Literal[
     "line",
     "bar",
@@ -67,6 +68,7 @@ logger = get_logger(__name__)
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _TIME_COLUMN_BY_GRAIN = {
     "daily": "Day",
+    "weekly": "Week",
     "monthly": "Month",
     "quarterly": "Quarter",
     "yearly": "Year",
@@ -160,6 +162,15 @@ class ChatQueryResult:
     rows: pl.DataFrame
     query_summary: str
     freshness: str
+
+
+@dataclass(frozen=True)
+class DeterministicChatStarter:
+    """Catalog-grounded aggregate query that does not require an LLM planner."""
+
+    key: DeterministicStarterKey
+    question: str
+    intent: ChatIntent
 
 
 def catalog_chat_manifest(
@@ -593,7 +604,7 @@ def chat_pin_tile(intent: ChatIntent, *, tile_id: str) -> dict[str, Any]:
 def chat_starter_questions(catalog: model.Catalog, *, limit: int = 4) -> list[str]:
     """Return a few example questions grounded in the catalog's metrics.
 
-    Deterministic starter prompts help first-time users discover what the
+    Catalog-grounded starter prompts help first-time users discover what the
     aggregate catalog can answer without having to guess metric names.
     """
 
@@ -613,6 +624,238 @@ def chat_starter_questions(catalog: model.Catalog, *, limit: int = 4) -> list[st
         if len(questions) >= limit:
             break
     return questions
+
+
+def deterministic_chat_starters(catalog: model.Catalog) -> list[DeterministicChatStarter]:
+    """Return supported no-model questions derived only from catalog contracts.
+
+    These are deliberately narrow templates rather than a second natural-language
+    planner. Each returned intent names an existing metric, dimension, and grain,
+    so callers can execute it through :func:`execute_chat_intent` without provider
+    access or any raw-row inspection.
+    """
+
+    processors = {processor.id: processor for processor in catalog.processors.processors}
+    metric_items = [
+        (metric_name, metric, processors.get(metric.source))
+        for metric_name, metric in sorted(catalog.metrics.metrics.items())
+    ]
+    count_item = _best_deterministic_metric(metric_items, kind="count")
+    rate_item = _best_deterministic_metric(metric_items, kind="rate")
+    unique_item = _best_deterministic_metric(metric_items, kind="unique")
+    starters: list[DeterministicChatStarter] = []
+
+    starter_specs: tuple[
+        tuple[
+            DeterministicStarterKey,
+            tuple[str, model.Metric, model.Processor] | None,
+            str,
+        ],
+        ...,
+    ] = (
+        ("count", count_item, "What is the total"),
+        ("rate", rate_item, "What is the overall"),
+        ("unique", unique_item, "What is the approximate"),
+    )
+    for key, item, prefix in starter_specs:
+        if item is None:
+            continue
+        metric_name, metric, _processor = item
+        label = _metric_display_label(metric_name, metric).casefold()
+        question = f"{prefix} {label}?"
+        starters.append(
+            DeterministicChatStarter(
+                key=key,
+                question=question,
+                intent=ChatIntent(
+                    question=question,
+                    metric=metric_name,
+                    response="text",
+                    group_by=[],
+                    filters={},
+                    grain="summary",
+                    limit=100,
+                ),
+            )
+        )
+
+    channel_item = _first_metric_supporting_dimension(
+        (count_item, rate_item, unique_item),
+        dimension="channel",
+    )
+    if channel_item is not None:
+        metric_name, metric, processor = channel_item
+        channel = next(
+            dimension for dimension in processor.group_by if dimension.casefold() == "channel"
+        )
+        label = _metric_display_label(metric_name, metric).casefold()
+        question = f"Compare {label} by {channel}"
+        starters.append(
+            DeterministicChatStarter(
+                key="channel",
+                question=question,
+                intent=ChatIntent(
+                    question=question,
+                    metric=metric_name,
+                    response="chart",
+                    group_by=[channel],
+                    filters={},
+                    grain="summary",
+                    chart=ChartIntent(
+                        kind="bar",
+                        x=channel,
+                        y=metric_name,
+                        value_format=_metric_value_format(metric),
+                    ),
+                    limit=100,
+                ),
+            )
+        )
+
+    date_item = _first_metric_with_time_grain((count_item, rate_item, unique_item))
+    if date_item is not None:
+        metric_name, _metric, _processor, grain = date_item
+        question = "What date range is available?"
+        starters.append(
+            DeterministicChatStarter(
+                key="date_range",
+                question=question,
+                intent=ChatIntent(
+                    question=question,
+                    metric=metric_name,
+                    response="table",
+                    group_by=[],
+                    filters={},
+                    grain=grain,
+                    limit=500,
+                ),
+            )
+        )
+    return starters
+
+
+def _best_deterministic_metric(
+    metric_items: list[tuple[str, model.Metric, model.Processor | None]],
+    *,
+    kind: Literal["count", "rate", "unique"],
+) -> tuple[str, model.Metric, model.Processor] | None:
+    candidates: list[tuple[int, str, model.Metric, model.Processor]] = []
+    for metric_name, metric, processor in metric_items:
+        if processor is None:
+            continue
+        payload = _metric_payload(metric)
+        search_text = _metric_search_text(metric_name, metric, payload)
+        score = 0
+        if kind == "count":
+            expression = payload.get("expression")
+            if metric.kind != "formula" or not isinstance(expression, Mapping):
+                continue
+            if _key(str(expression.get("col", ""))) != "count":
+                continue
+            score = 100 + _term_score(search_text, ("interaction", "count", "event"))
+        elif kind == "rate":
+            if metric.kind != "formula":
+                continue
+            expression = payload.get("expression")
+            if not isinstance(expression, Mapping) or expression.get("op") != "safe_div":
+                continue
+            if not any(term in search_text for term in (" rate", "rate ", "ctr", "engagement")):
+                continue
+            score = 100 + _term_score(
+                search_text,
+                ("engagement rate", "click through rate", "click-through rate", "ctr", "rate"),
+            )
+        else:
+            if metric.kind != "approx_distinct_count":
+                continue
+            score = 100 + _term_score(
+                search_text,
+                ("unique entities", "unique customers", "audience", "reach", "unique"),
+            )
+        candidates.append((score, metric_name, metric, processor))
+    if not candidates:
+        return None
+    _score, metric_name, metric, processor = min(
+        candidates,
+        key=lambda item: (-item[0], item[1].casefold()),
+    )
+    return metric_name, metric, processor
+
+
+def _metric_payload(metric: model.Metric) -> dict[str, Any]:
+    payload = metric.model_dump(mode="python", by_alias=True, exclude_none=True)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _metric_search_text(
+    metric_name: str,
+    metric: model.Metric,
+    payload: Mapping[str, Any],
+) -> str:
+    display = payload.get("display")
+    recipe = payload.get("recipe")
+    values = [metric_name, str(metric.description or "")]
+    if isinstance(display, Mapping):
+        values.extend(str(display.get(key, "")) for key in ("label", "unit", "value_format"))
+    if isinstance(recipe, Mapping):
+        values.append(str(recipe.get("id", "")))
+    return f" {' '.join(values).replace('_', ' ').replace('-', ' ').casefold()} "
+
+
+def _term_score(search_text: str, terms: tuple[str, ...]) -> int:
+    return sum((len(terms) - index) * 10 for index, term in enumerate(terms) if term in search_text)
+
+
+def _metric_display_label(metric_name: str, metric: model.Metric) -> str:
+    display = _metric_payload(metric).get("display")
+    if isinstance(display, Mapping):
+        label = str(display.get("label") or "").strip()
+        if label:
+            return label
+    return _title_from_identifier(metric_name)
+
+
+def _metric_value_format(metric: model.Metric) -> str | None:
+    display = _metric_payload(metric).get("display")
+    if not isinstance(display, Mapping):
+        return None
+    value_format = str(display.get("value_format") or "").strip()
+    return value_format if value_format in _VALUE_FORMATS else None
+
+
+def _first_metric_supporting_dimension(
+    items: tuple[
+        tuple[str, model.Metric, model.Processor] | None,
+        tuple[str, model.Metric, model.Processor] | None,
+        tuple[str, model.Metric, model.Processor] | None,
+    ],
+    *,
+    dimension: str,
+) -> tuple[str, model.Metric, model.Processor] | None:
+    for item in items:
+        if item is not None and any(
+            value.casefold() == dimension.casefold() for value in item[2].group_by
+        ):
+            return item
+    return None
+
+
+def _first_metric_with_time_grain(
+    items: tuple[
+        tuple[str, model.Metric, model.Processor] | None,
+        tuple[str, model.Metric, model.Processor] | None,
+        tuple[str, model.Metric, model.Processor] | None,
+    ],
+) -> tuple[str, model.Metric, model.Processor, str] | None:
+    preferred_grains = ("daily", "weekly", "monthly", "quarterly", "yearly")
+    for item in items:
+        if item is None:
+            continue
+        available = {model.normalize_grain_name(grain) for grain in item[2].grains}
+        for grain in preferred_grains:
+            if grain in available:
+                return *item, grain
+    return None
 
 
 def _title_from_identifier(value: str) -> str:
@@ -1053,6 +1296,48 @@ def execute_chat_intent(
         intent=intent,
         rows=rows,
         query_summary=_query_summary(intent),
+        freshness=freshness_label(fresh),
+    )
+
+
+def execute_deterministic_chat_query(
+    workspace_path: str | Path,
+    catalog: model.Catalog,
+    starter: DeterministicChatStarter,
+) -> ChatQueryResult:
+    """Execute a no-model starter exclusively through governed aggregate queries."""
+
+    if starter.key != "date_range":
+        return execute_chat_intent(workspace_path, catalog, starter.intent)
+
+    intent = starter.intent
+    rows = query_metric(
+        workspace_path,
+        intent.metric,
+        group_by=[],
+        filters={},
+        grain=intent.grain,
+        include_curve_columns=True,
+    )
+    time_column = _TIME_COLUMN_BY_GRAIN.get(intent.grain)
+    if time_column is None or time_column not in rows.columns:
+        time_column = next((column for column in rows.columns if _is_time_column(column)), None)
+    if rows.is_empty() or time_column is None:
+        bounds = pl.DataFrame(
+            schema={"Available from": pl.String, "Available through": pl.String, "Grain": pl.String}
+        )
+    else:
+        bounds = rows.select(
+            pl.col(time_column).cast(pl.String).min().alias("Available from"),
+            pl.col(time_column).cast(pl.String).max().alias("Available through"),
+            pl.lit(intent.grain).alias("Grain"),
+        )
+    fresh = metric_freshness(workspace_path, catalog, intent.metric, grain=intent.grain)
+    query_summary = f"{_query_summary(intent)} -> min/max {time_column or 'time bucket'}"
+    return ChatQueryResult(
+        intent=intent,
+        rows=bounds,
+        query_summary=query_summary,
         freshness=freshness_label(fresh),
     )
 
