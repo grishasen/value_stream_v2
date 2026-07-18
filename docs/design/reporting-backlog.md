@@ -11,9 +11,6 @@ The work remains aggregate-first. Reports, Configuration Builder, and AI
 Configuration Studio must read and write the same YAML behavior, and every
 runtime query must continue through the aggregate/query layer.
 
-The configuration-authoring program's Done/Partial/Open assessment of the RPT
-stories it reuses is recorded in the
-[configuration authoring story baseline](configuration-authoring-story-baseline-2026-07-18.md).
 This backlog remains the source of truth for full RPT scope.
 
 ## Scope and compatibility

@@ -57,7 +57,8 @@ rates so a single journey cannot masquerade as a trend.
 ## Rollout gates
 
 1. Validate the privacy log-capture tests and the authoring accessibility
-   matrix.
+   checks (keyboard-only navigation, focus order, and screen-reader labels
+   across both authoring workflows).
 2. Enable Build for an internal cohort.
 3. Inspect failure and abandonment without opening or enriching events with
    customer data.

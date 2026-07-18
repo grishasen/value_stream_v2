@@ -33,6 +33,9 @@ coverage.xml
 *.swp
 .DS_Store
 
+# Obsidian: the shared docs vault config is tracked; per-user UI state is not
+docs/.obsidian/workspace.json
+
 # Project transient
 *.duckdb
 *.duckdb.wal

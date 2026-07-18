@@ -1317,7 +1317,8 @@ set for Claude Code and similar MCP clients:
 
 REST, remote HTTP MCP, OAuth/OIDC auth, dashboard tile tools, lineage drilldown,
 and generated-code analysis remain later surfaces. See
-`docs/design/chat-with-data-mlp1.md` for provider setup and runbooks.
+`docs/guides/users/chat-with-data.md` for provider setup and
+`docs/reference/api-and-mcp.md` for the MCP and HTTP API runbooks.
 
 ---
 

@@ -156,6 +156,12 @@ revision exists, it provides a direct **Go to Draft** action.
 - that exact revision has been explicitly reviewed;
 - it is not already applied.
 
+If the accepted revision omits sources, processors, metrics, or dashboards
+that exist in the current workspace catalog, applying it would remove them.
+The apply bar discloses exactly which objects the replacement removes and
+blocks Apply until you confirm the removal for that specific revision. The
+revision receipt then reports the removal count.
+
 Apply writes sources, processors, metrics, dashboards, and optional `ai.yaml`
 inside the rollback-protected workspace transaction. It does not ingest data.
 The resulting revision receipt shows the revision key, workspace status, source

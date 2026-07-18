@@ -18,9 +18,30 @@ ai:
     timeout_seconds: 120
 ```
 
-Local Ollama, OpenAI, and Anthropic setups — plus MCP registration for Claude
-Code — are documented step by step in
-[Chat With Data MLP1](../../design/chat-with-data-mlp1.md).
+`model` is a LiteLLM model string — the example above targets OpenAI with the
+key read from `OPENAI_API_KEY`. `api_base` and `custom_provider` support local
+or proxy-backed providers:
+
+```yaml
+# Local Ollama (after `ollama pull llama3.1` and `ollama serve`)
+ai:
+  llm:
+    model: ollama/llama3.1
+    api_base: http://localhost:11434
+    custom_provider: ollama
+    api_key_env: ""
+
+# Anthropic (export ANTHROPIC_API_KEY first)
+ai:
+  llm:
+    model: anthropic/claude-sonnet-4-6
+    api_key_env: ANTHROPIC_API_KEY
+```
+
+The Chat page also lets you override these values for the current Streamlit
+session. MCP clients such as Claude Code should use the local stdio MCP server
+instead of the Chat page; registration steps are in the
+[API & MCP reference](../../reference/api-and-mcp.md).
 
 Configuration Builder's Chat Review step can edit `chat_with_data` settings in
 `ai.yaml`: a generic agent prompt plus dataset and metric descriptions that are
@@ -61,7 +82,7 @@ Data for sensitive raw samples. See
 
 ## Related Docs
 
-- [Chat With Data MLP1 design](../../design/chat-with-data-mlp1.md) — intent
-  schema, chart allowlist, provider setup, and operational notes.
 - [API & MCP reference](../../reference/api-and-mcp.md) — the same governed
-  tool layer for programmatic clients.
+  tool layer for programmatic clients, including Claude Code registration.
+- [Security](../operations/security.md) — the LLM boundary and governed SQL
+  posture.

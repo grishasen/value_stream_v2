@@ -2,9 +2,9 @@
 
 The read-only HTTP API and the local stdio MCP server expose the same
 governed tool layer over the aggregate query path. Neither surface mutates the
-catalog or aggregate store, and neither exposes raw source rows. Design
-rationale and provider setup live in
-[Chat With Data MLP1](../design/chat-with-data-mlp1.md); the security posture
+catalog or aggregate store, and neither exposes raw source rows. LLM provider
+setup for the in-app planner is in
+[Chat with data](../guides/users/chat-with-data.md); the security posture
 is summarized in [Security](../guides/operations/security.md).
 
 ```text
