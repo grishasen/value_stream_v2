@@ -178,8 +178,7 @@ convert or merge different sketch families together.
 - An installed metric records the recipe ID/version so future upgrade tooling
   can show a diff instead of silently migrating it.
 - Workspace-owned recipes, approval owners, deprecation, upgrade assistance,
-  and report packs are planned in the
-  [KPI recipe backlog](../design/kpi-recipe-backlog.md).
+  and report packs are planned future work, not current behavior.
 
 ## Aggregate and Backfill Rules
 

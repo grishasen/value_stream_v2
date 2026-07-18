@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Document | Architecture overview |
-| Companion docs | design/replacement-design.md (detailed), concepts/domain-model.md, reference/processors.md, reference/algorithms.md, reference/readers-and-formats.md, reference/expression-dsl.md, reference/chart-catalog.md, design/implementation-plan.md, reference/faq.md |
+| Companion docs | design/replacement-design.md (detailed), concepts/domain-model.md, reference/processors.md, reference/algorithms.md, reference/readers-and-formats.md, reference/expression-dsl.md, reference/chart-catalog.md, reference/faq.md |
 | Audience | Engineers, architects, and senior stakeholders |
 | Current stack | Polars · DuckDB · Streamlit · Plotly · Apache DataSketches · PyArrow Parquet |
 | Current headless surfaces | Read-only FastAPI HTTP API · local stdio MCP |
@@ -636,4 +636,3 @@ These boundaries keep the platform small enough to build, operate, and reason ab
 7. reference/readers-and-formats.md — file format specs.
 8. reference/chart-catalog.md — Plotly chart bindings.
 9. reference/faq.md — common questions; check this when stuck.
-10. design/implementation-plan.md — phased build plan.

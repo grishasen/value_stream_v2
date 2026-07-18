@@ -57,9 +57,6 @@ plugins:
         CHART_CATALOG.md: reference/chart-catalog.md
         QA.md: reference/faq.md
         CHAT_WITH_DATA_MLP1.md: guides/users/chat-with-data.md
-        IMPLEMENTATION_PLAN.md: design/implementation-plan.md
-        REPORTING_BACKLOG.md: design/reporting-backlog.md
-        KICKOFF_PROMPT.md: design/kickoff-prompt.md
         wiki/index.md: index.md
         wiki/documentation-plan.md: meta/documentation-guide.md
         wiki/product-overview.md: concepts/product-overview.md
@@ -119,10 +116,4 @@ nav:
       - FAQ: reference/faq.md
   - Design docs:
       - Replacement design: design/replacement-design.md
-      - Implementation plan: design/implementation-plan.md
-      - Reporting backlog: design/reporting-backlog.md
-      - KPI recipe backlog: design/kpi-recipe-backlog.md
-      - Configuration Studios remediation backlog: design/ai-studio-remediation-backlog.md
-      - Configuration Editor QA evidence: design/config-editor-qa-backlog.md
-      - Kickoff prompt: design/kickoff-prompt.md
       - Documentation guide: meta/documentation-guide.md
