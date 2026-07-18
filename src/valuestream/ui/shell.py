@@ -117,7 +117,7 @@ def _navigation_pages(ctx: ValueStreamContext) -> list[NavigationPage]:
         NavigationPage("Home", "Home", ":material/home:", lambda: home.render(ctx), default=True),
         NavigationPage("Analysis", "Reports", ":material/area_chart:", lambda: reports.render(ctx)),
         NavigationPage("Analysis", "Chat With Data", ":material/chat:", lambda: chat.render(ctx)),
-        NavigationPage("Settings", "Catalog", ":material/database:", lambda: catalog.render(ctx)),
+        NavigationPage("Configuration", "Catalog", ":material/database:", lambda: catalog.render(ctx)),
         NavigationPage(
             "Data Integration",
             "Data Load",
@@ -131,7 +131,7 @@ def _navigation_pages(ctx: ValueStreamContext) -> list[NavigationPage]:
             lambda: ops.render(ctx),
         ),
     ]
-    authoring_section = "Build" if authoring_v2_enabled() else "Settings"
+    authoring_section = "Configuration" if authoring_v2_enabled() else "Settings"
     authoring_pages = (
         [
             NavigationPage(

@@ -293,10 +293,9 @@ def _report_toolbar(
         for report_page in configured_dashboard.pages
     )
     with st.sidebar:
-        st.write("### Report")
         dashboards = ctx.catalog.dashboards.dashboards
         dashboard = st.selectbox(
-            "Dashboard",
+            "**Dashboard**",
             dashboards,
             index=_object_index(dashboards, dashboard),
             format_func=lambda item: item.title,
@@ -304,7 +303,7 @@ def _report_toolbar(
         )
         pages = dashboard.pages
         page = st.selectbox(
-            "Report",
+            "**Report**",
             pages,
             index=_object_index(pages, _selected_page(dashboard)),
             format_func=lambda item: item.title,
