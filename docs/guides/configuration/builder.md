@@ -26,6 +26,11 @@ editable step, the top-right action becomes **Apply to workspace** only when
 the current draft is valid and differs from the persisted catalog. There is
 exactly one active Apply action for the object being edited.
 
+Builder mirrors the current step to the URL as a stable `builder_step` value.
+Reloading a clean session therefore returns to the same step even when there is
+no draft checkpoint. Unknown or obsolete values fall back to **Workspace
+Health**; the URL contains no draft or catalog content.
+
 ## Drafts, revisions, and Apply
 
 Editor changes are session-local until you choose **Apply to workspace**. The
@@ -50,6 +55,11 @@ These handoffs preserve the Builder origin so the next page can report the
 authoring outcome. An unresolved Run data requirement remains the recommended
 outcome even if you apply a later report-only change. Starting a data run
 remains a separate user action.
+
+When a source Apply changes its aggregate computation contract, the same
+post-Apply screen immediately shows **Data refresh required**, names the
+affected source, and offers **Run data**. You do not have to continue to Export
+to discover that requirement, and the Apply action still never starts the run.
 
 ## Editors and technical detail
 

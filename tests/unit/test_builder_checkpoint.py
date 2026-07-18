@@ -259,3 +259,51 @@ def test_builder_checkpoint_requires_reconciliation_after_catalog_change(tmp_pat
         next(button for button in refreshed.button if button.label == "Discard draft").click().run()
     )
     assert not builder_checkpoint.checkpoint_path(tmp_path).exists()
+
+
+@pytest.mark.unit
+def test_clean_builder_navigation_round_trips_through_url_query(tmp_path: Path) -> None:
+    builder.ensure_minimum_workspace(tmp_path)
+
+    def app(workspace: str, initial_query_step: str) -> None:
+        import streamlit as st  # noqa: PLC0415
+
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+
+        if not st.session_state.get("qa_builder_query_seeded"):
+            st.query_params[page.BUILDER_STEP_QUERY_PARAM] = initial_query_step
+            st.session_state["qa_builder_query_seeded"] = True
+        page._builder_steps(load_context(workspace))
+        st.caption(f"URL step: {st.query_params.get(page.BUILDER_STEP_QUERY_PARAM, 'missing')}")
+
+    opened = AppTest.from_function(
+        app,
+        kwargs={"workspace": str(tmp_path), "initial_query_step": "settings"},
+    ).run()
+
+    assert not opened.exception
+    assert opened.session_state["builder_step"] == "Settings"
+    assert not builder_checkpoint.checkpoint_path(tmp_path).exists()
+
+    jump = next(item for item in opened.selectbox if item.label == "Jump to step")
+    navigated = jump.set_value("Reports / Tiles").run()
+    assert not navigated.exception
+    assert navigated.session_state["builder_step"] == "Reports / Tiles"
+    assert any(item.value == "URL step: reports" for item in navigated.caption)
+
+    reloaded = AppTest.from_function(
+        app,
+        kwargs={"workspace": str(tmp_path), "initial_query_step": "reports"},
+    ).run()
+    assert not reloaded.exception
+    assert reloaded.session_state["builder_step"] == "Reports / Tiles"
+    assert not builder_checkpoint.checkpoint_path(tmp_path).exists()
+
+    obsolete_link = AppTest.from_function(
+        app,
+        kwargs={"workspace": str(tmp_path), "initial_query_step": "removed-step"},
+    ).run()
+    assert not obsolete_link.exception
+    assert obsolete_link.session_state["builder_step"] == "Workspace Health"
+    assert any(item.value == "URL step: health" for item in obsolete_link.caption)

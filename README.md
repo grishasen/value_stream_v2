@@ -44,10 +44,14 @@ families for those sources, and broad business KPI/report coverage. See its
 ```sh
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy src
+uv run python scripts/mypy_gate.py
 uv run pytest -m "not bench and not slow"
 uv run mkdocs build --strict
 ```
+
+Mypy analyzes all source modules against an exact reviewed diagnostic baseline.
+When an intentional typing fix changes that set, review the diff and refresh it
+with `uv run python scripts/mypy_gate.py --update`.
 
 ## License
 

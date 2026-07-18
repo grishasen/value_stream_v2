@@ -562,6 +562,54 @@ def test_builder_preserves_unresolved_data_refresh_across_later_applies(
 
 
 @pytest.mark.unit
+def test_source_contract_apply_notice_surfaces_data_refresh_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = {
+        "id": "ih",
+        "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+    }
+    changed_source = {
+        **source,
+        "transforms": [
+            {
+                "kind": "derive_column",
+                "column": "HighValue",
+                "expression": {"op": "gt", "left": {"col": "Value"}, "right": 100},
+            }
+        ],
+    }
+    warnings: list[str] = []
+    links: list[tuple[str, str]] = []
+    session_state: dict[str, object] = {"builder_apply_notice": "Source applied."}
+    fake_streamlit = SimpleNamespace(
+        session_state=session_state,
+        success=lambda *_args, **_kwargs: None,
+        warning=lambda message, **_kwargs: warnings.append(str(message)),
+        link_button=lambda label, url, **_kwargs: links.append((str(label), str(url))),
+    )
+    monkeypatch.setattr(config_builder, "st", fake_streamlit)
+
+    requires_data_run = builder.builder_requires_data_run("source", source, changed_source)
+    config_builder._store_builder_apply_outcome(
+        builder.builder_apply_outcome(
+            "Interaction history",
+            source_ids=["ih"],
+            requires_data_run=requires_data_run,
+        )
+    )
+    config_builder._render_apply_notice()
+
+    assert requires_data_run
+    assert warnings == [
+        "**Data refresh required · Interaction history**\n\n"
+        "The workspace configuration is valid, but its aggregate computation contract "
+        "changed. Run ih from Data Load to publish matching aggregates."
+    ]
+    assert links == [("Run data", "/data_load?from=builder")]
+
+
+@pytest.mark.unit
 def test_builder_navigation_supports_jump_back_and_continue(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
 

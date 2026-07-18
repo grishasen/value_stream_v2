@@ -114,6 +114,27 @@ BUILDER_STEP_DEFINITIONS = (
 )
 BUILDER_STEPS = tuple(step.label for step in BUILDER_STEP_DEFINITIONS)
 BUILDER_STEP_BY_LABEL = {step.label: step for step in BUILDER_STEP_DEFINITIONS}
+BUILDER_STEP_QUERY_PARAM = "builder_step"
+BUILDER_STEP_QUERY_VALUES = dict(
+    zip(
+        BUILDER_STEPS,
+        (
+            "health",
+            "sources",
+            "processors",
+            "dimensions",
+            "metrics",
+            "reports",
+            "chat",
+            "settings",
+            "export",
+        ),
+        strict=True,
+    )
+)
+BUILDER_STEP_BY_QUERY_VALUE = {
+    query_value: step for step, query_value in BUILDER_STEP_QUERY_VALUES.items()
+}
 BUILDER_LAST_OUTCOME_KEY = "builder_last_apply_outcome"
 BUILDER_DIMENSION_PROPOSALS_KEY = "builder_dimension_pending_proposals"
 BUILDER_PENDING_TILE_DELETE_KEY = "builder_tile_delete_draft"
@@ -502,11 +523,14 @@ def _builder_steps(ctx: ValueStreamContext) -> None:
         st.session_state["builder_step"] = next_step
         current_step = next_step
     else:
-        current_step = st.session_state.get("builder_step", steps[0])
+        current_step = st.session_state.get("builder_step")
+        if current_step not in steps:
+            current_step = _builder_step_from_query_params() or steps[0]
     if current_step not in steps:
         current_step = steps[0]
         st.session_state["builder_step"] = current_step
     st.session_state["builder_step"] = current_step
+    _sync_builder_step_query_param(current_step)
     _persist_builder_checkpoint()
     if st.session_state.get("builder_step_jump") != current_step:
         st.session_state["builder_step_jump"] = current_step
@@ -574,6 +598,31 @@ def _builder_steps(ctx: ValueStreamContext) -> None:
         "Export current workspace": lambda: _export_current_workspace(ctx, save_slot),
     }
     handlers[current_step]()
+
+
+def _builder_step_from_query_params() -> str | None:
+    """Resolve the stable Builder step stored in the current page URL."""
+
+    query_params = getattr(st, "query_params", None)
+    if query_params is None:
+        return None
+    raw = query_params.get(BUILDER_STEP_QUERY_PARAM)
+    if isinstance(raw, list | tuple):
+        raw = raw[-1] if raw else None
+    if not isinstance(raw, str):
+        return None
+    return BUILDER_STEP_BY_QUERY_VALUE.get(raw.strip().casefold())
+
+
+def _sync_builder_step_query_param(step: str) -> None:
+    """Mirror navigation into the URL so a clean page reload keeps its place."""
+
+    query_value = BUILDER_STEP_QUERY_VALUES.get(step)
+    query_params = getattr(st, "query_params", None)
+    if query_value is None or query_params is None:
+        return
+    if query_params.get(BUILDER_STEP_QUERY_PARAM) != query_value:
+        query_params[BUILDER_STEP_QUERY_PARAM] = query_value
 
 
 def _set_builder_step(step: str) -> None:
@@ -935,6 +984,9 @@ def _render_apply_notice() -> None:
     notice = st.session_state.pop("builder_apply_notice", None)
     if notice:
         st.success(str(notice), icon=":material/check_circle:")
+        outcome = st.session_state.get(BUILDER_LAST_OUTCOME_KEY)
+        if isinstance(outcome, Mapping) and outcome.get("action") == "run_data":
+            _render_outcome_handoff()
 
 
 def _technical_yaml(label: str, text: str) -> None:
