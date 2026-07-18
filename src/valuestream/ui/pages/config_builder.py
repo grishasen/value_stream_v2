@@ -22,7 +22,6 @@ from valuestream.ai.settings import (
 )
 from valuestream.charts import render_chart
 from valuestream.config import model
-from valuestream.engine import run_source
 from valuestream.readers.discovery import discover
 from valuestream.readers.io import cleanup_temporaries, read
 from valuestream.ui import (
@@ -36,6 +35,14 @@ from valuestream.ui import (
 )
 from valuestream.ui.context import ValueStreamContext, catalog_counts, processors_for_source
 from valuestream.ui.data import query_tile
+from valuestream.ui.instrumentation import (
+    AuthoringEvent,
+    AuthoringOutcome,
+    AuthoringStage,
+    AuthoringWorkflow,
+    record_event,
+    start_journey,
+)
 from valuestream.ui.presentation import humanize_identifier
 from valuestream.ui.theme import (
     PLOTLY_DARK_COLORWAY,
@@ -56,28 +63,47 @@ NEW_TILE_KEY = "__new_tile_draft__"
 NEW_TILE_LABEL = "New tile draft"
 NEW_DASHBOARD_KEY = "__new_dashboard__"
 NEW_PAGE_KEY = "__new_page__"
-BUILDER_STEPS = (
-    "Workspace Health",
-    "Sources",
-    "Processors",
-    "Dimensions",
-    "Metrics",
-    "Reports / Tiles",
-    "Chat Review",
-    "Settings",
-    "Save & Export",
+
+
+@dataclass(frozen=True)
+class BuilderStepDefinition:
+    """One compact Builder navigation step and its user-facing task."""
+
+    label: str
+    phase: str
+    task: str
+
+
+BUILDER_STEP_DEFINITIONS = (
+    BuilderStepDefinition(
+        "Workspace Health", "Define", "Confirm that the current workspace is valid."
+    ),
+    BuilderStepDefinition("Sources", "Define", "Review how source files become working rows."),
+    BuilderStepDefinition(
+        "Processors", "Define", "Define the aggregate states computed for each source."
+    ),
+    BuilderStepDefinition(
+        "Dimensions", "Define", "Choose safe dimensions for filtering and breakdowns."
+    ),
+    BuilderStepDefinition("Metrics", "Model", "Create or maintain decision-ready metrics."),
+    BuilderStepDefinition("Reports / Tiles", "Report", "Place metrics into useful report views."),
+    BuilderStepDefinition(
+        "Chat Review", "Review", "Review the aggregate context available to Chat With Data."
+    ),
+    BuilderStepDefinition(
+        "Settings", "Review", "Review shared workspace defaults and report appearance."
+    ),
+    BuilderStepDefinition(
+        "Export current workspace",
+        "Finish",
+        "Choose the next useful outcome, then download catalog files if needed.",
+    ),
 )
-BUILDER_PHASES = {
-    "Workspace Health": "Define",
-    "Sources": "Define",
-    "Processors": "Define",
-    "Dimensions": "Define",
-    "Metrics": "Model",
-    "Reports / Tiles": "Report",
-    "Chat Review": "Review",
-    "Settings": "Review",
-    "Save & Export": "Export",
-}
+BUILDER_STEPS = tuple(step.label for step in BUILDER_STEP_DEFINITIONS)
+BUILDER_STEP_BY_LABEL = {step.label: step for step in BUILDER_STEP_DEFINITIONS}
+BUILDER_LAST_OUTCOME_KEY = "builder_last_apply_outcome"
+BUILDER_DIMENSION_PROPOSALS_KEY = "builder_dimension_pending_proposals"
+BUILDER_PENDING_TILE_DELETE_KEY = "builder_tile_delete_draft"
 
 
 @dataclass(frozen=True)
@@ -223,9 +249,10 @@ REPORT_LIBRARY_CHART_LABELS = {
 
 def render(ctx: ValueStreamContext) -> None:
     """Render validation-first YAML catalog builders."""
+    start_journey(st.session_state, workflow=AuthoringWorkflow.BUILDER)
     components.render_page_header(
         "Configuration Builder",
-        "Review health, shape sources and processors, author metrics and report tiles, then save or export catalog YAML.",
+        "Make one reviewable workspace change at a time, apply it safely, then open a report or refresh data.",
         status="ok" if ctx.validation.ok else "warning",
         status_label="Catalog OK" if ctx.validation.ok else "Needs review",
     )
@@ -233,111 +260,504 @@ def render(ctx: ValueStreamContext) -> None:
         if st.button("Reload catalog", icon=":material/refresh:"):
             st.rerun()
 
+    _render_apply_notice()
     _render_immediate_config_warnings(ctx)
-    # A segmented control instead of st.tabs so hidden sections (notably the
-    # full README markdown) are not rendered on every rerun.
-    st.session_state.setdefault("builder_section", "Builder")
-    section = st.segmented_control(
-        "Configuration section",
-        ["Builder", "README", "Report Inventory"],
-        key="builder_section",
-        label_visibility="collapsed",
-        help=config_help.field_help("editor.config_section"),
-    )
-    section = section or "Builder"
-    if section == "README":
-        _readme_tab()
-    elif section == "Report Inventory":
-        _report_inventory_tab(ctx)
-    else:
-        _builder_steps(ctx)
+    with st.expander("How this workflow works", expanded=False, icon=":material/help:"):
+        st.markdown(
+            "1. Edit one object in the current step.\n"
+            "2. Review the draft revision and apply it to the workspace.\n"
+            "3. Open a report immediately, or use Data Load when aggregate data must be refreshed."
+        )
+        st.caption(
+            "YAML remains the source of behavior. Exact generated definitions stay available "
+            "under Technical details."
+        )
+    _builder_steps(ctx)
 
 
 def _builder_steps(ctx: ValueStreamContext) -> None:
     steps = list(BUILDER_STEPS)
-    picker_key = "builder_step_picker"
     next_step = st.session_state.pop("builder_next_step", None)
     if next_step in steps:
         st.session_state["builder_step"] = next_step
-        st.session_state[picker_key] = next_step
         current_step = next_step
-    elif st.session_state.get(picker_key) in steps:
-        current_step = st.session_state[picker_key]
     else:
         current_step = st.session_state.get("builder_step", steps[0])
     if current_step not in steps:
         current_step = steps[0]
         st.session_state["builder_step"] = current_step
-    if st.session_state.get(picker_key) not in steps:
-        st.session_state[picker_key] = current_step
-    with (
-        components.card(),
-        st.container(
-            horizontal=True,
-            horizontal_alignment="distribute",
-            vertical_alignment="center",
-            gap="xsmall",
-        ),
-    ):
-        step = st.segmented_control(
-            "Builder step",
-            steps,
-            key=picker_key,
-            label_visibility="collapsed",
-            help=config_help.field_help("editor.builder_step"),
+    st.session_state["builder_step"] = current_step
+    if st.session_state.get("builder_step_jump") != current_step:
+        st.session_state["builder_step_jump"] = current_step
+
+    index = steps.index(current_step)
+    definition = BUILDER_STEP_BY_LABEL[current_step]
+    with components.card():
+        task_col, jump_col, action_col = st.columns([0.58, 0.22, 0.20], vertical_alignment="center")
+        with task_col:
+            st.caption(f"Step {index + 1} of {len(steps)} · {definition.phase}")
+            st.write(f"### {definition.label}")
+            st.caption(definition.task)
+        with jump_col:
+            st.selectbox(
+                "Jump to step",
+                steps,
+                key="builder_step_jump",
+                on_change=_apply_builder_jump,
+            )
+        with action_col:
+            save_slot = st.empty()
+            # The active editor fills this placeholder after it computes its
+            # canonical dirty state. The initial write supports fragments.
+            save_slot.caption("")
+        st.progress((index + 1) / len(steps), text=f"{definition.phase} · {definition.label}")
+        registry = st.session_state.get(builder.BUILDER_DRAFTS_KEY, {})
+        pending_count = len(registry) if isinstance(registry, dict) else 0
+        if pending_count:
+            st.caption(
+                f"{pending_count} unapplied draft{'s' if pending_count != 1 else ''} preserved "
+                "while you move between steps."
+            )
+        back_col, task_nav_col = st.columns([0.2, 0.8], vertical_alignment="center")
+        back_col.button(
+            "Back",
+            icon=":material/arrow_back:",
+            disabled=index == 0,
+            width="stretch",
+            key="builder_back",
+            on_click=_set_builder_step,
+            args=(steps[max(index - 1, 0)],),
         )
-        save_slot = st.empty()
-        # An outside container needs one initial write before a fragment can
-        # redraw its save action here during fragment-only reruns.
-        save_slot.caption("")
-    st.session_state["builder_step"] = step
+        task_nav_col.caption(
+            "Jump when you know where to go; the primary Continue action keeps the guided order."
+        )
+    draft_slot = st.empty()
+    # Claim the cross-fragment draft region on the full app run. Some editor
+    # modes return before rendering a draft, then populate it on a fragment
+    # rerun after the user changes mode.
+    draft_slot.caption("")
     handlers = {
         "Workspace Health": lambda: _health(ctx, save_slot),
-        "Sources": lambda: _source_builder(ctx, save_slot),
-        "Processors": lambda: _processor_builder(ctx, save_slot),
-        "Dimensions": lambda: _dimensions_builder(ctx, save_slot),
-        "Metrics": lambda: _metric_builder(ctx.workspace, ctx.catalog, save_slot),
-        "Reports / Tiles": lambda: _tile_builder(ctx.workspace, ctx.catalog, save_slot),
-        "Chat Review": lambda: _chat_review(ctx, save_slot),
-        "Settings": lambda: _settings_builder(ctx, save_slot),
-        "Save & Export": lambda: _save_export(ctx, save_slot),
+        "Sources": lambda: _source_builder(ctx, save_slot, draft_slot),
+        "Processors": lambda: _processor_builder(ctx, save_slot, draft_slot),
+        "Dimensions": lambda: _dimensions_builder(ctx, save_slot, draft_slot),
+        "Metrics": lambda: _metric_builder(ctx.workspace, ctx.catalog, save_slot, draft_slot),
+        "Reports / Tiles": lambda: _tile_builder(ctx.workspace, ctx.catalog, save_slot, draft_slot),
+        "Chat Review": lambda: _chat_review(ctx, save_slot, draft_slot),
+        "Settings": lambda: _settings_builder(ctx, save_slot, draft_slot),
+        "Export current workspace": lambda: _export_current_workspace(ctx, save_slot),
     }
-    handlers.get(step, handlers["Save & Export"])()
+    handlers[current_step]()
 
 
 def _set_builder_step(step: str) -> None:
     """Synchronize contextual Builder navigation before Streamlit reruns."""
     st.session_state["builder_step"] = step
-    st.session_state["builder_step_picker"] = step
+    st.session_state["builder_step_jump"] = step
 
 
-def _readme_tab() -> None:
-    path = Path(__file__).resolve().parents[4] / "README.md"
-    if not path.exists():
-        st.warning("README.md was not found.")
+def _apply_builder_jump() -> None:
+    """Move to the selected outline step on the widget-triggered rerun."""
+    selected = st.session_state.get("builder_step_jump")
+    if selected in BUILDER_STEPS:
+        st.session_state["builder_step"] = selected
+
+
+def _next_builder_step() -> str | None:
+    current = st.session_state.get("builder_step", BUILDER_STEPS[0])
+    if current not in BUILDER_STEPS:
+        return BUILDER_STEPS[0]
+    index = BUILDER_STEPS.index(current)
+    return BUILDER_STEPS[index + 1] if index + 1 < len(BUILDER_STEPS) else None
+
+
+def _render_continue_primary(save_slot: Any) -> None:
+    """Render the current step's primary Continue action."""
+    next_step = _next_builder_step()
+    save_slot.empty()
+    save_slot.button(
+        "Continue",
+        type="primary",
+        icon=":material/arrow_forward:",
+        disabled=next_step is None,
+        width="stretch",
+        key=f"builder_primary_continue_{st.session_state.get('builder_step', 'step')}",
+        on_click=_set_builder_step,
+        args=(next_step or BUILDER_STEPS[-1],),
+    )
+
+
+class _ApplyActionSlot:
+    """Placeholder adapter that gives shared review flows Builder vocabulary."""
+
+    def __init__(self, slot: Any) -> None:
+        self._slot = slot
+
+    def empty(self) -> Any:
+        return self._slot.empty()
+
+    def button(self, label: str, *args: Any, **kwargs: Any) -> Any:
+        del label
+        kwargs["icon"] = ":material/publish:"
+        kwargs["width"] = "stretch"
+        return self._slot.button("Apply to workspace", *args, **kwargs)
+
+
+def _claim_fragment_action_slots(save_slot: Any, draft_slot: Any) -> None:
+    """Reserve external action regions during every fragment's initial run."""
+
+    save_slot.empty()
+    draft_slot.empty()
+
+
+def _render_editor_primary_action(
+    *,
+    save_slot: Any,
+    draft_slot: Any,
+    status: builder.BuilderDraftStatus,
+    valid: bool,
+    widget_prefixes: tuple[str, ...],
+    help_text: str,
+) -> bool:
+    """Render one canonical draft status and the single active apply action."""
+    registered = builder.registered_builder_draft(st.session_state, status.key)
+    draft_slot.empty()
+    if not status.dirty:
+        _render_continue_primary(save_slot)
+        if registered is not None:
+            _render_registered_draft(
+                draft_slot=draft_slot,
+                status=status,
+                registered=registered,
+                widget_prefixes=widget_prefixes,
+            )
+        return False
+
+    builder.update_builder_draft_registry(
+        st.session_state,
+        status,
+        widget_prefixes=widget_prefixes,
+    )
+    if valid:
+        _record_builder_valid_proposal()
+    restored = st.session_state.pop("builder_restored_draft_key", None) == status.key
+
+    with draft_slot.container(border=True):
+        message_col, discard_col = st.columns([0.8, 0.2], vertical_alignment="center")
+        with message_col:
+            st.write(f"**Editing draft · revision `{status.revision}`**")
+            st.caption(
+                ("Restored from this session. " if restored else "Stored for this session. ")
+                + ("Ready to apply." if valid else "Resolve the highlighted issue before applying.")
+            )
+        discard_col.button(
+            "Discard draft",
+            icon=":material/delete_sweep:",
+            width="stretch",
+            key=f"builder_discard_{builder.widget_key_fragment(status.key)}",
+            on_click=_discard_registered_builder_draft,
+            args=(status.key, widget_prefixes),
+        )
+
+    save_slot.empty()
+    apply_requested = save_slot.button(
+        "Apply to workspace",
+        type="primary",
+        icon=":material/publish:",
+        disabled=not valid,
+        help=help_text,
+        width="stretch",
+        key=f"builder_apply_{builder.widget_key_fragment(status.key)}",
+    )
+    if apply_requested:
+        _record_builder_reviewed()
+    return apply_requested
+
+
+def _render_registered_draft(
+    *,
+    draft_slot: Any,
+    status: builder.BuilderDraftStatus,
+    registered: Mapping[str, Any],
+    widget_prefixes: tuple[str, ...],
+) -> None:
+    """Offer an explicit restore when Streamlit cleaned step-local widget state."""
+    revision = str(registered.get("revision", "saved") or "saved")
+    same_baseline = registered.get("baseline_hash") == status.baseline_hash
+    widget_state = registered.get("widget_state")
+    can_restore = same_baseline and isinstance(widget_state, Mapping) and bool(widget_state)
+    with draft_slot.container(border=True):
+        message_col, restore_col, discard_col = st.columns(
+            [0.62, 0.19, 0.19], vertical_alignment="center"
+        )
+        with message_col:
+            st.write(f"**Unapplied draft available · revision `{revision}`**")
+            st.caption(
+                "Restore the exact session draft before applying it."
+                if same_baseline
+                else "The persisted object changed after this draft was stored. Discard it to continue."
+            )
+        restore_col.button(
+            "Restore draft",
+            icon=":material/restore:",
+            disabled=not can_restore,
+            width="stretch",
+            key=f"builder_restore_{builder.widget_key_fragment(status.key)}",
+            on_click=_restore_registered_builder_draft,
+            args=(status.key,),
+        )
+        discard_col.button(
+            "Discard draft",
+            icon=":material/delete_sweep:",
+            width="stretch",
+            key=f"builder_discard_available_{builder.widget_key_fragment(status.key)}",
+            on_click=_discard_registered_builder_draft,
+            args=(status.key, widget_prefixes),
+        )
+
+
+def _restore_registered_builder_draft(key: str) -> None:
+    """Restore shadow widget values in the callback prefix before rerendering."""
+    if builder.restore_builder_draft(st.session_state, key):
+        st.session_state["builder_restored_draft_key"] = key
+
+
+def _discard_registered_builder_draft(
+    key: str,
+    widget_prefixes: tuple[str, ...],
+) -> None:
+    """Discard a registered proposal before the editor widgets rerender."""
+    builder.discard_builder_draft(
+        st.session_state,
+        key,
+        widget_prefixes=widget_prefixes,
+    )
+
+
+def _complete_builder_apply(
+    *,
+    status: builder.BuilderDraftStatus,
+    scope: str,
+    label: str,
+    source_ids: list[str] | tuple[str, ...] = (),
+    message: str,
+) -> None:
+    """Record a safe outcome and refresh the catalog after a successful apply."""
+    requires_data_run = builder.builder_requires_data_run(
+        scope,
+        status.baseline_payload,
+        status.draft_payload,
+    )
+    outcome = builder.builder_apply_outcome(
+        label,
+        source_ids=source_ids,
+        requires_data_run=requires_data_run,
+    )
+    _store_builder_apply_outcome(outcome)
+    _record_builder_applied(outcome)
+    raw = st.session_state.get(builder.BUILDER_DRAFTS_KEY)
+    registry = dict(raw) if isinstance(raw, dict) else {}
+    registry.pop(status.key, None)
+    st.session_state[builder.BUILDER_DRAFTS_KEY] = registry
+    st.session_state["builder_apply_notice"] = message
+    st.rerun(scope="app")
+
+
+def _record_builder_valid_proposal() -> None:
+    """Emit the first structurally ready Builder proposal without draft details."""
+    record_event(
+        st.session_state,
+        event=AuthoringEvent.VALID_PROPOSAL,
+        workflow=AuthoringWorkflow.BUILDER,
+        stage=AuthoringStage.DRAFT,
+        outcome=AuthoringOutcome.SUCCESS,
+        once=True,
+    )
+
+
+def _record_builder_reviewed() -> None:
+    """Record the explicit review decision represented by the apply click."""
+    record_event(
+        st.session_state,
+        event=AuthoringEvent.REVIEWED,
+        workflow=AuthoringWorkflow.BUILDER,
+        stage=AuthoringStage.REVIEW,
+        outcome=AuthoringOutcome.SUCCESS,
+        once=True,
+    )
+
+
+def _record_builder_apply_failed(exc: Exception) -> None:
+    """Emit an allowlisted apply failure without exception or catalog payloads."""
+    if isinstance(exc, TimeoutError):
+        outcome = AuthoringOutcome.TIMEOUT
+    elif isinstance(exc, (PermissionError, ValueError)):
+        outcome = AuthoringOutcome.BLOCKED
+    else:
+        outcome = AuthoringOutcome.ERROR
+    record_event(
+        st.session_state,
+        event=AuthoringEvent.FAILED,
+        workflow=AuthoringWorkflow.BUILDER,
+        stage=AuthoringStage.APPLY,
+        outcome=outcome,
+    )
+
+
+def _record_builder_applied(outcome: builder.BuilderApplyOutcome) -> None:
+    """Emit the bounded Builder apply event without catalog or sample details."""
+    record_event(
+        st.session_state,
+        event=AuthoringEvent.APPLIED,
+        workflow=AuthoringWorkflow.BUILDER,
+        stage=AuthoringStage.APPLY,
+        outcome=AuthoringOutcome.SUCCESS,
+        requires_data_run=outcome.requires_data_run,
+    )
+
+
+def _store_builder_apply_outcome(outcome: builder.BuilderApplyOutcome) -> None:
+    """Keep an unresolved data-refresh requirement ahead of later report-only work."""
+    previous = st.session_state.get(BUILDER_LAST_OUTCOME_KEY)
+    if isinstance(previous, Mapping) and previous.get("action") == "run_data":
+        if not outcome.requires_data_run:
+            return
+        previous_sources = previous.get("source_ids")
+        previous_source_ids = previous_sources if isinstance(previous_sources, list | tuple) else ()
+        source_ids = {
+            *outcome.source_ids,
+            *(str(source_id) for source_id in previous_source_ids),
+        }
+        outcome = builder.builder_apply_outcome(
+            "Workspace changes",
+            source_ids=source_ids,
+            requires_data_run=True,
+        )
+    st.session_state[BUILDER_LAST_OUTCOME_KEY] = asdict(outcome)
+
+
+def _render_apply_notice() -> None:
+    notice = st.session_state.pop("builder_apply_notice", None)
+    if notice:
+        st.success(str(notice), icon=":material/check_circle:")
+
+
+def _technical_yaml(label: str, text: str) -> None:
+    """Keep exact YAML and expression AST available without leading with it."""
+    with st.expander(f"Technical details · {label}", expanded=False):
+        st.code(text or "{}", language="yaml")
+
+
+def _render_outcome_handoff() -> None:
+    """Render the next valuable action after the most recent apply."""
+    raw = st.session_state.get(BUILDER_LAST_OUTCOME_KEY)
+    if not isinstance(raw, Mapping):
+        st.info("Apply a configuration change to receive a report or data-refresh recommendation.")
         return
-    st.markdown(path.read_text(encoding="utf-8"))
+    label = str(raw.get("label", "Configuration") or "Configuration")
+    action = str(raw.get("action", "open_report") or "open_report")
+    message = str(raw.get("message", "") or "")
+    if action == "run_data":
+        st.warning(f"**Data refresh required · {label}**\n\n{message}")
+        st.link_button(
+            "Run data",
+            "/data_load?from=builder",
+            icon=":material/database_upload:",
+            type="primary",
+            width="stretch",
+        )
+        return
+    st.success(f"**Report ready · {label}**\n\n{message}")
+    st.link_button(
+        "Open report",
+        "/reports?from=builder",
+        icon=":material/area_chart:",
+        type="primary",
+        width="stretch",
+    )
 
 
-def _report_inventory_tab(ctx: ValueStreamContext) -> None:
-    rows = []
-    for dashboard in ctx.catalog.dashboards.dashboards:
+def _dimension_pending_proposals() -> dict[str, dict[str, Any]]:
+    raw = st.session_state.get(BUILDER_DIMENSION_PROPOSALS_KEY)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _stage_dimension_proposal(
+    key: str,
+    processor_def: dict[str, Any],
+    *,
+    metric_defs: Mapping[str, dict[str, Any]] | None = None,
+) -> None:
+    proposals = _dimension_pending_proposals()
+    proposals[key] = {
+        "processor": processor_def,
+        "metrics": dict(metric_defs or {}),
+    }
+    st.session_state[BUILDER_DIMENSION_PROPOSALS_KEY] = proposals
+
+
+def _report_inventory_tab(catalog: model.Catalog) -> None:
+    rows = _report_inventory_rows(catalog)
+    if not rows:
+        st.info("No report tiles configured yet.")
+        return
+    components.dataframe_with_search(
+        rows,
+        key="builder_report_inventory",
+        search_columns=["Dashboard", "Page", "Report", "Metric", "Chart"],
+        height=520,
+        column_order=["Dashboard", "Page", "Report", "Metric", "Chart"],
+    )
+    if st.toggle(
+        "Show technical IDs",
+        value=False,
+        key="builder_report_inventory_technical_ids",
+    ):
+        st.dataframe(
+            _report_inventory_rows(catalog, technical=True),
+            hide_index=True,
+            width="stretch",
+            height=360,
+        )
+
+
+def _report_inventory_rows(
+    catalog: model.Catalog,
+    *,
+    technical: bool = False,
+) -> list[dict[str, str]]:
+    """Return searchable report inventory rows with human labels first."""
+    rows: list[dict[str, str]] = []
+    for dashboard in catalog.dashboards.dashboards:
         for page in dashboard.pages:
             for tile in page.tiles:
+                if technical:
+                    rows.append(
+                        {
+                            "Dashboard ID": dashboard.id,
+                            "Page ID": page.id,
+                            "Tile ID": tile.id,
+                            "Metric ID": tile.metric,
+                            "Chart kind": tile.chart,
+                        }
+                    )
+                    continue
+                metric = catalog.metrics.metrics.get(tile.metric)
+                display_label = (
+                    str(metric.display.label or "")
+                    if metric is not None and metric.display is not None
+                    else ""
+                )
                 rows.append(
                     {
-                        "Dashboard": dashboard.id,
-                        "Page": page.id,
-                        "Tile": tile.id,
-                        "Title": tile.title,
-                        "Metric": tile.metric,
-                        "Chart": tile.chart,
+                        "Dashboard": dashboard.title or humanize_identifier(dashboard.id),
+                        "Page": page.title or humanize_identifier(page.id),
+                        "Report": tile.title or humanize_identifier(tile.id),
+                        "Metric": display_label or humanize_identifier(tile.metric),
+                        "Chart": humanize_identifier(tile.chart),
                     }
                 )
-    if not rows:
-        st.info("No dashboard tiles configured.")
-        return
-    st.dataframe(rows, hide_index=True, width="stretch", height=520)
+    return rows
 
 
 def _render_immediate_config_warnings(ctx: ValueStreamContext) -> None:
@@ -374,15 +794,9 @@ def _funnel_stage_warnings(catalog: model.Catalog) -> list[str]:
 
 
 def _health(ctx: ValueStreamContext, save_slot: Any) -> None:
-    components.editor_save_bar(
-        key="builder_health_save",
-        caption="Workspace Health is read-only; there are no changes to save on this step.",
-        disabled=True,
-        placeholder=save_slot,
-    )
-    components.metric_strip(
+    _render_continue_primary(save_slot)
+    components.key_value_strip(
         [{"label": key, "value": value} for key, value in catalog_counts(ctx).items()],
-        key="builder_health",
     )
     components.render_validation_summary(ctx.validation.issues, ok=ctx.validation.ok)
 
@@ -430,6 +844,8 @@ def _render_default_values_editor(
         ["Field", "Default Value", "Enabled"],
         builder.blank_default_row,
     )
+    if default_frame.is_empty():
+        st.info("No default values yet — choose a field above or add a row below.")
     edited_defaults = st.data_editor(
         default_frame,
         num_rows="dynamic",
@@ -462,6 +878,8 @@ def _render_filter_rows_editor(
     *,
     value_width: str = "large",
 ) -> None:
+    if getattr(filter_frame, "is_empty", lambda: False)():
+        st.info("No filters yet — add a row below when the source needs one.")
     edited_filters = st.data_editor(
         filter_frame,
         num_rows="dynamic",
@@ -494,8 +912,7 @@ def _render_filter_rows_editor(
     st.session_state[rows_key] = builder.normalize_editor_rows(edited_filters)
     try:
         compiled_filter = builder.compile_filter_rows(st.session_state[rows_key])
-        st.caption("Compiled AST")
-        st.code(builder.expression_yaml(compiled_filter) or "{}", language="yaml")
+        _technical_yaml("Compiled filter AST", builder.expression_yaml(compiled_filter) or "{}")
     except Exception as exc:
         logger.exception("Failed to compile filter rows: editor_key=%s", editor_key)
         st.error(str(exc))
@@ -507,6 +924,8 @@ def _render_calculated_rows_editor(
     editor_key: str,
     calculation_frame: Any,
 ) -> None:
+    if getattr(calculation_frame, "is_empty", lambda: False)():
+        st.info("No calculated fields yet — add a row below when you need one.")
     edited_calcs = st.data_editor(
         calculation_frame,
         num_rows="dynamic",
@@ -547,13 +966,12 @@ def _render_calculated_rows_editor(
     )
     st.session_state[calc_key] = builder.normalize_editor_rows(edited_calcs)
     try:
-        st.caption("Generated calculated transforms")
-        st.code(
+        _technical_yaml(
+            "Generated calculated transforms",
             yaml.safe_dump(
                 {"transforms": builder.build_derive_column_transforms(st.session_state[calc_key])},
                 sort_keys=False,
             ),
-            language="yaml",
         )
     except Exception as exc:
         logger.exception("Failed to build calculated field transforms: editor_key=%s", editor_key)
@@ -657,6 +1075,7 @@ def _delete_source_dialog(ctx: ValueStreamContext, source_id: str) -> None:
         try:
             deleted = builder.delete_source_cascade(ctx.workspace, plan.source_id)
         except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
             logger.exception("Failed to delete source cascade: source=%s", plan.source_id)
             st.error(str(exc))
             return
@@ -668,19 +1087,19 @@ def _delete_source_dialog(ctx: ValueStreamContext, source_id: str) -> None:
 
 
 @st.fragment()
-def _source_builder(ctx: ValueStreamContext, save_slot: Any) -> None:  # noqa: PLR0912, PLR0915
-    components.editor_save_bar(
-        key="builder_source_save_pending",
-        caption="Complete the source definition below to enable saving.",
-        disabled=True,
-        placeholder=save_slot,
-    )
+def _source_builder(  # noqa: PLR0912, PLR0915
+    ctx: ValueStreamContext,
+    save_slot: Any,
+    draft_slot: Any,
+) -> None:
+    _claim_fragment_action_slots(save_slot, draft_slot)
     delete_notice = st.session_state.pop("builder_source_delete_notice", None)
     if delete_notice:
         st.session_state.pop("builder_source_select", None)
         st.toast(str(delete_notice), icon=":material/delete_sweep:")
     if not ctx.catalog.pipelines.sources:
         st.info("No sources configured.")
+        _render_continue_primary(save_slot)
         return
 
     source_col, delete_col = st.columns([8, 2], vertical_alignment="bottom")
@@ -688,7 +1107,7 @@ def _source_builder(ctx: ValueStreamContext, save_slot: Any) -> None:  # noqa: P
         source = st.selectbox(
             "Source",
             ctx.catalog.pipelines.sources,
-            format_func=lambda item: f"{item.id} ({item.reader.kind})",
+            format_func=_source_choice_label,
             key="builder_source_select",
             help=config_help.field_help("source.selector"),
         )
@@ -864,7 +1283,7 @@ def _source_builder(ctx: ValueStreamContext, save_slot: Any) -> None:  # noqa: P
         if mode == "Rules":
             rows_key = f"builder_source_filter_rows_{source.id}"
             if rows_key not in st.session_state:
-                st.session_state[rows_key] = filter_rows or [builder.blank_filter_row()]
+                st.session_state[rows_key] = filter_rows or []
             filter_frame = builder.editor_frame(
                 st.session_state[rows_key],
                 ["Field", "Operator", "Value", "Enabled"],
@@ -957,39 +1376,51 @@ def _source_builder(ctx: ValueStreamContext, save_slot: Any) -> None:  # noqa: P
         filter_expression=compiled_filter,
         calculated_rows=st.session_state[calc_key] if calculated_rows_valid else [],
     )
-    st.write("### Generated Source Transforms")
-    st.code(
+    _technical_yaml(
+        "Generated source transforms",
         yaml.safe_dump(
             {"transforms": source_def.get("transforms", [])},
             sort_keys=False,
         ),
-        language="yaml",
     )
-    st.write("### Generated YAML")
-    st.code(yaml.safe_dump({"sources": [source_def]}, sort_keys=False), language="yaml")
-    if components.editor_save_bar(
-        key="builder_source_save",
-        caption=f"Save `{source.id}` directly to the active workspace catalog.",
-        disabled=not source_id.strip() or not calculated_rows_valid,
-        placeholder=save_slot,
+    _technical_yaml(
+        "Generated source YAML",
+        yaml.safe_dump({"sources": [source_def]}, sort_keys=False),
+    )
+    draft_status = builder.builder_draft_status(
+        f"source:{source.id}",
+        builder.source_to_dict(source),
+        source_def,
+    )
+    if _render_editor_primary_action(
+        save_slot=save_slot,
+        draft_slot=draft_slot,
+        status=draft_status,
+        valid=bool(source_id.strip()) and calculated_rows_valid,
+        widget_prefixes=("builder_source_",),
+        help_text=f"Validate and apply source {source.id!r} to the active workspace.",
     ):
         try:
             with builder.validated_catalog_transaction(ctx.workspace):
                 builder.write_source_definition(ctx.workspace, source_def)
-            _show_validation_after_write(ctx.workspace, "Source written.")
+            _complete_builder_apply(
+                status=draft_status,
+                scope="source",
+                label=description.strip() or humanize_identifier(source_id.strip()),
+                source_ids=[source_id.strip()],
+                message="Source applied to the workspace.",
+            )
         except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
             logger.exception("Failed to write source definition: source=%s", source_id.strip())
             st.error(str(exc))
 
 
 @st.fragment()
-def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
-    components.editor_save_bar(
-        key="builder_dimensions_save_pending",
-        caption="Select a processor below to enable saving.",
-        disabled=True,
-        placeholder=save_slot,
-    )
+def _dimensions_builder(  # noqa: PLR0912, PLR0915
+    ctx: ValueStreamContext, save_slot: Any, draft_slot: Any
+) -> None:
+    _claim_fragment_action_slots(save_slot, draft_slot)
     with components.bordered_panel(
         "Dimension Coverage", "Review and update processor group-by fields."
     ):
@@ -1007,11 +1438,12 @@ def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
         st.dataframe(rows, hide_index=True, width="stretch", height=280)
 
     if not ctx.catalog.processors.processors:
+        _render_continue_primary(save_slot)
         return
     processor = st.selectbox(
         "Processor To Edit",
         ctx.catalog.processors.processors,
-        format_func=lambda item: f"{item.id} ({item.kind})",
+        format_func=_processor_choice_label_human,
         key="builder_dimension_processor",
         help=config_help.field_help("dimension.processor"),
     )
@@ -1051,48 +1483,63 @@ def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
     processor_def = builder.processor_to_dict(processor)
     processor_def["dimensions"] = selected
     processor_def.pop("group_by", None)
-    st.code(yaml.safe_dump({"processors": [processor_def]}, sort_keys=False), language="yaml")
-    if components.editor_save_bar(
-        key="builder_dimensions_save",
-        caption=f"Save the selected dimensions for processor `{processor.id}`.",
-        disabled=not processor.id,
-        placeholder=save_slot,
+    pending_proposals = _dimension_pending_proposals()
+    if pending_proposals:
+        st.info(
+            f"{len(pending_proposals)} additional exploration proposal"
+            f"{'s are' if len(pending_proposals) != 1 else ' is'} included in this draft."
+        )
+    _technical_yaml(
+        "Generated dimension YAML",
+        yaml.safe_dump({"processors": [processor_def]}, sort_keys=False),
+    )
+    draft_status = builder.builder_draft_status(
+        f"dimensions:{processor.id}",
+        {"processor": builder.processor_to_dict(processor), "proposals": {}},
+        {"processor": processor_def, "proposals": pending_proposals},
+    )
+    if _render_editor_primary_action(
+        save_slot=save_slot,
+        draft_slot=draft_slot,
+        status=draft_status,
+        valid=bool(processor.id),
+        widget_prefixes=("builder_dimension_", "builder_exploration_", "builder_sketch_"),
+        help_text=(
+            "Validate and apply the selected dimensions and staged exploration definitions. "
+            "Data is not run from this action."
+        ),
     ):
         try:
             with builder.validated_catalog_transaction(ctx.workspace):
                 builder.write_processor_definition(ctx.workspace, processor_def)
-            _show_validation_after_write(
-                ctx.workspace,
-                "Processor dimensions written. Re-run the source to materialize new aggregates.",
+                for proposal in pending_proposals.values():
+                    staged_processor = proposal.get("processor")
+                    if isinstance(staged_processor, dict):
+                        builder.write_processor_definition(ctx.workspace, staged_processor)
+                    staged_metrics = proposal.get("metrics")
+                    if isinstance(staged_metrics, Mapping):
+                        for metric_name, metric_def in staged_metrics.items():
+                            if isinstance(metric_def, dict):
+                                builder.write_metric_definition(
+                                    ctx.workspace, str(metric_name), metric_def
+                                )
+            source_ids = [processor.source]
+            source_ids.extend(
+                str(proposal.get("processor", {}).get("source", ""))
+                for proposal in pending_proposals.values()
+                if isinstance(proposal.get("processor"), Mapping)
+            )
+            st.session_state.pop(BUILDER_DIMENSION_PROPOSALS_KEY, None)
+            _complete_builder_apply(
+                status=draft_status,
+                scope="dimensions",
+                label=processor.description or humanize_identifier(processor.id),
+                source_ids=source_ids,
+                message="Dimension draft applied. Use Data Load to refresh affected aggregates.",
             )
         except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
             logger.exception("Failed to write processor dimensions: processor=%s", processor.id)
-            st.error(str(exc))
-    if st.button(
-        "Save & Run Source",
-        icon=":material/play_arrow:",
-        disabled=not processor.id,
-        help="Write the processor dimensions, validate the catalog, then run this source so new aggregate files are materialized.",
-    ):
-        try:
-            with builder.validated_catalog_transaction(ctx.workspace):
-                builder.write_processor_definition(ctx.workspace, processor_def)
-            with st.status("Running source", expanded=True) as status:
-                chunk_progress = components.chunk_progress_indicator(include_source=False)
-                result = run_source(
-                    ctx.workspace,
-                    processor.source,
-                    progress_callback=chunk_progress,
-                )
-                status.write(
-                    f"{result.chunks_ok} ok, {result.chunks_skipped} skipped, {result.chunks_failed} failed."
-                )
-                status.update(label=f"Source run {result.status}", state="complete")
-            st.success(
-                "Processor dimensions written and source run finished. Reload the catalog to inspect the new aggregate coverage."
-            )
-        except Exception as exc:  # pragma: no cover - Streamlit display path
-            logger.exception("Failed to apply and run source: processor=%s", processor.id)
             st.error(str(exc))
     if source is not None:
         _temporary_exploration_panel(
@@ -1136,19 +1583,22 @@ def _dimension_profile_panel(
         profile_frame = dimension_profile.profile_frame(rows).rename(
             {"Current Usage": "Current Processors"}
         )
-        metric_cols = st.columns(4)
-        metric_cols[0].metric("Profiled fields", len(rows))
-        metric_cols[1].metric(
-            "Recommended",
-            sum(row.recommendation == "Recommended" for row in rows),
-        )
-        metric_cols[2].metric(
-            "Needs review",
-            sum(row.recommendation == "Review" for row in rows),
-        )
-        metric_cols[3].metric(
-            "Already active",
-            sum(row.recommendation == "Active" for row in rows),
+        components.key_value_strip(
+            [
+                {"label": "Profiled fields", "value": len(rows)},
+                {
+                    "label": "Recommended",
+                    "value": sum(row.recommendation == "Recommended" for row in rows),
+                },
+                {
+                    "label": "Needs review",
+                    "value": sum(row.recommendation == "Review" for row in rows),
+                },
+                {
+                    "label": "Already active",
+                    "value": sum(row.recommendation == "Active" for row in rows),
+                },
+            ]
         )
         filter_choice = st.segmented_control(
             "Profile Filter",
@@ -1249,21 +1699,29 @@ def _dimension_promotion_panel(
             [str(value) for value in st.session_state.get(group_key, processor.group_by)]
         )
         profile_by_field = {row.field: row for row in rows}
-        candidates = [
-            field
-            for field in options
-            if field not in current and profile_by_field.get(field) is not None
-        ]
+        candidates = _dimension_promotion_candidates(options, current, rows)
         if not candidates:
             st.info("Every profiled field is already selected for this processor.")
             return
+        default_index = (
+            0
+            if profile_by_field[candidates[0]].recommendation in {"Recommended", "Review"}
+            else None
+        )
         field = st.selectbox(
             "Field To Promote",
             candidates,
+            index=default_index,
+            placeholder="Choose a reviewed field",
             format_func=lambda value: f"Add {value} as a filterable dimension",
             key=f"builder_dimension_promote_field_{processor.id}",
             help=config_help.field_help("dimension.promote_field"),
         )
+        if field is None:
+            st.info(
+                "Only fields marked Avoid remain. Choose one explicitly after reviewing its risk."
+            )
+            return
         row = profile_by_field[field]
         st.write(
             {
@@ -1284,32 +1742,45 @@ def _dimension_promotion_panel(
             )
         if sample is not None and not sample.is_empty():
             preview = dimension_profile.aggregate_size_preview(sample, current, [field])
-            metrics = st.columns(4)
-            metrics[0].metric("Current groups", preview.current_rows)
-            metrics[1].metric("Projected groups", preview.projected_rows)
-            metrics[2].metric("Added groups", preview.added_rows)
-            metrics[3].metric("Expansion", f"{preview.expansion_factor:.1f}x")
+            components.key_value_strip(
+                [
+                    {"label": "Current groups", "value": preview.current_rows},
+                    {"label": "Projected groups", "value": preview.projected_rows},
+                    {"label": "Added groups", "value": preview.added_rows},
+                    {"label": "Expansion", "value": f"{preview.expansion_factor:.1f}x"},
+                ]
+            )
         next_dimensions = builder.dedupe([*current, field])
-        add_col, run_col = st.columns(2)
-        if add_col.button(
+        if st.button(
             f"Add {field} as filterable dimension",
             icon=":material/add:",
             key=f"builder_dimension_promote_add_{processor.id}",
         ):
             st.session_state[group_key] = next_dimensions
             st.rerun()
-        if run_col.button(
-            f"Add {field} & Run Source",
-            icon=":material/play_arrow:",
-            key=f"builder_dimension_promote_run_{processor.id}",
-        ):
-            processor_def = _processor_def_with_dimensions(processor, next_dimensions)
-            _write_processor_and_run_source(
-                ctx,
-                source.id,
-                processor_def,
-                f"{field} added as a filterable dimension.",
-            )
+
+
+def _dimension_promotion_candidates(
+    options: list[str],
+    current: list[str],
+    rows: list[dimension_profile.DimensionProfileRow],
+) -> list[str]:
+    """Rank safe dimension candidates first without preselecting Avoid fields."""
+    profile_by_field = {row.field: row for row in rows}
+    rank = {"Recommended": 0, "Review": 1, "Avoid": 2, "Active": 3}
+    candidates = [
+        field
+        for field in options
+        if field not in current and profile_by_field.get(field) is not None
+    ]
+    return sorted(
+        candidates,
+        key=lambda field: (
+            rank.get(profile_by_field[field].recommendation, 4),
+            field.casefold(),
+            field,
+        ),
+    )
 
 
 def _temporary_exploration_panel(
@@ -1358,10 +1829,13 @@ def _temporary_exploration_panel(
         )
         if sample is not None and not sample.is_empty() and explore_dims:
             preview = dimension_profile.aggregate_size_preview(sample, [], explore_dims)
-            metrics = st.columns(3)
-            metrics[0].metric("Exploration groups", preview.projected_rows)
-            metrics[1].metric("Sample rows", preview.sample_rows)
-            metrics[2].metric("Dimensions", len(explore_dims))
+            components.key_value_strip(
+                [
+                    {"label": "Exploration groups", "value": preview.projected_rows},
+                    {"label": "Sample rows", "value": preview.sample_rows},
+                    {"label": "Dimensions", "value": len(explore_dims)},
+                ]
+            )
         if rows:
             unsafe = [
                 row.field
@@ -1378,33 +1852,19 @@ def _temporary_exploration_panel(
             window_days=int(window_days),
             sample=sample,
         )
-        st.code(yaml.safe_dump({"processors": [processor_def]}, sort_keys=False), language="yaml")
-        create_col, run_col = st.columns(2)
-        if create_col.button(
-            "Create Exploratory Aggregate",
-            type="primary",
+        _technical_yaml(
+            "Exploration processor YAML",
+            yaml.safe_dump({"processors": [processor_def]}, sort_keys=False),
+        )
+        if st.button(
+            "Add exploration to draft",
+            icon=":material/add:",
             disabled=not explore_dims,
             key=f"builder_exploration_create_{processor.id}",
         ):
-            try:
-                with builder.validated_catalog_transaction(ctx.workspace):
-                    builder.write_processor_definition(ctx.workspace, processor_def)
-                _show_validation_after_write(ctx.workspace, "Exploratory aggregate written.")
-            except Exception as exc:  # pragma: no cover - Streamlit display path
-                logger.exception("Failed to write exploratory processor: source=%s", source.id)
-                st.error(str(exc))
-        if run_col.button(
-            "Create & Run Exploration",
-            icon=":material/play_arrow:",
-            disabled=not explore_dims,
-            key=f"builder_exploration_run_{processor.id}",
-        ):
-            _write_processor_and_run_source(
-                ctx,
-                source.id,
-                processor_def,
-                "Exploratory aggregate written.",
-            )
+            _stage_dimension_proposal(str(processor_def["id"]), processor_def)
+            st.toast("Exploration added to this step's draft.", icon=":material/draft:")
+            st.rerun()
         _exploration_lifecycle_controls(ctx, source.id)
 
 
@@ -1426,30 +1886,36 @@ def _sketch_exploration_panel(
         recommendations = dimension_profile.sketch_recommendations(rows)
         if recommendations:
             st.dataframe(recommendations, hide_index=True, width="stretch", height=180)
+        profile_by_field = {row.field: row for row in rows}
         topk_options = sorted(
-            builder.dedupe(
-                [
-                    *[
-                        row.field
-                        for row in rows
-                        if row.field in options and row.recommendation in {"Review", "Avoid"}
-                    ],
-                    *options,
-                ]
+            builder.dedupe(options),
+            key=lambda field: (
+                profile_by_field.get(field) is None
+                or profile_by_field[field].recommendation == "Avoid",
+                field.casefold(),
+                field,
             ),
-            key=lambda field: (field.casefold(), field),
         )
+        safe_topk_options = [
+            field
+            for field in topk_options
+            if field in profile_by_field
+            and profile_by_field[field].recommendation in {"Recommended", "Review"}
+        ]
+        default_topk = _default_topk_field(safe_topk_options) if safe_topk_options else None
         entity_default = _default_entity_field(options, source)
         include_topk = st.checkbox(
             "Top frequent values",
-            value=True,
+            value=False,
             key=f"builder_sketch_include_topk_{processor.id}",
             help=config_help.field_help("dimension.topk_enabled"),
         )
         topk_field = st.selectbox(
             "Top-K Field",
-            topk_options or options,
-            index=builder.option_index(topk_options or options, _default_topk_field(topk_options)),
+            topk_options,
+            index=builder.option_index(topk_options, default_topk) if default_topk else None,
+            placeholder="Select a field explicitly",
+            disabled=not include_topk,
             key=f"builder_sketch_topk_field_{processor.id}",
             help=config_help.field_help("dimension.topk_field"),
         )
@@ -1488,12 +1954,13 @@ def _sketch_exploration_panel(
             source,
             base_processor=processor,
             dimensions=sketch_dims,
-            topk_field=topk_field if include_topk else "",
+            topk_field=str(topk_field or "") if include_topk else "",
             entity_field=entity_field,
             include_cpc=include_cpc,
             include_theta=include_theta,
         )
-        st.code(
+        _technical_yaml(
+            "Sketch exploration YAML",
             yaml.safe_dump(
                 {
                     "processors": [processor_def],
@@ -1501,39 +1968,20 @@ def _sketch_exploration_panel(
                 },
                 sort_keys=False,
             ),
-            language="yaml",
         )
         if st.button(
-            "Create Sketch Exploration",
-            type="primary",
+            "Add sketch exploration to draft",
+            icon=":material/add:",
             disabled=not processor_def.get("states"),
             key=f"builder_sketch_create_{processor.id}",
         ):
-            try:
-                with builder.validated_catalog_transaction(ctx.workspace):
-                    builder.write_processor_definition(ctx.workspace, processor_def)
-                    for metric_name, metric_def in metric_defs.items():
-                        builder.write_metric_definition(ctx.workspace, metric_name, metric_def)
-                _show_validation_after_write(ctx.workspace, "Sketch exploration written.")
-            except Exception as exc:  # pragma: no cover - Streamlit display path
-                logger.exception("Failed to write sketch exploration: source=%s", source.id)
-                st.error(str(exc))
-        if st.button(
-            "Create Sketch Exploration & Run Source",
-            icon=":material/play_arrow:",
-            disabled=not processor_def.get("states"),
-            key=f"builder_sketch_run_{processor.id}",
-        ):
-            try:
-                with builder.validated_catalog_transaction(ctx.workspace):
-                    builder.write_processor_definition(ctx.workspace, processor_def)
-                    for metric_name, metric_def in metric_defs.items():
-                        builder.write_metric_definition(ctx.workspace, metric_name, metric_def)
-                _run_source_with_status(ctx, source.id)
-                st.success("Sketch exploration written and source run finished.")
-            except Exception as exc:  # pragma: no cover - Streamlit display path
-                logger.exception("Failed to run sketch exploration: source=%s", source.id)
-                st.error(str(exc))
+            _stage_dimension_proposal(
+                str(processor_def["id"]),
+                processor_def,
+                metric_defs=metric_defs,
+            )
+            st.toast("Sketch exploration added to this step's draft.", icon=":material/draft:")
+            st.rerun()
 
 
 def _processor_def_with_dimensions(
@@ -1544,36 +1992,6 @@ def _processor_def_with_dimensions(
     processor_def["dimensions"] = builder.dedupe(dimensions)
     processor_def.pop("group_by", None)
     return processor_def
-
-
-def _write_processor_and_run_source(
-    ctx: ValueStreamContext,
-    source_id: str,
-    processor_def: dict[str, Any],
-    write_message: str,
-) -> None:
-    try:
-        with builder.validated_catalog_transaction(ctx.workspace):
-            builder.write_processor_definition(ctx.workspace, processor_def)
-        _run_source_with_status(ctx, source_id)
-        st.success(f"{write_message} Source run finished.")
-    except Exception as exc:  # pragma: no cover - Streamlit display path
-        logger.exception("Failed to write processor and run source: source=%s", source_id)
-        st.error(str(exc))
-
-
-def _run_source_with_status(ctx: ValueStreamContext, source_id: str) -> None:
-    with st.status("Running source", expanded=True) as status:
-        chunk_progress = components.chunk_progress_indicator(include_source=False)
-        result = run_source(
-            ctx.workspace,
-            source_id,
-            progress_callback=chunk_progress,
-        )
-        status.write(
-            f"{result.chunks_ok} ok, {result.chunks_skipped} skipped, {result.chunks_failed} failed."
-        )
-        status.update(label=f"Source run {result.status}", state="complete")
 
 
 def _temporary_processor_def(
@@ -1698,7 +2116,7 @@ def _exploration_lifecycle_controls(ctx: ValueStreamContext, source_id: str) -> 
         help=config_help.field_help("dimension.exploration_selector"),
     )
     if st.button(
-        "Promote Exploration To Production",
+        "Add promotion to draft",
         icon=":material/publish:",
         key=f"builder_exploration_promote_{source_id}",
     ):
@@ -1709,13 +2127,9 @@ def _exploration_lifecycle_controls(ctx: ValueStreamContext, source_id: str) -> 
         metadata["promoted_at"] = _utc_now().isoformat()
         metadata.pop("expires_at", None)
         processor_def["exploration"] = metadata
-        try:
-            with builder.validated_catalog_transaction(ctx.workspace):
-                builder.write_processor_definition(ctx.workspace, processor_def)
-            _show_validation_after_write(ctx.workspace, "Exploration promoted.")
-        except Exception as exc:  # pragma: no cover - Streamlit display path
-            logger.exception("Failed to promote exploration: processor=%s", selected.id)
-            st.error(str(exc))
+        _stage_dimension_proposal(f"promote:{selected.id}", processor_def)
+        st.toast("Promotion added to this step's draft.", icon=":material/draft:")
+        st.rerun()
 
 
 def _exploration_meta(processor: model.Processor) -> dict[str, Any]:
@@ -1835,17 +2249,13 @@ def _utc_now() -> dt.datetime:
 
 @st.fragment()
 def _processor_builder(  # noqa: PLR0912, PLR0915
-    ctx: ValueStreamContext, save_slot: Any
+    ctx: ValueStreamContext, save_slot: Any, draft_slot: Any
 ) -> None:
-    components.editor_save_bar(
-        key="builder_processor_save_pending",
-        caption="Complete the processor definition below to enable saving.",
-        disabled=True,
-        placeholder=save_slot,
-    )
+    _claim_fragment_action_slots(save_slot, draft_slot)
     processors = ctx.catalog.processors.processors
     if not ctx.catalog.pipelines.sources:
         st.info("No sources configured.")
+        _render_continue_primary(save_slot)
         return
 
     mode_options = ["Create New Processor"]
@@ -1869,7 +2279,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         processor = st.selectbox(
             "Processor",
             processors,
-            format_func=lambda item: f"{item.id} ({item.kind})",
+            format_func=_processor_choice_label_human,
             key="builder_processor_select",
             help=config_help.field_help("processor.selector"),
         )
@@ -1997,7 +2407,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         if mode == "Rules":
             rows_key = f"builder_proc_filter_rows_{processor.id}"
             if rows_key not in st.session_state:
-                st.session_state[rows_key] = filter_rows or [builder.blank_filter_row()]
+                st.session_state[rows_key] = filter_rows or []
             filter_frame = builder.editor_frame(
                 st.session_state[rows_key],
                 ["Field", "Operator", "Value", "Enabled"],
@@ -2032,6 +2442,13 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
                 builder.parse_expression_yaml(raw_filter) if raw_filter.strip() else None
             )
 
+    time_def = dict(processor_def.get("time", {}))
+    time_def.update(
+        {
+            "column": time_column.strip() or None,
+            "grains": grains or ["Summary"],
+        }
+    )
     processor_def.update(
         {
             "id": processor_id.strip(),
@@ -2039,7 +2456,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             "kind": kind,
             "description": description.strip(),
             "dimensions": group_by,
-            "time": {"column": time_column.strip() or None, "grains": grains or ["Summary"]},
+            "time": time_def,
         }
     )
     for managed_key in forms.PROCESSOR_KIND_MANAGED_FIELDS:
@@ -2054,24 +2471,41 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         processor_def["filter"] = compiled_filter
     else:
         processor_def.pop("filter", None)
-    st.write("### Generated YAML")
-    st.code(yaml.safe_dump({"processors": [processor_def]}, sort_keys=False), language="yaml")
-    if components.editor_save_bar(
-        key="builder_processor_save",
-        caption=(
-            f"Save processor `{processor.id}` to the active workspace catalog."
-            if not creating
-            else "Save the new processor to the active workspace catalog."
+    if not creating:
+        processor_def = _preserve_untouched_processor_definition(processor, processor_def)
+    _technical_yaml(
+        "Generated processor YAML",
+        yaml.safe_dump({"processors": [processor_def]}, sort_keys=False),
+    )
+    draft_status = builder.builder_draft_status(
+        f"processor:{'new' if creating else processor.id}",
+        None if creating else builder.processor_to_dict(processor),
+        processor_def,
+    )
+    if _render_editor_primary_action(
+        save_slot=save_slot,
+        draft_slot=draft_slot,
+        status=draft_status,
+        valid=bool(processor_id.strip()),
+        widget_prefixes=("builder_processor_", "builder_proc_"),
+        help_text=(
+            "Validate and apply this processor to the active workspace. "
+            "Use Data Load separately to materialize aggregates."
         ),
-        disabled=not processor_id.strip(),
-        placeholder=save_slot,
     ):
         try:
             with builder.validated_catalog_transaction(ctx.workspace):
                 builder.write_processor_definition(ctx.workspace, processor_def)
             message = "Processor created." if creating else "Processor written."
-            _show_validation_after_write(ctx.workspace, message)
+            _complete_builder_apply(
+                status=draft_status,
+                scope="processor",
+                label=description.strip() or humanize_identifier(processor_id.strip()),
+                source_ids=[source_id],
+                message=message + " Use Data Load to refresh matching aggregates.",
+            )
         except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
             logger.exception(
                 "Failed to write processor definition: processor=%s", processor_id.strip()
             )
@@ -2119,17 +2553,16 @@ def _remap_processor_def_fields(
 
 @st.fragment()
 def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
-    workspace: Path, catalog: model.Catalog, save_slot: Any
+    workspace: Path,
+    catalog: model.Catalog,
+    save_slot: Any,
+    draft_slot: Any,
 ) -> None:
-    components.editor_save_bar(
-        key="builder_metric_save_pending",
-        caption="Complete or review a metric definition below to enable saving.",
-        disabled=True,
-        placeholder=save_slot,
-    )
+    _claim_fragment_action_slots(save_slot, draft_slot)
     processors = catalog.processors.processors
     if not processors:
         st.info("No processors configured.")
+        _render_continue_primary(save_slot)
         return
 
     metric_names = sorted(catalog.metrics.metrics)
@@ -2193,10 +2626,12 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             key_prefix="builder_kpi_recipes",
             submit_label="Add recipe to catalog",
             expanded=True,
-            submit_placeholder=save_slot,
+            submit_placeholder=_ApplyActionSlot(save_slot),
         )
         if recipe_request is None:
             return
+        _record_builder_valid_proposal()
+        _record_builder_reviewed()
         try:
             with builder.validated_catalog_transaction(workspace):
                 if recipe_request.processor_def:
@@ -2219,6 +2654,24 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                         page_title=target.page_title,
                         tile=recipe_request.tile_def,
                     )
+            outcome_scope = (
+                "recipe_with_state" if recipe_request.materialization is not None else "metric"
+            )
+            outcome_sources = (
+                [recipe_request.materialization.source_id]
+                if recipe_request.materialization is not None
+                else []
+            )
+            apply_outcome = builder.builder_apply_outcome(
+                humanize_identifier(recipe_request.metric_id),
+                source_ids=outcome_sources,
+                requires_data_run=outcome_scope == "recipe_with_state",
+            )
+            _store_builder_apply_outcome(apply_outcome)
+            _record_builder_applied(apply_outcome)
+            st.session_state["builder_apply_notice"] = (
+                f"Metric {humanize_identifier(recipe_request.metric_id)!r} applied."
+            )
             _queue_metric_refresh(
                 st.session_state,
                 metric_id=recipe_request.metric_id,
@@ -2232,6 +2685,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             )
             st.rerun(scope="app")
         except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
             logger.exception("Failed to add KPI recipe to the catalog")
             st.error(str(exc))
             return
@@ -2275,7 +2729,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                     editable_processors,
                     str(current_metric_def.get("source", "") or ""),
                 ),
-                format_func=lambda item: f"{item.id} ({item.kind})",
+                format_func=_processor_choice_label_human,
                 key="builder_metric_processor_edit",
                 help=config_help.field_help("metric.processor"),
             )
@@ -2409,16 +2863,24 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             metric_def["depends_on"] = dependencies
         if display:
             metric_def["display"] = display
+        if editing:
+            metric_def = _preserve_untouched_metric_definition(seed_metric_def, metric_def)
         metric_ready = bool(metric_name.strip()) and (editing or bool(metric_label.strip()))
-        if components.editor_save_bar(
-            key="builder_metric_save",
-            caption=(
-                f"Save metric `{metric_name}` to the active workspace catalog."
-                if metric_name
-                else "Name the metric to enable saving."
+        draft_status = builder.builder_draft_status(
+            f"metric:{selected_metric_name or metric_name or 'new'}",
+            seed_metric_def if editing else None,
+            metric_def if metric_ready else {"metric": metric_def, "name": metric_name},
+        )
+        if _render_editor_primary_action(
+            save_slot=save_slot,
+            draft_slot=draft_slot,
+            status=draft_status,
+            valid=metric_ready,
+            widget_prefixes=("builder_metric_",),
+            help_text=(
+                "Validate and apply this metric to the active workspace. Existing aggregate "
+                "states can be used without running data."
             ),
-            disabled=not metric_ready,
-            placeholder=save_slot,
         ):
             try:
                 if not editing and metric_name.strip() in catalog.metrics.metrics:
@@ -2426,6 +2888,18 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                     return
                 with builder.validated_catalog_transaction(workspace):
                     builder.write_metric_definition(workspace, metric_name.strip(), metric_def)
+                apply_outcome = builder.builder_apply_outcome(
+                    humanize_identifier(metric_name.strip())
+                )
+                _store_builder_apply_outcome(apply_outcome)
+                _record_builder_applied(apply_outcome)
+                raw_registry = st.session_state.get(builder.BUILDER_DRAFTS_KEY)
+                registry = dict(raw_registry) if isinstance(raw_registry, dict) else {}
+                registry.pop(draft_status.key, None)
+                st.session_state[builder.BUILDER_DRAFTS_KEY] = registry
+                st.session_state["builder_apply_notice"] = (
+                    f"Metric {humanize_identifier(metric_name.strip())!r} applied."
+                )
                 _queue_metric_refresh(
                     st.session_state,
                     metric_id=metric_name.strip(),
@@ -2438,22 +2912,22 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 )
                 st.rerun(scope="app")
             except Exception as exc:  # pragma: no cover - Streamlit display path
+                _record_builder_apply_failed(exc)
                 logger.exception(
                     "Failed to write metric definition: metric=%s", metric_name.strip()
                 )
                 st.error(str(exc))
 
     with right, st.container(border=True):
-        st.write("### Generated YAML")
-        st.caption("Metrics are saved into `catalog/metrics.yaml`.")
-        st.code(builder.metric_yaml(metric_name or "metric_id", metric_def), language="yaml")
-        st.write("### Validation")
-        ok, issues = builder.validate_workspace(workspace)
-        if ok:
-            st.success("Current workspace catalog validates.")
-        else:
-            for issue in issues:
-                st.warning(issue)
+        st.write("### Review")
+        st.caption(
+            "The draft revision above is compared with the applied metric. Exact YAML remains "
+            "available for expert review."
+        )
+        _technical_yaml(
+            "Generated metric YAML",
+            builder.metric_yaml(metric_name or "metric_id", metric_def),
+        )
 
 
 def _metric_definition_form(
@@ -2536,6 +3010,29 @@ def _metric_display_controls(raw: Any, *, key_suffix: str) -> dict[str, Any]:
     }
 
 
+def _preserve_untouched_metric_definition(
+    seed_metric_def: dict[str, Any],
+    metric_def: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep the exact authored metric when the visual form is semantically unchanged."""
+
+    try:
+        baseline = model.Metrics.model_validate({"metrics": {"metric": seed_metric_def}}).metrics[
+            "metric"
+        ]
+        candidate = model.Metrics.model_validate({"metrics": {"metric": metric_def}}).metrics[
+            "metric"
+        ]
+    except ValueError:
+        return metric_def
+    status = builder.builder_draft_status(
+        "metric-editor:metric",
+        baseline.model_dump(mode="json", by_alias=True, exclude_none=True),
+        candidate.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
+    return seed_metric_def if not status.dirty else metric_def
+
+
 def _processor_index_by_id(processors: list[model.Processor], processor_id: str) -> int:
     for index, processor in enumerate(processors):
         if processor.id == processor_id:
@@ -2599,7 +3096,12 @@ def _report_library_options(
                         dashboard.id,
                         page.id,
                         tile.id,
-                        tile.model_dump(mode="json", exclude_none=True),
+                        tile.model_dump(
+                            mode="json",
+                            by_alias=True,
+                            exclude_none=True,
+                            exclude_unset=True,
+                        ),
                     )
                 )
     return options
@@ -3032,17 +3534,16 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
 
 @st.fragment()
 def _tile_builder(  # noqa: PLR0912, PLR0915
-    workspace: Path, catalog: model.Catalog, save_slot: Any
+    workspace: Path,
+    catalog: model.Catalog,
+    save_slot: Any,
+    draft_slot: Any,
 ) -> None:
-    components.editor_save_bar(
-        key="builder_reports_save_pending",
-        caption="Complete the tile and page settings below to enable saving.",
-        disabled=True,
-        placeholder=save_slot,
-    )
+    _claim_fragment_action_slots(save_slot, draft_slot)
     metric_names = sorted(catalog.metrics.metrics)
     if not metric_names:
         st.info("No metrics configured.")
+        _render_continue_primary(save_slot)
         return
 
     selected_tile_override = st.session_state.pop("builder_tile_selection_override", None)
@@ -3088,23 +3589,71 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             st.session_state["builder_tile_seed"] = (selected_seed[0], selected_seed[1], seed)
             st.session_state["builder_tile_editor_token"] = f"new_{counter}"
         if delete_tile and selected_seed is not None:
-            try:
-                with builder.validated_catalog_transaction(workspace):
-                    deleted = builder.delete_tile_definition(
-                        workspace,
-                        dashboard_id=selected_seed[0],
-                        page_id=selected_seed[1],
-                        tile_id=selected_seed[2],
+            st.session_state[BUILDER_PENDING_TILE_DELETE_KEY] = {
+                "dashboard_id": selected_seed[0],
+                "page_id": selected_seed[1],
+                "tile_id": selected_seed[2],
+                "title": str(selected_seed[3].get("title", selected_seed[2])),
+            }
+            st.rerun()
+
+        pending_delete = st.session_state.get(BUILDER_PENDING_TILE_DELETE_KEY)
+        if (
+            isinstance(pending_delete, Mapping)
+            and selected_seed is not None
+            and (
+                pending_delete.get("dashboard_id"),
+                pending_delete.get("page_id"),
+                pending_delete.get("tile_id"),
+            )
+            == selected_seed[:3]
+        ):
+            tile_label = str(pending_delete.get("title", selected_seed[2]))
+            st.warning(
+                f"Tile {tile_label!r} is staged for deletion. Apply to workspace to remove it, "
+                "or discard this draft to keep it."
+            )
+            deletion_status = builder.builder_draft_status(
+                f"report-delete:{selected_seed[0]}/{selected_seed[1]}/{selected_seed[2]}",
+                {"deleted": False, "tile": selected_seed[3]},
+                {"deleted": True, "tile_id": selected_seed[2]},
+            )
+            if _render_editor_primary_action(
+                save_slot=save_slot,
+                draft_slot=draft_slot,
+                status=deletion_status,
+                valid=True,
+                widget_prefixes=(BUILDER_PENDING_TILE_DELETE_KEY,),
+                help_text=f"Validate and remove tile {tile_label!r} from the active workspace.",
+            ):
+                try:
+                    with builder.validated_catalog_transaction(workspace):
+                        deleted = builder.delete_tile_definition(
+                            workspace,
+                            dashboard_id=selected_seed[0],
+                            page_id=selected_seed[1],
+                            tile_id=selected_seed[2],
+                        )
+                    if not deleted:
+                        st.warning("Tile was not found; the workspace was not changed.")
+                        return
+                    st.session_state.pop(BUILDER_PENDING_TILE_DELETE_KEY, None)
+                    _complete_builder_apply(
+                        status=deletion_status,
+                        scope="report",
+                        label=tile_label,
+                        message="Tile removed from the workspace.",
                     )
-                st.success("Tile deleted." if deleted else "Tile was not found.")
-            except Exception as exc:  # pragma: no cover - Streamlit display path
-                logger.exception(
-                    "Failed to delete tile definition: dashboard=%s page=%s tile=%s",
-                    selected_seed[0],
-                    selected_seed[1],
-                    selected_seed[2],
-                )
-                st.error(str(exc))
+                except Exception as exc:  # pragma: no cover - Streamlit display path
+                    _record_builder_apply_failed(exc)
+                    logger.exception(
+                        "Failed to delete tile definition: dashboard=%s page=%s tile=%s",
+                        selected_seed[0],
+                        selected_seed[1],
+                        selected_seed[2],
+                    )
+                    st.error(str(exc))
+            return
 
     with st.container(border=True):
         st.write("### Tile Editor")
@@ -3168,19 +3717,31 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                     ).items()
                 ]
             )
-        defaults = (
-            builder.default_tile_fields(catalog, metric_name, chart_kind)
-            if metric_name and chart_kind
-            else {}
-        )
         compatible_field_keys = _compatible_tile_field_keys(str(chart_kind or ""))
-        defaults.update(
-            {
+        selection_matches_seed = bool(
+            not is_new_tile
+            and metric_name == seed_tile.get("metric")
+            and chart_kind == seed_tile.get("chart")
+        )
+        if selection_matches_seed:
+            defaults = {
                 key: value
                 for key, value in seed_tile.items()
                 if key in compatible_field_keys or key in builder.CHART_SETTING_FIELDS
             }
-        )
+        else:
+            defaults = (
+                builder.default_tile_fields(catalog, metric_name, chart_kind)
+                if metric_name and chart_kind
+                else {}
+            )
+            defaults.update(
+                {
+                    key: value
+                    for key, value in seed_tile.items()
+                    if key in builder.CHART_SETTING_FIELDS
+                }
+            )
         field_options = (
             ["", *builder.chart_field_options(catalog, metric_name)] if metric_name else [""]
         )
@@ -3260,6 +3821,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             page=pages_by_id.get(str(page_choice)),
             key_suffix=f"{editor_token}_{dashboard_id}_{page_id}",
         )
+        existing_page = pages_by_id.get(str(page_choice))
 
         default_tile_title = str(
             seed_tile.get(
@@ -3331,19 +3893,60 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             )
         else:
             built_tile = {}
+        if selected_seed is not None and not is_new_tile and built_tile:
+            built_tile = _preserve_untouched_tile_definition(seed_tile, built_tile)
 
         if st.button("Preview Tile", icon=":material/preview:", disabled=not built_tile):
             _preview_tile(workspace, catalog, built_tile)
-        if components.editor_save_bar(
-            key="builder_reports_save",
-            caption="Save the current tile and its page settings to the active catalog.",
-            disabled=(
-                not built_tile
-                or not dashboard_id.strip()
-                or not page_id.strip()
-                or not page_settings_ready
+        baseline_page = None
+        if existing_page is not None:
+            baseline_page = {
+                "id": existing_page.id,
+                "title": existing_page.title,
+                "filters": [
+                    item.model_dump(mode="json", by_alias=True, exclude_none=True)
+                    for item in existing_page.filters
+                ],
+                "time_filter": existing_page.time_filter.model_dump(
+                    mode="json", by_alias=True, exclude_none=True
+                ),
+            }
+        proposed_page = {
+            "id": page_id.strip(),
+            "title": page_title.strip() or builder.title_from_identifier(page_id),
+            "filters": page_filters,
+            "time_filter": page_time_filter,
+        }
+        draft_status = builder.builder_draft_status(
+            f"report:{selected_tile_key}",
+            {
+                "dashboard_id": seed_dashboard,
+                "page": baseline_page,
+                "tile": seed_tile if selected_seed is not None else None,
+            },
+            {
+                "dashboard_id": dashboard_id.strip(),
+                "page": proposed_page,
+                "tile": built_tile,
+            },
+        )
+        report_ready = bool(
+            built_tile and dashboard_id.strip() and page_id.strip() and page_settings_ready
+        )
+        if _render_editor_primary_action(
+            save_slot=save_slot,
+            draft_slot=draft_slot,
+            status=draft_status,
+            valid=report_ready,
+            widget_prefixes=(
+                "builder_tile_",
+                "builder_dashboard_",
+                "builder_page_",
+                "builder_report_",
             ),
-            placeholder=save_slot,
+            help_text=(
+                "Validate and apply this report tile and its page settings to the workspace."
+            ),
         ):
             try:
                 with builder.validated_catalog_transaction(workspace):
@@ -3366,8 +3969,14 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                         filters=page_filters,
                         time_filter=page_time_filter,
                     )
-                _show_validation_after_write(workspace, "Tile and page settings written.")
+                _complete_builder_apply(
+                    status=draft_status,
+                    scope="report",
+                    label=title.strip() or humanize_identifier(str(built_tile.get("id", ""))),
+                    message="Report tile and page settings applied.",
+                )
             except Exception as exc:  # pragma: no cover - Streamlit display path
+                _record_builder_apply_failed(exc)
                 logger.exception(
                     "Failed to write tile definition: dashboard=%s page=%s tile=%s",
                     dashboard_id.strip(),
@@ -3376,8 +3985,14 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                 )
                 st.error(str(exc))
 
-        st.write("### Generated YAML")
-        st.code(builder.tile_yaml(built_tile) if built_tile else "{}", language="yaml")
+        _technical_yaml(
+            "Generated report YAML",
+            builder.tile_yaml(built_tile) if built_tile else "{}",
+        )
+
+    with st.expander("Report inventory", expanded=False, icon=":material/inventory_2:"):
+        st.caption("Search configured reports by human title, metric, or chart type.")
+        _report_inventory_tab(catalog)
 
 
 def _compatible_tile_field_keys(chart_kind: str) -> set[str]:
@@ -3392,6 +4007,25 @@ def _compatible_tile_field_keys(chart_kind: str) -> set[str]:
     if chart_kind in {"gauge", "table"}:
         keys.add("group_by")
     return keys
+
+
+def _preserve_untouched_tile_definition(
+    seed_tile: dict[str, Any],
+    built_tile: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep exact tile YAML when the visual editor preserves effective behavior."""
+
+    try:
+        baseline = model.Tile.model_validate(seed_tile)
+        candidate = model.Tile.model_validate(built_tile)
+    except ValueError:
+        return built_tile
+    status = builder.builder_draft_status(
+        f"tile-editor:{baseline.id}",
+        baseline.model_dump(mode="json", by_alias=True, exclude_none=True),
+        candidate.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
+    return seed_tile if not status.dirty else built_tile
 
 
 def _page_settings_editor(
@@ -3984,9 +4618,9 @@ def _chat_description_rows(
                 "Description": str(descriptions.get(key, "")),
             }
         )
-        seen.add(key.casefold())
+        seen.add(key)
     for key, description in descriptions.items():
-        if key.casefold() in seen:
+        if key in seen:
             continue
         rows.append({"Type": "Custom", "Key": key, "Description": description})
     return rows
@@ -4003,14 +4637,8 @@ def _chat_description_map(rows: Any) -> dict[str, str]:
 
 
 @st.fragment()
-def _chat_review(ctx: ValueStreamContext, save_slot: Any) -> None:
-    components.editor_save_bar(
-        key="builder_chat_save_pending",
-        caption="Edit chat guidance below, then save it to the active workspace.",
-        disabled=True,
-        placeholder=save_slot,
-    )
-    components.render_validation_summary(ctx.validation.issues, ok=ctx.validation.ok)
+def _chat_review(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any) -> None:
+    _claim_fragment_action_slots(save_slot, draft_slot)
     config_path, ai_config = load_llm_settings_config(ctx.workspace)
     chat_config_path, chat_config = load_chat_with_data_config(ctx.workspace)
     settings_label = "Configured" if ai_config.get("model") else "Session-only"
@@ -4033,12 +4661,22 @@ def _chat_review(ctx: ValueStreamContext, save_slot: Any) -> None:
     rows = _chat_metric_rows(ctx.catalog)
     if not rows:
         st.info("Add aggregate metrics before using Chat With Data.")
-        _chat_settings_editor(ctx, chat_config, save_slot=save_slot)
+        _chat_settings_editor(
+            ctx,
+            chat_config,
+            save_slot=save_slot,
+            draft_slot=draft_slot,
+        )
         return
     st.dataframe(rows, hide_index=True, width="stretch", height=420)
     if not ctx.validation.ok:
         st.warning("Resolve catalog validation issues before relying on chat answers.")
-    _chat_settings_editor(ctx, chat_config, save_slot=save_slot)
+    _chat_settings_editor(
+        ctx,
+        chat_config,
+        save_slot=save_slot,
+        draft_slot=draft_slot,
+    )
 
 
 def _chat_settings_editor(
@@ -4046,6 +4684,7 @@ def _chat_settings_editor(
     chat_config: Mapping[str, Any],
     *,
     save_slot: Any,
+    draft_slot: Any,
 ) -> None:
     agent_prompt = str(chat_config.get("agent_prompt") or DEFAULT_CHAT_AGENT_PROMPT)
     metric_descriptions = {
@@ -4134,28 +4773,51 @@ def _chat_settings_editor(
             },
         )
 
-    if components.editor_save_bar(
-        key="builder_chat_save",
-        caption="Save chat prompt and descriptions to `ai.yaml` in the active workspace.",
-        placeholder=save_slot,
+    proposed_chat_config = {
+        "agent_prompt": edited_prompt,
+        "dataset_descriptions": _chat_description_map(edited_dataset_rows),
+        "metric_descriptions": _chat_description_map(edited_metric_rows),
+    }
+    baseline_chat_config = {
+        "agent_prompt": agent_prompt,
+        "dataset_descriptions": dataset_descriptions,
+        "metric_descriptions": metric_descriptions,
+    }
+    draft_status = builder.builder_draft_status(
+        "chat:guidance",
+        baseline_chat_config,
+        proposed_chat_config,
+    )
+    if _render_editor_primary_action(
+        save_slot=save_slot,
+        draft_slot=draft_slot,
+        status=draft_status,
+        valid=True,
+        widget_prefixes=("builder_chat_",),
+        help_text="Apply Chat With Data guidance to the active workspace.",
     ):
-        path = write_chat_with_data_config(
-            ctx.workspace,
-            agent_prompt=edited_prompt,
-            dataset_descriptions=_chat_description_map(edited_dataset_rows),
-            metric_descriptions=_chat_description_map(edited_metric_rows),
-        )
-        st.success(f"Chat settings saved to `{path.name}`.")
+        try:
+            write_chat_with_data_config(
+                ctx.workspace,
+                agent_prompt=edited_prompt,
+                dataset_descriptions=proposed_chat_config["dataset_descriptions"],
+                metric_descriptions=proposed_chat_config["metric_descriptions"],
+            )
+            _complete_builder_apply(
+                status=draft_status,
+                scope="chat",
+                label="Chat guidance",
+                message="Chat guidance applied to the workspace.",
+            )
+        except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
+            logger.exception("Failed to write Chat With Data guidance")
+            st.error(str(exc))
 
 
 @st.fragment()
-def _settings_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
-    components.editor_save_bar(
-        key="builder_settings_save_pending",
-        caption="Complete the workspace settings below to enable saving.",
-        disabled=True,
-        placeholder=save_slot,
-    )
+def _settings_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any) -> None:
+    _claim_fragment_action_slots(save_slot, draft_slot)
     defaults = ctx.catalog.pipelines.defaults
     calendar = defaults.calendar
     known_grains = ["Day", "Month", "Quarter", "Year", "Summary"]
@@ -4179,7 +4841,7 @@ def _settings_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
         selected_grains = st.multiselect(
             "Calendar Grains",
             grain_options,
-            default=[grain for grain in calendar.grains if grain in grain_options] or known_grains,
+            default=[grain for grain in calendar.grains if grain in grain_options],
             key="builder_settings_calendar_grains",
             help=config_help.field_help("workspace.calendar_grains"),
         )
@@ -4195,10 +4857,8 @@ def _settings_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
     components.sync_text_area("builder_settings_theme_yaml", theme_text)
     theme: dict[str, Any] = {}
     theme_error: str | None = None
-    with components.bordered_panel(
-        "Dashboard Theme",
-        "Edit permissive Plotly/dashboard theme tokens stored in dashboards.yaml.",
-    ):
+    with st.expander("Technical details · Dashboard theme YAML", expanded=False):
+        st.caption("Edit permissive Plotly/dashboard theme tokens stored in dashboards.yaml.")
         raw_theme = st.text_area(
             "Theme YAML",
             key="builder_settings_theme_yaml",
@@ -4215,17 +4875,38 @@ def _settings_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
             theme_error = str(exc)
             st.warning(theme_error)
 
-    st.caption(
-        "AI Configuration Studio can populate these settings in its draft from model output; "
-        "this editor writes the active catalog directly."
-    )
+    st.caption("These values remain a session draft until you apply them to the workspace.")
     if not selected_grains:
         st.warning("Select at least one calendar grain.")
-    if components.editor_save_bar(
-        key="builder_settings_save",
-        caption="Save workspace defaults and dashboard theme to the active catalog.",
-        disabled=bool(theme_error) or not selected_grains,
-        placeholder=save_slot,
+    baseline_settings = {
+        "workspace_name": ctx.catalog.pipelines.workspace,
+        "time_zone": defaults.time_zone,
+        "calendar_grains": list(calendar.grains),
+        "week_start": calendar.week_start,
+        "dashboard_theme": ctx.catalog.dashboards.theme,
+    }
+    proposed_settings = {
+        "workspace_name": workspace_name,
+        "time_zone": time_zone,
+        "calendar_grains": selected_grains,
+        "week_start": week_start,
+        "dashboard_theme": theme,
+    }
+    draft_status = builder.builder_draft_status(
+        "settings:workspace",
+        baseline_settings,
+        proposed_settings,
+    )
+    if _render_editor_primary_action(
+        save_slot=save_slot,
+        draft_slot=draft_slot,
+        status=draft_status,
+        valid=not theme_error and bool(selected_grains),
+        widget_prefixes=("builder_settings_",),
+        help_text=(
+            "Validate and apply workspace defaults and dashboard theme. Data Load remains "
+            "a separate action."
+        ),
     ):
         try:
             with builder.validated_catalog_transaction(ctx.workspace):
@@ -4237,40 +4918,68 @@ def _settings_builder(ctx: ValueStreamContext, save_slot: Any) -> None:
                     week_start=week_start,
                     dashboard_theme=theme,
                 )
-            _show_validation_after_write(ctx.workspace, "Settings saved.")
+            _complete_builder_apply(
+                status=draft_status,
+                scope="workspace_settings",
+                label="Workspace settings",
+                source_ids=[source.id for source in ctx.catalog.pipelines.sources],
+                message="Workspace settings applied. Use Data Load to refresh affected sources.",
+            )
         except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
             logger.exception("Failed to write workspace settings")
             st.error(str(exc))
 
 
 @st.fragment()
-def _save_export(ctx: ValueStreamContext, save_slot: Any) -> None:
-    components.editor_save_bar(
-        key="builder_export_save",
-        caption="Builder changes are already saved to the active workspace; export files below.",
-        label="Saved",
+def _export_current_workspace(ctx: ValueStreamContext, save_slot: Any) -> None:
+    save_slot.empty()
+    save_slot.button(
+        "Workspace current",
+        icon=":material/check_circle:",
         disabled=True,
-        placeholder=save_slot,
+        width="stretch",
+        key="builder_export_current",
     )
+    st.write("### What happens next")
+    _render_outcome_handoff()
+    st.write("### Current workspace validation")
     components.render_validation_summary(ctx.validation.issues, ok=ctx.validation.ok)
-    for filename in [
+    filenames = [
         "pipelines.yaml",
         "processors.yaml",
         "metrics.yaml",
         "dashboards.yaml",
-    ]:
+    ]
+    file_text: dict[str, str] = {}
+    for filename in filenames:
         path = ctx.workspace / "catalog" / filename
-        with st.expander(filename, expanded=filename in {"metrics.yaml", "dashboards.yaml"}):
-            if path.exists():
-                text = path.read_text(encoding="utf-8")
-                st.code(text, language="yaml")
+        if path.exists():
+            file_text[filename] = path.read_text(encoding="utf-8")
+
+    st.write("### Download catalog files")
+    st.caption("Downloads are available before the optional file previews.")
+    download_cols = st.columns(2)
+    for index, filename in enumerate(filenames):
+        with download_cols[index % 2]:
+            if filename in file_text:
                 st.download_button(
                     f"Download {filename}",
-                    data=text,
+                    data=file_text[filename],
                     file_name=filename,
                     mime="text/yaml",
                     key=f"builder_download_{filename}",
+                    width="stretch",
                 )
+            else:
+                st.warning(f"{filename} does not exist.")
+
+    st.write("### Technical details")
+    st.caption("File previews are collapsed so large catalogs do not bury the actions above.")
+    for filename in filenames:
+        with st.expander(filename, expanded=False):
+            if filename in file_text:
+                st.code(file_text[filename], language="yaml")
             else:
                 st.warning(f"{filename} does not exist.")
 
@@ -4362,7 +5071,19 @@ def _processor_choice_label(value: str, processors_by_id: dict[str, model.Proces
     if not value:
         return "Select processor"
     processor = processors_by_id[value]
-    return f"{processor.id} ({processor.kind})"
+    return _processor_choice_label_human(processor)
+
+
+def _source_choice_label(source: model.Source) -> str:
+    """Show the human source name before reader and technical identity."""
+    label = source.description.strip() or humanize_identifier(source.id)
+    return f"{label} · {humanize_identifier(source.reader.kind)}"
+
+
+def _processor_choice_label_human(processor: model.Processor) -> str:
+    """Show the human processor name before its technical kind."""
+    label = processor.description.strip() or humanize_identifier(processor.id)
+    return f"{label} · {humanize_identifier(processor.kind)}"
 
 
 def _metric_processors_for_definitions(
@@ -4420,7 +5141,10 @@ def _metric_choice_label(catalog: model.Catalog, metric_name: str) -> str:
     metric_def = builder.metric_to_dict(metric)
     source = str(metric_def.get("source", "") or "unknown")
     kind = str(metric_def.get("kind", "") or "unknown")
-    return f"{metric_name} · {source} · {builder.metric_kind_label(kind)}"
+    display = metric_def.get("display")
+    display_label = str(display.get("label", "") or "") if isinstance(display, dict) else ""
+    label = display_label or humanize_identifier(metric_name)
+    return f"{label} · {builder.metric_kind_label(kind)} · {humanize_identifier(source)}"
 
 
 def _stable_random_suffix(session_state: MutableMapping[str, Any], key: str) -> str:
@@ -4706,11 +5430,81 @@ def _build_source_definition(
             "transforms": transforms,
         }
     )
+    candidate = model.Source.model_validate(source_def)
+    equivalent = builder.builder_draft_status(
+        f"source-editor:{source.id}",
+        _source_editor_projection(source),
+        _source_editor_projection(candidate),
+    )
+    if not equivalent.dirty:
+        return builder.source_to_dict(source)
     return source_def
+
+
+def _source_editor_projection(source: model.Source) -> dict[str, Any]:
+    """Compare source-editor meaning without treating transform reordering as an edit."""
+
+    source_def = builder.source_to_dict(source)
+    editable_transform_kinds = {"rename_capitalize", "defaults", "filter", "derive_column"}
+    return {
+        "id": source.id,
+        "description": source.description,
+        "reader": source_def.get("reader", {}),
+        "schema": source_def.get("schema", {}),
+        "defaults": builder.source_defaults(source),
+        "rename_capitalize": _source_has_transform(source, "rename_capitalize"),
+        "filter": builder.first_filter_expression(source),
+        "calculated_fields": builder.calculated_rows_from_source(source),
+        "fixed_transforms": [
+            transform
+            for transform in source_def.get("transforms", [])
+            if transform.get("kind") not in editable_transform_kinds
+        ],
+        "materialize_transforms": source_def.get("materialize_transforms", False),
+        "debugging": source_def.get("debugging", False),
+    }
 
 
 def _source_has_transform(source: model.Source, kind: str) -> bool:
     return any(transform.kind == kind for transform in source.transforms)
+
+
+def _preserve_untouched_processor_definition(
+    processor: model.Processor,
+    processor_def: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep exact catalog YAML when the processor editor made no semantic change."""
+
+    try:
+        candidate = model.Processors.model_validate({"processors": [processor_def]}).processors[0]
+    except ValueError:
+        return processor_def
+    status = builder.builder_draft_status(
+        f"processor-editor:{processor.id}",
+        _processor_editor_projection(processor),
+        _processor_editor_projection(candidate),
+    )
+    if not status.dirty:
+        return builder.processor_to_dict(processor)
+    return processor_def
+
+
+def _processor_editor_projection(processor: model.Processor) -> dict[str, Any]:
+    """Normalize implicit processor defaults to the values exposed by the editor."""
+
+    processor_def = builder.processor_to_dict(processor)
+    raw_time = dict(processor_def.pop("time", {}) or {})
+    fixed_time = {key: value for key, value in raw_time.items() if key not in {"column", "grains"}}
+    processor_def["time"] = {
+        "column": processor.time.column if processor.time else None,
+        "grains": [builder.display_grain(grain) for grain in processor.grains],
+        "fixed": fixed_time,
+    }
+    processor_def["states"] = {
+        name: spec.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for name, spec in model.effective_processor_states(processor).items()
+    }
+    return processor_def
 
 
 def _state_rows(

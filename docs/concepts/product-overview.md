@@ -42,8 +42,9 @@ snapshot counts.
 
 - CLI command `valuestream` for validation, ingestion, querying, serving the UI,
   export, migration, backfill, dummy data generation, and cleanup.
-- Streamlit application with Home, Data Load, Reports, Catalog, Configuration
-  Builder, AI Configuration Studio, Chat With Data, and Pipelines / Ops pages.
+- Streamlit application with Home, Reports, Chat With Data, a top-level Build
+  choice, Configuration Builder, AI Configuration Studio, Catalog, Data Load,
+  and Pipelines / Ops pages.
 - Python SDK helpers for workspace and query access.
 - DuckDB metric export for downstream SQL tools.
 - Local read-only stdio MCP tools and a read-only FastAPI HTTP API over the

@@ -11,6 +11,7 @@ import re
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -548,13 +549,18 @@ def prompt_draft_sections(
     draft: dict[str, Any],
     *,
     hidden_fields: list[str] | None = None,
+    preserve_fields: list[str] | None = None,
 ) -> dict[str, Any]:
     """Return prompt-safe draft sections with unapproved field names removed."""
 
     prompt_draft = _prompt_draft(draft)
     if not hidden_fields:
         return prompt_draft
-    redacted = redact_hidden_field_mentions(prompt_draft, hidden_fields)
+    redacted = redact_hidden_field_mentions(
+        prompt_draft,
+        hidden_fields,
+        preserve_fields=preserve_fields,
+    )
     return redacted if isinstance(redacted, dict) else {}
 
 
@@ -581,6 +587,28 @@ class AIProviderCallError(RuntimeError):
         self.permission_denied = permission_denied
         detail = " due to insufficient permissions" if permission_denied else f" ({error_type})"
         super().__init__(f"AI provider call failed{detail}. Reference: {call_id}.")
+
+
+@dataclass(frozen=True)
+class DraftCandidateResult:
+    """Result of a bounded generate, parse, merge, and validate operation.
+
+    Invalid model output is deliberately not exposed as a candidate. Callers can
+    keep the previously accepted revision in place and show ``issues`` as a safe
+    retry receipt instead of accidentally placing broken YAML into review state.
+    """
+
+    draft: dict[str, Any] | None
+    issues: tuple[str, ...]
+    attempts: int
+    last_response: str = ""
+    failure_stage: str = ""
+
+    @property
+    def ok(self) -> bool:
+        """Return whether a validated candidate is available."""
+
+        return self.draft is not None and not self.issues
 
 
 def generate_schema_preview(
@@ -789,6 +817,69 @@ def merge_draft_sections(base_draft: dict[str, Any], sections: dict[str, Any]) -
         if section in sections:
             merged[section] = _deepcopy_yaml(sections[section])
     return merged
+
+
+def generate_validated_candidate(
+    *,
+    base_draft: dict[str, Any],
+    prompt: str,
+    call: Callable[[str], str],
+    repair_prompt: Callable[[dict[str, Any], list[str], str], str],
+    max_repairs: int = 2,
+) -> DraftCandidateResult:
+    """Generate one valid catalog candidate with at most two internal repairs.
+
+    The operation boundary is intentionally small and deterministic: every model
+    response is parsed, merged onto the same accepted base, and fully validated
+    before it can leave this function. A repair response may replace complete
+    sections of the latest parseable attempt, while an unparseable response falls
+    back to the accepted base. Provider exceptions are allowed to propagate so the
+    UI can preserve their safe call reference and offer an explicit retry.
+    """
+
+    repairs_remaining = min(max(int(max_repairs), 0), 2)
+    current_prompt = prompt
+    repair_base = _deepcopy_yaml(base_draft)
+    last_response = ""
+    issues: list[str] = []
+    failure_stage = ""
+
+    for attempt in range(1, repairs_remaining + 2):
+        last_response = call(current_prompt)
+        try:
+            sections = parse_ai_yaml_sections(last_response)
+        except (TypeError, ValueError, yaml.YAMLError):
+            failure_stage = "parse"
+            issues = [
+                "The model response was not valid catalog YAML. Return complete catalog sections."
+            ]
+            candidate = repair_base
+            trace = "Model response parsing failed before catalog validation."
+        else:
+            candidate = merge_draft_sections(repair_base, sections)
+            ok, issues = validate_draft_catalog(candidate)
+            if ok:
+                return DraftCandidateResult(
+                    draft=candidate,
+                    issues=(),
+                    attempts=attempt,
+                    last_response=last_response,
+                )
+            failure_stage = "validation"
+            repair_base = candidate
+            trace = validation_trace_for_repair(candidate)
+
+        if attempt > repairs_remaining:
+            break
+        current_prompt = repair_prompt(candidate, list(issues), trace)
+
+    return DraftCandidateResult(
+        draft=None,
+        issues=tuple(issues),
+        attempts=repairs_remaining + 1,
+        last_response=last_response,
+        failure_stage=failure_stage,
+    )
 
 
 def filter_draft_by_selection(
@@ -1157,16 +1248,28 @@ def _catalog_prompt(
     prompt_approved_schema = redact_hidden_field_mentions(
         prompt_approved_schema,
         hidden_fields,
+        preserve_fields=prompt_approved_fields,
     )
-    safe_file_name = redact_hidden_field_mentions(file_name, hidden_fields)
-    safe_user_goals = redact_hidden_field_mentions(user_goals, hidden_fields)
-    safe_change_request = redact_hidden_field_mentions(change_request, hidden_fields)
+    safe_file_name = redact_hidden_field_mentions(
+        file_name, hidden_fields, preserve_fields=prompt_approved_fields
+    )
+    safe_user_goals = redact_hidden_field_mentions(
+        user_goals, hidden_fields, preserve_fields=prompt_approved_fields
+    )
+    safe_change_request = redact_hidden_field_mentions(
+        change_request, hidden_fields, preserve_fields=prompt_approved_fields
+    )
     safe_validation_issues = redact_hidden_field_mentions(
         validation_issues or [],
         hidden_fields,
+        preserve_fields=prompt_approved_fields,
     )
-    safe_validation_trace = redact_hidden_field_mentions(validation_trace, hidden_fields)
-    safe_extra_rules = redact_hidden_field_mentions(extra_rules, hidden_fields)
+    safe_validation_trace = redact_hidden_field_mentions(
+        validation_trace, hidden_fields, preserve_fields=prompt_approved_fields
+    )
+    safe_extra_rules = redact_hidden_field_mentions(
+        extra_rules, hidden_fields, preserve_fields=prompt_approved_fields
+    )
     goals_text = ""
     if safe_user_goals.strip():
         goals_text = (
@@ -1221,7 +1324,7 @@ def _catalog_prompt(
         f"Hidden field count: {len(hidden_fields)}\n"
         f"Approved schema preview:\n{yaml.safe_dump(prompt_approved_schema, sort_keys=False)}\n"
         "Current draft:\n"
-        f"{yaml.safe_dump(prompt_draft_sections(current_draft, hidden_fields=hidden_fields), sort_keys=False)}"
+        f"{yaml.safe_dump(prompt_draft_sections(current_draft, hidden_fields=hidden_fields, preserve_fields=prompt_approved_fields), sort_keys=False)}"
         f"{issue_text}\n\n"
         f"Final self-check before returning:\n{final_self_check}\n\n"
         "Return valid YAML only. Do not wrap the answer in prose or Markdown fences."
@@ -1278,19 +1381,50 @@ def _approved_field_role_dictionary(
 def redact_hidden_field_mentions(
     value: Any,
     hidden_fields: list[str],
+    *,
+    preserve_fields: list[str] | None = None,
 ) -> Any:
-    """Recursively replace unapproved field-name mentions in dynamic prompt data."""
+    """Recursively replace unapproved field-name mentions in dynamic prompt data.
 
-    patterns = tuple(
-        re.compile(re.escape(field), re.IGNORECASE)
+    A hidden name is redacted even inside a longer identifier, because generated
+    object ids such as ``CustomerID_metric`` derive from the hidden field. The
+    exception is an identifier that belongs to a preserved (approved) field:
+    hidden ``Outcome`` must not corrupt approved ``OutcomeTime`` — a different
+    field — or the model would receive a schema it cannot satisfy.
+    """
+
+    preserved = {field.casefold() for field in (preserve_fields or []) if field}
+    rules = tuple(
+        (
+            re.compile(rf"[A-Za-z0-9_]*{re.escape(field)}[A-Za-z0-9_]*", re.IGNORECASE),
+            re.compile(re.escape(field), re.IGNORECASE),
+            # Preserved names that contain this hidden name: an identifier built
+            # from one of them mentions the hidden name only via the approved
+            # field, so it must stay intact.
+            tuple(name for name in preserved if field.casefold() in name),
+        )
         for field in sorted({field for field in hidden_fields if field}, key=len, reverse=True)
     )
 
+    def redact_token(token: str, mention: re.Pattern[str], covering: tuple[str, ...]) -> str:
+        folded = token.casefold()
+        if folded in preserved or any(name in folded for name in covering):
+            return token
+        return mention.sub("<hidden-field>", token)
+
+    def redact_text(text: str) -> str:
+        for token_pattern, mention, covering in rules:
+            text = token_pattern.sub(
+                lambda match, mention=mention, covering=covering: redact_token(
+                    match.group(0), mention, covering
+                ),
+                text,
+            )
+        return text
+
     def redact(item: Any) -> Any:
         if isinstance(item, str):
-            for pattern in patterns:
-                item = pattern.sub("<hidden-field>", item)
-            return item
+            return redact_text(item)
         if isinstance(item, dict):
             cleaned: dict[Any, Any] = {}
             for key, nested_item in item.items():

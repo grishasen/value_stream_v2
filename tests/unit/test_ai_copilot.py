@@ -14,6 +14,10 @@ from valuestream.ai import (
     prompt_for_coverage,
     run_copilot_tool_loop,
 )
+from valuestream.ai.copilot import (
+    draft_patch_bundles,
+    merge_selected_draft_patch_bundles,
+)
 from valuestream.ui.pages import ai_config_studio as ai_config_studio_page
 from valuestream.ui.pages.ai_config_studio import (
     DETERMINISTIC_STEPS,
@@ -521,6 +525,187 @@ def test_source_filter_patch_is_independent_from_processor_definitions() -> None
 
 
 @pytest.mark.unit
+def test_patch_bundles_close_processor_metric_tile_and_report_dependencies() -> None:
+    base = _base_draft()
+    proposed, _ = apply_draft_operations(
+        base,
+        [
+            {
+                "op": "set_processor",
+                "processor": {
+                    "id": "satisfaction",
+                    "source": "ih",
+                    "kind": "binary_outcome",
+                    "dimensions": ["Channel"],
+                    "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked"],
+                        "negative_values": ["Impression"],
+                    },
+                },
+            },
+            {
+                "op": "set_metric",
+                "name": "Satisfaction",
+                "metric": {
+                    "source": "satisfaction",
+                    "kind": "formula",
+                    "expression": {
+                        "op": "safe_div",
+                        "num": {"col": "Positives"},
+                        "den": {"col": "Count"},
+                    },
+                },
+            },
+            {
+                "op": "set_tile",
+                "dashboard": "satisfaction",
+                "page": "overview",
+                "tile": {
+                    "id": "satisfaction",
+                    "title": "Satisfaction",
+                    "metric": "Satisfaction",
+                    "chart": "kpi_card",
+                    "value": "Satisfaction",
+                },
+            },
+        ],
+    )
+
+    bundles = draft_patch_bundles(
+        base,
+        proposed,
+        ai_config_studio_page.validate_draft_catalog,
+    )
+    repeated = draft_patch_bundles(
+        base,
+        proposed,
+        ai_config_studio_page.validate_draft_catalog,
+    )
+
+    assert len(bundles) == 1
+    bundle = bundles[0]
+    assert set(bundle.patch_keys) == {
+        "processors:satisfaction",
+        "metrics:Satisfaction",
+        "dashboards:structure",
+        "tiles:satisfaction/overview/satisfaction",
+    }
+    assert bundle.key == repeated[0].key
+    assert bundle.title == "Add Satisfaction processing flow"
+    assert "1 processing flow" in bundle.summary
+    assert "1 metric" in bundle.summary
+    assert "1 report tile" in bundle.summary
+    assert "accepted together" in bundle.consequence
+    assert not bundle.is_removal
+    assert bundle.is_valid
+
+
+@pytest.mark.unit
+def test_patch_bundle_removals_require_explicit_review() -> None:
+    base = _base_draft()
+    proposed, _ = apply_draft_operations(
+        base,
+        [{"op": "remove_processor", "id": "engagement"}],
+    )
+
+    def validate(candidate: dict) -> tuple[bool, list[str]]:
+        return True, []
+
+    bundles = draft_patch_bundles(base, proposed, validate)
+
+    assert len(bundles) == 1
+    assert bundles[0].is_removal
+    assert "never selected automatically" in bundles[0].consequence
+
+    rejected, rejection_issues = merge_selected_draft_patch_bundles(
+        base,
+        proposed,
+        bundles,
+        {bundles[0].key},
+        validate,
+    )
+    accepted, acceptance_issues = merge_selected_draft_patch_bundles(
+        base,
+        proposed,
+        bundles,
+        {bundles[0].key},
+        validate,
+        allow_removals=True,
+    )
+
+    assert rejected is None
+    assert "requires explicit review" in rejection_issues[0]
+    assert accepted is not None
+    assert accepted["processors"]["processors"] == []
+    assert acceptance_issues == ()
+
+
+@pytest.mark.unit
+def test_patch_bundle_selection_revalidates_the_combination() -> None:
+    base = _base_draft()
+    proposed, _ = apply_draft_operations(
+        base,
+        [
+            {"op": "set_source_default", "source": "ih", "field": "Region", "value": "EU"},
+            {"op": "set_source_default", "source": "ih", "field": "Segment", "value": "A"},
+        ],
+    )
+
+    def validate(candidate: dict) -> tuple[bool, list[str]]:
+        defaults = candidate["pipelines"]["sources"][0].get("defaults", {})
+        if {"Region", "Segment"}.issubset(defaults):
+            return False, ["Region and Segment defaults cannot be accepted together."]
+        return True, []
+
+    bundles = draft_patch_bundles(base, proposed, validate)
+
+    assert len(bundles) == 2
+    assert all(bundle.is_valid for bundle in bundles)
+
+    candidate, issues = merge_selected_draft_patch_bundles(
+        base,
+        proposed,
+        bundles,
+        {bundle.key for bundle in bundles},
+        validate,
+    )
+
+    assert candidate is None
+    assert issues == ("Region and Segment defaults cannot be accepted together.",)
+
+
+@pytest.mark.unit
+def test_invalid_patch_bundle_cannot_be_selected() -> None:
+    base = _base_draft()
+    proposed, _ = apply_draft_operations(
+        base,
+        [{"op": "set_source_default", "source": "ih", "field": "Blocked", "value": True}],
+    )
+
+    def validate(candidate: dict) -> tuple[bool, list[str]]:
+        defaults = candidate["pipelines"]["sources"][0].get("defaults", {})
+        return (
+            (False, ["Blocked defaults are not allowed."]) if "Blocked" in defaults else (True, [])
+        )
+
+    bundles = draft_patch_bundles(base, proposed, validate)
+    candidate, issues = merge_selected_draft_patch_bundles(
+        base,
+        proposed,
+        bundles,
+        {bundles[0].key},
+        validate,
+    )
+
+    assert not bundles[0].is_valid
+    assert bundles[0].validation_issues == ("Blocked defaults are not allowed.",)
+    assert candidate is None
+    assert issues == (f"'{bundles[0].title}' does not pass draft validation.",)
+
+
+@pytest.mark.unit
 def test_copilot_tool_loop_repairs_invalid_operations_before_pending_review() -> None:
     responses = iter(
         [
@@ -601,6 +786,45 @@ def test_copilot_tool_loop_rejects_processor_edit_on_filters_step() -> None:
 
 
 @pytest.mark.unit
+def test_copilot_tool_loop_never_applies_operations_in_read_only_mode() -> None:
+    prompts: list[str] = []
+    validation_calls = 0
+
+    def call_model(prompt: str) -> str:
+        prompts.append(prompt)
+        return (
+            '{"reply":"I will add Total.","operations":[{"op":"set_metric",'
+            '"name":"Total","metric":{"source":"engagement","kind":"formula",'
+            '"expression":{"col":"Count"}}}],"questions":[]}'
+        )
+
+    def validate(candidate: dict) -> tuple[bool, list[str]]:
+        nonlocal validation_calls
+        validation_calls += 1
+        return True, []
+
+    result = run_copilot_tool_loop(
+        prompt="Add Total",
+        draft=_base_draft(),
+        call_model=call_model,
+        validate=validate,
+        read_only=True,
+        pending_summary="One new conversion metric is waiting for review.",
+    )
+
+    assert result.iterations == 1
+    assert result.pending_draft is None
+    assert result.turn.operations == []
+    assert validation_calls == 0
+    assert "PENDING REVIEW MODE" in prompts[0]
+    assert "One new conversion metric is waiting for review." in prompts[0]
+    assert "No draft change was created" in result.turn.reply
+    assert result.validation_issues == (
+        "Mutating operations are blocked while a proposal is pending review.",
+    )
+
+
+@pytest.mark.unit
 def test_prompt_for_copilot_includes_step_goals_history_and_contract() -> None:
     prompt = prompt_for_copilot(
         step="9. Metrics",
@@ -633,6 +857,30 @@ def test_prompt_for_copilot_includes_step_goals_history_and_contract() -> None:
     assert "Hidden field count: 1" in prompt
     assert "CustomerID" not in prompt
     assert "Keep <hidden-field> hidden." in prompt
+
+
+@pytest.mark.unit
+def test_pending_review_prompt_is_read_only_and_includes_redacted_summary() -> None:
+    prompt = prompt_for_copilot(
+        step="9. Metrics",
+        user_message="What will this proposal change?",
+        history=[],
+        user_goals="",
+        approved_schema=[{"column": "Channel", "dtype": "String", "unique": 3}],
+        approved_fields=["Channel"],
+        hidden_fields=["CustomerID"],
+        current_draft=_base_draft(),
+        read_only=True,
+        pending_summary="Adds Channel coverage without exposing CustomerID.",
+    )
+
+    assert "PENDING REVIEW MODE" in prompt
+    assert "operations: MUST be an empty list" in prompt
+    assert "accept or reject the pending proposal first" in prompt
+    assert "Pending proposal summary:" in prompt
+    assert "Adds Channel coverage" in prompt
+    assert "CustomerID" not in prompt
+    assert "<hidden-field>" in prompt
 
 
 @pytest.mark.unit
@@ -817,6 +1065,7 @@ def test_copilot_panel_holds_operations_in_pending_review(
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
+        st.session_state["ai_studio_api_key"] = "test-key"
         st.session_state["ai_studio_draft"] = draft
         st.session_state.setdefault("ai_studio_pending_draft", None)
         working = pl.DataFrame({"Channel": ["Web", "Mobile"]})
@@ -856,6 +1105,7 @@ def test_copilot_permission_error_names_model_and_preserves_last_prompt(
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "gpt-unavailable"
+        st.session_state["ai_studio_api_key"] = "test-key"
         st.session_state["ai_studio_draft"] = draft
         st.session_state.setdefault("ai_studio_pending_draft", None)
         page._render_copilot_panel(
@@ -869,9 +1119,9 @@ def test_copilot_permission_error_names_model_and_preserves_last_prompt(
 
     assert not at.exception
     error = at.error[0].value
-    assert "gpt-unavailable" in error
-    assert "AI Settings" in error
-    assert "No draft operations were applied" in error
+    assert "Couldn't complete Copilot request" in error
+    assert "accepted revision was not changed" in error
+    assert "insufficient permissions" not in error
     assert "Set ModelControlGroup to Test." in at.session_state["ai_studio_copilot_last_prompt"]
 
 
@@ -921,7 +1171,11 @@ def test_accepting_preprocessing_patches_syncs_all_source_editors() -> None:
         app,
         kwargs={"base_draft": base, "pending_draft": pending},
     ).run()
-    next(button for button in at.button if button.label == "Accept patches").click().run()
+    at = next(button for button in at.button if button.label == "Review individually").click().run()
+    for index, checkbox in enumerate(at.checkbox):
+        if checkbox.label == "Accept this complete bundle":
+            at = at.checkbox[index].check().run()
+    next(button for button in at.button if button.label == "Accept selected bundles").click().run()
 
     assert not at.exception
     assert at.session_state["ai_studio_pending_draft"] is None
@@ -965,6 +1219,7 @@ def test_copilot_panel_renders_clarifying_question_options(
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
+        st.session_state["ai_studio_api_key"] = "test-key"
         st.session_state["ai_studio_draft"] = draft
         st.session_state.setdefault("ai_studio_pending_draft", None)
         working = pl.DataFrame({"Channel": ["Web", "Mobile"]})
@@ -1013,6 +1268,7 @@ def test_copilot_question_before_first_draft_does_not_accept_baseline(
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
+        st.session_state["ai_studio_api_key"] = "test-key"
         st.session_state.setdefault("ai_studio_draft", None)
         st.session_state.setdefault("ai_studio_pending_draft", None)
         page._render_copilot_panel(
@@ -1030,17 +1286,16 @@ def test_copilot_question_before_first_draft_does_not_accept_baseline(
 
 
 @pytest.mark.unit
-def test_pending_review_disables_copilot_and_preserves_pending(
+def test_pending_review_allows_read_only_copilot_and_preserves_pending(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
 
-    calls = 0
+    prompts: list[str] = []
 
-    def fake_call(*args: object, **kwargs: object) -> str:
-        nonlocal calls
-        calls += 1
-        return '{"reply":"Unexpected","operations":[],"questions":[]}'
+    def fake_call(settings: object, prompt: str, **kwargs: object) -> str:
+        prompts.append(prompt)
+        return '{"reply":"This proposal adds one metric.","operations":[],"questions":[]}'
 
     monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call)
     base = _base_draft()
@@ -1067,6 +1322,7 @@ def test_pending_review_disables_copilot_and_preserves_pending(
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
+        st.session_state["ai_studio_api_key"] = "test-key"
         st.session_state["ai_studio_draft"] = base_draft
         st.session_state["ai_studio_pending_draft"] = pending_draft
         st.session_state["ai_studio_pending_base_draft"] = base_draft
@@ -1083,9 +1339,17 @@ def test_pending_review_disables_copilot_and_preserves_pending(
     ).run()
 
     assert not at.exception
-    assert at.chat_input[0].disabled
+    assert not at.chat_input[0].disabled
+    at.chat_input[0].set_value("What does this proposal change?").run()
+
+    assert not at.exception
     assert at.session_state["ai_studio_pending_draft"] == pending
-    assert calls == 0
+    assert len(prompts) == 2
+    assert "PENDING REVIEW MODE" in prompts[-1]
+    assert (
+        "This proposal adds one metric."
+        in at.session_state["ai_studio_copilot_history"][-1]["content"]
+    )
 
 
 @pytest.mark.unit
@@ -1120,27 +1384,39 @@ def test_new_sample_identity_resets_draft_and_copilot_with_same_columns() -> Non
 
 
 @pytest.mark.unit
-def test_phase_statuses_distinguish_ready_to_publish_from_published() -> None:
+def test_phase_statuses_require_explicit_review_before_publish() -> None:
     from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
 
-    def app(draft: dict, published: bool) -> None:
+    def app(draft: dict, reviewed: bool, published: bool) -> None:
         import streamlit as st  # noqa: PLC0415 - isolated AppTest source
 
         from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
 
         st.session_state["ai_studio_draft"] = draft
         st.session_state["ai_studio_pending_draft"] = None
+        st.session_state["ai_studio_reviewed_signature"] = (
+            page._draft_signature(draft) if reviewed else ""
+        )
         st.session_state["ai_studio_published_signature"] = (
             page._draft_signature(draft) if published else ""
         )
         st.session_state["phase_statuses"] = page._phase_statuses(["Channel"])
 
-    ready = AppTest.from_function(app, kwargs={"draft": _base_draft(), "published": False}).run()
+    unreviewed = AppTest.from_function(
+        app,
+        kwargs={"draft": _base_draft(), "reviewed": False, "published": False},
+    ).run()
+    reviewed = AppTest.from_function(
+        app,
+        kwargs={"draft": _base_draft(), "reviewed": True, "published": False},
+    ).run()
     published = AppTest.from_function(
         app,
-        kwargs={"draft": _base_draft(), "published": True},
+        kwargs={"draft": _base_draft(), "reviewed": True, "published": True},
     ).run()
 
-    assert ready.session_state["phase_statuses"]["Review"] == "complete"
-    assert ready.session_state["phase_statuses"]["Publish"] == "attention"
-    assert published.session_state["phase_statuses"]["Publish"] == "complete"
+    assert unreviewed.session_state["phase_statuses"]["Review"] == "attention"
+    assert unreviewed.session_state["phase_statuses"]["Apply"] == "empty"
+    assert reviewed.session_state["phase_statuses"]["Review"] == "complete"
+    assert reviewed.session_state["phase_statuses"]["Apply"] == "attention"
+    assert published.session_state["phase_statuses"]["Apply"] == "complete"

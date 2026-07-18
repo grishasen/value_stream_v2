@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-17
 
-**Status:** Plan of record; first trust hotfix implemented
+**Status:** Milestones 0–3 complete; Milestone 4 is in manual accessibility verification; Milestone 5 is code-ready for measured rollout, with cohort evidence and legacy-path retirement open.
 **Outcome:** A first-time user can choose the right authoring path, create a valid configuration without sharing sample values by default, review the proposal safely, apply it transactionally, and reach a clear report or data-processing next step.
 
 This plan reviews the [independent UX audit](ux-review-config-builder-ai-studio.md) against the earlier [evidence-backed conversion audit](configuration-builder-ai-studio-conversion-audit-2026-07-17.md), the [architecture](../concepts/architecture.md), the [replacement design](replacement-design.md), the [implementation plan](implementation-plan.md), the [reporting backlog](reporting-backlog.md), and the [KPI recipe backlog](kpi-recipe-backlog.md).
@@ -81,15 +81,15 @@ Status values are intended to be updated in place: **Todo**, **In progress**, **
 
 | ID | Status | Effort | Work | Acceptance |
 |---|---|---:|---|---|
-| CA-001 | Todo | M | Establish a code-and-test baseline for related RPT and KPR stories; mark each Done, Partial, or Open before scheduling. Convert current guide/UI mismatches into regression tests. | The plan links to existing stories instead of duplicating them, and every claimed regression has a failing test before its fix. |
+| CA-001 | Done | M | Establish a code-and-test baseline for related RPT and KPR stories; mark each Done, Partial, or Open before scheduling. Convert current guide/UI mismatches into regression tests. | The plan links to existing stories instead of duplicating them, and every claimed regression has a failing test before its fix. |
 | CA-002 | Done | S | Stop INFO-level logging of full AI prompts and responses. Retain call ID, model, duration, token metadata, and outcome; redact diagnostics by default. | Sample values, prompts, responses, credentials, and local paths never appear in normal logs; a dedicated log-capture test proves it. |
 | CA-003 | Done | S/M | Put every Builder catalog mutation behind the existing catalog transaction and post-write validity requirement. Reuse the AI apply rollback pattern rather than only reporting invalid state after a write. | Any failed write or post-write validation restores all affected catalog files byte-for-byte. |
 | CA-004 | Done | S/M | Default sample examples to off, flag likely identifiers, and require an explicit data-sharing review showing provider, model, fields, and whether examples are included. | A fresh sample sends zero example values until opt-in; prompt-payload tests prove it; generation cannot bypass the consent checkpoint. |
-| CA-005 | Todo | M | Make source defaults format-aware. Separate **Preview sample** from the production source location. Detect or explicitly select Pega behavior; use neutral CSV and Parquet defaults otherwise. Either support archive members advertised by the UI or narrow the promise. | A generic CSV never creates a Pega ZIP source; every supported sample can be re-read by its generated source settings; unsupported archives fail with actionable copy. |
-| CA-006 | Todo | M | Add provider, model, credential, and operation capability checks on the user-initiated generate or repair path; cache successful checks for the session. Map provider exceptions to product-language errors with expandable diagnostics and make gating tooltips conditional. | Missing credentials or insufficient permissions identify the failed capability and a corrective action; raw LiteLLM errors never lead the screen; an enabled or running action never shows disabled-state guidance. |
-| CA-007 | Todo | L | Change generation to parse, merge, validate, and run a bounded internal repair before producing reviewable patches. If recovery fails, discard the invalid candidate and offer a validated deterministic draft or a retry. | No acceptance control renders for an invalid candidate; repair exhaustion preserves prior work; invalid drafts cannot reach apply or run actions. |
-| CA-008 | Todo | M | Introduce revision-keyed draft validation and derive phase, step, proposal, accepted-draft, and published-workspace status from it. Human completion requires explicit review, not inferred object counts. | The same object and revision has one issue count everywhere; distinct objects are labelled; no phase is complete before the required user confirmation. |
-| CA-009 | Todo | L | Make the existing step-local persistence model truthful before considering a global draft rewrite. Form changes remain session-local until an object-specific **Apply to workspace** action; dirty state compares canonical objects and survives internal navigation with Restore or Discard. Rename the final step **Export current workspace**. | Switching steps without editing cannot change save state; an unapplied proposal cannot disappear silently; exactly one active apply action exists for the current object; **Run data** remains separate. |
+| CA-005 | Done | M | Make source defaults format-aware. Separate **Preview sample** from the production source location. Detect or explicitly select Pega behavior; use neutral CSV and Parquet defaults otherwise. Either support archive members advertised by the UI or narrow the promise. | A generic CSV never creates a Pega ZIP source; every supported sample can be re-read by its generated source settings; unsupported archives fail with actionable copy. |
+| CA-006 | Done | M | Add provider, model, credential, and operation capability checks on the user-initiated generate or repair path; cache successful checks for the session. Map provider exceptions to product-language errors with expandable diagnostics and make gating tooltips conditional. | Missing credentials or insufficient permissions identify the failed capability and a corrective action; raw LiteLLM errors never lead the screen; an enabled or running action never shows disabled-state guidance. |
+| CA-007 | Done | L | Change generation to parse, merge, validate, and run a bounded internal repair before producing reviewable patches. If recovery fails, discard the invalid candidate and offer a validated deterministic draft or a retry. | No acceptance control renders for an invalid candidate; repair exhaustion preserves prior work; invalid drafts cannot reach apply or run actions. |
+| CA-008 | Done | M | Introduce revision-keyed draft validation and derive phase, step, proposal, accepted-draft, and published-workspace status from it. Human completion requires explicit review, not inferred object counts. | The same object and revision has one issue count everywhere; distinct objects are labelled; no phase is complete before the required user confirmation. |
+| CA-009 | Done | L | Make the existing step-local persistence model truthful before considering a global draft rewrite. Form changes remain session-local until an object-specific **Apply to workspace** action; dirty state compares canonical objects and survives internal navigation with Restore or Discard. Rename the final step **Export current workspace**. | Switching steps without editing cannot change save state; an unapplied proposal cannot disappear silently; exactly one active apply action exists for the current object; **Run data** remains separate. |
 
 Do not begin with a cross-step global-draft rewrite. If later evidence shows that step-local proposals cannot satisfy the lifecycle, write an ADR before changing that persistence boundary and ship the migration behind a feature flag.
 
@@ -97,23 +97,23 @@ Do not begin with a cross-step global-draft rewrite. If later evidence shows tha
 
 | ID | Status | Effort | Work | Acceptance |
 |---|---|---:|---|---|
-| CA-101 | Todo | M | Add a top-level **Build** entry that explains **Start from sample with AI** versus **Configure the current workspace manually**. Replace the blank Studio canvas with upload, workspace sample, and one-click deterministic demo choices. | A cold user can begin in the main canvas and reach a valid demo draft without opening the sidebar or configuring an LLM. |
-| CA-102 | Todo | L | Restore one truthful navigation rhythm: compact progress, one current task, Back, one primary Continue or Apply action, and a jump outline. Dead-end Review or Publish states route to the prerequisite action. | Every step has one obvious primary action; Builder guide and live Previous or Next behavior agree; completion reflects user actions. |
-| CA-103 | Todo | L | Move patch review into the main canvas. Build semantic, dependency-closed bundles with a business summary, consequences, and validity. Offer **Accept safe additions**, **Review individually**, and **Reject**; removals start rejected. Keep exact YAML in collapsed details. | Large proposals are reviewable without a sidebar checkbox wall; any accepted combination validates; a removal requires explicit selection. |
-| CA-104 | Todo | M | Replace free-text required-field mapping with searchable schema selectors showing type and a safe preview. Keep Copilot available for read-only explanation while patches are pending, while blocking mutating requests that could overwrite them. | A nonexistent field cannot be mapped; a user can ask what a pending patch does without changing the proposal. |
-| CA-105 | Todo | M | Add an outcome-first finish screen that explains what was applied, classifies materialization impact, and recommends either **Open report** or **Run data**. | A successful authoring flow ends at a report or an explicit processing handoff, never merely at YAML download. |
-| CA-106 | Todo | M | Apply progressive disclosure: collapse YAML, AST, generated transforms, paths, provider details, and IDs. Put validation and downloads above collapsed file previews. Replace the embedded repository README with task-scoped help. Add Report Inventory search and human labels. | No default screen renders a full catalog dump; **Export current workspace** actions are reachable near the top; expert details remain available. |
-| CA-107 | Todo | M/L | Make long AI operations recoverable with named stages, a hard timeout, preserved draft state, and retry. First run a technical spike for native cancellable background execution; add Cancel only if the operation can actually be stopped safely. | A timeout never loses work or leaves ambiguous state; the UI names the current stage and provides one recovery action. |
+| CA-101 | Done | M | Add a top-level **Build** entry that explains **Start from sample with AI** versus **Configure the current workspace manually**. Replace the blank Studio canvas with upload, workspace sample, and one-click deterministic demo choices. | A cold user can begin in the main canvas and reach a valid demo draft without opening the sidebar or configuring an LLM. |
+| CA-102 | Done | L | Restore one truthful navigation rhythm: compact progress, one current task, Back, one primary Continue or Apply action, and a jump outline. Dead-end Review or Publish states route to the prerequisite action. | Every step has one obvious primary action; Builder guide and live Previous or Next behavior agree; completion reflects user actions. |
+| CA-103 | Done | L | Move patch review into the main canvas. Build semantic, dependency-closed bundles with a business summary, consequences, and validity. Offer **Accept safe additions**, **Review individually**, and **Reject**; removals start rejected. Keep exact YAML in collapsed details. | Large proposals are reviewable without a sidebar checkbox wall; any accepted combination validates; a removal requires explicit selection. |
+| CA-104 | Done | M | Replace free-text required-field mapping with searchable schema selectors showing type and a safe preview. Keep Copilot available for read-only explanation while patches are pending, while blocking mutating requests that could overwrite them. | A nonexistent field cannot be mapped; a user can ask what a pending patch does without changing the proposal. |
+| CA-105 | Done | M | Add an outcome-first finish screen that explains what was applied, classifies materialization impact, and recommends either **Open report** or **Run data**. | A successful authoring flow ends at a report or an explicit processing handoff, never merely at YAML download. |
+| CA-106 | Done | M | Apply progressive disclosure: collapse YAML, AST, generated transforms, paths, provider details, and IDs. Put validation and downloads above collapsed file previews. Replace the embedded repository README with task-scoped help. Add Report Inventory search and human labels. | No default screen renders a full catalog dump; **Export current workspace** actions are reachable near the top; expert details remain available. |
+| CA-107 | Done | M/L | Make long AI operations recoverable with named stages, a hard timeout, preserved draft state, and retry. First run a technical spike for native cancellable background execution; add Cancel only if the operation can actually be stopped safely. | A timeout never loses work or leaves ambiguous state; the UI names the current stage and provides one recovery action. |
 
 ### Nice to have — coherence and polish
 
 | ID | Status | Effort | Work | Acceptance |
 |---|---|---:|---|---|
-| CA-201 | Todo | M | Show human names first; move generated IDs to details. Fix phantom table rows, unsafe default selections, clipped columns, wrapping, and Report Inventory filtering. | Empty editors read as empty; no **Avoid** recommendation is preselected; key table values remain inspectable. |
-| CA-202 | Todo | M | Replace narrow stat-card grids with compact key-value layouts. Reduce duplicate health summaries, card chrome, chip wrapping, and help-icon noise. | At desktop and narrow widths, status text is legible and one primary action dominates each screen. |
-| CA-203 | Todo | M | Run a dedicated accessibility pass for keyboard order, focus, status announcements, accessible names, contrast, non-color diff semantics, and 200% zoom. | Keyboard-only and screen-reader checks pass the agreed matrix; no conclusion relies only on visual truncation. |
-| CA-204 | Todo | S/M | Normalize type hierarchy, casing, button roles, error severity, and business-language copy. Reproduce the reported browser-title and favicon issue before changing them because the shell already configures both. Load the configured fonts or remove the unsupported declarations. | Visual roles are consistent and provider, validator, and engine terminology is secondary to user language. |
-| CA-205 | Todo | S/M | Add privacy-safe funnel instrumentation for entry, sample chosen, consent confirmed, draft requested, valid proposal, review, apply, run, and report open. Measure time-to-valid and failure or abandonment by stage. | Events contain no raw sample values, field values, local paths, prompts, or credentials; numeric targets are set only after a baseline exists. |
+| CA-201 | Done | M | Show human names first; move generated IDs to details. Fix phantom table rows, unsafe default selections, clipped columns, wrapping, and Report Inventory filtering. | Empty editors read as empty; no **Avoid** recommendation is preselected; key table values remain inspectable. |
+| CA-202 | Done | M | Replace narrow stat-card grids with compact key-value layouts. Reduce duplicate health summaries, card chrome, chip wrapping, and help-icon noise. | At desktop and narrow widths, status text is legible and one primary action dominates each screen. |
+| CA-203 | In progress | M | Run a dedicated accessibility pass for keyboard order, focus, status announcements, accessible names, contrast, non-color diff semantics, and 200% zoom. | Keyboard-only and screen-reader checks pass the agreed matrix; no conclusion relies only on visual truncation. |
+| CA-204 | Done | S/M | Normalize type hierarchy, casing, button roles, error severity, and business-language copy. Reproduce the reported browser-title and favicon issue before changing them because the shell already configures both. Load the configured fonts or remove the unsupported declarations. | Visual roles are consistent and provider, validator, and engine terminology is secondary to user language. |
+| CA-205 | Done | S/M | Add privacy-safe funnel instrumentation for entry, sample chosen, consent confirmed, draft requested, valid proposal, review, apply, run, and report open. Measure time-to-valid and failure or abandonment by stage. | Events contain no raw sample values, field values, local paths, prompts, or credentials; numeric targets are set only after a baseline exists. |
 
 ## 4. Reuse before building
 
@@ -133,6 +133,8 @@ KPI recipe Increment A already supplies a shared browser, resolver, mapping, and
 
 ### Milestone 0 — baseline and decisions
 
+**Status: Done.** The story baseline records implementation ownership in the primary implementation map below while preserving Partial/Open status for the broader RPT/KPR stories.
+
 - Complete CA-001.
 - Land CA-002 and CA-003 as immediate trust hotfixes.
 - Freeze the canonical lifecycle, action vocabulary, prompt consent contract, and preview-versus-source copy.
@@ -142,6 +144,8 @@ KPI recipe Increment A already supplies a shared browser, resolver, mapping, and
 
 ### Milestone 1 — safe input and valid generation
 
+**Status: Done.**
+
 - Complete CA-004 through CA-008.
 - Extend existing AI and Studio tests instead of starting a parallel test harness.
 - Update the AI Studio guide and security guidance with the behavior changes.
@@ -149,6 +153,8 @@ KPI recipe Increment A already supplies a shared browser, resolver, mapping, and
 **Exit gate:** no examples without opt-in, no invalid candidate in review, no raw provider error as primary copy, no generic CSV configured as Pega, and no conflicting verdicts.
 
 ### Milestone 2 — draft, review, and apply
+
+**Status: Done.**
 
 - Complete CA-009, CA-103, and the review portion of CA-104.
 - Reuse the existing catalog transaction and post-write validation.
@@ -158,12 +164,16 @@ KPI recipe Increment A already supplies a shared browser, resolver, mapping, and
 
 ### Milestone 3 — activation and outcome
 
+**Status: Done.**
+
 - Complete CA-101, CA-102, CA-105, and CA-107.
 - Update the Builder guide, AI Studio guide, UI tour, and relevant tutorial in the same changes.
 
 **Exit gate:** a first-time user can choose a path, finish the deterministic demo, apply safely, and reach **Open report** or **Run data** without using YAML.
 
 ### Milestone 4 — disclosure, responsiveness, and accessibility
+
+**Status: In progress.** Automated contrast, focus, reduced-motion, native-component, AppTest, and light-theme desktop/narrow reflow checks pass. Manual keyboard traversal, VoiceOver/NVDA, true browser 200% zoom, and dark-theme browser evidence remain open.
 
 - Complete CA-106 and CA-201 through CA-204.
 - Reconcile the current specification requiring help on every field with the audit evidence of help-icon overload: definitions remain accessible, while standalone visible help is reserved for ambiguous fields and section-level guidance.
@@ -172,10 +182,12 @@ KPI recipe Increment A already supplies a shared browser, resolver, mapping, and
 
 ### Milestone 5 — measured rollout
 
+**Status: In progress.** CA-205 implementation is complete. No representative baseline window, like-for-like cohort comparison, or documented legacy-navigation retirement has occurred.
+
 - Complete CA-205 before broad exposure.
 - Roll out behind a feature flag, compare funnel stages, inspect failure and abandonment, then retire the old semantics.
 
-**Exit gate:** all critical items are Done, privacy and validity invariants are enforced by tests, and funnel events contain no customer data.
+**Exit gate:** all critical items are Done, privacy and validity invariants are enforced by tests, funnel events contain no customer data, and a representative baseline/comparison is documented before the rollout flag and legacy grouping are retired.
 
 ## 6. Verification matrix
 

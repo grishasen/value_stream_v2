@@ -18,6 +18,13 @@ from valuestream.ui.context import (
     source_last_run,
     source_root,
 )
+from valuestream.ui.instrumentation import (
+    AuthoringEvent,
+    AuthoringOutcome,
+    AuthoringStage,
+    record_event,
+    workflow_from_handoff,
+)
 from valuestream.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -176,6 +183,7 @@ def _render_upload(ctx: ValueStreamContext, source: Any, root: Path) -> None:
 
 
 def _run_all(ctx: ValueStreamContext, *, force: bool) -> None:
+    _record_authoring_run_started()
     try:
         with st.status("Running workspace", expanded=True) as status:
             status.write("Discovering files and processing configured sources...")
@@ -195,12 +203,14 @@ def _run_all(ctx: ValueStreamContext, *, force: bool) -> None:
             f"{result.sources_partial} partial, {result.sources_failed} failed"
         )
     except Exception as exc:  # pragma: no cover - Streamlit display path
+        _record_authoring_run_failed()
         logger.exception("Workspace data load failed: workspace=%s", ctx.workspace)
         st.toast("Data load failed.", icon=":material/error:")
         st.error(str(exc))
 
 
 def _run_one(ctx: ValueStreamContext, source_id: str, *, force: bool) -> None:
+    _record_authoring_run_started()
     try:
         with st.status(f"Running {source_id}", expanded=True) as status:
             status.write("Discovering files...")
@@ -222,6 +232,7 @@ def _run_one(ctx: ValueStreamContext, source_id: str, *, force: bool) -> None:
             f"{result.rows_kept:,} rows kept"
         )
     except Exception as exc:  # pragma: no cover - Streamlit display path
+        _record_authoring_run_failed()
         logger.exception(
             "Source data load failed: workspace=%s source=%s",
             ctx.workspace,
@@ -229,6 +240,38 @@ def _run_one(ctx: ValueStreamContext, source_id: str, *, force: bool) -> None:
         )
         st.toast("Source run failed.", icon=":material/error:")
         st.error(str(exc))
+
+
+def _record_authoring_run_started() -> None:
+    """Record an explicit run only when Data Load was reached from authoring."""
+
+    handoff_workflow = workflow_from_handoff(st.query_params.get("from"))
+    if handoff_workflow is None:
+        return
+    record_event(
+        st.session_state,
+        event=AuthoringEvent.RUN_STARTED,
+        workflow=handoff_workflow,
+        stage=AuthoringStage.RUN,
+        outcome=AuthoringOutcome.STARTED,
+        once=True,
+    )
+
+
+def _record_authoring_run_failed() -> None:
+    """Record a bounded failure without leaking the engine exception."""
+
+    handoff_workflow = workflow_from_handoff(st.query_params.get("from"))
+    if handoff_workflow is None:
+        return
+    record_event(
+        st.session_state,
+        event=AuthoringEvent.FAILED,
+        workflow=handoff_workflow,
+        stage=AuthoringStage.RUN,
+        outcome=AuthoringOutcome.ERROR,
+        once=True,
+    )
 
 
 @st.dialog(

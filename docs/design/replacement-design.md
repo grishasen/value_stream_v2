@@ -1215,18 +1215,24 @@ Replaces the current `report_builder/` and most manual `config_generator/` editi
 - **Reports / Tiles** — search/filter a report library, create/duplicate/delete tiles, use visual chart-field mapping or raw YAML fallback, inspect chart recipe metadata, preview against aggregates, and save into `dashboards.yaml`.
 - **Chat Review** — review the aggregate metrics, processors, and persisted group-by fields exposed to Chat With Data; confirm catalog validation and LLM settings readiness before relying on chat answers; edit chat-only `ai.yaml` guidance such as the generic agent prompt plus dataset/metric descriptions used by the LLM planner.
 - **Settings** — edit `pipelines.yaml` workspace defaults such as workspace name, time zone, calendar grains, and week start, plus `dashboards.yaml` theme settings.
-- **Save & Export** — show and download each catalog file independently because Value Stream stores YAML across `pipelines.yaml`, `processors.yaml`, `metrics.yaml`, and `dashboards.yaml`.
+- **Export current workspace** — put validation and individual catalog-file downloads before collapsed YAML previews. Export describes the applied workspace; it is not a save action for an unapplied object draft.
 
-The implemented Builder presents these areas through a compact step selector
-with Previous/Next actions and a phase progress bar. Validation and review
-status are summarized in Workspace Health rather than duplicated above every
-step. Shared report/home metric cards use breakpoint-aware grids, and both UI
-and Plotly themes use explicit light/dark surface and contrast tokens.
+The implemented Builder presents these areas through a compact jump outline,
+Back/Continue actions, and one current task. A changed object becomes a
+canonical, session-local revision with one visible **Apply to workspace**
+action; navigation preserves it until Apply or Discard. Successful apply ends
+in either **Open report** or an explicit **Run data** handoff. Validation and
+review status are summarized in Workspace Health rather than duplicated above
+every step. Shared report/home metric cards use breakpoint-aware grids, and
+both UI and Plotly themes use explicit light/dark surface and contrast tokens.
 
 AI Configuration Studio remains a separate guided workflow because it starts from a sample file rather than an existing catalog:
 
-- **Sample** — upload/select a source sample and review runtime reader controls.
-- **Required fields** — map subject, outcome time, decision time, and outcome fields.
+- **Sample** — upload/select a preview sample, or load the deterministic demo,
+  then separately review a format-aware production source plan. Uploaded bytes
+  are not staged for ingestion by this step.
+- **Required fields** — map subject, outcome time, decision time, and outcome
+  fields with selectors restricted to the reviewed schema.
 - **Defaults, filters, calculations** — use the same row editors as the Builder; filters compile to AST, calculations compile to `derive_column` transforms.
 - **Governed Copilot preprocessing** — source defaults, dataset filters, and
   calculated fields can be added, replaced, or removed through closed Copilot
@@ -1239,8 +1245,21 @@ AI Configuration Studio remains a separate guided workflow because it starts fro
   the session draft and are then synchronized into the Defaults and
   Filters/Calculations row editors before those widgets render again.
 - **Approve fields** — choose which working fields are eligible for draft metric/report generation and which sample values may be shared with a future LLM.
-- **Draft** — generate reviewed YAML drafts. LLM responses can populate source, processor, metric, report, chat-readiness, workspace-default, and dashboard-theme settings; deterministic generation remains available as a baseline and fallback.
-- **Save & Export** — download draft YAML; the persistent **Save draft** action in the upper-right of the Studio status panel applies the accepted draft through the same structured writers. Sources, processors, metrics, dashboards, and `ai.yaml` share one rollback boundary that includes post-write catalog validation. **Save Draft & Run Source** is the separate explicit materialization action.
+- **Draft** — preflight the selected provider capability, then generate, parse,
+  merge, validate, and if necessary run up to two bounded repair passes. Only
+  a valid revision can enter review. Provider failures lead with safe corrective copy;
+  timeout/retry preserves the last valid draft. Deterministic generation is
+  available without model configuration.
+- **Review** — present semantic, dependency-closed bundles in the main canvas
+  with safe-addition, individual-review, and reject paths. Removals start
+  rejected. Copilot may explain pending changes but cannot mutate underneath
+  them; exact YAML is a collapsed detail.
+- **Apply and export** — one **Apply to workspace** action writes the explicitly
+  reviewed revision through the structured writers. Sources, processors,
+  metrics, dashboards, and `ai.yaml` share one rollback boundary including
+  post-write validation. Apply never starts a source. The outcome routes to
+  Reports when aggregates are usable or to Data Load when materialization is
+  required; downloads remain available above collapsed previews.
 
 ### 11.2 Plotly chart kinds (catalog parity with current app)
 

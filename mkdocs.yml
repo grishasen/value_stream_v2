@@ -91,6 +91,7 @@ nav:
           - Performance benchmarking: guides/operations/performance-benchmarking.md
           - Migration & backfill: guides/operations/migration.md
           - Deployment: guides/operations/deployment.md
+          - Configuration authoring rollout: guides/operations/authoring-rollout.md
           - Security: guides/operations/security.md
           - Troubleshooting: guides/operations/troubleshooting.md
   - Concepts:
@@ -122,6 +123,9 @@ nav:
       - Reporting backlog: design/reporting-backlog.md
       - KPI recipe backlog: design/kpi-recipe-backlog.md
       - Configuration authoring improvement plan: design/configuration-builder-ai-studio-improvement-plan-2026-07-17.md
+      - Configuration authoring story baseline: design/configuration-authoring-story-baseline-2026-07-18.md
+      - Configuration authoring accessibility matrix: design/configuration-authoring-accessibility-matrix-2026-07-18.md
+      - AI Studio cancellation spike: design/ai-studio-cancellation-spike-2026-07-18.md
       - Configuration authoring conversion audit: design/configuration-builder-ai-studio-conversion-audit-2026-07-17.md
       - Independent configuration authoring UX review: design/ux-review-config-builder-ai-studio.md
       - Chat With Data MLP1: design/chat-with-data-mlp1.md

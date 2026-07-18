@@ -134,6 +134,7 @@ and shortened catalog hash. Page modules consume that context directly.
 | `ui/pages/data_load.py` | Upload, discovery, and source runs |
 | `ui/pages/reports.py` | Dashboard rendering, filters, presentation, inspect mode |
 | `ui/pages/catalog.py` | Catalog inventory and validation visibility |
+| `ui/pages/build.py` | Choice between sample-first and catalog-first authoring |
 | `ui/pages/config_builder.py` | Catalog-first builder, chat review, settings, and YAML export |
 | `ui/pages/ai_config_studio.py` | Sample-driven catalog drafting with optional model assistance |
 | `ui/pages/chat.py` | Aggregate-aware chat over selected metrics |

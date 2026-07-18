@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -55,6 +56,498 @@ st.write("Editor body")
     assert not app.exception
     assert [button.label for button in app.button] == ["Save"]
     assert not app.button[0].disabled
+
+
+@pytest.mark.unit
+def test_builder_draft_status_uses_canonical_object_equality() -> None:
+    baseline = {"id": "engagement", "states": {"Count": {"type": "count"}}}
+    equivalent = {
+        "states": {"Count": {"type": "count", "description": None}},
+        "id": "engagement",
+    }
+    changed = {"id": "engagement", "states": {"Count": {"type": "value_sum"}}}
+
+    clean = builder.builder_draft_status("processor:engagement", baseline, equivalent)
+    dirty = builder.builder_draft_status("processor:engagement", baseline, changed)
+
+    assert not clean.dirty
+    assert dirty.dirty
+    assert dirty.revision == dirty.draft_hash[:12]
+
+
+@pytest.mark.unit
+def test_builder_draft_registry_preserves_and_discards_step_state() -> None:
+    state: dict[str, object] = {
+        "builder_source_id_ih": "events",
+        "builder_metric_name": "keep",
+    }
+    status = builder.builder_draft_status("source:ih", {"id": "ih"}, {"id": "events"})
+
+    assert not builder.update_builder_draft_registry(
+        state,
+        status,
+        widget_prefixes=("builder_source_",),
+    )
+    assert builder.update_builder_draft_registry(
+        state,
+        status,
+        widget_prefixes=("builder_source_",),
+    )
+    assert state[builder.BUILDER_DRAFTS_KEY] == {
+        "source:ih": {
+            "revision": status.revision,
+            "baseline_hash": status.baseline_hash,
+            "draft_hash": status.draft_hash,
+            "draft_payload": {"id": "events"},
+            "widget_state": {"builder_source_id_ih": "events"},
+        }
+    }
+
+    state.pop("builder_source_id_ih")
+    assert builder.restore_builder_draft(state, status.key)
+    assert state["builder_source_id_ih"] == "events"
+    assert builder.registered_builder_draft(state, status.key)["draft_payload"] == {"id": "events"}
+
+    builder.discard_builder_draft(
+        state,
+        status.key,
+        widget_prefixes=("builder_source_",),
+    )
+
+    assert state[builder.BUILDER_DRAFTS_KEY] == {}
+    assert "builder_source_id_ih" not in state
+    assert state["builder_metric_name"] == "keep"
+
+
+@pytest.mark.unit
+def test_builder_step_draft_can_be_restored_after_navigation() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import builder
+from valuestream.ui.pages.config_builder import _render_editor_primary_action
+
+def move(step):
+    st.session_state["draft_test_step"] = step
+
+save_slot = st.empty()
+draft_slot = st.empty()
+if st.session_state.get("draft_test_step", "edit") == "edit":
+    description = st.text_input(
+        "Description",
+        value="Persisted description",
+        key="builder_source_description_demo",
+    )
+    status = builder.builder_draft_status(
+        "source:demo",
+        {"description": "Persisted description"},
+        {"description": description},
+    )
+    _render_editor_primary_action(
+        save_slot=save_slot,
+        draft_slot=draft_slot,
+        status=status,
+        valid=True,
+        widget_prefixes=("builder_source_",),
+        help_text="Apply test source",
+    )
+    st.button("Leave editor", on_click=move, args=("away",))
+else:
+    st.write("Another step")
+    st.button("Return to editor", on_click=move, args=("edit",))
+"""
+    ).run()
+
+    assert not app.exception
+    assert [button.label for button in app.button].count("Continue") == 1
+    assert [button.label for button in app.button].count("Apply to workspace") == 0
+
+    app = app.text_input[0].set_value("Session proposal").run()
+    assert not app.exception
+    assert [button.label for button in app.button].count("Continue") == 0
+    assert [button.label for button in app.button].count("Apply to workspace") == 1
+
+    app = next(button for button in app.button if button.label == "Leave editor").click().run()
+    app = next(button for button in app.button if button.label == "Return to editor").click().run()
+
+    assert not app.exception
+    assert [button.label for button in app.button].count("Restore draft") == 1
+    app = next(button for button in app.button if button.label == "Restore draft").click().run()
+
+    assert not app.exception
+    assert app.text_input[0].value == "Session proposal"
+    assert [button.label for button in app.button].count("Apply to workspace") == 1
+
+
+@pytest.mark.unit
+def test_builder_apply_outcome_separates_report_ready_from_data_refresh() -> None:
+    report = builder.builder_apply_outcome("Executive summary")
+    processor = builder.builder_apply_outcome(
+        "Engagement",
+        source_ids=["ih", "ih"],
+        requires_data_run=True,
+    )
+
+    assert not report.requires_data_run
+    assert report.action == "open_report"
+    assert processor.requires_data_run
+    assert processor.action == "run_data"
+    assert processor.source_ids == ("ih",)
+
+
+@pytest.mark.unit
+def test_builder_materialization_impact_ignores_prose_and_presentation() -> None:
+    source = {
+        "id": "ih",
+        "description": "Before",
+        "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+    }
+    processor = {
+        "id": "engagement",
+        "source": "ih",
+        "description": "Before",
+        "states": {"Count": {"type": "count"}},
+    }
+    settings = {
+        "workspace_name": "Demo",
+        "time_zone": "UTC",
+        "calendar_grains": ["Day", "Summary"],
+        "week_start": "monday",
+        "dashboard_theme": {"accent": "pine"},
+    }
+
+    assert not builder.builder_requires_data_run(
+        "source", source, {**source, "description": "After"}
+    )
+    assert not builder.builder_requires_data_run(
+        "processor", processor, {**processor, "description": "After"}
+    )
+    assert not builder.builder_requires_data_run(
+        "workspace_settings",
+        settings,
+        {**settings, "workspace_name": "Renamed", "dashboard_theme": {"accent": "gold"}},
+    )
+    assert not builder.builder_requires_data_run(
+        "metric", {"description": "A"}, {"kind": "formula"}
+    )
+
+
+@pytest.mark.unit
+def test_builder_materialization_impact_detects_computation_changes() -> None:
+    source = {
+        "id": "ih",
+        "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+    }
+    processor = {
+        "id": "engagement",
+        "source": "ih",
+        "states": {"Count": {"type": "count"}},
+    }
+    settings = {
+        "time_zone": "UTC",
+        "calendar_grains": ["Day", "Summary"],
+        "week_start": "monday",
+    }
+
+    assert builder.builder_requires_data_run(
+        "source",
+        source,
+        {**source, "reader": {"kind": "parquet", "file_pattern": "new/*.parquet"}},
+    )
+    assert builder.builder_requires_data_run(
+        "processor",
+        processor,
+        {**processor, "states": {"Count": {"type": "value_sum", "column": "Value"}}},
+    )
+    assert builder.builder_requires_data_run(
+        "workspace_settings",
+        settings,
+        {**settings, "time_zone": "Europe/Berlin"},
+    )
+
+
+@pytest.mark.unit
+def test_direct_builder_render_starts_builder_authoring_journey() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    render_function = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "render"
+    )
+    start_call = next(
+        node
+        for node in ast.walk(render_function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "start_journey"
+    )
+
+    workflow = next(keyword.value for keyword in start_call.keywords if keyword.arg == "workflow")
+
+    assert isinstance(workflow, ast.Attribute)
+    assert workflow.attr == "BUILDER"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("requires_data_run", [True, False])
+def test_builder_apply_event_records_materialization_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+    requires_data_run: bool,
+) -> None:
+    captured: dict[str, object] = {}
+    session_state: dict[str, object] = {}
+
+    def capture(state: object, **kwargs: object) -> bool:
+        captured.update({"state": state, **kwargs})
+        return True
+
+    monkeypatch.setattr(config_builder, "record_event", capture)
+    monkeypatch.setattr(config_builder, "st", SimpleNamespace(session_state=session_state))
+
+    config_builder._record_builder_applied(
+        builder.builder_apply_outcome(
+            "Test object",
+            requires_data_run=requires_data_run,
+        )
+    )
+
+    assert captured["state"] is session_state
+    assert captured["event"].value == "applied"  # type: ignore[union-attr]
+    assert captured["workflow"].value == "builder"  # type: ignore[union-attr]
+    assert captured["stage"].value == "apply"  # type: ignore[union-attr]
+    assert captured["outcome"].value == "success"  # type: ignore[union-attr]
+    assert captured["requires_data_run"] is requires_data_run
+
+
+@pytest.mark.unit
+def test_builder_ready_review_and_apply_events_are_ordered_and_private(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui import builder  # noqa: PLC0415
+        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+
+        status = builder.builder_draft_status(
+            "source:private",
+            {"description": "baseline"},
+            {"description": "PRIVATE-CUSTOMER-42"},
+        )
+        if page._render_editor_primary_action(
+            save_slot=st.empty(),
+            draft_slot=st.empty(),
+            status=status,
+            valid=True,
+            widget_prefixes=("builder_private_",),
+            help_text="Apply the test proposal.",
+        ):
+            page._record_builder_applied(builder.builder_apply_outcome("Private object"))
+
+    rendered = AppTest.from_function(app).run()
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run()
+    )
+
+    assert not rendered.exception
+    valid = caplog.text.index("workflow=builder event=valid_proposal")
+    reviewed = caplog.text.index("workflow=builder event=reviewed")
+    applied = caplog.text.index("workflow=builder event=applied")
+    assert valid < reviewed < applied
+    assert "PRIVATE-CUSTOMER-42" not in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (TimeoutError("private timeout details"), "timeout"),
+        (ValueError("private validation details"), "blocked"),
+        (RuntimeError("PRIVATE-CUSTOMER-42"), "error"),
+    ],
+)
+def test_builder_apply_failure_uses_only_allowlisted_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected: str,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def capture(_state: object, **kwargs: object) -> bool:
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(config_builder, "record_event", capture)
+    monkeypatch.setattr(config_builder, "st", SimpleNamespace(session_state={}))
+
+    config_builder._record_builder_apply_failed(error)
+
+    assert captured["event"].value == "failed"  # type: ignore[union-attr]
+    assert captured["workflow"].value == "builder"  # type: ignore[union-attr]
+    assert captured["stage"].value == "apply"  # type: ignore[union-attr]
+    assert captured["outcome"].value == expected  # type: ignore[union-attr]
+    assert all("PRIVATE" not in str(value) for value in captured.values())
+
+
+@pytest.mark.unit
+def test_builder_preserves_unresolved_data_refresh_across_later_applies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_state: dict[str, object] = {}
+    monkeypatch.setattr(config_builder, "st", SimpleNamespace(session_state=session_state))
+
+    config_builder._store_builder_apply_outcome(
+        builder.builder_apply_outcome(
+            "Engagement processor",
+            source_ids=["ih"],
+            requires_data_run=True,
+        )
+    )
+    config_builder._store_builder_apply_outcome(builder.builder_apply_outcome("Executive report"))
+
+    pending = session_state[config_builder.BUILDER_LAST_OUTCOME_KEY]
+    assert pending["action"] == "run_data"
+    assert pending["source_ids"] == ("ih",)
+
+    config_builder._store_builder_apply_outcome(
+        builder.builder_apply_outcome(
+            "Customer processor",
+            source_ids=["customers"],
+            requires_data_run=True,
+        )
+    )
+
+    merged = session_state[config_builder.BUILDER_LAST_OUTCOME_KEY]
+    assert merged["action"] == "run_data"
+    assert merged["source_ids"] == ("customers", "ih")
+
+
+@pytest.mark.unit
+def test_builder_navigation_supports_jump_back_and_continue(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+
+    assert not rendered.exception
+    labels = [button.label for button in rendered.button]
+    assert labels.count("Back") == 1
+    assert labels.count("Continue") == 1
+    assert labels.count("Apply to workspace") == 0
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Sources").run()
+
+    assert not rendered.exception
+    source_labels = [button.label for button in rendered.button]
+    assert source_labels.count("Continue") == 1
+    assert source_labels.count("Apply to workspace") == 0
+
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Export current workspace").run()
+
+    assert not rendered.exception
+    assert rendered.session_state["builder_step"] == "Export current workspace"
+    assert {item.label for item in rendered.get("download_button")} == {
+        "Download pipelines.yaml",
+        "Download processors.yaml",
+        "Download metrics.yaml",
+        "Download dashboards.yaml",
+    }
+
+
+@pytest.mark.unit
+def test_builder_metric_mode_switch_can_fill_claimed_fragment_slots(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    builder.write_metric_definition(
+        tmp_path,
+        "CTR",
+        {
+            **builder.build_formula_metric("engagement", "Positives", "Count"),
+            "display": {"label": "Click-through rate"},
+        },
+    )
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Metrics").run()
+    metric_action = next(
+        item for item in rendered.segmented_control if item.label == "Metric action"
+    )
+    rendered = metric_action.set_value("Edit Existing Metric").run()
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
+
+
+@pytest.mark.unit
+def test_export_downloads_render_before_collapsed_yaml_previews() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_export_current_workspace"
+    )
+    downloads = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "download_button"
+    ]
+    expanders = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "expander"
+    ]
+
+    assert downloads
+    assert expanders
+    assert max(node.lineno for node in downloads) < min(node.lineno for node in expanders)
+    assert all(
+        any(
+            keyword.arg == "expanded"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is False
+            for keyword in node.keywords
+        )
+        for node in expanders
+    )
+
+
+@pytest.mark.unit
+def test_empty_editor_frame_has_columns_without_phantom_row() -> None:
+    frame = builder.editor_frame(
+        [],
+        ["Field", "Value", "Enabled"],
+        builder.blank_filter_row,
+    )
+
+    assert frame.is_empty()
+    assert frame.columns == ["Field", "Value", "Enabled"]
+    assert frame.schema == {
+        "Field": pl.String,
+        "Value": pl.String,
+        "Enabled": pl.Boolean,
+    }
+    assert builder.default_rows_from_values({}) == []
+    assert builder.filter_rows_from_expression(None) == []
 
 
 @pytest.mark.unit
@@ -1067,6 +1560,85 @@ def test_metric_to_dict_omits_empty_base_fields() -> None:
 
 
 @pytest.mark.unit
+def test_metric_to_dict_keeps_sparse_authored_display_fields() -> None:
+    metric = model.FormulaMetric.model_validate(
+        {
+            "source": "engagement",
+            "kind": "formula",
+            "expression": {"col": "Count"},
+            "display": {"label": "Interactions"},
+        }
+    )
+
+    data = builder.metric_to_dict(metric)
+
+    assert data["display"] == {"label": "Interactions"}
+
+
+@pytest.mark.unit
+def test_lifecycle_metric_does_not_invent_outputs_for_existing_sparse_yaml() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import forms
+
+ctx = forms.MetricFormContext(state_options=lambda _types: [])
+st.session_state["result"] = forms.metric_kind_fields(
+    "lifecycle_summary",
+    {"source": "lifecycle", "kind": "lifecycle_summary"},
+    ctx,
+    key_prefix="lifecycle_sparse",
+)
+"""
+    ).run()
+
+    assert not app.exception
+    assert app.session_state["result"] == {}
+
+
+@pytest.mark.unit
+def test_set_op_metric_keeps_time_window_operands_read_only() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import forms
+
+seed = {
+    "source": "audiences",
+    "kind": "set_op",
+    "op": "intersection",
+    "operands": [
+        {"state": "Active_theta", "time_window": {"start": "-30d", "end": "-1d"}},
+        {"state": "Active_theta", "time_window": {"start": "-1d", "end": "now"}},
+    ],
+}
+ctx = forms.MetricFormContext(
+    state_options=lambda _types: ["Active_theta", "Known_theta"],
+)
+st.session_state["result"] = forms.metric_kind_fields(
+    "set_op", seed, ctx, key_prefix="windowed_set"
+)
+"""
+    ).run()
+
+    assert not app.exception
+    assert app.session_state["result"] == {
+        "op": "intersection",
+        "operands": [
+            {
+                "state": "Active_theta",
+                "time_window": {"start": "-30d", "end": "-1d"},
+            },
+            {
+                "state": "Active_theta",
+                "time_window": {"start": "-1d", "end": "now"},
+            },
+        ],
+    }
+    assert app.info
+
+
+@pytest.mark.unit
 def test_build_state_defs_uses_direct_editor_rows() -> None:
     processor = model.NumericDistributionProcessor.model_validate(
         {
@@ -1166,6 +1738,141 @@ def test_build_source_definition_can_add_rename_capitalize_defaults_transform() 
         {"kind": "parse_datetime", "columns": ["OutcomeTime"], "format": "%Y-%m-%d"},
     ]
     assert source_def["transforms"][2] == {"kind": "defaults", "values": {"Revenue": 0.0}}
+
+
+@pytest.mark.unit
+def test_build_source_definition_preserves_untouched_transform_order() -> None:
+    source = model.Source.model_validate(
+        {
+            "id": "sample",
+            "description": "Generated sample",
+            "reader": {
+                "kind": "csv",
+                "file_pattern": "sample.csv",
+                "root": "data/studio",
+            },
+            "schema": {
+                "timestamp_column": "OutcomeTime",
+                "natural_key": ["CustomerID"],
+                "drop_columns": [],
+            },
+            "transforms": [
+                {
+                    "kind": "derive_column",
+                    "output": "SubjectID",
+                    "expression": {"col": "CustomerID"},
+                },
+                {
+                    "kind": "parse_datetime",
+                    "columns": ["OutcomeTime"],
+                    "format": "%+",
+                },
+                {
+                    "kind": "derive_calendar",
+                    "from": "OutcomeTime",
+                    "outputs": ["Day", "Month", "Quarter", "Year"],
+                },
+            ],
+        }
+    )
+
+    source_def = config_builder._build_source_definition(
+        source=source,
+        source_id=source.id,
+        description=source.description,
+        reader_kind=source.reader.kind,
+        file_pattern=source.reader.file_pattern,
+        group_by_filename=source.reader.group_by_filename,
+        root="data/studio",
+        streaming=False,
+        hive_partitioning=False,
+        timestamp_column=source.schema_.timestamp_column,
+        natural_key=list(source.schema_.natural_key),
+        drop_columns=list(source.schema_.drop_columns),
+        default_rows=[],
+        use_rename_capitalize=False,
+        filter_expression=None,
+        calculated_rows=builder.calculated_rows_from_source(source),
+    )
+
+    assert source_def == builder.source_to_dict(source)
+    assert not builder.builder_draft_status(
+        "source:sample", builder.source_to_dict(source), source_def
+    ).dirty
+
+
+@pytest.mark.unit
+def test_preserve_untouched_processor_definition_ignores_materialized_default_states() -> None:
+    processor = model.Processors.model_validate(
+        {
+            "processors": [
+                {
+                    "id": "sample_engagement",
+                    "source": "sample",
+                    "kind": "binary_outcome",
+                    "description": "Generated engagement processor.",
+                    "dimensions": ["Channel"],
+                    "time": {
+                        "column": "OutcomeTime",
+                        "grains": ["Day", "Month", "Summary"],
+                        "aggregation_levels": {"Month": "Day"},
+                    },
+                    "entities": {"subject": "SubjectID"},
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked", "Conversion"],
+                        "negative_values": ["Impression", "Pending"],
+                    },
+                }
+            ]
+        }
+    ).processors[0]
+    proposed = builder.processor_to_dict(processor)
+    proposed["states"] = {
+        name: spec.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for name, spec in model.effective_processor_states(processor).items()
+    }
+
+    preserved = config_builder._preserve_untouched_processor_definition(
+        processor,
+        proposed,
+    )
+
+    assert preserved == builder.processor_to_dict(processor)
+    assert "states" not in preserved
+    assert preserved["time"]["aggregation_levels"] == {"Month": "Day"}
+
+
+@pytest.mark.unit
+def test_preserve_untouched_processor_definition_keeps_real_edits() -> None:
+    processor = model.Processors.model_validate(
+        {
+            "processors": [
+                {
+                    "id": "engagement",
+                    "source": "events",
+                    "kind": "binary_outcome",
+                    "description": "Original description",
+                    "entities": {"subject": "SubjectID"},
+                    "outcome": {"column": "Outcome"},
+                }
+            ]
+        }
+    ).processors[0]
+    proposed = builder.processor_to_dict(processor)
+    proposed["description"] = "Updated description"
+    proposed["time"] = {"column": None, "grains": ["Day", "Month", "Summary"]}
+    proposed["states"] = {
+        name: spec.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for name, spec in model.effective_processor_states(processor).items()
+    }
+
+    preserved = config_builder._preserve_untouched_processor_definition(
+        processor,
+        proposed,
+    )
+
+    assert preserved["description"] == "Updated description"
 
 
 @pytest.mark.unit
@@ -1388,6 +2095,36 @@ def test_dimension_recommendation_requires_at_least_three_distinct_values() -> N
         "Recommended",
         "Low-cardinality field suitable for filters and breakdowns.",
     )
+
+
+@pytest.mark.unit
+def test_dimension_promotion_ranks_reviewed_fields_before_avoid() -> None:
+    def row(field: str, recommendation: str) -> dimension_profile.DimensionProfileRow:
+        return dimension_profile.DimensionProfileRow(
+            field=field,
+            dtype="String",
+            non_null=10,
+            null_rate=0.0,
+            cardinality=4,
+            cardinality_rate=0.4,
+            sample_values="",
+            current_usage="",
+            recommendation=recommendation,
+            safe_for_group_by="No" if recommendation == "Avoid" else "Review",
+            reason="test",
+        )
+
+    candidates = config_builder._dimension_promotion_candidates(
+        ["CustomerID", "Channel", "Campaign"],
+        [],
+        [
+            row("CustomerID", "Avoid"),
+            row("Channel", "Recommended"),
+            row("Campaign", "Review"),
+        ],
+    )
+
+    assert candidates == ["Channel", "Campaign", "CustomerID"]
 
 
 @pytest.mark.unit
@@ -1647,6 +2384,52 @@ def test_report_library_searches_business_and_technical_tile_context(tmp_path: P
         "overview/portfolio/holdings_value",
         "overview/portfolio/holdings_rate",
     ]
+    assert set(options[0][3]) == {"id", "title", "metric", "chart", "value"}
+
+
+@pytest.mark.unit
+def test_report_tile_semantic_noop_preserves_exact_authored_defaults() -> None:
+    seed = {
+        "id": "trend",
+        "title": "Trend",
+        "metric": "CTR",
+        "chart": "line",
+        "x": "Day",
+        "y": "CTR",
+        "placement": "content",
+    }
+    rebuilt = {
+        "id": "trend",
+        "title": "Trend",
+        "metric": "CTR",
+        "chart": "line",
+        "x": "Day",
+        "y": "CTR",
+    }
+
+    preserved = config_builder._preserve_untouched_tile_definition(seed, rebuilt)
+
+    assert preserved == seed
+
+
+@pytest.mark.unit
+def test_existing_report_tile_opens_clean_in_visual_editor(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Reports / Tiles").run(timeout=15)
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
 
 
 @pytest.mark.unit
@@ -1669,6 +2452,49 @@ def test_visual_report_library_replaces_inventory_dataframe(tmp_path: Path) -> N
     assert rendered.get("plotly_chart")
     assert rendered.segmented_control[0].value == "summary"
     assert rendered.pills
+
+
+@pytest.mark.unit
+def test_report_inventory_uses_human_labels_and_keeps_ids_in_details(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    builder.write_metric_definition(
+        tmp_path,
+        "CTR_generated_123",
+        {
+            **builder.build_formula_metric("engagement", "Positives", "Count"),
+            "display": {"label": "Click-through rate"},
+        },
+    )
+    builder.write_tile_definition(
+        tmp_path,
+        dashboard_id="marketing_generated_123",
+        dashboard_title="Marketing overview",
+        page_id="executive_generated_123",
+        page_title="Executive summary",
+        tile={
+            "id": "ctr_generated_123",
+            "title": "Engagement rate",
+            "metric": "CTR_generated_123",
+            "chart": "kpi_card",
+            "value": "CTR_generated_123",
+        },
+    )
+    catalog = load(tmp_path)
+
+    human_rows = config_builder._report_inventory_rows(catalog)
+    technical_rows = config_builder._report_inventory_rows(catalog, technical=True)
+
+    assert human_rows == [
+        {
+            "Dashboard": "Marketing overview",
+            "Page": "Executive summary",
+            "Report": "Engagement rate",
+            "Metric": "Click-through rate",
+            "Chart": "Kpi card",
+        }
+    ]
+    assert technical_rows[0]["Metric ID"] == "CTR_generated_123"
+    assert technical_rows[0]["Tile ID"] == "ctr_generated_123"
 
 
 @pytest.mark.unit
@@ -1814,7 +2640,7 @@ def test_metric_filter_helpers_scope_metrics_by_source_and_kind(tmp_path: Path) 
 
 
 @pytest.mark.unit
-def test_metric_choice_label_includes_id_source_and_kind(tmp_path: Path) -> None:
+def test_metric_choice_label_leads_with_human_name_then_kind_and_source(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
     builder.write_metric_definition(
         tmp_path,
@@ -1825,7 +2651,7 @@ def test_metric_choice_label_includes_id_source_and_kind(tmp_path: Path) -> None
 
     assert (
         config_builder._metric_choice_label(catalog, "Dropoff")
-        == "Dropoff · engagement · Formula / state passthrough"
+        == "Dropoff · Formula / state passthrough · Engagement"
     )
 
 
@@ -2115,39 +2941,103 @@ def test_validated_catalog_transaction_rolls_back_all_post_write_changes(
 
 
 @pytest.mark.unit
-def test_save_and_run_does_not_start_source_when_post_write_validation_fails(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _write_builder_catalog(tmp_path)
-    before = {
-        name: (tmp_path / "catalog" / name).read_bytes() for name in builder.CATALOG_FILENAMES
+def test_configuration_builder_never_runs_data_from_apply() -> None:
+    source = Path(config_builder.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    called_names = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
-    run_calls: list[str] = []
-    errors: list[str] = []
+    imported_names = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
 
-    def fail_post_write_validation(workspace: str | Path) -> None:
-        raise ValueError("post-write validation failed")
+    assert "run_source" not in called_names
+    assert "run_source" not in imported_names
+    assert "Save & Run" not in source
+    assert "& Run Source" not in source
+    assert "Create & Run" not in source
 
-    monkeypatch.setattr(builder, "require_valid_workspace", fail_post_write_validation)
-    monkeypatch.setattr(
-        config_builder,
-        "_run_source_with_status",
-        lambda ctx, source_id: run_calls.append(source_id),
+
+@pytest.mark.unit
+def test_tile_deletion_is_staged_behind_the_step_apply_action() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    tile_builder = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_tile_builder"
     )
-    monkeypatch.setattr(config_builder.st, "error", lambda message: errors.append(str(message)))
+    guarded_delete_calls = 0
 
-    config_builder._write_processor_and_run_source(
-        SimpleNamespace(workspace=tmp_path),
-        "ih",
-        {"id": "engagement", "source": "ih", "kind": "binary_outcome"},
-        "Processor written.",
+    class DeleteGuardVisitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.apply_depth = 0
+
+        def visit_If(self, node: ast.If) -> None:
+            guarded = (
+                isinstance(node.test, ast.Call)
+                and isinstance(node.test.func, ast.Name)
+                and node.test.func.id == "_render_editor_primary_action"
+            )
+            self.apply_depth += int(guarded)
+            self.generic_visit(node)
+            self.apply_depth -= int(guarded)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            nonlocal guarded_delete_calls
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "delete_tile_definition":
+                assert self.apply_depth > 0
+                guarded_delete_calls += 1
+            self.generic_visit(node)
+
+    DeleteGuardVisitor().visit(tile_builder)
+
+    assert guarded_delete_calls == 1
+
+
+@pytest.mark.unit
+def test_sketch_exploration_does_not_preselect_topk_or_avoid_fields() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    sketch_panel = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_sketch_exploration_panel"
+    )
+    calls = [node for node in ast.walk(sketch_panel) if isinstance(node, ast.Call)]
+    topk_checkbox = next(
+        node
+        for node in calls
+        if isinstance(node.func, ast.Attribute)
+        and node.func.attr == "checkbox"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "Top frequent values"
+    )
+    topk_selector = next(
+        node
+        for node in calls
+        if isinstance(node.func, ast.Attribute)
+        and node.func.attr == "selectbox"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "Top-K Field"
+    )
+    checkbox_default = next(
+        keyword.value for keyword in topk_checkbox.keywords if keyword.arg == "value"
+    )
+    selector_index = next(
+        keyword.value for keyword in topk_selector.keywords if keyword.arg == "index"
     )
 
-    after = {name: (tmp_path / "catalog" / name).read_bytes() for name in builder.CATALOG_FILENAMES}
-    assert run_calls == []
-    assert errors == ["post-write validation failed"]
-    assert after == before
+    assert isinstance(checkbox_default, ast.Constant)
+    assert checkbox_default.value is False
+    assert isinstance(selector_index, ast.IfExp)
+    assert isinstance(selector_index.orelse, ast.Constant)
+    assert selector_index.orelse.value is None
 
 
 @pytest.mark.unit
@@ -2157,8 +3047,11 @@ def test_configuration_builder_catalog_mutations_use_validated_transaction() -> 
         "delete_tile_definition",
         "write_dashboards_definition",
         "write_metric_definition",
+        "write_metrics_definition",
         "write_page_settings",
+        "write_pipelines_definition",
         "write_processor_definition",
+        "write_processors_definition",
         "write_source_definition",
         "write_tile_definition",
         "write_workspace_settings",
@@ -2223,6 +3116,33 @@ def test_write_workspace_settings_updates_catalog_defaults_and_theme(tmp_path: P
 
 
 @pytest.mark.unit
+def test_settings_editor_keeps_an_explicit_empty_calendar_draft_clean(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    pipelines_path = tmp_path / "catalog" / "pipelines.yaml"
+    pipelines = yaml.safe_load(pipelines_path.read_text(encoding="utf-8"))
+    pipelines["defaults"] = {
+        "time_zone": "UTC",
+        "calendar": {"grains": [], "week_start": "monday"},
+    }
+    pipelines_path.write_text(yaml.safe_dump(pipelines, sort_keys=False), encoding="utf-8")
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Settings").run()
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert any("Select at least one calendar grain" in item.value for item in rendered.warning)
+
+
+@pytest.mark.unit
 def test_chat_metric_rows_include_processor_dimensions(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
     catalog = load(tmp_path)
@@ -2262,6 +3182,16 @@ def test_chat_description_rows_preserve_catalog_and_custom_keys(tmp_path: Path) 
         "engagement": "Catalog processor description.",
         "legacy_family": "Legacy label.",
     }
+
+
+@pytest.mark.unit
+def test_chat_description_rows_preserve_case_variant_custom_keys() -> None:
+    rows = config_builder._chat_description_rows(
+        [("sample", "Dataset")],
+        {"SAMPLE": "Configured legacy spelling."},
+    )
+
+    assert config_builder._chat_description_map(rows) == {"SAMPLE": "Configured legacy spelling."}
 
 
 @pytest.mark.unit

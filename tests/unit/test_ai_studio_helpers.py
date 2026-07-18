@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,6 +35,7 @@ from valuestream.ai import (
     validation_trace_for_repair,
 )
 from valuestream.config import model
+from valuestream.config.loader import load
 from valuestream.recipes import (
     instantiate_metric,
     instantiate_tile,
@@ -93,6 +97,109 @@ def test_workspace_sample_files_lists_supported_data_files_only(tmp_path: Path) 
 
 
 @pytest.mark.unit
+def test_sample_source_plan_matches_preview_and_runtime_format() -> None:
+    csv_plan = ai_config_studio_page._sample_source_plan(
+        "orders.csv",
+        ["OrderID", "Revenue"],
+        workspace_relative="data/orders/orders.csv",
+    )
+    parquet_plan = ai_config_studio_page._sample_source_plan(
+        "orders.parquet",
+        ["OrderID", "Revenue"],
+    )
+    generic_json_plan = ai_config_studio_page._sample_source_plan(
+        "events.ndjson",
+        ["event_id", "event_time"],
+        workspace_relative="data/events/events.ndjson",
+    )
+    demo_plan = ai_config_studio_page._sample_source_plan(
+        "value_stream_demo.csv",
+        ["CustomerID", "OutcomeTime", "Outcome", "Channel"],
+        workspace_relative="data/studio/value_stream_demo.csv",
+    )
+
+    assert (csv_plan.reader_kind, csv_plan.root, csv_plan.file_pattern) == (
+        "csv",
+        "data/orders",
+        "orders.csv",
+    )
+    assert csv_plan.production_ready
+    assert parquet_plan.reader_kind == "parquet"
+    assert not parquet_plan.production_ready
+    assert generic_json_plan.reader_kind == "pega_ds_export"
+    assert generic_json_plan.requires_runtime_confirmation
+    assert not generic_json_plan.production_ready
+    assert not generic_json_plan.group_pattern
+    assert not generic_json_plan.timestamp_format
+    assert demo_plan.timestamp_format == "%+"
+
+
+@pytest.mark.unit
+def test_studio_continue_queues_step_before_jump_widget_renders() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import (  # noqa: PLC0415 - isolated AppTest source
+            ai_config_studio as page,
+        )
+
+        steps = ["Sample", "Required Fields"]
+        queued = page._normalize_studio_step(
+            st.session_state.pop("ai_studio_next_step", None), steps
+        )
+        if queued in steps:
+            st.session_state["ai_studio_step"] = queued
+            st.session_state["ai_studio_jump_step"] = queued
+        current = st.session_state.get("ai_studio_step", steps[0])
+        current = page._render_studio_step_header(current, steps)
+        page._render_studio_step_navigation(current, steps)
+
+    at = AppTest.from_function(app).run()
+
+    next(widget for widget in at.button if widget.label == "Continue").click().run()
+
+    assert not at.exception
+    assert at.session_state["ai_studio_step"] == "Required Fields"
+    assert at.selectbox[0].value == "Required Fields"
+
+
+@pytest.mark.unit
+def test_required_field_mapping_renders_with_targeted_optional_help() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        from valuestream.ui.pages import (  # noqa: PLC0415 - isolated AppTest source
+            ai_config_studio as page,
+        )
+
+        sample = page._demo_sample()
+        page._set_effective_schema_state(sample)
+        page._required_fields(sample, sample)
+
+    at = AppTest.from_function(app).run()
+
+    assert not at.exception
+    assert {widget.label for widget in at.selectbox} >= {
+        "Subject ID Field",
+        "Outcome Field",
+        "Outcome Timestamp",
+        "Decision Timestamp",
+    }
+
+
+@pytest.mark.unit
+def test_read_sample_bytes_rejects_zip_without_supported_members() -> None:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("README.txt", "not data")
+
+    with pytest.raises(ValueError, match="JSON or NDJSON"):
+        ai_config_studio_page._read_sample_bytes("sample.zip", buffer.getvalue())
+
+
+@pytest.mark.unit
 def test_parse_ai_yaml_sections_accepts_fenced_file_keys() -> None:
     sections = parse_ai_yaml_sections(
         """
@@ -128,6 +235,128 @@ chat_with_data:
         "agent_prompt": "Use CDH business language.",
         "metric_descriptions": {"engagement": "CTR and lift metrics."},
     }
+
+
+@pytest.mark.unit
+def test_generate_validated_candidate_repairs_before_returning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter(["metrics: {metrics: {}}", "metrics: {metrics: {CTR: {}}}"])
+    prompts: list[str] = []
+
+    def validate(candidate: dict) -> tuple[bool, list[str]]:
+        return (bool(candidate.get("metrics", {}).get("metrics")), ["missing metric"])
+
+    monkeypatch.setattr(ai_studio, "validate_draft_catalog", validate)
+    result = ai_studio.generate_validated_candidate(
+        base_draft=_base_draft(),
+        prompt="first",
+        call=lambda prompt: (prompts.append(prompt), next(responses))[1],
+        repair_prompt=lambda _draft, issues, _trace: f"repair: {issues[0]}",
+        max_repairs=1,
+    )
+
+    assert result.ok
+    assert result.attempts == 2
+    assert prompts == ["first", "repair: missing metric"]
+
+
+@pytest.mark.unit
+def test_generate_validated_candidate_never_returns_invalid_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ai_studio,
+        "validate_draft_catalog",
+        lambda _candidate: (False, ["metrics.bad: invalid reference"]),
+    )
+    accepted = _base_draft()
+
+    result = ai_studio.generate_validated_candidate(
+        base_draft=accepted,
+        prompt="first",
+        call=lambda _prompt: "metrics: {metrics: {bad: {source: missing, kind: formula}}}",
+        repair_prompt=lambda _draft, _issues, _trace: "repair",
+        max_repairs=2,
+    )
+
+    assert not result.ok
+    assert result.draft is None
+    assert result.attempts == 3
+    assert result.failure_stage == "validation"
+    assert accepted == _base_draft()
+
+
+@pytest.mark.unit
+def test_generate_validated_candidate_bounds_repairs_to_two() -> None:
+    calls = 0
+
+    def call(_prompt: str) -> str:
+        nonlocal calls
+        calls += 1
+        return "not: a catalog section"
+
+    result = ai_studio.generate_validated_candidate(
+        base_draft=_base_draft(),
+        prompt="first",
+        call=call,
+        repair_prompt=lambda _draft, _issues, _trace: "repair",
+        max_repairs=99,
+    )
+
+    assert not result.ok
+    assert result.draft is None
+    assert result.attempts == 3
+    assert calls == 3
+
+
+@pytest.mark.unit
+def test_validated_candidate_records_timeout_when_preflight_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    events: list[tuple[object, object]] = []
+
+    def capture_event(_session_state: object, **kwargs: object) -> bool:
+        events.append((kwargs["event"], kwargs["outcome"]))
+        return True
+
+    monkeypatch.setattr(ai_config_studio_page, "record_event", capture_event)
+    monkeypatch.setattr(
+        ai_config_studio_page,
+        "_preflight_ai_operation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("provider timeout")),
+    )
+
+    def app(draft: dict) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ai import AICallSettings  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        try:
+            with st.status("operation") as status:
+                page._run_validated_ai_candidate(
+                    settings=AICallSettings(model="openai/test", api_key="test"),
+                    operation="catalog_draft",
+                    prompt="draft",
+                    base_draft=draft,
+                    approved_fields=[],
+                    repair_prompt_factory=lambda *_args: "repair",
+                    status=status,
+                )
+        except TimeoutError:
+            st.session_state["timeout_caught"] = True
+
+    at = AppTest.from_function(app, kwargs={"draft": _base_draft()}).run()
+
+    assert not at.exception
+    assert at.session_state["timeout_caught"]
+    assert (
+        ai_config_studio_page.AuthoringEvent.FAILED,
+        ai_config_studio_page.AuthoringOutcome.TIMEOUT,
+    ) in events
 
 
 @pytest.mark.unit
@@ -217,6 +446,34 @@ def test_apply_draft_rolls_back_catalog_and_ai_config_on_post_write_failure(
     assert not any(
         (tmp_path / "catalog" / filename).exists() for filename in builder.CATALOG_FILENAMES
     )
+
+
+@pytest.mark.unit
+def test_apply_draft_persists_reviewed_removals_after_catalog_reload(tmp_path: Path) -> None:
+    current = json.loads(json.dumps(_base_draft()))
+    legacy_source = json.loads(json.dumps(current["pipelines"]["sources"][0]))
+    legacy_source["id"] = "legacy"
+    current["pipelines"]["sources"].append(legacy_source)
+    legacy_processor = json.loads(json.dumps(current["processors"]["processors"][0]))
+    legacy_processor.update({"id": "legacy_engagement", "source": "legacy"})
+    current["processors"]["processors"].append(legacy_processor)
+    current["metrics"]["metrics"]["LegacyCTR"] = {
+        **current["metrics"]["metrics"]["CTR"],
+        "source": "legacy_engagement",
+    }
+    ctx = SimpleNamespace(workspace=tmp_path)
+    ai_config_studio_page._apply_draft(ctx, current)
+
+    accepted = _base_draft()
+    accepted["dashboards"]["theme"] = {"colorway": ["#275dad"]}
+    ai_config_studio_page._apply_draft(ctx, accepted)
+
+    reloaded = load(tmp_path)
+    assert [source.id for source in reloaded.pipelines.sources] == ["ih"]
+    assert [processor.id for processor in reloaded.processors.processors] == ["engagement"]
+    assert sorted(reloaded.metrics.metrics) == ["CTR"]
+    assert [dashboard.id for dashboard in reloaded.dashboards.dashboards] == ["overview"]
+    assert reloaded.dashboards.theme == {"colorway": ["#275dad"]}
 
 
 @pytest.mark.unit
@@ -615,6 +872,72 @@ def test_repair_prompt_includes_validation_errors_and_traceback() -> None:
     assert "<hidden-field>" in prompt
     assert "Traceback (most recent call last):" in prompt
     assert "ValidationError: <hidden-field> caused a bad draft" in prompt
+
+
+@pytest.mark.unit
+def test_redact_hidden_field_mentions_preserves_approved_fields_containing_hidden_names() -> None:
+    redacted = ai_studio.redact_hidden_field_mentions(
+        {
+            "goals": "Weekly OutcomeTime trend split by Outcome and outcome.",
+            "schema": [{"column": "OutcomeTime"}, {"column": "Outcome"}],
+        },
+        ["Outcome"],
+        preserve_fields=["OutcomeTime", "Channel"],
+    )
+
+    assert (
+        redacted["goals"] == "Weekly OutcomeTime trend split by <hidden-field> and <hidden-field>."
+    )
+    assert redacted["schema"] == [{"column": "OutcomeTime"}, {"column": "<hidden-field>"}]
+
+
+@pytest.mark.unit
+def test_redact_hidden_field_mentions_keeps_ids_derived_from_preserved_fields() -> None:
+    redacted = ai_studio.redact_hidden_field_mentions(
+        ["overview/engagement/OutcomeTime_tile", "CustomerID_metric", "Outcome_metric"],
+        ["Outcome", "CustomerID"],
+        preserve_fields=["OutcomeTime"],
+    )
+
+    assert redacted == [
+        "overview/engagement/OutcomeTime_tile",
+        "<hidden-field>_metric",
+        "<hidden-field>_metric",
+    ]
+
+
+@pytest.mark.unit
+def test_redact_hidden_field_mentions_still_redacts_derived_ids_without_preserve_list() -> None:
+    text = "column: Outcome\n- CustomerID_metric\nvalue: 'Outcome'\nother: outcome_time"
+
+    redacted = ai_studio.redact_hidden_field_mentions(text, ["Outcome", "CustomerID"])
+
+    assert redacted == (
+        "column: <hidden-field>\n- <hidden-field>_metric\nvalue: '<hidden-field>'\n"
+        "other: <hidden-field>_time"
+    )
+
+
+@pytest.mark.unit
+def test_repair_prompt_keeps_approved_fields_containing_hidden_names() -> None:
+    prompt = prompt_for_repair(
+        file_name="sample.csv",
+        approved_schema=[
+            {"column": "OutcomeTime", "dtype": "Datetime", "unique": 300},
+            {"column": "Channel", "dtype": "String", "unique": 3},
+        ],
+        approved_fields=["OutcomeTime", "Channel"],
+        hidden_fields=["Outcome"],
+        current_draft=_base_draft(),
+        validation_issues=["Outcome must not be exposed; keep OutcomeTime for the time axis"],
+        validation_trace="",
+    )
+
+    assert "OutcomeTime" in prompt
+    assert "<hidden-field-name>Time" not in prompt
+    assert "<hidden-field>Time" not in prompt
+    assert re.search(r"(?<![A-Za-z0-9_])Outcome(?![A-Za-z0-9_])", prompt) is None
+    assert "<hidden-field> must not be exposed" in prompt
 
 
 @pytest.mark.unit
@@ -1058,6 +1381,11 @@ def test_new_sample_defaults_example_sharing_off_and_prompt_preview_has_no_value
         st.session_state["approved"] = approved
         st.session_state["examples"] = examples
         st.session_state["schema_preview"] = page._schema_preview_for_ai(frame, approved)
+        st.session_state["fresh_editor_rows"] = {
+            "defaults": list(st.session_state["ai_studio_defaults"]),
+            "filters": list(st.session_state["ai_studio_filter_rows"]),
+            "calculations": list(st.session_state["ai_studio_calculations"]),
+        }
 
     at = AppTest.from_function(app).run()
 
@@ -1065,6 +1393,11 @@ def test_new_sample_defaults_example_sharing_off_and_prompt_preview_has_no_value
     assert at.session_state["approved"] == ["Channel", "SubjectID"]
     assert at.session_state["examples"] == []
     assert all("examples" not in row for row in at.session_state["schema_preview"])
+    assert at.session_state["fresh_editor_rows"] == {
+        "defaults": [],
+        "filters": [],
+        "calculations": [],
+    }
 
 
 @pytest.mark.unit
@@ -1485,6 +1818,22 @@ def test_schema_sample_applies_rename_capitalize_before_later_steps() -> None:
 
 
 @pytest.mark.unit
+def test_deterministic_demo_timestamp_plan_preprocesses_without_error() -> None:
+    st.session_state.clear()
+    st.session_state["ai_studio_defaults"] = []
+    st.session_state["ai_studio_filter_mode"] = "Rules"
+    st.session_state["ai_studio_filter_rows"] = []
+    st.session_state["ai_studio_calculations"] = []
+    st.session_state["ai_studio_timestamp_format"] = "%+"
+
+    working, error = _working_sample(ai_config_studio_page._demo_sample())
+
+    assert error is None
+    assert working.schema["OutcomeTime"] == pl.Datetime(time_zone="UTC")
+    assert {"Day", "Month", "Quarter", "Year"} <= set(working.columns)
+
+
+@pytest.mark.unit
 def test_schema_sample_uses_original_columns_when_rename_capitalize_is_off() -> None:
     st.session_state.clear()
     st.session_state["ai_studio_rename_capitalize"] = False
@@ -1740,6 +2089,7 @@ metrics:
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
+        st.session_state["ai_studio_api_key"] = "test-key"
         st.session_state["ai_studio_user_goals"] = "Track total volume."
         page._render_ai_refine_panel(draft, None, ["Channel"])
 
@@ -1772,6 +2122,18 @@ def test_workspace_save_bar_exposes_ready_and_published_states() -> None:
 
         st.session_state["ai_studio_draft"] = draft
         st.session_state["ai_studio_pending_draft"] = None
+        st.session_state["ai_studio_reviewed_signature"] = page._draft_signature(draft)
+        st.session_state["ai_studio_sample_source_plan"] = page.SampleSourcePlan(
+            "CSV",
+            "sample",
+            "csv",
+            "data",
+            "sample.csv",
+            production_ready=True,
+        )
+        st.session_state["ai_studio_reader_kind"] = "csv"
+        st.session_state["ai_studio_reader_root"] = "data"
+        st.session_state["ai_studio_file_pattern"] = "sample.csv"
         st.session_state["ai_studio_published_signature"] = (
             page._draft_signature(draft) if published else ""
         )
@@ -1784,15 +2146,68 @@ def test_workspace_save_bar_exposes_ready_and_published_states() -> None:
     ).run()
 
     assert not ready.exception
-    assert ready.button[0].label == "Save draft"
+    assert ready.button[0].label == "Apply to workspace"
     assert not ready.button[0].disabled
     assert not published.exception
-    assert published.button[0].label == "Saved"
+    assert published.button[0].label == "Applied"
     assert published.button[0].disabled
 
 
 @pytest.mark.unit
-def test_studio_status_panel_hosts_compact_save_action() -> None:
+def test_workspace_apply_exception_records_bounded_apply_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    events: list[dict[str, object]] = []
+
+    def capture_event(_state: object, **kwargs: object) -> bool:
+        events.append(kwargs)
+        return True
+
+    def fail_apply(_ctx: object, _draft: object) -> None:
+        raise TimeoutError("PRIVATE-CUSTOMER-42")
+
+    monkeypatch.setattr(ai_config_studio_page, "record_event", capture_event)
+    monkeypatch.setattr(ai_config_studio_page, "_draft_requires_data_run", lambda *_args: False)
+    monkeypatch.setattr(ai_config_studio_page, "_apply_draft", fail_apply)
+
+    def app(draft: dict) -> None:
+        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state["ai_studio_draft"] = draft
+        st.session_state["ai_studio_pending_draft"] = None
+        st.session_state["ai_studio_reviewed_signature"] = page._draft_signature(draft)
+        st.session_state["ai_studio_sample_source_plan"] = page.SampleSourcePlan(
+            "CSV",
+            "sample",
+            "csv",
+            "data",
+            "sample.csv",
+            production_ready=True,
+        )
+        st.session_state["ai_studio_reader_kind"] = "csv"
+        st.session_state["ai_studio_reader_root"] = "data"
+        st.session_state["ai_studio_file_pattern"] = "sample.csv"
+        page._render_workspace_save_bar(SimpleNamespace(workspace="."))
+
+    rendered = AppTest.from_function(app, kwargs={"draft": _base_draft()}).run()
+    rendered = rendered.button[0].click().run()
+
+    assert not rendered.exception
+    failed = next(event for event in events if event["event"].value == "failed")  # type: ignore[union-attr]
+    assert failed["workflow"].value == "ai_studio"  # type: ignore[union-attr]
+    assert failed["stage"].value == "apply"  # type: ignore[union-attr]
+    assert failed["outcome"].value == "timeout"  # type: ignore[union-attr]
+    assert all("PRIVATE-CUSTOMER-42" not in str(value) for value in failed.values())
+
+
+@pytest.mark.unit
+def test_studio_status_panel_does_not_repeat_apply_action_on_early_steps() -> None:
     from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
 
     def app(draft: dict) -> None:
@@ -1806,6 +2221,7 @@ def test_studio_status_panel_hosts_compact_save_action() -> None:
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_draft"] = draft
         st.session_state["ai_studio_pending_draft"] = None
+        st.session_state["ai_studio_reviewed_signature"] = page._draft_signature(draft)
         page._studio_status_bar(
             SimpleNamespace(workspace="."),
             pl.DataFrame({"Channel": ["Web"]}),
@@ -1817,9 +2233,7 @@ def test_studio_status_panel_hosts_compact_save_action() -> None:
     rendered = AppTest.from_function(app, kwargs={"draft": _base_draft()}).run()
 
     assert not rendered.exception
-    assert rendered.button[0].label == "Save draft"
-    assert not rendered.button[0].disabled
-    assert len(rendered.get("column")) == 2
+    assert all(button.label != "Apply to workspace" for button in rendered.button)
 
 
 def _base_draft() -> dict:

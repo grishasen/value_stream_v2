@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import ast as py_ast
+import copy
 import math
 import os
 import re
 import secrets
 import tempfile
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, MutableMapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ import polars as pl
 import yaml
 
 from valuestream.charts.recipes import RECIPES
+from valuestream.config import canonical as config_canonical
 from valuestream.config import model
 from valuestream.config.loader import CatalogLoadError, load
 from valuestream.config.validate import validate_catalog
@@ -73,6 +75,255 @@ STATE_TYPES = [
 
 SCALAR_STATE_TYPES = ("count", "value_sum", "min", "max", "pooled_mean", "pooled_variance")
 DIGEST_STATE_TYPES = ("tdigest", "kll")
+
+BUILDER_DRAFTS_KEY = "builder_unapplied_drafts"
+_RUN_DATA_SCOPES = frozenset(
+    {
+        "source",
+        "processor",
+        "dimensions",
+        "workspace_settings",
+        "exploration",
+        "recipe_with_state",
+    }
+)
+
+
+@dataclass(frozen=True)
+class BuilderDraftStatus:
+    """Canonical dirty-state summary for one step-local Builder object."""
+
+    key: str
+    baseline_hash: str
+    draft_hash: str
+    revision: str
+    dirty: bool
+    baseline_payload: Any
+    draft_payload: Any
+
+
+@dataclass(frozen=True)
+class BuilderApplyOutcome:
+    """Outcome-first handoff shown after one configuration apply."""
+
+    label: str
+    action: str
+    message: str
+    source_ids: tuple[str, ...] = ()
+
+    @property
+    def requires_data_run(self) -> bool:
+        """Return whether the applied configuration changes computation state."""
+        return self.action == "run_data"
+
+
+def builder_draft_status(
+    key: str,
+    baseline: Any,
+    draft: Any,
+) -> BuilderDraftStatus:
+    """Compare one proposed object with its applied canonical representation."""
+    baseline_payload = config_canonical.canonicalize(baseline)
+    draft_payload = config_canonical.canonicalize(draft)
+    baseline_hash = config_canonical.config_hash(baseline_payload)
+    draft_hash = config_canonical.config_hash(draft_payload)
+    return BuilderDraftStatus(
+        key=key,
+        baseline_hash=baseline_hash,
+        draft_hash=draft_hash,
+        revision=draft_hash[:12],
+        dirty=baseline_hash != draft_hash,
+        baseline_payload=baseline_payload,
+        draft_payload=draft_payload,
+    )
+
+
+def update_builder_draft_registry(
+    session_state: MutableMapping[str, Any],
+    status: BuilderDraftStatus,
+    *,
+    widget_prefixes: Iterable[str] = (),
+) -> bool:
+    """Persist one canonical draft plus restorable widget shadows."""
+    raw = session_state.get(BUILDER_DRAFTS_KEY)
+    registry = dict(raw) if isinstance(raw, dict) else {}
+    existed = status.key in registry
+    if status.dirty:
+        prefixes = tuple(widget_prefixes)
+        widget_state = {
+            str(widget_key): copy.deepcopy(value)
+            for widget_key, value in session_state.items()
+            if prefixes and any(str(widget_key).startswith(prefix) for prefix in prefixes)
+        }
+        registry[status.key] = {
+            "revision": status.revision,
+            "baseline_hash": status.baseline_hash,
+            "draft_hash": status.draft_hash,
+            "draft_payload": copy.deepcopy(status.draft_payload),
+            "widget_state": widget_state,
+        }
+    else:
+        registry.pop(status.key, None)
+    session_state[BUILDER_DRAFTS_KEY] = registry
+    return existed
+
+
+def registered_builder_draft(
+    session_state: MutableMapping[str, Any],
+    key: str,
+) -> dict[str, Any] | None:
+    """Return one registered Builder draft without exposing the live registry."""
+    raw = session_state.get(BUILDER_DRAFTS_KEY)
+    if not isinstance(raw, dict):
+        return None
+    entry = raw.get(key)
+    return copy.deepcopy(entry) if isinstance(entry, dict) else None
+
+
+def restore_builder_draft(
+    session_state: MutableMapping[str, Any],
+    key: str,
+) -> bool:
+    """Restore a registered draft's shadow values before widgets are rendered."""
+    entry = registered_builder_draft(session_state, key)
+    if entry is None:
+        return False
+    widget_state = entry.get("widget_state")
+    if not isinstance(widget_state, dict) or not widget_state:
+        return False
+    for widget_key, value in widget_state.items():
+        session_state[str(widget_key)] = copy.deepcopy(value)
+    return True
+
+
+def discard_builder_draft(
+    session_state: MutableMapping[str, Any],
+    key: str,
+    *,
+    widget_prefixes: Iterable[str] = (),
+) -> None:
+    """Discard one registered proposal and its step-local widget state."""
+    raw = session_state.get(BUILDER_DRAFTS_KEY)
+    registry = dict(raw) if isinstance(raw, dict) else {}
+    registry.pop(key, None)
+    session_state[BUILDER_DRAFTS_KEY] = registry
+    prefixes = tuple(widget_prefixes)
+    if not prefixes:
+        return
+    for widget_key in list(session_state):
+        if widget_key == BUILDER_DRAFTS_KEY:
+            continue
+        if any(str(widget_key).startswith(prefix) for prefix in prefixes):
+            session_state.pop(widget_key, None)
+
+
+def builder_apply_outcome(
+    label: str,
+    *,
+    source_ids: Iterable[str] = (),
+    requires_data_run: bool = False,
+) -> BuilderApplyOutcome:
+    """Classify an applied Builder object as report-ready or requiring data."""
+    sources = tuple(sorted({str(source_id) for source_id in source_ids if str(source_id)}))
+    if requires_data_run:
+        source_text = (
+            f" Run {', '.join(sources)} from Data Load to publish matching aggregates."
+            if sources
+            else " Run the affected source from Data Load to publish matching aggregates."
+        )
+        return BuilderApplyOutcome(
+            label=label,
+            action="run_data",
+            message=(
+                "The workspace configuration is valid, but its aggregate computation "
+                f"contract changed.{source_text}"
+            ),
+            source_ids=sources,
+        )
+    return BuilderApplyOutcome(
+        label=label,
+        action="open_report",
+        message="The workspace configuration is valid and existing aggregates can be used now.",
+    )
+
+
+def builder_requires_data_run(
+    scope: str,
+    baseline: Any,
+    draft: Any,
+) -> bool:
+    """Compare only the configuration contract that can change persisted aggregates."""
+    if scope not in _RUN_DATA_SCOPES:
+        return False
+    if scope == "recipe_with_state":
+        return True
+    if scope == "source":
+        baseline_contract = _source_computation_projection(baseline)
+        draft_contract = _source_computation_projection(draft)
+    elif scope == "processor":
+        baseline_contract = _processor_computation_projection(baseline)
+        draft_contract = _processor_computation_projection(draft)
+    elif scope == "dimensions":
+        baseline_contract = _dimension_computation_projection(baseline)
+        draft_contract = _dimension_computation_projection(draft)
+    elif scope == "workspace_settings":
+        baseline_contract = _workspace_computation_projection(baseline)
+        draft_contract = _workspace_computation_projection(draft)
+    else:
+        return False
+    return config_canonical.config_hash(baseline_contract) != config_canonical.config_hash(
+        draft_contract
+    )
+
+
+def _source_computation_projection(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return config_canonical.canonicalize(value)
+    payload = copy.deepcopy(value)
+    for key in ("description", "debugging", "materialize_transforms"):
+        payload.pop(key, None)
+    reader = payload.get("reader")
+    if isinstance(reader, dict):
+        reader.pop("debugging", None)
+        reader.pop("streaming", None)
+    return config_canonical.canonicalize(payload)
+
+
+def _processor_computation_projection(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return config_canonical.canonicalize(value)
+    payload = copy.deepcopy(value)
+    for key in ("description", "sketch_build_mode"):
+        payload.pop(key, None)
+    return config_canonical.canonicalize(payload)
+
+
+def _dimension_computation_projection(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return config_canonical.canonicalize(value)
+    processor = _processor_computation_projection(value.get("processor"))
+    proposals = value.get("proposals")
+    if not isinstance(proposals, dict):
+        proposals = {}
+    projected_proposals: dict[str, Any] = {}
+    for key, proposal in proposals.items():
+        if not isinstance(proposal, dict):
+            projected_proposals[str(key)] = config_canonical.canonicalize(proposal)
+            continue
+        projected_proposals[str(key)] = {
+            "processor": _processor_computation_projection(proposal.get("processor")),
+            "metrics": config_canonical.canonicalize(proposal.get("metrics", {})),
+        }
+    return {"processor": processor, "proposals": projected_proposals}
+
+
+def _workspace_computation_projection(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return config_canonical.canonicalize(value)
+    return config_canonical.canonicalize(
+        {key: value.get(key) for key in ("time_zone", "calendar_grains", "week_start")}
+    )
+
 
 METRIC_KIND_LABELS = {
     "formula": "Formula / state passthrough",
@@ -334,18 +585,19 @@ def editor_frame(
     blank_row_factory: Callable[[], dict[str, Any]],
 ) -> pl.DataFrame:
     """Return a stable typed frame for Streamlit editable row tables."""
-    editor_rows = normalize_editor_rows(rows) or [blank_row_factory()]
-    return pl.DataFrame(
-        {
-            column: [
-                bool(row.get(column, False))
-                if column == "Enabled"
-                else _editor_text_value(row.get(column, ""))
-                for row in editor_rows
-            ]
-            for column in columns
-        }
-    )
+    del blank_row_factory  # kept for API compatibility with existing editor callers
+    editor_rows = normalize_editor_rows(rows)
+    series = []
+    for column in columns:
+        values = [
+            bool(row.get(column, False))
+            if column == "Enabled"
+            else _editor_text_value(row.get(column, ""))
+            for row in editor_rows
+        ]
+        dtype = pl.Boolean if column == "Enabled" else pl.String
+        series.append(pl.Series(column, values, dtype=dtype))
+    return pl.DataFrame(series)
 
 
 def _editor_text_value(value: Any) -> str:
@@ -360,7 +612,7 @@ def default_rows_from_values(values: dict[str, Any]) -> list[dict[str, Any]]:
         {"Field": key, "Default Value": value, "Enabled": True}
         for key, value in sorted(values.items(), key=lambda item: str(item[0]).casefold())
     ]
-    return rows or [blank_default_row()]
+    return rows
 
 
 def default_rows_with_fields(
@@ -381,7 +633,7 @@ def default_rows_with_fields(
         row["Field"] = field
         rows.append(row)
         existing.add(field)
-    return rows or [blank_default_row()]
+    return rows
 
 
 def _default_row_has_content(row: dict[str, Any]) -> bool:
@@ -407,7 +659,7 @@ def build_default_values(default_rows: list[dict[str, Any]]) -> dict[str, Any]:
 def filter_rows_from_expression(expression: dict[str, Any] | None) -> list[dict[str, Any]] | None:
     """Best-effort conversion from a simple AST expression to editable rule rows."""
     if expression is None:
-        return [blank_filter_row()]
+        return []
     if expression.get("op") == "and" and isinstance(expression.get("args"), list):
         rows: list[dict[str, Any]] = []
         for arg in expression["args"]:
@@ -415,7 +667,7 @@ def filter_rows_from_expression(expression: dict[str, Any] | None) -> list[dict[
             if parsed is None:
                 return None
             rows.append(parsed)
-        return rows or [blank_filter_row()]
+        return rows
     parsed = _filter_row_from_expression(expression)
     return [parsed] if parsed is not None else None
 
@@ -462,13 +714,13 @@ def calculated_rows_from_source(source: model.Source) -> list[dict[str, Any]]:
                 "Enabled": True,
             }
         )
-    return rows or [blank_calculated_row()]
+    return rows
 
 
 def calculated_rows_for_editor(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize calculated-field rows to the current editor column shape."""
     normalized: list[dict[str, Any]] = []
-    for row in rows or [blank_calculated_row()]:
+    for row in rows:
         mode = str(row.get("Mode", "") or "AST YAML").strip()
         normalized.append(
             {
@@ -576,7 +828,12 @@ def processor_to_dict(processor: model.Processor) -> dict[str, Any]:
 
 def metric_to_dict(metric: model.Metric) -> dict[str, Any]:
     """Serialize a metric model to a concise YAML-ready dict."""
-    data = metric.model_dump(mode="json", by_alias=True, exclude_none=True)
+    data = metric.model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_none=True,
+        exclude_unset=True,
+    )
     if not data.get("description"):
         data.pop("description", None)
     if not data.get("depends_on"):
@@ -1753,6 +2010,36 @@ def write_processor_definition(
     _write_yaml(path, data)
 
 
+def write_pipelines_definition(
+    workspace: str | Path,
+    pipelines_def: dict[str, Any],
+) -> None:
+    """Replace ``pipelines.yaml`` with one structurally validated full definition."""
+
+    model.Pipelines.model_validate(pipelines_def)
+    _write_yaml(_catalog_file(workspace, "pipelines.yaml"), pipelines_def)
+
+
+def write_processors_definition(
+    workspace: str | Path,
+    processors_def: dict[str, Any],
+) -> None:
+    """Replace ``processors.yaml`` with one structurally validated full definition."""
+
+    model.Processors.model_validate(processors_def)
+    _write_yaml(_catalog_file(workspace, "processors.yaml"), processors_def)
+
+
+def write_metrics_definition(
+    workspace: str | Path,
+    metrics_def: dict[str, Any],
+) -> None:
+    """Replace ``metrics.yaml`` with one structurally validated full definition."""
+
+    model.Metrics.model_validate(metrics_def)
+    _write_yaml(_catalog_file(workspace, "metrics.yaml"), metrics_def)
+
+
 def write_tile_definition(
     workspace: str | Path,
     *,
@@ -2362,6 +2649,7 @@ def digest_pair_option_label(option: tuple[str, str, str]) -> str:
 
 
 __all__ = [
+    "BUILDER_DRAFTS_KEY",
     "CALCULATION_MODES",
     "CHART_OPTIONAL_FIELDS",
     "CHART_REQUIRED_FIELDS",
@@ -2371,6 +2659,8 @@ __all__ = [
     "METRIC_KIND_LABELS",
     "SCALAR_STATE_TYPES",
     "STATE_TYPES",
+    "BuilderApplyOutcome",
+    "BuilderDraftStatus",
     "blank_calculated_row",
     "blank_default_row",
     "blank_filter_row",
@@ -2389,6 +2679,9 @@ __all__ = [
     "build_tile",
     "build_topk_items_metric",
     "build_variant_compare_metric",
+    "builder_apply_outcome",
+    "builder_draft_status",
+    "builder_requires_data_run",
     "calculated_rows_for_editor",
     "calculated_rows_from_source",
     "chart_choices_for_metric",
@@ -2411,6 +2704,7 @@ __all__ = [
     "digest_pair_option_label",
     "digest_pair_options_from_definition",
     "digest_state_pair_options",
+    "discard_builder_draft",
     "display_grain",
     "editor_frame",
     "ensure_minimum_workspace",
@@ -2433,6 +2727,8 @@ __all__ = [
     "processor_for_metric",
     "processor_to_dict",
     "random_catalog_id",
+    "registered_builder_draft",
+    "restore_builder_draft",
     "scalar_state_columns",
     "score_properties_from_definition",
     "source_defaults",
@@ -2444,12 +2740,16 @@ __all__ = [
     "string_list",
     "tile_yaml",
     "title_from_identifier",
+    "update_builder_draft_registry",
     "validate_workspace",
     "widget_key_fragment",
     "write_dashboards_definition",
     "write_metric_definition",
+    "write_metrics_definition",
     "write_page_settings",
+    "write_pipelines_definition",
     "write_processor_definition",
+    "write_processors_definition",
     "write_source_definition",
     "write_tile_definition",
     "write_workspace_settings",

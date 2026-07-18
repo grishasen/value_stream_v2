@@ -37,6 +37,13 @@ from valuestream.ui.data import (
     tile_to_dict,
 )
 from valuestream.ui.freshness import freshness_label
+from valuestream.ui.instrumentation import (
+    AuthoringEvent,
+    AuthoringOutcome,
+    AuthoringStage,
+    record_event,
+    workflow_from_handoff,
+)
 from valuestream.ui.presentation import resolve_tile_presentation
 from valuestream.ui.theme import dashboard_theme
 from valuestream.utils.logger import get_logger
@@ -198,10 +205,29 @@ ADVANCED_SETTING_KEYS = {
 
 def render(ctx: ValueStreamContext) -> None:
     """Render configured dashboards as the Value Stream reports workspace."""
+    handoff_workflow = workflow_from_handoff(st.query_params.get("from"))
     if not ctx.catalog.dashboards.dashboards:
+        if handoff_workflow is not None:
+            record_event(
+                st.session_state,
+                event=AuthoringEvent.FAILED,
+                workflow=handoff_workflow,
+                stage=AuthoringStage.REPORT,
+                outcome=AuthoringOutcome.BLOCKED,
+                once=True,
+            )
         components.render_page_header("Reports", "No dashboards configured.", status="pending")
         st.info("No dashboards configured.")
         return
+    if handoff_workflow is not None:
+        record_event(
+            st.session_state,
+            event=AuthoringEvent.REPORT_OPENED,
+            workflow=handoff_workflow,
+            stage=AuthoringStage.REPORT,
+            outcome=AuthoringOutcome.SUCCESS,
+            once=True,
+        )
 
     dashboard = _selected_dashboard(ctx)
     page = _selected_page(dashboard)
@@ -522,9 +548,7 @@ def _filter_options(
     tile while retaining a fallback for an empty or not-yet-ready first plot.
     """
 
-    supported_tiles = [
-        tile for tile in page.tiles if tile.id in capability.supported_tile_ids
-    ]
+    supported_tiles = [tile for tile in page.tiles if tile.id in capability.supported_tile_ids]
     plot_tiles = [tile for tile in supported_tiles if tile.placement != "kpi_strip"]
     kpi_tiles = [tile for tile in supported_tiles if tile.placement == "kpi_strip"]
     for tile in [*plot_tiles, *kpi_tiles]:
@@ -599,9 +623,7 @@ def _filter_chip_labels(
     chips: list[str] = []
     if start and end:
         if time_preset:
-            chips.append(
-                f"{_time_preset_label(time_preset)} · {_compact_date_range(start, end)}"
-            )
+            chips.append(f"{_time_preset_label(time_preset)} · {_compact_date_range(start, end)}")
         else:
             chips.append(f"Time: {start.isoformat()} to {end.isoformat()}")
     chips.extend(f"{key}: {_filter_chip_value(value)}" for key, value in filters.items())
@@ -629,8 +651,7 @@ def _compact_date_range(start: dt.date, end: dt.date) -> str:
     separator = "\N{EN DASH}"
     if start.year != end.year:
         return (
-            f"{start_month} {start.day}, {start.year}{separator}"
-            f"{end_month} {end.day}, {end.year}"
+            f"{start_month} {start.day}, {start.year}{separator}{end_month} {end.day}, {end.year}"
         )
     if start.month == end.month:
         return f"{start_month} {start.day}{separator}{end.day}, {end.year}"

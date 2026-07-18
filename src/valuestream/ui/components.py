@@ -197,7 +197,10 @@ def key_value_strip(items: Iterable[MetricItem | dict[str, Any]]) -> None:
     normalized = [item if isinstance(item, MetricItem) else MetricItem(**item) for item in items]
     if not normalized:
         return
-    frame = pd.DataFrame([{"Setting": item.label, "Value": item.value} for item in normalized])
+    frame = pd.DataFrame(
+        [{"Setting": item.label, "Value": str(item.value)} for item in normalized],
+        dtype="string",
+    )
     st.dataframe(
         frame,
         hide_index=True,

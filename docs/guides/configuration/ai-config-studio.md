@@ -1,206 +1,182 @@
 # AI Configuration Studio
 
-The AI Configuration Studio guides source onboarding through sample review,
-field approval, defaults, filters, calculations, processors, metrics, reports,
-chat readiness, settings, and export. LLM-generated drafts can pre-populate
-most catalog settings; review them before applying the draft.
+AI Configuration Studio is a governed catalog-authoring workflow. It turns a
+source sample and a business goal into YAML-backed sources, processors, metrics,
+reports, and chat settings. The workspace catalog remains authoritative: model
+output is only a proposal, and no proposal can write configuration or run data
+without separate user actions.
 
-Steps are grouped into four phases — **Data** (sample through field
-approval), **Draft** (the first generated draft), **Review** (processors,
-metrics, and reports), and **Publish** (chat, settings, and export). Phase
-markers distinguish complete (`✓`), attention required (`!`), and empty (`○`)
-states. Publish is complete only after the current validated draft is applied
-to the workspace; editing the draft afterward returns Publish to attention.
-Selecting a phase jumps to its first step; the step selector then shows only
-that phase's steps.
+The Studio uses one compact progress indicator, a **Jump to step** selector,
+and persistent **Back** and **Continue** actions. The final step is **Apply**.
+Validation, review, workspace apply, and data loading are distinct states;
+object counts alone never imply that a revision is reviewed or applied.
 
-Every step shows the same **Save draft** action at the upper-right
-of the existing status panel. It publishes the currently accepted, validated
-session draft through the full rollback-protected write path without adding a
-separate vertical block. Its tooltip explains when no draft exists, AI changes
-are pending review, validation fails, or that exact draft is already saved.
-Controls inside review steps use
-**Update ... In Draft** wording: they accept the current panel into the
-session draft but do not write the workspace. This keeps draft editing and
-workspace persistence visibly separate.
+## Start from a sample
 
-Every editable field and editable table column has a help tooltip. Tooltips
-describe the underlying catalog property and show a concrete example when the
-expected value shape is not obvious. AI Configuration Studio shares this help
-catalog with Configuration Builder and the KPI recipe library; generated and
-manually authored definitions therefore use the same terminology.
+The cold start is in the main canvas. Choose one of three paths:
 
-Processor Parameter Editor uses the same compact logical grid as
-Configuration Builder: identity fields share one row, descriptions sit beside
-dimensions, and outcome or distribution settings are grouped into related
-columns.
+- upload a CSV, Parquet, JSON, NDJSON, gzip, or ZIP sample for an in-memory
+  preview;
+- choose a supported file already under `<workspace>/data`;
+- choose **Try deterministic demo**, which creates a small CSV under
+  `<workspace>/data/studio` so preview and runtime use the same file.
 
-## Start From a Sample
+An upload remains in memory until you explicitly choose **Stage sample in
+workspace**. Staging places it under `data/studio`; simply previewing an upload
+does not persist raw rows.
 
-Start with either an uploaded CSV, Parquet, JSON, NDJSON, gzip, or zip sample,
-or choose **Workspace sample** to reuse a supported file already stored under
-`<workspace>/data`. The workspace option avoids uploading the same source file
-again when Data Load or an operator has already placed it in the workspace.
+The **Source plan** reports the sample format, runtime reader, workspace root,
+exact file pattern, and runtime readiness. CSV and Parquet map to their matching
+runtime readers. JSON, NDJSON, gzip, and ZIP previews use the Pega DS runtime
+reader only when the schema looks like a compatible interaction export.
+Otherwise the Studio marks the source **Preview only** and asks you to confirm
+Pega compatibility or convert it to CSV/Parquet. Pega grouping and timestamp
+defaults are never applied to a generic CSV or Parquet file.
 
-## Business Requirements
+ZIP previews must contain at least one JSON or NDJSON member. An empty or
+unrelated archive is rejected with an actionable message instead of appearing
+to be a valid zero-row sample.
 
-The Sample and AI Draft steps include a free-form **Business Requirements**
-field. Describe what you want to measure in plain language — for example
-"weekly conversion by channel and average revenue per customer". The
-requirements are sent to the model together with the approved schema when
-generating the AI draft and when refreshing reports, so the generated
-processors, metrics, and tiles target your goals instead of a generic starter
-catalog. Requirements are kept when you switch samples; requirements the
-approved schema cannot support are skipped rather than guessed.
+On **Required Fields**, mappings are strict selectors over the current schema.
+An unknown column name cannot be typed into a source-field mapping. Defaults,
+filters, and calculated-field editors start empty; rows appear only after an
+explicit add action.
 
-## Review Data Sharing Before AI Runs
+## Describe the outcome
+
+The Sample and Draft steps include **Business Requirements**. Describe the
+decision or measure in plain language, such as “weekly conversion by channel
+and average revenue per customer.” Requirements survive a sample switch, but
+the Studio never invents fields to satisfy a requirement the approved schema
+cannot support.
+
+## Review what can be sent to AI
 
 Field approval and sample-value sharing are separate choices. A new sample
-starts with all discovered fields approved for schema use and **no sample
-values selected for sharing**. Identifier-like names such as `CustomerID` or
-`SubjectID` are marked **Likely ID** so they receive extra scrutiny before you
-opt them into example sharing.
+starts with discovered fields available for schema use and no values selected
+for example sharing. Identifier-like fields receive a **Likely ID** warning.
 
-Before any model-backed draft, revision, repair, report refresh, Copilot, or
-requirements-coverage action can run, confirm **Review data sent to AI**. The
-checkpoint shows the configured provider and model, every approved schema
-field, whether a custom endpoint is configured, and the fields whose sample
-values will be included. Even with examples off, the approved schema includes
-field names, types, null counts, and unique counts. Hidden field names are not
-sent; matching names are also redacted from business requirements, change
-requests, prior Copilot history, validation diagnostics, and draft identifiers.
-Prompts can also contain the remaining business requirements and relevant
-deterministic catalog or current draft settings. Provider storage and retention
-follow the terms of the configured destination.
+Before a model-backed draft, revision, repair, report refresh, coverage check,
+or Copilot request can run, confirm **Review data sent to AI**. The checkpoint
+shows the model, provider, destination class, approved schema field count, and
+fields whose values will be shared. Even with examples disabled, the approved
+schema can include field names, types, null counts, and unique counts, plus the
+business requirements and relevant catalog settings.
 
-Confirmation is scoped to the current sample and sharing contract. Loading a
-different sample or changing the provider, model, approved fields, or example
-sharing invalidates it, clears prior consent controls, and requires another
-review. It also clears prior Copilot conversation context so echoed sample
-values cannot cross into a narrower scope or a different provider. The local
-**Use Deterministic Draft** action never calls a model and remains available
-without AI data-sharing confirmation.
+Confirmation is scoped to the sample, provider, model, endpoint, approved
+fields, and example-sharing choices. Changing any part of that contract clears
+the confirmation and prior Copilot context. Hidden field names are redacted
+from dynamic prompt material, including derived identifiers, while approved
+fields with overlapping names remain intact.
 
-## Revise With Free-Form Change Requests
+## Provider preflight and bounded generation
 
-The Processors, Metrics, and Reports Review steps include an **AI Revision**
-panel. Enter a free-form change request — for example "add a KPI card with
-total orders to the overview page" — and the model returns only the catalog
-sections it needs to replace. The revision goes through the same pending
-review as generated drafts: you select what to keep, validation runs, and
-nothing updates the editable draft until you accept it.
+Every AI operation begins only after its button is clicked. The Studio then
+preflights the exact provider, model, endpoint, and operation capability. A
+successful preflight is cached for those session settings. Missing credentials,
+model access failures, and provider errors are shown in safe product language;
+raw provider payloads, credentials, prompts, sample values, and local paths are
+not copied into routine UI errors or logs.
 
-## AI Copilot
+Draft-producing operations use the same bounded pipeline:
 
-The **AI Copilot** panel remains visible beside every step and runs as an
-independent Streamlit fragment, so ordinary dialogue does not rerun the main
-editor. It knows the current step, business requirements, approved schema,
-and accepted draft. Ask a question or request a change in free form; the
-copilot answers with a short reply and, when you asked for a change, governed
-operations for source defaults, dataset filters, calculated fields, processors, metrics,
-built-in KPI recipes, and report tiles. For example, "set the
-ModelControlGroup default to Test" creates a `set_source_default` operation;
-"calculate Margin from Revenue minus Cost" creates a validated
-`derive_column` expression rather than free-form YAML.
+1. call the model;
+2. parse catalog YAML;
+3. merge complete returned sections onto the accepted base;
+4. validate the full catalog;
+5. if needed, make at most two internal repair calls and validate again.
 
-On the **Calculations** step, the Copilot receives the complete closed
-expression-DSL catalog, including every supported operator, its exact AST
-shape, allowed date units and cast types, and nested examples. Concatenation is
-an AST operation, not a function-call string: for example,
-`{op: concat, args: [{col: Issue}, {col: Group}], sep: "/"}`. Non-string
-inputs can be nested inside `op: cast` before concatenation. The prompt must
-not report an operator as unavailable when it appears in this catalog; the
-resulting `derive_column` still passes normal model and catalog validation
-before it can enter patch review.
+Only a valid candidate can enter pending review. If all three attempts fail,
+the candidate is discarded and the previously accepted revision remains
+unchanged. The status panel names the preflight, generation, repair, and
+validation stages. Retrying is another explicit operation; the Studio does not
+show a cancel control it cannot honor.
 
-On the **Filters** step, dataset requests use `set_source_filter` or
-`remove_source_filter`. They create a source `kind: filter` transform in
-`pipelines.yaml`, before processor fan-out, and therefore affect every
-processor bound to that source. A processor-level filter remains a separate
-Processors-step concern. If a model attempts `set_processor` for a Filters-step
-request, the governed loop rejects it and asks the model to correct the
-operation before anything can enter patch review.
+The deterministic draft uses the same validation and explicit review boundary
+but never calls a provider.
 
-The operation loop is bounded to three model calls. It applies operations to
-a temporary copy, validates that copy with the catalog validator, and sends
-operation or validation errors back to the model for correction. Only a valid
-result becomes pending review. Each structural change then appears as its own
-Accept checkbox with before/after YAML. Reject preserves the accepted draft's
-previous definition; it never deletes a changed object as a side effect.
-While patches are pending, the copilot input is disabled so a later request
-cannot overwrite unreviewed work. When a request is ambiguous, the copilot
-asks a clarifying question with quick-reply options before executing tools.
-Accepted source-default, source-filter, and calculated-field patches are also synchronized
-back into the Defaults, Filters, and Calculations row editors on the next full rerun, so
-the visual preprocessing controls and accepted `pipelines.yaml` draft remain
-the same source of truth. Removing any of these definitions uses the same governed
-operation and patch review path.
-The conversation and draft reset when a different sample file is loaded,
-including a file with the same column names; business requirements remain.
-If the configured provider rejects a request for insufficient permissions,
-the Studio identifies the selected model and points to **AI Settings** or the
-provider's project/key permissions. The attempted prompt remains available in
-**Last prompt**, and no draft operation is applied.
+## Review complete change bundles
 
-## Requirements Coverage
+Pending changes occupy the full canvas. Checkboxes are off by default. Studio
+groups related changes into dependency-closed bundles so a processor change
+travels with changed metrics that use it and report tiles that use those
+metrics. The selected combination is validated again before acceptance.
 
-The Metrics Review, Reports Review, and Save & Export steps include a
-**Requirements Coverage** panel. **Check Coverage** asks the model to split
-the business requirements into individual requirements and judge each one
-against the current draft: covered, partial, or missing, with the metric ids
-and tile keys that cover it. Returned references are checked against the
-draft; unknown metric or tile ids are removed, and an unsupported covered or
-partial judgement is downgraded to missing. A warning appears when the draft
-or requirements changed after the last check. Each uncovered requirement
-gets an **Ask Copilot To Cover** shortcut that sends it to the copilot as a
-change request.
+Invalid bundles are disabled. **Accept safe additions** excludes every removal.
+To accept a removal, choose **Review individually** and explicitly select that
+removal bundle; it starts rejected. This prevents a broad safe-changes action
+from deleting configuration.
+Before/after YAML remains available under **Technical details**, but human
+labels, summaries, and consequences lead the review.
 
-## Review Before Applying
+Accepting a valid bundle combination records the exact reviewed revision
+signature. Any later manual edit creates a new revision and clears that review
+status. The final step offers **Mark this revision reviewed** when a valid
+manually edited revision still needs explicit business review.
 
-Use it as a drafting workflow. Review generated YAML or individual structural
-patches before applying them, then validate the catalog and run the workspace.
+## Ask Copilot
 
-- Metric Review includes friendly labels, units, formats, and favorable
-  direction.
-- Metric Review includes the same KPI recipe library as Configuration Builder.
-  Adding a recipe materializes a metric and optional report tile inside the
-  session-local draft; it does not write the workspace immediately. Recipe
-  inputs use business fields/algorithms, stages, and populations rather than
-  internal aggregate-state IDs. All processor grouping/configuration fields
-  and recipe-compatible algorithms remain selectable before the first load;
-  a missing combination adds a processor-state proposal to the same draft and
-  is marked as requiring the first run or a backfill.
-  Before adding the recipe to the draft, **Review changes** shows the exact
-  generated YAML patches and, when needed, the affected source, states, fields,
-  and processor computation-hash transition.
-- Reports Review includes page filters/time presets plus selected-tile
-  description, scale, and KPI settings.
-- Draft apply validates and preserves the full dashboard
-  theme/layout/page/tile structure. Sources, processors, metrics, dashboards,
-  and `ai.yaml` are written inside one rollback boundary; failed writes or
-  post-write validation restore the prior workspace configuration.
-- Use **Save Draft & Run Source** on Save & Export when a reviewed recipe
-  introduces processor state that must be materialized. The top **Save draft
-  to workspace** action changes configuration only and never starts ingestion.
+Copilot is progressively disclosed under **Ask AI about this step**. It knows
+the active step, approved schema, business requirements, and current revision.
+Structured operations are applied only to a temporary copy, validated, and
+then sent to the same bundle-review boundary.
 
-## Identifiers
+While a proposal is pending, Copilot stays available in read-only mode. You can
+ask what a bundle changes or why it matters, but returned mutation operations
+are ignored and the pending proposal cannot be overwritten. Ambiguous requests
+can produce quick-reply questions before any operation is attempted.
 
-Generated metric IDs use the entered metric name, so the same metric kind can
-be used multiple times without manually inventing IDs. Existing metric
-selectors start from processor and kind, then show only the metric IDs that
-match that processor/kind pair.
+On Filters, dataset requests modify the source filter before processor fan-out;
+processor filters remain a separate Processors concern. On Calculations,
+Copilot uses the closed expression AST catalog rather than executable code or
+free-form function strings.
 
-Generated report dashboards use display names for authoring and create
-dashboard, page, and tile IDs automatically from those names. Raw dashboards
-YAML is still available when you need to override an identifier directly.
+## Coverage and technical details
 
-## Related Docs
+Requirements Coverage maps business requirements to existing measures and
+reports. Returned metric and tile references are checked against the current
+revision; unknown references are removed and unsupported “covered” claims are
+downgraded. A coverage result becomes stale when the requirements or revision
+changes.
 
-- [Workspaces & catalog](workspaces-and-catalog.md) — validate and re-run
-  after applying a draft.
-- [Pega export tutorial](../../tutorials/pega-export.md) — using Workspace
-  sample with a Pega archive.
-- [Chat with data](../users/chat-with-data.md) — the chat settings the Studio's
-  chat-readiness step feeds.
-- [KPI recipes](../../reference/kpi-recipes.md) — discovery, readiness,
-  mapping, provenance, and backfill behavior.
+Routine views lead with friendly names and key/value summaries. Internal IDs,
+raw YAML, prompts, responses, and validation detail are available only in
+collapsed **Technical details** sections. YAML downloads appear before raw YAML
+inspection controls.
+
+## Apply, load data, and open the outcome
+
+The final step never creates an implicit deterministic draft. If no accepted
+revision exists, it provides a direct **Go to Draft** action.
+
+**Apply to workspace** is enabled only when all of the following are true:
+
+- no proposal is pending;
+- the exact accepted revision validates;
+- that exact revision has been explicitly reviewed;
+- it is not already applied.
+
+Apply writes sources, processors, metrics, dashboards, and optional `ai.yaml`
+inside the rollback-protected workspace transaction. It does not ingest data.
+The resulting revision receipt shows the revision key, workspace status, source
+count, and whether processor computation hashes indicate a data run is needed.
+
+If aggregate computation changed, the primary **Run data** action routes to
+`/data_load?from=ai_studio`. If no computation changed, **Open report** routes
+to `/reports?from=ai_studio`. Data Load owns execution, progress, retry, and
+diagnostics; Studio does not combine a catalog write with ingestion.
+
+The authoring funnel records only allowlisted workflow stages, outcomes,
+durations, counts, and whether a data run is required. It never records sample
+values, field names, prompts, credentials, local paths, or catalog identifiers.
+
+## Related docs
+
+- [Workspaces & catalog](workspaces-and-catalog.md) — catalog ownership and
+  validation.
+- [Pega export tutorial](../../tutorials/pega-export.md) — loading a supported
+  Pega interaction archive.
+- [Chat with data](../users/chat-with-data.md) — using the generated chat
+  settings.
+- [KPI recipes](../../reference/kpi-recipes.md) — recipe readiness,
+  provenance, and materialization impact.

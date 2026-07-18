@@ -78,6 +78,20 @@ tightly governed:
 - Governed SQL logs a query hash, statement kind, length, cap, and result
   counts. It does not log SQL text, literal values, or workspace paths.
 
+## Authoring Funnel Analytics
+
+The optional Build rollout uses privacy-safe application log events rather
+than a generic analytics payload. The event API accepts only enumerated
+workflow, stage, event, and outcome values plus bounded duration/count values
+and a materialization-required flag. An anonymous random journey ID lasts for
+the browser session; it is not a user, workspace, sample, or catalog object ID.
+
+There is deliberately no free-form metadata map. Sample and field values,
+field/object names, workspace paths, prompts, responses, credentials,
+endpoints, and provider exceptions therefore cannot be added at a call site.
+See [Configuration authoring rollout](authoring-rollout.md) for the complete
+event list and measurement procedure.
+
 ## Traceability
 
 The catalog is validated and hashed; processor outputs carry provenance
@@ -93,4 +107,6 @@ for the governance view.
 - [API & MCP reference](../../reference/api-and-mcp.md) — endpoints, tools,
   and error mapping.
 - [Deployment](deployment.md) — hosting choices that this posture constrains.
+- [Configuration authoring rollout](authoring-rollout.md) — feature flag,
+  privacy-safe event contract, and rollout gates.
 - [FAQ §F](../../reference/faq.md) — security and compliance questions.

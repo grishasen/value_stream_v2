@@ -10,6 +10,11 @@ The library is an authoring layer, not a second runtime catalog. Installed
 metrics and tiles are ordinary YAML; processors, aggregates, query planning,
 and reports continue to obey the aggregate-first architecture.
 
+The configuration-authoring program's Done/Partial/Open assessment of the KPR
+stories it reuses is recorded in the
+[configuration authoring story baseline](configuration-authoring-story-baseline-2026-07-18.md).
+This backlog remains the source of truth for full KPR scope.
+
 ## Product Principles
 
 1. **Business question first.** Search results lead with decision intent, not

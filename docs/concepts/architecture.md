@@ -369,10 +369,20 @@ deep-scans embedded provenance before publishing an interrupted run.
 
 ### Configuration authoring surfaces
 
-Value Stream has two Streamlit authoring paths over the same YAML catalog:
+Value Stream exposes a top-level **Build** choice over two Streamlit authoring
+paths backed by the same YAML catalog. **Start from a sample** enters AI
+Configuration Studio; **Configure the current workspace** enters Configuration
+Builder. The landing page chooses a workflow but does not create a third
+authoring store.
 
-- **Configuration Builder** is the catalog-first, validation-first editor for the active workspace. It has one main builder flow with steps for workspace health, sources, processors, dimensions, metrics, reports/tiles, chat review, settings, and save/export. Source steps edit reader runtime settings, schema keys, defaults, dataset filters, and calculated fields. Filters are authored either as rule rows (`field`, `operator`, `value`, `enabled`) or raw expression-AST YAML; calculated fields become `derive_column` transforms with typed AST expressions. Processor steps edit group-by dimensions, grains, states, and optional processor filters. Metric and report steps edit display metadata, page filters/time presets, KPI behavior, descriptions, and scales in addition to chart fields. Page-settings writes merge into the existing page and preserve its tiles, dashboard layout, and theme. Chat review shows which aggregate metrics will be available to Chat With Data and edits chat-only LLM prompt/description guidance in `ai.yaml`; settings edit workspace defaults plus dashboard theme.
-- **AI Configuration Studio** is the sample-driven, model-assisted draft workflow. It starts from an uploaded sample, detects reader/runtime defaults, maps required identity/time/outcome fields, applies defaults, compiles filter rules/raw AST, applies calculated fields, derives calendar fields, and asks the user to approve the working field catalog. Sample values are excluded from model prompts by default. Approved schema names, types, null counts, and unique counts remain part of the prompt, while hidden field names are excluded. Every sample-backed model action requires confirmation of the exact sample, provider, model, endpoint route, approved fields, and example-value scope; changing that scope invalidates the confirmation and its widget state. Governed Copilot operations for defaults, dataset filters, and calculated fields mutate the source pipeline; a Filters-step request cannot fall back to a processor mutation. The shared AI prompt dictionary enumerates the complete closed expression DSL with exact node shapes, including `concat` as an AST operation with `args` and optional `sep`. Accepted source-filter patches synchronize back into the rule/raw-AST editor before its next render. Its schema dictionary, generation/repair prompts, deterministic report generator, and review controls understand the same metric-display, page-filter, KPI, and scale properties. Applying a draft validates and writes sources, processors, metrics, dashboards, and `ai.yaml` inside one rollback boundary, preserving theme, layout, page, tile, and chat-guidance properties. Deterministic generation remains available as a baseline/review fallback inside the same draft boundary.
+- **Configuration Builder** is the catalog-first, validation-first editor for the active workspace. Its compact outline covers workspace health, sources, processors, dimensions, metrics, reports/tiles, chat review, settings, and **Export current workspace**. Each object editor compares a canonical session-local revision with the applied object. Internal navigation preserves a dirty revision until the user applies or discards it; simply visiting a step cannot make it dirty. A current object exposes exactly one **Apply to workspace** action, and apply never starts ingestion. Source steps edit reader runtime settings, schema keys, defaults, dataset filters, and calculated fields. Filters are authored either as rule rows (`field`, `operator`, `value`, `enabled`) or raw expression-AST YAML; calculated fields become `derive_column` transforms with typed AST expressions. Processor steps edit group-by dimensions, grains, states, and optional processor filters. Metric and report steps edit display metadata, page filters/time presets, KPI behavior, descriptions, and scales in addition to chart fields. Page-settings writes merge into the existing page and preserve its tiles, dashboard layout, and theme. Chat review shows which aggregate metrics will be available to Chat With Data and edits chat-only LLM prompt/description guidance in `ai.yaml`; settings edit workspace defaults plus dashboard theme.
+- **AI Configuration Studio** is the sample-first, optionally model-assisted draft workflow. Uploaded bytes are preview-only; the user separately reviews the generated production source plan. CSV, Parquet, JSON, and explicitly detected Pega/archive samples receive format-specific reader defaults, while unsupported archive shapes fail before a misleading source can be drafted. Required-field mappings select only fields present in the approved schema. Sample values are excluded from model prompts by default. Approved schema names, types, null counts, and unique counts remain part of the prompt, while hidden field names are excluded. Every sample-backed model action requires confirmation of the exact sample, provider, model, endpoint route, approved fields, and example-value scope; changing that scope invalidates the confirmation and its widget state. User-initiated model work preflights the configured provider/model/credential capability, reports a safe corrective action, and caches a successful check for the session. Generation parses, merges, and validates a candidate before review; a bounded sequence of at most two repair passes may run inside the same named operation. An unrecoverable candidate is discarded while the last valid draft remains available, with deterministic generation as the validated fallback. Review uses semantic, dependency-closed bundles in the main canvas; removals require explicit selection and exact YAML stays collapsed. Governed Copilot remains available for read-only explanation while bundles are pending but blocks mutations that could overwrite them. Applying a reviewed revision validates and writes sources, processors, metrics, dashboards, and `ai.yaml` inside one rollback boundary, preserving theme, layout, page, tile, and chat-guidance properties.
+
+Both workflows display one revision ledger: editing draft → ready for review →
+reviewed → applied → data refresh required or report ready. Validation is keyed
+by the canonical revision, so a field change invalidates the prior verdict and
+review. Current-workspace and draft verdicts are never presented as if they
+describe the same object.
 
 Every Builder catalog mutation and its post-write validation share one
 rollback boundary. A failed write or invalid resulting workspace restores all
@@ -400,7 +410,19 @@ a new workspace or replay/backfill for existing aggregates; recipe
 installation never starts that data operation or converts one stored sketch
 family into another.
 
-Both surfaces use structured YAML parsing and the closed expression AST. Neither writes free-form Python or mutates the workspace until the user presses an explicit apply action; every apply re-runs catalog validation.
+Both surfaces use structured YAML parsing and the closed expression AST.
+Neither writes free-form Python or mutates the workspace until the user presses
+an explicit apply action; every apply re-runs catalog validation. Apply then
+classifies whether existing aggregates can open a report or whether the user
+must continue to Data Load. The latter is a handoff, not an implicit run.
+
+Privacy-safe authoring instrumentation records only allowlisted workflow,
+stage, event, outcome, bounded duration/count, and materialization-required
+flags under an anonymous session journey. It has no arbitrary metadata field,
+so sample/field values, object identifiers, local paths, prompts, credentials,
+and provider error text cannot be attached. The revised entry can be hidden
+with `VALUESTREAM_AUTHORING_V2=0` during measured rollout. See the
+[authoring rollout guide](../guides/operations/authoring-rollout.md).
 
 ## 11. Technology stack and rationale
 

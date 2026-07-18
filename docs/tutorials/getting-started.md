@@ -121,6 +121,9 @@ directories. It does not delete source data or catalog YAML.
 ## Where Next
 
 - [UI tour](ui-tour.md) — serve the Streamlit app over the workspace you just built.
+- In the app, open **Build** to choose between the deterministic sample-first
+  path and manual catalog editing. Applying configuration remains separate from
+  the data run you completed above.
 - [Distribution analytics](distribution-analytics.md) — quantiles, response times, and model-score metrics.
 - [Lifecycle and funnel analytics](lifecycle-and-funnel-analytics.md) — funnels and experiment comparisons.
 - [Pega export tutorial](pega-export.md) — the same flow against real Pega Dataset Export files.

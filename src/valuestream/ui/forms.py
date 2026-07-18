@@ -899,7 +899,7 @@ def _contingency_fields(
     tests = st.multiselect(
         "Tests",
         list(CONTINGENCY_TEST_OPTIONS),
-        default=current_tests or list(CONTINGENCY_TEST_OPTIONS),
+        default=current_tests if seed else list(CONTINGENCY_TEST_OPTIONS),
         key=f"{key_prefix}_contingency_tests",
         help=config_help.field_help("metric.tests"),
     )
@@ -912,7 +912,7 @@ def _contingency_fields(
     if not variant_column:
         st.warning("Contingency tests require a variant column.")
         return None
-    fields: dict[str, Any] = {"variant_column": variant_column, "tests": tests or ["chi2"]}
+    fields: dict[str, Any] = {"variant_column": variant_column, "tests": tests}
     if outputs:
         fields["outputs"] = outputs
     return fields
@@ -923,7 +923,8 @@ def _lifecycle_fields(seed: dict[str, Any], key_prefix: str) -> dict[str, Any]:
         output
         for output in (
             builder.string_list(seed.get("outputs"))
-            or ["frequency", "monetary_value", "rfm_segment", "rfm_score"]
+            if seed
+            else ["frequency", "monetary_value", "rfm_segment", "rfm_score"]
         )
         if output in LIFECYCLE_OUTPUT_OPTIONS
     ]
@@ -946,6 +947,14 @@ def _set_op_fields(
     if len(states) < 2:
         st.warning("Set operations require at least two theta states.")
         return None
+    raw_operands = seed.get("operands")
+    operands = raw_operands if isinstance(raw_operands, list) else []
+    if any(isinstance(operand, dict) and operand.get("time_window") for operand in operands):
+        st.info(
+            "This metric uses time-window operands. The visual editor keeps those operands "
+            "read-only so their windows cannot be lost; use the YAML catalog for structural edits."
+        )
+        return {key: seed[key] for key in ("op", "operands", "states", "output") if key in seed}
     op = st.selectbox(
         "Operation",
         list(SET_OP_OPTIONS),
@@ -969,6 +978,8 @@ def _set_op_fields(
     if not selected:
         st.warning("Choose at least one theta state.")
         return None
+    if operands and op == seed.get("op") and list(selected) == builder.operand_states(seed):
+        return {key: seed[key] for key in ("op", "operands", "states", "output") if key in seed}
     return {"op": op, "states": list(selected)}
 
 
