@@ -293,23 +293,28 @@ def _builder_steps(ctx: ValueStreamContext) -> None:
     index = steps.index(current_step)
     definition = BUILDER_STEP_BY_LABEL[current_step]
     with components.card():
-        task_col, jump_col, action_col = st.columns([0.58, 0.22, 0.20], vertical_alignment="center")
+        task_col, controls_col = st.columns([0.58, 0.42], vertical_alignment="center")
         with task_col:
             st.caption(f"Step {index + 1} of {len(steps)} · {definition.phase}")
             st.write(f"### {definition.label}")
             st.caption(definition.task)
-        with jump_col:
-            st.selectbox(
-                "Jump to step",
-                steps,
-                key="builder_step_jump",
-                on_change=_apply_builder_jump,
-            )
-        with action_col:
-            save_slot = st.empty()
-            # The active editor fills this placeholder after it computes its
-            # canonical dirty state. The initial write supports fragments.
-            save_slot.caption("")
+        with controls_col:
+            # Bottom alignment levels the primary action with the Jump input
+            # itself rather than with the label + input block's midpoint.
+            jump_col, action_col = st.columns([0.52, 0.48], vertical_alignment="bottom")
+            with jump_col:
+                st.selectbox(
+                    "Jump to step",
+                    steps,
+                    key="builder_step_jump",
+                    on_change=_apply_builder_jump,
+                )
+            with action_col:
+                save_slot = st.empty()
+                # The active editor fills this placeholder after it computes
+                # its canonical dirty state. The initial write supports
+                # fragments.
+                save_slot.caption("")
         st.progress((index + 1) / len(steps), text=f"{definition.phase} · {definition.label}")
         registry = st.session_state.get(builder.BUILDER_DRAFTS_KEY, {})
         pending_count = len(registry) if isinstance(registry, dict) else 0

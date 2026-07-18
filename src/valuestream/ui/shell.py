@@ -35,6 +35,7 @@ class NavigationPage:
     icon: str
     target: Callable[[], None]
     default: bool = False
+    indent: bool = False
 
 
 def parse_args() -> argparse.Namespace:
@@ -142,6 +143,9 @@ def _navigation_pages(ctx: ValueStreamContext) -> list[NavigationPage]:
         if authoring_v2_enabled()
         else []
     )
+    # Under the Build landing page, the two authoring tools read as its
+    # children; without the landing page they stay flat section entries.
+    tools_indented = authoring_v2_enabled()
     authoring_pages.extend(
         [
             NavigationPage(
@@ -149,12 +153,14 @@ def _navigation_pages(ctx: ValueStreamContext) -> list[NavigationPage]:
                 "Configuration Builder",
                 ":material/build:",
                 lambda: config_builder.render(ctx),
+                indent=tools_indented,
             ),
             NavigationPage(
                 authoring_section,
                 "AI Configuration Studio",
                 ":material/network_intelligence:",
                 lambda: ai_config_studio.render(ctx),
+                indent=tools_indented,
             ),
         ]
     )
@@ -217,7 +223,12 @@ def _render_sidebar_links(
         expander_key = f"nav_section_{_url_path(section)}_{_url_path(active_section)}"
         with st.expander(section, expanded=section == active_section, key=expander_key):
             for page in section_pages:
-                st.page_link(
+                container = st
+                if page.indent:
+                    # Children of a section landing page read as a submenu:
+                    # a spacer column insets the link and its highlight pill.
+                    _, container = st.columns([0.08, 0.92], gap="small")
+                container.page_link(
                     page_lookup[(section, page.title)],
                     label=page.title,
                     icon=page.icon,
