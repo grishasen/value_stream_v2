@@ -78,8 +78,8 @@ Both authoring surfaces provide the same steps:
    `processors.yaml`, `metrics.yaml`, and `dashboards.yaml` patches.
 8. When a processor state is proposed, review the source, source fields,
    affected states, and current/proposed processor computation hashes.
-9. Apply explicitly. If materialization is required, run the named source from
-   Data Load (or use **Save Draft & Run Source** in AI Configuration Studio).
+9. Apply explicitly. If materialization is required, follow the named source
+   handoff to Data Load and start the run there.
 
 Configuration Builder writes any proposed processor state first, followed by
 the materialized metric and optional tile. All writes and post-write catalog
@@ -89,11 +89,11 @@ switches to **Edit Existing Metric**, opens the new metric, and presents a
 direct Data Load handoff when the processor contract changed.
 
 AI Configuration Studio adds the same processor/metric/tile artifacts to its
-session-local draft. The workspace remains unchanged until **Save & Export**
-applies that draft. Applying a draft uses one rollback boundary for all four
-catalog files plus `ai.yaml`, including post-write validation. Recipe
-confirmation itself never starts ingestion; the separate **Apply Draft & Run
-Source** action is the explicit materialization approval.
+session-local draft. The workspace remains unchanged until **Apply to
+workspace** writes the reviewed revision. Applying uses one rollback boundary
+for all four catalog files plus `ai.yaml`, including post-write validation.
+Recipe confirmation and apply never start ingestion; the outcome links to Data
+Load when the processor contract requires materialization.
 
 An installed metric carries recipe provenance as ordinary permissive metric
 metadata:
@@ -178,8 +178,7 @@ convert or merge different sketch families together.
 - An installed metric records the recipe ID/version so future upgrade tooling
   can show a diff instead of silently migrating it.
 - Workspace-owned recipes, approval owners, deprecation, upgrade assistance,
-  and report packs are planned in the
-  [KPI recipe backlog](../design/kpi-recipe-backlog.md).
+  and report packs are planned future work, not current behavior.
 
 ## Aggregate and Backfill Rules
 

@@ -190,3 +190,42 @@ def test_transform_pipeline_catalog() -> None:
     assert "Raw" not in out.columns
     assert out["DisplayName"].to_list() == ["Offer"]
     assert out["FillMe"].to_list() == ["fallback"]
+
+
+@pytest.mark.unit
+def test_parse_datetime_skips_columns_the_reader_already_typed() -> None:
+    """CSV date inference or parquet schemas can pre-type timestamp columns.
+
+    The generated Studio source applies ``parse_datetime`` to columns the
+    preview saw as strings; the runtime reader may deliver them as datetimes
+    already, and the same config must work for both reads.
+    """
+
+    source = _source(
+        [
+            {"kind": "parse_datetime", "columns": ["OutcomeTime", "DecisionTime"], "format": "%+"},
+            {
+                "kind": "derive_column",
+                "output": "ResponseSeconds",
+                "expression": {
+                    "op": "date_diff",
+                    "unit": "seconds",
+                    "end": {"col": "OutcomeTime"},
+                    "start": {"col": "DecisionTime"},
+                },
+            },
+        ]
+    )
+    already_typed = dt.datetime(2026, 7, 1, 9, 0, tzinfo=dt.UTC)
+    frame = pl.DataFrame(
+        {
+            "OutcomeTime": [already_typed],
+            "DecisionTime": ["2026-07-01T08:59:00Z"],
+        }
+    ).lazy()
+
+    out = apply_transforms(frame, source).collect()
+
+    assert out.get_column("OutcomeTime").dtype.is_temporal()
+    assert out.get_column("DecisionTime").dtype.is_temporal()
+    assert out.get_column("ResponseSeconds").to_list() == [60]

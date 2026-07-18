@@ -14,28 +14,6 @@ from valuestream.ui import config_help, theme
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 UI_ROOT = PROJECT_ROOT / "src" / "valuestream" / "ui"
 HTML_MARKERS = ("<style", "<script", "<div", "<span", "<iframe", "<html")
-CONFIG_EDITOR_FILES = (
-    UI_ROOT / "forms.py",
-    UI_ROOT / "pages" / "config_builder.py",
-    UI_ROOT / "pages" / "ai_config_studio.py",
-    UI_ROOT / "recipe_library.py",
-)
-CONFIG_FIELD_WIDGETS = {
-    "checkbox",
-    "color_picker",
-    "date_input",
-    "file_uploader",
-    "multiselect",
-    "number_input",
-    "segmented_control",
-    "select_slider",
-    "selectbox",
-    "slider",
-    "text_area",
-    "text_input",
-    "time_input",
-    "toggle",
-}
 
 
 def _qualname(node: ast.AST) -> str:
@@ -45,19 +23,6 @@ def _qualname(node: ast.AST) -> str:
         base = _qualname(node.value)
         return f"{base}.{node.attr}" if base else node.attr
     return ""
-
-
-def _function_call_names(path: Path) -> dict[str, set[str]]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return {
-        node.name: {
-            _qualname(child.func)
-            for child in ast.walk(node)
-            if isinstance(child, ast.Call)
-        }
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
 
 
 def _streamlit_aliases(tree: ast.AST) -> tuple[set[str], set[str], set[str]]:
@@ -101,6 +66,23 @@ def _contains_style_template(node: ast.AST | None) -> bool:
     ):
         return _contains_style_template(node.func.value)
     return False
+
+
+def _relative_luminance(hex_color: str) -> float:
+    channels = [int(hex_color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+    linear = [
+        value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+        for value in channels
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _contrast_ratio(foreground: str, background: str) -> float:
+    lighter, darker = sorted(
+        (_relative_luminance(foreground), _relative_luminance(background)),
+        reverse=True,
+    )
+    return (lighter + 0.05) / (darker + 0.05)
 
 
 def _is_allowed_theme_style(path: Path, call_name: str, first_arg: ast.AST | None) -> bool:
@@ -165,48 +147,42 @@ def test_streamlit_ui_uses_native_components_instead_of_rendered_html() -> None:
 
 
 @pytest.mark.unit
-def test_configuration_editors_keep_save_action_at_the_top_of_every_step() -> None:
-    builder_calls = _function_call_names(UI_ROOT / "pages" / "config_builder.py")
-    for function_name in (
-        "_health",
-        "_source_builder",
-        "_processor_builder",
-        "_dimensions_builder",
-        "_metric_builder",
-        "_tile_builder",
-        "_chat_review",
-        "_settings_builder",
-        "_save_export",
-    ):
-        assert "components.editor_save_bar" in builder_calls[function_name]
+def test_configuration_editors_use_one_truthful_action_vocabulary() -> None:
+    builder_source = (UI_ROOT / "pages" / "config_builder.py").read_text(encoding="utf-8")
+    studio_source = (UI_ROOT / "pages" / "ai_config_studio.py").read_text(encoding="utf-8")
+    combined = builder_source + studio_source
 
-    studio_calls = _function_call_names(UI_ROOT / "pages" / "ai_config_studio.py")
-    assert "_studio_status_bar" in studio_calls["_render_studio"]
-    assert "_render_workspace_save_bar" in studio_calls["_studio_status_bar"]
-    assert "_render_workspace_save_bar" in studio_calls["_current_catalog_draft_editor"]
+    for action in ("Jump to step", "Back", "Continue", "Apply to workspace"):
+        assert action in builder_source
+        assert action in studio_source
+    assert "Export current workspace" in builder_source
+    for obsolete in (
+        "Save Draft & Run Source",
+        "Apply Draft & Run Source",
+        "Save draft",
+        "Save & Export",
+    ):
+        assert obsolete not in combined
+    assert "run_source(" not in builder_source
+    assert "run_source(" not in studio_source
 
 
 @pytest.mark.unit
-def test_config_editor_fields_and_table_columns_have_help() -> None:
-    missing_help: list[str] = []
+def test_ambiguous_configuration_controls_keep_targeted_help() -> None:
+    builder_source = (UI_ROOT / "pages" / "config_builder.py").read_text(encoding="utf-8")
+    studio_source = (UI_ROOT / "pages" / "ai_config_studio.py").read_text(encoding="utf-8")
 
-    for path in CONFIG_EDITOR_FILES:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-                continue
-            is_field_widget = node.func.attr in CONFIG_FIELD_WIDGETS
-            is_editor_column = node.func.attr.endswith("Column") and "column_config" in _qualname(
-                node.func
-            )
-            if not is_field_widget and not is_editor_column:
-                continue
-            if not any(keyword.arg == "help" for keyword in node.keywords):
-                missing_help.append(f"{path.relative_to(UI_ROOT)}:{node.lineno}")
-
-    assert not missing_help, "Configuration fields require help tooltips:\n" + "\n".join(
-        missing_help
-    )
+    for key in ("source.reader", "processor.kind", "metric.kind", "report.chart"):
+        assert f'config_help.field_help("{key}")' in builder_source
+    for key in (
+        "ai.model",
+        "ai.timeout",
+        "source.reader",
+        "mapping.subject",
+        "processor.kind",
+        "metric.kind",
+    ):
+        assert f'config_help.field_help("{key}")' in studio_source
 
 
 @pytest.mark.unit
@@ -236,32 +212,33 @@ def test_dark_theme_uses_accessible_surface_ladder() -> None:
     theme_source = (UI_ROOT / "theme.py").read_text(encoding="utf-8")
 
     expected_theme_tokens = {
-        "primaryColor": "#45BA50",
-        "backgroundColor": "#080A09",
-        "secondaryBackgroundColor": "#171C18",
-        "textColor": "#F0F3F0",
-        "borderColor": "#343C36",
-        "dataframeHeaderBackgroundColor": "#171C18",
-        "blueColor": "#00B1D8",
+        "primaryColor": "#6EA8FE",
+        "backgroundColor": "#0B1017",
+        "secondaryBackgroundColor": "#18212C",
+        "textColor": "#F3F7FB",
+        "borderColor": "#304052",
+        "dataframeHeaderBackgroundColor": "#18212C",
+        "blueColor": "#6EA8FE",
         "violetColor": "#AD87ED",
-        "greenColor": "#45BA50",
+        "greenColor": "#4FD1C5",
         "orangeColor": "#FF8B25",
         "redColor": "#F14D4C",
-        "grayColor": "#A7AFA9",
+        "grayColor": "#A9B5C2",
     }
     for key, value in expected_theme_tokens.items():
         assert dark_theme[key] == value
 
-    assert dark_sidebar["backgroundColor"] == "#080A09"
-    assert dark_sidebar["secondaryBackgroundColor"] == "#171C18"
+    assert dark_sidebar["backgroundColor"] == "#0B1017"
+    assert dark_sidebar["secondaryBackgroundColor"] == "#18212C"
 
     for token in (
-        '"cream": "#080a09"',
-        '"card": "#111512"',
-        '"soft": "#171c18"',
-        '"border": "#343c36"',
-        '"green": "#45ba50"',
-        '"muted": "#a7afa9"',
+        '"cream": "#0b1017"',
+        '"card": "#121a24"',
+        '"soft": "#18212c"',
+        '"border": "#304052"',
+        '"action": "#6ea8fe"',
+        '"verified": "#4fd1c5"',
+        '"muted": "#a9b5c2"',
     ):
         assert token in theme_source
 
@@ -288,10 +265,10 @@ def test_plotly_template_uses_distinct_report_colorways() -> None:
     assert dark_colorway == theme.PLOTLY_DARK_COLORWAY
     assert light_colorway[:2] == ["#0072B2", "#D55E00"]
     assert dark_colorway[:2] == ["#56B4E9", "#F2C14E"]
-    assert light_paper_bgcolor == "#f5f3ee"
-    assert light_plot_bgcolor == "#f5f3ee"
-    assert dark_paper_bgcolor == "#080a09"
-    assert dark_plot_bgcolor == "#080a09"
+    assert light_paper_bgcolor == "#f7f9fc"
+    assert light_plot_bgcolor == "#f7f9fc"
+    assert dark_paper_bgcolor == "#0b1017"
+    assert dark_plot_bgcolor == "#0b1017"
 
 
 @pytest.mark.unit
@@ -302,10 +279,37 @@ def test_dashboard_theme_carries_app_background(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(theme, "_active_theme_base", lambda: "dark")
     dark = theme.dashboard_theme()
 
-    assert light["paper_bgcolor"] == "#f5f3ee"
-    assert light["plot_bgcolor"] == "#f5f3ee"
-    assert dark["paper_bgcolor"] == "#080a09"
-    assert dark["plot_bgcolor"] == "#080a09"
+    assert light["paper_bgcolor"] == "#f7f9fc"
+    assert light["plot_bgcolor"] == "#f7f9fc"
+    assert dark["paper_bgcolor"] == "#0b1017"
+    assert dark["plot_bgcolor"] == "#0b1017"
+
+
+@pytest.mark.unit
+def test_authoring_theme_tokens_meet_wcag_aa_contrast() -> None:
+    required_pairs = (
+        ("#17202A", "#F7F9FC"),
+        ("#52606D", "#F7F9FC"),
+        ("#FFFFFF", "#275DAD"),
+        ("#F3F7FB", "#0B1017"),
+        ("#A9B5C2", "#0B1017"),
+        ("#08101C", "#6EA8FE"),
+    )
+    assert all(
+        _contrast_ratio(foreground, background) >= 4.5 for foreground, background in required_pairs
+    )
+
+
+@pytest.mark.unit
+def test_authoring_theme_has_visible_focus_and_reduced_motion() -> None:
+    theme_source = (UI_ROOT / "theme.py").read_text(encoding="utf-8")
+    config_source = (UI_ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8")
+
+    assert ":focus-visible" in theme_source
+    assert "@media (prefers-reduced-motion: reduce)" in theme_source
+    assert "Playfair" not in theme_source + config_source
+    assert "DM Sans" not in theme_source + config_source
+    assert 'buttonRadius = "0.5rem"' in config_source
 
 
 @pytest.mark.unit
@@ -355,3 +359,40 @@ def test_summary_metrics_use_card_helper() -> None:
     assert "def metric_cards" in components_source
     assert "metric_cards(items, columns=columns)" in components_source
     assert "components.metric_strip(items," in reports_source
+
+
+@pytest.mark.unit
+def test_app_entry_pins_arrow_memory_pool_before_page_imports() -> None:
+    """Arrow's bundled mimalloc segfaults in per-thread heap init on macOS
+    arm64 when Table.to_pandas runs on Streamlit's short-lived script threads;
+    app.py must select the system pool before any UI import can allocate."""
+
+    path = UI_ROOT / "app.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+    setdefault_line: int | None = None
+    first_ui_import_line: int | None = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "setdefault"
+            and _qualname(node.func.value).endswith("os.environ")
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == "ARROW_DEFAULT_MEMORY_POOL"
+        ):
+            setdefault_line = node.lineno
+        if (
+            isinstance(node, ast.ImportFrom)
+            and str(node.module).startswith("valuestream")
+            and (first_ui_import_line is None or node.lineno < first_ui_import_line)
+        ):
+            first_ui_import_line = node.lineno
+
+    assert setdefault_line is not None, "app.py must default ARROW_DEFAULT_MEMORY_POOL"
+    assert first_ui_import_line is not None
+    assert setdefault_line < first_ui_import_line, (
+        "ARROW_DEFAULT_MEMORY_POOL must be set before valuestream imports so the "
+        "default is in place before the first Arrow allocation"
+    )

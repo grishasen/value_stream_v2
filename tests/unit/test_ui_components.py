@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 
 from valuestream.engine import ChunkProgress
@@ -78,3 +79,30 @@ def test_chunk_progress_indicator_shows_monotonic_elapsed_time(
 )
 def test_format_elapsed(seconds: float, expected: str) -> None:
     assert components._format_elapsed(seconds) == expected
+
+
+@pytest.mark.unit
+def test_key_value_strip_normalizes_mixed_values_for_arrow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def dataframe(frame: pd.DataFrame, **kwargs: Any) -> None:
+        captured.update(frame=frame, kwargs=kwargs)
+
+    monkeypatch.setattr(components.st, "dataframe", dataframe)
+
+    components.key_value_strip(
+        [
+            {"label": "Status", "value": "Ready"},
+            {"label": "Sources", "value": 2},
+            {"label": "Ratio", "value": 0.75},
+        ]
+    )
+
+    assert captured["frame"].to_dict(orient="records") == [
+        {"Setting": "Status", "Value": "Ready"},
+        {"Setting": "Sources", "Value": "2"},
+        {"Setting": "Ratio", "Value": "0.75"},
+    ]
+    assert all(str(dtype) == "string" for dtype in captured["frame"].dtypes)

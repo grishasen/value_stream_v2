@@ -12,7 +12,7 @@ survive the chunk pass.
 | Reader | Start here | Then read | Reference when needed |
 |---|---|---|---|
 | Business user / analyst | [Getting started](tutorials/getting-started.md) | [Running reports](guides/users/running-reports.md), [Chat with data](guides/users/chat-with-data.md) | [FAQ](reference/faq.md), [Business functionality](concepts/business-functionality.md) |
-| Product owner / stakeholder | [Product overview](concepts/product-overview.md) | [Business functionality](concepts/business-functionality.md) | [Reporting backlog](design/reporting-backlog.md), [KPI recipe backlog](design/kpi-recipe-backlog.md) |
+| Product owner / stakeholder | [Product overview](concepts/product-overview.md) | [Business functionality](concepts/business-functionality.md) | [FAQ](reference/faq.md), [Architecture overview](concepts/architecture-overview.md) |
 | Workspace operator / data engineer | [Pega export tutorial](tutorials/pega-export.md) | [Operations runbook](guides/operations/runbook.md), [Migration & backfill](guides/operations/migration.md) | [CLI reference](reference/cli.md), [Readers & formats](reference/readers-and-formats.md) |
 | Developer | [Architecture overview](concepts/architecture-overview.md) | [Architecture](concepts/architecture.md), [Domain model](concepts/domain-model.md), [Replacement design](design/replacement-design.md) | [Processors](reference/processors.md), [Algorithms](reference/algorithms.md), [Expression DSL](reference/expression-dsl.md) |
 | Auditor / reviewer | [Business functionality](concepts/business-functionality.md) (governance) | [Troubleshooting](guides/operations/troubleshooting.md) (escalation data) | [FAQ](reference/faq.md), [Domain model](concepts/domain-model.md) |
@@ -30,7 +30,7 @@ than through per-role copies of the same content.
 | [Guides](guides/users/running-reports.md) | Task-oriented | "How do I accomplish X?" — users, configuration, operations |
 | [Concepts](concepts/product-overview.md) | Understanding-oriented | "Why is it built like this?" — product, business, architecture, decisions |
 | [Reference](reference/cli.md) | Information-oriented | "What exactly is X?" — CLI, DSL, processors, algorithms, charts, API, FAQ |
-| [Design docs](design/replacement-design.md) | Engineering history | Master design, implementation plan, backlog, feature designs |
+| [Design docs](design/replacement-design.md) | Engineering history | "What is the full intended design?" — the master replacement design |
 
 ## Current Scope
 

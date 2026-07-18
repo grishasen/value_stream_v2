@@ -1,0 +1,74 @@
+/*
+ * Value Stream docs vault — light palette.
+ * Mirrors the application light theme defined in
+ * src/valuestream/ui/.streamlit/config.toml and src/valuestream/ui/theme.py:
+ *   background #F7F9FC · panel #EEF3F8 · selected #E7EEF8 · card #FFFFFF
+ *   ink #17202A · muted #52606D · border #D5DEE8 · accent #275DAD
+ *   green #0F766E · orange #C77920 · red #B84B45 · violet #7C65A9
+ */
+
+.theme-light {
+  /* Accent: #275DAD */
+  --accent-h: 216;
+  --accent-s: 63%;
+  --accent-l: 42%;
+
+  /* Surfaces */
+  --background-primary: #f7f9fc;
+  --background-primary-alt: #eef3f8;
+  --background-secondary: #eef3f8;
+  --background-secondary-alt: #e7eef8;
+  --background-modifier-border: #d5dee8;
+  --background-modifier-border-hover: #c3d0de;
+  --background-modifier-border-focus: #275dad;
+  --background-modifier-hover: rgba(39, 93, 173, 0.06);
+
+  /* Text */
+  --text-normal: #17202a;
+  --text-muted: #52606d;
+  --text-faint: #7b8794;
+  --text-accent: #275dad;
+  --text-accent-hover: #1e4c8f;
+  --text-selection: rgba(39, 93, 173, 0.18);
+
+  /* Links */
+  --link-color: #275dad;
+  --link-color-hover: #1e4c8f;
+  --link-external-color: #275dad;
+  --link-external-color-hover: #1e4c8f;
+
+  /* Editor elements */
+  --code-background: #eef3f8;
+  --code-normal: #17202a;
+  --hr-color: #d5dee8;
+  --blockquote-border-color: #275dad;
+  --table-header-background: #eef3f8;
+  --table-border-color: #d5dee8;
+  --tag-color: #275dad;
+  --tag-background: #e7eef8;
+
+  /* Controls */
+  --interactive-accent: #275dad;
+  --interactive-accent-hover: #1e4c8f;
+  --checkbox-color: #275dad;
+  --checkbox-color-hover: #1e4c8f;
+
+  /* Sidebar / file navigator */
+  --icon-color: #52606d;
+  --icon-color-hover: #17202a;
+  --nav-item-color: #52606d;
+  --nav-item-color-active: #17202a;
+  --nav-item-background-active: #e7eef8;
+
+  /* Semantic colors (callouts, graph, syntax) */
+  --color-red: #b84b45;
+  --color-red-rgb: 184, 75, 69;
+  --color-orange: #c77920;
+  --color-orange-rgb: 199, 121, 32;
+  --color-green: #0f766e;
+  --color-green-rgb: 15, 118, 110;
+  --color-blue: #275dad;
+  --color-blue-rgb: 39, 93, 173;
+  --color-purple: #7c65a9;
+  --color-purple-rgb: 124, 101, 169;
+}

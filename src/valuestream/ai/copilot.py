@@ -22,7 +22,9 @@ from valuestream.ai.studio import (
     catalog_prompt_dictionaries,
     filter_draft_by_selection,
     prompt_draft_sections,
+    redact_hidden_field_mentions,
     tile_keys,
+    validate_draft_catalog,
 )
 from valuestream.config import model
 from valuestream.recipes import (
@@ -222,6 +224,20 @@ class DraftPatch:
 
 
 @dataclass(frozen=True)
+class DraftPatchBundle:
+    """A dependency-closed group of draft patches for governed review."""
+
+    key: str
+    title: str
+    summary: str
+    consequence: str
+    patch_keys: tuple[str, ...]
+    is_removal: bool
+    is_valid: bool
+    validation_issues: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class CopilotRun:
     """Result of the bounded governed-operation loop."""
 
@@ -361,6 +377,10 @@ def install_recipe_request_in_draft(
                 "tile": request.tile_def,
             },
         )
+    ok, issues = validate_draft_catalog(updated)
+    if not ok:
+        detail = "; ".join(issues[:5])
+        raise ValueError(f"Recipe installation would create an invalid draft: {detail}")
     return updated
 
 
@@ -761,9 +781,7 @@ def _source_filter_transforms(source: dict[str, Any]) -> list[dict[str, Any]]:
 def _validated_source_filter(expression: dict[str, Any]) -> dict[str, Any]:
     if _expression_contains_key(expression, "polars"):
         raise ValueError("Copilot source filters require the closed expression AST, not Polars")
-    transform = model.FilterTransform.model_validate(
-        {"kind": "filter", "expression": expression}
-    )
+    transform = model.FilterTransform.model_validate({"kind": "filter", "expression": expression})
     return cast(
         dict[str, Any],
         transform.model_dump(mode="json", by_alias=True, exclude_none=True),
@@ -807,9 +825,7 @@ def _replace_source_filter_transforms(
     ]
 
 
-def _source_filter_insertion_index(
-    transforms: list[Any], expression: dict[str, Any]
-) -> int:
+def _source_filter_insertion_index(transforms: list[Any], expression: dict[str, Any]) -> int:
     referenced_fields = _expression_field_references(expression)
     insertion_index = 0
     for index, transform in enumerate(transforms):
@@ -883,9 +899,7 @@ def _calculated_transform_index(source: dict[str, Any], field_name: str) -> int 
     )
 
 
-def _validated_calculated_transform(
-    field_name: str, expression: dict[str, Any]
-) -> dict[str, Any]:
+def _validated_calculated_transform(field_name: str, expression: dict[str, Any]) -> dict[str, Any]:
     if "polars" in expression:
         raise ValueError("Copilot calculated fields require the closed expression AST, not Polars")
     transform = model.DeriveColumn.model_validate(
@@ -1042,6 +1056,95 @@ def draft_patches(base: dict[str, Any], proposed: dict[str, Any]) -> list[DraftP
     return patches
 
 
+def draft_patch_bundles(
+    base: dict[str, Any],
+    proposed: dict[str, Any],
+    validate: Callable[[dict[str, Any]], tuple[bool, list[str]]],
+) -> list[DraftPatchBundle]:
+    """Return dependency-closed, independently validated review bundles.
+
+    Processor changes travel with changed metrics that reference them, and metric
+    changes travel with changed report tiles that reference them. Report structure
+    is included when the affected dashboard or page is part of the same change.
+    Source-derived fields are also kept with changed consumers when their names are
+    referenced directly. Each bundle is validated as a complete candidate against
+    the supplied draft validator.
+    """
+
+    patches = draft_patches(base, proposed)
+    if not patches:
+        return []
+    patch_by_key = {patch.key: patch for patch in patches}
+    components = _dependency_closed_patch_keys(base, proposed, patches)
+    bundles: list[DraftPatchBundle] = []
+    for component in components:
+        patch_keys = tuple(sorted(component, key=str.casefold))
+        candidate = merge_selected_draft_patches(base, proposed, patch_keys)
+        is_valid, validation_issues = validate(candidate)
+        component_patches = [patch_by_key[key] for key in patch_keys]
+        title = _bundle_title(component_patches)
+        is_removal = any(patch.change == "removed" for patch in component_patches)
+        bundles.append(
+            DraftPatchBundle(
+                key=f"bundle:{'|'.join(patch_keys)}",
+                title=title,
+                summary=_bundle_summary(component_patches),
+                consequence=_bundle_consequence(
+                    component_patches,
+                    is_removal=is_removal,
+                    is_valid=is_valid,
+                ),
+                patch_keys=patch_keys,
+                is_removal=is_removal,
+                is_valid=is_valid,
+                validation_issues=tuple(validation_issues),
+            )
+        )
+    return bundles
+
+
+def merge_selected_draft_patch_bundles(
+    base: dict[str, Any],
+    proposed: dict[str, Any],
+    bundles: list[DraftPatchBundle] | tuple[DraftPatchBundle, ...],
+    accepted_bundle_keys: list[str] | set[str] | tuple[str, ...],
+    validate: Callable[[dict[str, Any]], tuple[bool, list[str]]],
+    *,
+    allow_removals: bool = False,
+) -> tuple[dict[str, Any] | None, tuple[str, ...]]:
+    """Merge and validate a selected bundle combination.
+
+    Invalid bundles are never merged. Removal bundles are rejected by default so
+    an "accept safe additions" action cannot delete configuration accidentally;
+    an individually reviewed removal can opt in with ``allow_removals=True``.
+    The returned draft is ``None`` whenever the selection is unsafe or the combined
+    candidate fails validation.
+    """
+
+    accepted = set(accepted_bundle_keys)
+    bundle_by_key = {bundle.key: bundle for bundle in bundles}
+    unknown = sorted(accepted - set(bundle_by_key), key=str.casefold)
+    if unknown:
+        return None, tuple(f"Unknown patch bundle '{key}'." for key in unknown)
+
+    selected = [bundle for bundle in bundles if bundle.key in accepted]
+    rejected: list[str] = []
+    for bundle in selected:
+        if not bundle.is_valid:
+            rejected.append(f"'{bundle.title}' does not pass draft validation.")
+        if bundle.is_removal and not allow_removals:
+            rejected.append(f"'{bundle.title}' contains removals and requires explicit review.")
+    if rejected:
+        return None, tuple(rejected)
+
+    patch_keys = {patch_key for bundle in selected for patch_key in bundle.patch_keys}
+    candidate = merge_selected_draft_patches(base, proposed, patch_keys)
+    is_valid, validation_issues = validate(candidate)
+    if not is_valid:
+        return None, tuple(validation_issues)
+    return candidate, ()
+
+
 def merge_selected_draft_patches(
     base: dict[str, Any],
     proposed: dict[str, Any],
@@ -1101,6 +1204,10 @@ def run_copilot_tool_loop(
     validate: Callable[[dict[str, Any]], tuple[bool, list[str]]],
     max_iterations: int = 3,
     operation_policy: dict[str, str] | None = None,
+    hidden_fields: list[str] | None = None,
+    approved_fields: list[str] | None = None,
+    read_only: bool = False,
+    pending_summary: str = "",
 ) -> CopilotRun:
     """Run a bounded operation/validation loop without mutating the accepted draft."""
 
@@ -1109,7 +1216,16 @@ def run_copilot_tool_loop(
     responses: list[str] = []
     summaries: list[str] = []
     issues: list[str] = []
-    current_prompt = prompt
+    current_prompt = (
+        _read_only_copilot_prompt(
+            prompt,
+            pending_summary=pending_summary,
+            hidden_fields=hidden_fields or [],
+            approved_fields=approved_fields or [],
+        )
+        if read_only
+        else prompt
+    )
     last_turn = CopilotTurn(reply="No copilot response was produced.")
     policy = operation_policy or {}
     for iteration in range(1, limit + 1):
@@ -1117,6 +1233,21 @@ def run_copilot_tool_loop(
         responses.append(response)
         turn = parse_copilot_response(response)
         last_turn = turn
+        if read_only and turn.operations:
+            blocked_message = (
+                "No draft change was created because Copilot is explanation-only while a "
+                "proposal is pending review. Accept or reject that proposal before requesting "
+                "another change."
+            )
+            reply = f"{turn.reply}\n\n{blocked_message}" if turn.reply else blocked_message
+            return CopilotRun(
+                turn=CopilotTurn(reply=reply, questions=turn.questions),
+                validation_issues=(
+                    "Mutating operations are blocked while a proposal is pending review.",
+                ),
+                responses=tuple(responses),
+                iterations=iteration,
+            )
         if turn.questions:
             return CopilotRun(
                 turn=turn,
@@ -1159,6 +1290,8 @@ def run_copilot_tool_loop(
                 original_prompt=prompt,
                 candidate=candidate,
                 issues=issues,
+                hidden_fields=hidden_fields or [],
+                approved_fields=approved_fields or [],
             )
     failed_reply = (
         f"{last_turn.reply}\n\nNo pending change was created because the proposed "
@@ -1172,23 +1305,343 @@ def run_copilot_tool_loop(
     )
 
 
+def _read_only_copilot_prompt(
+    prompt: str,
+    *,
+    pending_summary: str,
+    hidden_fields: list[str],
+    approved_fields: list[str],
+) -> str:
+    safe_prompt = str(
+        redact_hidden_field_mentions(
+            prompt,
+            hidden_fields,
+            preserve_fields=approved_fields,
+        )
+    )
+    safe_summary = str(
+        redact_hidden_field_mentions(
+            pending_summary,
+            hidden_fields,
+            preserve_fields=approved_fields,
+        )
+    ).strip()
+    summary_text = f"\nPending proposal summary:\n{safe_summary}\n" if safe_summary else ""
+    return (
+        f"{safe_prompt}\n\n"
+        "PENDING REVIEW MODE: This turn is read-only. Answer questions and explain the "
+        "pending proposal, but do not propose, return, or apply any draft operation. The "
+        'JSON response must contain an empty "operations" list, even if the user asks for '
+        "another change. Ask them to accept or reject the pending proposal first."
+        f"{summary_text}"
+    )
+
+
 def _tool_correction_prompt(
     *,
     original_prompt: str,
     candidate: dict[str, Any],
     issues: list[str],
+    hidden_fields: list[str],
+    approved_fields: list[str],
 ) -> str:
+    safe_original_prompt = redact_hidden_field_mentions(
+        original_prompt, hidden_fields, preserve_fields=approved_fields
+    )
+    safe_issues = redact_hidden_field_mentions(
+        issues, hidden_fields, preserve_fields=approved_fields
+    )
     return (
-        f"{original_prompt}\n\n"
+        f"{safe_original_prompt}\n\n"
         "The previous governed operations were evaluated against a temporary draft and failed. "
         "Return corrected operations against the current temporary draft. Do not repeat an "
         "invalid operation. Ask a clarifying question instead of guessing when the errors "
         "cannot be resolved from the approved context.\n\n"
-        f"Validation or operation errors:\n{yaml.safe_dump(issues, sort_keys=False)}\n"
+        f"Validation or operation errors:\n{yaml.safe_dump(safe_issues, sort_keys=False)}\n"
         "Current temporary draft:\n"
-        f"{yaml.safe_dump(prompt_draft_sections(candidate), sort_keys=False)}\n"
+        f"{yaml.safe_dump(prompt_draft_sections(candidate, hidden_fields=hidden_fields, preserve_fields=approved_fields), sort_keys=False)}\n"
         "Return the same JSON response contract only."
     )
+
+
+def _dependency_closed_patch_keys(
+    base: dict[str, Any],
+    proposed: dict[str, Any],
+    patches: list[DraftPatch],
+) -> list[set[str]]:
+    parent = {patch.key: patch.key for patch in patches}
+    order = {patch.key: index for index, patch in enumerate(patches)}
+
+    def find(key: str) -> str:
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    def connect(left: DraftPatch, right: DraftPatch) -> None:
+        left_root = find(left.key)
+        right_root = find(right.key)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    processor_patches = [patch for patch in patches if patch.section == "processors"]
+    metric_patches = [patch for patch in patches if patch.section == "metrics"]
+    tile_patches = [patch for patch in patches if patch.section == "tiles"]
+    _connect_processor_metric_tile_dependencies(
+        processor_patches,
+        metric_patches,
+        tile_patches,
+        connect,
+    )
+    _connect_dashboard_structure_dependencies(
+        base,
+        proposed,
+        patches,
+        tile_patches,
+        connect,
+    )
+    _connect_source_field_dependencies(patches, processor_patches, connect)
+
+    grouped: dict[str, set[str]] = {}
+    for patch in patches:
+        grouped.setdefault(find(patch.key), set()).add(patch.key)
+    return sorted(grouped.values(), key=lambda keys: min(order[key] for key in keys))
+
+
+def _connect_processor_metric_tile_dependencies(
+    processor_patches: list[DraftPatch],
+    metric_patches: list[DraftPatch],
+    tile_patches: list[DraftPatch],
+    connect: Callable[[DraftPatch, DraftPatch], None],
+) -> None:
+    """Join the core processor -> metric -> report dependency chain."""
+
+    for processor_patch in processor_patches:
+        for metric_patch in metric_patches:
+            if processor_patch.object_id in _patch_property_values(metric_patch, "source"):
+                connect(processor_patch, metric_patch)
+
+    for metric_patch in metric_patches:
+        for tile_patch in tile_patches:
+            if metric_patch.object_id in _patch_property_values(tile_patch, "metric"):
+                connect(metric_patch, tile_patch)
+
+
+def _connect_dashboard_structure_dependencies(
+    base: dict[str, Any],
+    proposed: dict[str, Any],
+    patches: list[DraftPatch],
+    tile_patches: list[DraftPatch],
+    connect: Callable[[DraftPatch, DraftPatch], None],
+) -> None:
+    """Join tiles to changed dashboard/page containers they require."""
+
+    structure_patch = next(
+        (patch for patch in patches if patch.key == "dashboards:structure"),
+        None,
+    )
+    if structure_patch is None:
+        return
+    base_nodes = _dashboard_structure_nodes(base)
+    proposed_nodes = _dashboard_structure_nodes(proposed)
+    changed_nodes = {
+        key
+        for key in set(base_nodes) | set(proposed_nodes)
+        if base_nodes.get(key) != proposed_nodes.get(key)
+    }
+    for tile_patch in tile_patches:
+        dashboard_id, page_id, _ = tile_patch.object_id.split("/", 2)
+        if (
+            f"dashboard:{dashboard_id}" in changed_nodes
+            or f"page:{dashboard_id}/{page_id}" in changed_nodes
+        ):
+            connect(structure_patch, tile_patch)
+
+
+def _connect_source_field_dependencies(
+    patches: list[DraftPatch],
+    processor_patches: list[DraftPatch],
+    connect: Callable[[DraftPatch, DraftPatch], None],
+) -> None:
+    """Join changed source fields to changed consumers that name them."""
+
+    source_field_patches: list[tuple[DraftPatch, str, str]] = []
+    for patch in patches:
+        if patch.section not in {"source_defaults", "calculated_fields"}:
+            continue
+        source_id, field_name = _source_object_parts(patch.object_id)
+        source_field_patches.append((patch, source_id, field_name))
+    source_filter_patches = {
+        patch.object_id: patch for patch in patches if patch.section == "source_filters"
+    }
+    calculated_patches = [
+        item for item in source_field_patches if item[0].section == "calculated_fields"
+    ]
+    for field_patch, source_id, field_name in source_field_patches:
+        filter_patch = source_filter_patches.get(source_id)
+        if filter_patch is not None and _patch_references_value(filter_patch, field_name):
+            connect(field_patch, filter_patch)
+        for processor_patch in processor_patches:
+            if source_id in _patch_property_values(
+                processor_patch, "source"
+            ) and _patch_references_value(processor_patch, field_name):
+                connect(field_patch, processor_patch)
+        for calculated_patch, calculated_source, _ in calculated_patches:
+            if (
+                calculated_patch.key != field_patch.key
+                and calculated_source == source_id
+                and _patch_references_value(calculated_patch, field_name)
+            ):
+                connect(field_patch, calculated_patch)
+
+
+def _patch_property_values(patch: DraftPatch, property_name: str) -> set[str]:
+    values: set[str] = set()
+    for item in (patch.before, patch.after):
+        if isinstance(item, dict) and item.get(property_name) is not None:
+            values.add(str(item[property_name]))
+    return values
+
+
+def _patch_references_value(patch: DraftPatch, value: str) -> bool:
+    return _nested_value_contains(patch.before, value) or _nested_value_contains(
+        patch.after,
+        value,
+    )
+
+
+def _nested_value_contains(item: Any, value: str) -> bool:
+    if isinstance(item, str):
+        return item == value
+    if isinstance(item, dict):
+        return any(_nested_value_contains(child, value) for child in item.values())
+    if isinstance(item, (list, tuple)):
+        return any(_nested_value_contains(child, value) for child in item)
+    return False
+
+
+def _dashboard_structure_nodes(draft: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    nodes: dict[str, dict[str, Any]] = {}
+    dashboards = draft.get("dashboards", {}).get("dashboards", [])
+    if not isinstance(dashboards, list):
+        return nodes
+    for dashboard in dashboards:
+        if not isinstance(dashboard, dict) or not dashboard.get("id"):
+            continue
+        dashboard_id = str(dashboard["id"])
+        nodes[f"dashboard:{dashboard_id}"] = {
+            key: copy.deepcopy(value) for key, value in dashboard.items() if key != "pages"
+        }
+        pages = dashboard.get("pages", [])
+        if not isinstance(pages, list):
+            continue
+        for page in pages:
+            if not isinstance(page, dict) or not page.get("id"):
+                continue
+            page_id = str(page["id"])
+            nodes[f"page:{dashboard_id}/{page_id}"] = {
+                key: copy.deepcopy(value) for key, value in page.items() if key != "tiles"
+            }
+    return nodes
+
+
+def _bundle_title(patches: list[DraftPatch]) -> str:
+    priority = {
+        "processors": 0,
+        "metrics": 1,
+        "tiles": 2,
+        "calculated_fields": 3,
+        "source_filters": 4,
+        "source_defaults": 5,
+        "dashboards": 6,
+        "chat_with_data": 7,
+    }
+    primary = min(
+        patches,
+        key=lambda patch: (priority.get(patch.section, 99), patch.object_id.casefold()),
+    )
+    action = {
+        "added": "Add",
+        "removed": "Remove",
+        "changed": "Update",
+    }.get(primary.change, "Update")
+    object_name = primary.object_id.rsplit("/", 1)[-1]
+    label = _title_from_identifier(object_name)
+    noun = {
+        "processors": "processing flow",
+        "metrics": "metric",
+        "tiles": "report tile",
+        "calculated_fields": "calculation",
+        "source_filters": "source filter",
+        "source_defaults": "default",
+        "dashboards": "report layout",
+        "chat_with_data": "data assistant settings",
+    }.get(primary.section, "configuration")
+    if primary.section == "dashboards":
+        return f"{action} report layout"
+    if primary.section == "chat_with_data":
+        return f"{action} data assistant settings"
+    return f"{action} {label} {noun}"
+
+
+def _bundle_summary(patches: list[DraftPatch]) -> str:
+    labels = {
+        "processors": "processing flow",
+        "metrics": "metric",
+        "tiles": "report tile",
+        "calculated_fields": "calculation",
+        "source_filters": "source filter",
+        "source_defaults": "source default",
+        "dashboards": "report layout",
+        "chat_with_data": "data assistant setting",
+    }
+    counts: dict[str, int] = {}
+    for patch in patches:
+        label = labels.get(patch.section, "configuration item")
+        counts[label] = counts.get(label, 0) + 1
+    parts = [f"{count} {label}{'' if count == 1 else 's'}" for label, count in counts.items()]
+    semantic_patches = [patch for patch in patches if patch.section != "dashboards"] or patches
+    change_words = {patch.change for patch in semantic_patches}
+    verb = (
+        "Adds"
+        if change_words == {"added"}
+        else "Removes"
+        if change_words == {"removed"}
+        else "Updates"
+    )
+    return f"{verb} {_join_human_list(parts)} as one reviewable change."
+
+
+def _bundle_consequence(
+    patches: list[DraftPatch],
+    *,
+    is_removal: bool,
+    is_valid: bool,
+) -> str:
+    consequences: list[str] = []
+    if is_removal:
+        consequences.append(
+            "This bundle removes existing configuration and is never selected automatically."
+        )
+    elif len(patches) > 1:
+        consequences.append(
+            "Its dependent configuration must be accepted together to keep references intact."
+        )
+    else:
+        consequences.append("This change can be reviewed independently.")
+    if not is_valid:
+        consequences.append("It cannot be accepted until the resulting draft passes validation.")
+    return " ".join(consequences)
+
+
+def _join_human_list(items: list[str]) -> str:
+    if not items:
+        return "no items"
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
 
 
 def _mapping_patches(
@@ -1370,9 +1823,7 @@ def _set_source_filters_patch_value(draft: dict[str, Any], source_id: str, value
     _replace_source_filter_transforms(source, filters)
 
 
-def _set_calculated_field_patch_value(
-    draft: dict[str, Any], object_id: str, value: Any
-) -> None:
+def _set_calculated_field_patch_value(draft: dict[str, Any], object_id: str, value: Any) -> None:
     source_id, field_name = _source_object_parts(object_id)
     source = _source_by_id(draft, source_id)
     if value is None:
@@ -1451,31 +1902,87 @@ def prompt_for_copilot(
     approved_fields: list[str],
     hidden_fields: list[str],
     current_draft: dict[str, Any],
+    read_only: bool = False,
+    pending_summary: str = "",
 ) -> str:
     """Build the step-aware copilot prompt for one user message."""
 
+    hidden_names = {field.casefold() for field in hidden_fields}
+    prompt_approved_fields = [
+        field for field in approved_fields if field.casefold() not in hidden_names
+    ]
+    prompt_approved_schema = [
+        row
+        for row in approved_schema
+        if str(row.get("column") or "").casefold() not in hidden_names
+    ]
+    prompt_approved_schema = redact_hidden_field_mentions(
+        prompt_approved_schema,
+        hidden_fields,
+        preserve_fields=prompt_approved_fields,
+    )
+    safe_user_message = redact_hidden_field_mentions(
+        user_message, hidden_fields, preserve_fields=prompt_approved_fields
+    )
+    safe_user_goals = redact_hidden_field_mentions(
+        user_goals, hidden_fields, preserve_fields=prompt_approved_fields
+    )
+    safe_pending_summary = str(
+        redact_hidden_field_mentions(
+            pending_summary,
+            hidden_fields,
+            preserve_fields=prompt_approved_fields,
+        )
+    ).strip()
     goals_text = ""
-    if user_goals.strip():
-        goals_text = f"Business requirements from the user:\n{user_goals.strip()}\n\n"
+    if safe_user_goals.strip():
+        goals_text = f"Business requirements from the user:\n{safe_user_goals.strip()}\n\n"
     transcript_lines = []
     for item in history[-_HISTORY_LIMIT:]:
-        content = str(item.get("content") or "").strip()
+        content = str(
+            redact_hidden_field_mentions(
+                item.get("content") or "",
+                hidden_fields,
+                preserve_fields=prompt_approved_fields,
+            )
+        ).strip()
         if content:
             role = str(item.get("role") or "user")
             transcript_lines.append(f"{role}: {content}")
     transcript = "\n".join(transcript_lines)
     history_text = f"Conversation so far:\n{transcript}\n\n" if transcript else ""
+    mode_text = ""
+    operation_contract = (
+        "- operations: MUST be an empty list in pending-review mode. Explain the pending "
+        "proposal or ask clarifying questions only. Do not propose a replacement or any "
+        "additional draft mutation.\n"
+        if read_only
+        else (
+            "- operations: draft operations, only when the user asked for a concrete change. "
+            "Leave empty when you are only advising or asking questions.\n"
+        )
+    )
+    if read_only:
+        summary_text = (
+            f"Pending proposal summary:\n{safe_pending_summary}\n\n" if safe_pending_summary else ""
+        )
+        mode_text = (
+            "PENDING REVIEW MODE: This turn is read-only. Answer questions and explain the "
+            "proposal, but never return or apply draft operations. If the user asks for a "
+            "change, ask them to accept or reject the pending proposal first.\n\n"
+            f"{summary_text}"
+        )
     return (
         "You are the configuration copilot inside Value Stream's AI Configuration Studio. "
         "You help the user turn free-form requests into reviewable draft changes.\n\n"
         f"The user is on the {_step_name(step)!r} studio step. {_step_hint(step)} "
         f"{_step_operation_rule(step)}\n\n"
+        f"{mode_text}"
         "Respond with a single JSON object and nothing else:\n"
         '{"reply": str, "operations": [Operation], "questions": '
         '[{"question": str, "options": [str]}]}\n'
         "- reply: short plain-language answer for the user.\n"
-        "- operations: draft operations, only when the user asked for a concrete change. "
-        "Leave empty when you are only advising or asking questions.\n"
+        f"{operation_contract}"
         "- questions: when the request is ambiguous, ask before guessing and offer two to "
         "four concrete options per question. Leave empty otherwise.\n"
         "- Never return operations and questions in the same response. Resolve questions first.\n"
@@ -1491,12 +1998,13 @@ def prompt_for_copilot(
         "Catalog dictionaries:\n"
         f"{yaml.safe_dump(catalog_prompt_dictionaries(), sort_keys=False)}\n"
         f"{goals_text}"
-        f"Approved fields:\n{yaml.safe_dump(approved_fields, sort_keys=False)}\n"
-        f"Hidden fields:\n{yaml.safe_dump(hidden_fields, sort_keys=False)}\n"
-        f"Approved schema preview:\n{yaml.safe_dump(approved_schema, sort_keys=False)}\n"
-        f"Current draft:\n{yaml.safe_dump(prompt_draft_sections(current_draft), sort_keys=False)}\n"
+        f"Approved fields:\n{yaml.safe_dump(prompt_approved_fields, sort_keys=False)}\n"
+        f"Hidden field count: {len(hidden_fields)}\n"
+        f"Approved schema preview:\n{yaml.safe_dump(prompt_approved_schema, sort_keys=False)}\n"
+        "Current draft:\n"
+        f"{yaml.safe_dump(prompt_draft_sections(current_draft, hidden_fields=hidden_fields, preserve_fields=prompt_approved_fields), sort_keys=False)}\n"
         f"{history_text}"
-        f"User message:\n{user_message.strip()}\n\n"
+        f"User message:\n{safe_user_message.strip()}\n\n"
         "Return valid JSON only. Do not wrap the answer in prose or Markdown fences."
     )
 
@@ -1567,10 +2075,25 @@ def parse_copilot_response(text: str) -> CopilotTurn:
     return CopilotTurn(reply=reply, operations=operations, questions=questions)
 
 
-def prompt_for_coverage(*, user_goals: str, draft: dict[str, Any]) -> str:
+def prompt_for_coverage(
+    *,
+    user_goals: str,
+    draft: dict[str, Any],
+    hidden_fields: list[str] | None = None,
+    approved_fields: list[str] | None = None,
+) -> str:
     """Build the prompt that maps business requirements onto the current draft."""
 
     metrics = sorted(draft.get("metrics", {}).get("metrics", {}), key=str.casefold)
+    safe_goals = redact_hidden_field_mentions(
+        user_goals, hidden_fields or [], preserve_fields=approved_fields
+    )
+    safe_metrics = redact_hidden_field_mentions(
+        metrics, hidden_fields or [], preserve_fields=approved_fields
+    )
+    safe_tile_keys = redact_hidden_field_mentions(
+        tile_keys(draft), hidden_fields or [], preserve_fields=approved_fields
+    )
     return (
         "Judge how well this Value Stream catalog draft covers the user's business "
         "requirements. Split the requirements into distinct individual requirements "
@@ -1581,10 +2104,11 @@ def prompt_for_coverage(*, user_goals: str, draft: dict[str, Any]) -> str:
         "- metrics: existing metric ids that cover the requirement.\n"
         "- tiles: existing dashboard/page/tile keys that report it.\n"
         "- note: one short sentence explaining the judgement.\n\n"
-        f"Business requirements:\n{user_goals.strip()}\n\n"
-        f"Metric ids in the draft:\n{yaml.safe_dump(metrics, sort_keys=False)}\n"
-        f"Tile keys in the draft:\n{yaml.safe_dump(tile_keys(draft), sort_keys=False)}\n"
-        f"Current draft:\n{yaml.safe_dump(prompt_draft_sections(draft), sort_keys=False)}\n"
+        f"Business requirements:\n{safe_goals.strip()}\n\n"
+        f"Metric ids in the draft:\n{yaml.safe_dump(safe_metrics, sort_keys=False)}\n"
+        f"Tile keys in the draft:\n{yaml.safe_dump(safe_tile_keys, sort_keys=False)}\n"
+        "Current draft:\n"
+        f"{yaml.safe_dump(prompt_draft_sections(draft, hidden_fields=hidden_fields, preserve_fields=approved_fields), sort_keys=False)}\n"
         "Return valid JSON only. Do not wrap the answer in prose or Markdown fences."
     )
 

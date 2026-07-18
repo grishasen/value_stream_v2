@@ -10,32 +10,34 @@ import streamlit as st
 
 _CHROME_TOKENS: dict[str, dict[str, str]] = {
     "light": {
-        "cream": "#f5f3ee",
+        "cream": "#f7f9fc",
         "card": "#ffffff",
-        "ink": "#1a1a1a",
-        "muted": "#5f6670",
-        "border": "#d8d4cb",
-        "green": "#2d4a3e",
-        "sage": "#c5d4c0",
-        "soft": "#e8ebe6",
+        "ink": "#17202a",
+        "muted": "#52606d",
+        "border": "#d5dee8",
+        "action": "#275dad",
+        "verified": "#0f766e",
+        "sage": "#e7eef8",
+        "soft": "#eef3f8",
         "color-scheme": "light",
         "primary-fg": "#ffffff",
-        "shadow": "rgba(26, 26, 26, 0.05)",
-        "metric-delta-bg": "#e8f0e5",
+        "shadow": "rgba(23, 32, 42, 0.06)",
+        "metric-delta-bg": "#e7f4f1",
     },
     "dark": {
-        "cream": "#080a09",
-        "card": "#111512",
-        "ink": "#f0f3f0",
-        "muted": "#a7afa9",
-        "border": "#343c36",
-        "green": "#45ba50",
-        "sage": "#171c18",
-        "soft": "#171c18",
+        "cream": "#0b1017",
+        "card": "#121a24",
+        "ink": "#f3f7fb",
+        "muted": "#a9b5c2",
+        "border": "#304052",
+        "action": "#6ea8fe",
+        "verified": "#4fd1c5",
+        "sage": "#18263a",
+        "soft": "#18212c",
         "color-scheme": "dark",
-        "primary-fg": "#071008",
+        "primary-fg": "#08101c",
         "shadow": "rgba(0, 0, 0, 0.32)",
-        "metric-delta-bg": "rgba(69, 186, 80, 0.16)",
+        "metric-delta-bg": "rgba(79, 209, 197, 0.16)",
     },
 }
 
@@ -136,20 +138,20 @@ __VS_ACTIVE_CSS_VARS__
         .block-container h1,
         .block-container h2 {
             color: var(--vs-ink);
-            font-family: "Playfair Display", Georgia, "Times New Roman", serif;
-            font-weight: 500;
-            letter-spacing: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 650;
+            letter-spacing: -0.025em;
             padding-top: 0;
         }
 
         .block-container h1 {
-            font-size: clamp(2rem, 3vw, 2.65rem);
-            line-height: 1.08;
+            font-size: clamp(1.85rem, 2.5vw, 2.35rem);
+            line-height: 1.12;
         }
 
         .block-container h2 {
-            font-size: clamp(1.65rem, 2.3vw, 2.15rem);
-            line-height: 1.12;
+            font-size: clamp(1.4rem, 2vw, 1.8rem);
+            line-height: 1.18;
         }
 
         div[data-testid="stHeading"] h1,
@@ -161,9 +163,9 @@ __VS_ACTIVE_CSS_VARS__
         .block-container h4,
         .block-container h5 {
             color: var(--vs-ink);
-            font-family: "DM Sans", Inter, "Segoe UI", system-ui, sans-serif;
-            font-weight: 700;
-            letter-spacing: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 650;
+            letter-spacing: -0.01em;
         }
 
         .block-container p,
@@ -220,9 +222,10 @@ __VS_ACTIVE_CSS_VARS__
 
         section[data-testid="stSidebar"] div[class*="st-key-vs_brand"] p {
             color: var(--vs-ink);
-            font-family: "Playfair Display", Georgia, "Times New Roman", serif;
-            font-weight: 500;
-            font-size: 1.65rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 700;
+            font-size: 1.4rem;
+            letter-spacing: -0.025em;
             line-height: 1.15;
             margin-bottom: 0.2rem;
         }
@@ -243,7 +246,7 @@ __VS_ACTIVE_CSS_VARS__
         div[data-testid="stVerticalBlockBorderWrapper"] {
             background: var(--vs-card);
             border-color: var(--vs-border);
-            border-radius: 1rem;
+            border-radius: 0.75rem;
             box-shadow: 0 1px 2px var(--vs-shadow);
         }
 
@@ -253,14 +256,14 @@ __VS_ACTIVE_CSS_VARS__
 
         div[data-testid="stMetric"] [data-testid="stMetricValue"] {
             color: var(--vs-ink);
-            font-family: "DM Sans", Inter, "Segoe UI", system-ui, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             font-weight: 600;
         }
 
         div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
             background: var(--vs-metric-delta-bg);
             border-radius: 999px;
-            color: var(--vs-green);
+            color: var(--vs-verified);
             display: inline-flex;
             padding: 0.1rem 0.45rem;
             width: fit-content;
@@ -282,8 +285,17 @@ __VS_ACTIVE_CSS_VARS__
         div[data-testid="stSegmentedControl"] button[aria-checked="true"],
         div[data-testid="stButtonGroup"] button[aria-checked="true"] {
             background: var(--vs-sage) !important;
-            border-color: var(--vs-green) !important;
+            border-color: var(--vs-action) !important;
             color: var(--vs-ink) !important;
+        }
+
+        button:focus-visible,
+        input:focus-visible,
+        textarea:focus-visible,
+        [role="button"]:focus-visible,
+        [role="option"]:focus-visible {
+            outline: 3px solid var(--vs-action) !important;
+            outline-offset: 2px !important;
         }
 
         /*
@@ -354,6 +366,15 @@ __VS_ACTIVE_CSS_VARS__
         div[data-testid="stTable"] th {
             background: var(--vs-soft) !important;
         }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
         </style>
         """.replace("__VS_ACTIVE_CSS_VARS__", active_css_vars),
         unsafe_allow_html=True,
@@ -380,7 +401,7 @@ def init_plotly_theme() -> None:
         template = go.layout.Template(pio.templates[source_name])
         template.layout.update(
             colorway=colorway,
-            font={"family": "DM Sans, Inter, Segoe UI, system-ui, sans-serif"},
+            font={"family": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},
             margin={"l": 40, "r": 18, "t": 18, "b": 76},
             hovermode="x unified",
             hoverlabel=_hoverlabel(tokens),

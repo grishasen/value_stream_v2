@@ -278,7 +278,10 @@ Renames every column to its `Capitalized` form. The legacy app does this so Pega
 
 ### 8.2 `parse_datetime`
 
-Parses string columns into `Datetime`.
+Parses string columns into `Datetime`. The transform is "ensure datetime":
+columns a reader already typed as datetime (CSV date inference, Parquet
+schemas) pass through unchanged, so the same source configuration works for
+string-timestamp previews and typed runtime reads.
 
 ```yaml
 - kind: parse_datetime

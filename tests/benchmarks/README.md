@@ -108,3 +108,29 @@ of the source lazy plan. The contract does not invent separate timings for
 either optimizer-controlled graph: `chunk_pipeline_seconds_sum` is the honest
 read-through-write chunk boundary, while `orchestration_wall_seconds` is the
 remaining sequential planning, ledger, and view-refresh tail.
+
+## AI Studio preview qualification
+
+The bounded-preview gate is separate from the ingestion benchmark. It creates
+a synthetic Parquet file with multiple row groups and profiles the canonical AI
+Studio release fixture when that fixture is present:
+
+```sh
+uv run pytest -q tests/benchmarks/test_ai_studio_preview.py \
+  --junitxml=artifacts/ai-studio-preview.xml
+```
+
+The JUnit properties record time, process peak RSS, rows, selected columns, the
+logical minimum row groups needed for the row limit, and five synthetic or
+three release-fixture cache-candidate cycles. See the AI Configuration Studio
+guide for the 64 MiB buffered-input, 128 MiB archive-expansion, row, member, and
+qualification thresholds. Peak RSS must satisfy both the 512 MiB absolute
+release ceiling and the dynamic `2 * decoded frame + 128 MiB` ceiling; the
+synthetic gate uses a stricter 256 MiB absolute ceiling. Five post-GC synthetic
+cycles may retain no more than 64 MiB.
+
+The file also records validation and transactional Apply time for a canonical
+one-source, one-processor, four-metric, eight-tile draft. Each has a two-second
+CI ceiling. `ai_studio_validation_apply_profile` is the first committed
+authoring timing measurement; future changes exceeding it by more than 15%
+need an approved baseline update rather than silently weakening the gate.

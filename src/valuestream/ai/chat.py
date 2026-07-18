@@ -20,6 +20,7 @@ from valuestream.ui.freshness import freshness_label, metric_freshness
 from valuestream.utils.logger import get_logger
 
 ResponseKind = Literal["text", "table", "chart", "clarify", "sql"]
+DeterministicStarterKey = Literal["count", "rate", "unique", "channel", "date_range"]
 ChartKind = Literal[
     "line",
     "bar",
@@ -67,6 +68,7 @@ logger = get_logger(__name__)
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _TIME_COLUMN_BY_GRAIN = {
     "daily": "Day",
+    "weekly": "Week",
     "monthly": "Month",
     "quarterly": "Quarter",
     "yearly": "Year",
@@ -87,9 +89,7 @@ _TIME_COLUMNS = {
 _MAX_CHAT_ROWS = 500
 _METRIC_KIND_EXPLANATIONS = {
     "formula": "Derived from aggregate state columns or dependency metrics using the expression AST.",
-    "approx_distinct_count": (
-        "Approximate distinct count from a CPC, HLL, or Theta sketch state."
-    ),
+    "approx_distinct_count": ("Approximate distinct count from a CPC, HLL, or Theta sketch state."),
     "topk_items": "Top-K items from a processor top-k state.",
     "tdigest_quantile": "Quantile or percentile derived from a t-digest state.",
     "variant_compare": "Compares test and control roles across a variant column.",
@@ -101,6 +101,12 @@ _METRIC_KIND_EXPLANATIONS = {
     "set_op": "Set algebra metric over sketch states.",
     "funnel_dropoff": "Funnel transition count or rate between configured stages.",
 }
+
+
+class ChatIntentPlanningError(ValueError):
+    """A model-plan failure safe for caller logs and user-facing errors."""
+
+
 _PROCESSOR_KIND_EXPLANATIONS = {
     "binary_outcome": "Counts positive and negative outcomes for rates, lift, and tests.",
     "numeric_distribution": "Stores numeric distribution states such as count, mean, variance, and quantile sketches.",
@@ -156,6 +162,15 @@ class ChatQueryResult:
     rows: pl.DataFrame
     query_summary: str
     freshness: str
+
+
+@dataclass(frozen=True)
+class DeterministicChatStarter:
+    """Catalog-grounded aggregate query that does not require an LLM planner."""
+
+    key: DeterministicStarterKey
+    question: str
+    intent: ChatIntent
 
 
 def catalog_chat_manifest(
@@ -589,7 +604,7 @@ def chat_pin_tile(intent: ChatIntent, *, tile_id: str) -> dict[str, Any]:
 def chat_starter_questions(catalog: model.Catalog, *, limit: int = 4) -> list[str]:
     """Return a few example questions grounded in the catalog's metrics.
 
-    Deterministic starter prompts help first-time users discover what the
+    Catalog-grounded starter prompts help first-time users discover what the
     aggregate catalog can answer without having to guess metric names.
     """
 
@@ -609,6 +624,238 @@ def chat_starter_questions(catalog: model.Catalog, *, limit: int = 4) -> list[st
         if len(questions) >= limit:
             break
     return questions
+
+
+def deterministic_chat_starters(catalog: model.Catalog) -> list[DeterministicChatStarter]:
+    """Return supported no-model questions derived only from catalog contracts.
+
+    These are deliberately narrow templates rather than a second natural-language
+    planner. Each returned intent names an existing metric, dimension, and grain,
+    so callers can execute it through :func:`execute_chat_intent` without provider
+    access or any raw-row inspection.
+    """
+
+    processors = {processor.id: processor for processor in catalog.processors.processors}
+    metric_items = [
+        (metric_name, metric, processors.get(metric.source))
+        for metric_name, metric in sorted(catalog.metrics.metrics.items())
+    ]
+    count_item = _best_deterministic_metric(metric_items, kind="count")
+    rate_item = _best_deterministic_metric(metric_items, kind="rate")
+    unique_item = _best_deterministic_metric(metric_items, kind="unique")
+    starters: list[DeterministicChatStarter] = []
+
+    starter_specs: tuple[
+        tuple[
+            DeterministicStarterKey,
+            tuple[str, model.Metric, model.Processor] | None,
+            str,
+        ],
+        ...,
+    ] = (
+        ("count", count_item, "What is the total"),
+        ("rate", rate_item, "What is the overall"),
+        ("unique", unique_item, "What is the approximate"),
+    )
+    for key, item, prefix in starter_specs:
+        if item is None:
+            continue
+        metric_name, metric, _processor = item
+        label = _metric_display_label(metric_name, metric).casefold()
+        question = f"{prefix} {label}?"
+        starters.append(
+            DeterministicChatStarter(
+                key=key,
+                question=question,
+                intent=ChatIntent(
+                    question=question,
+                    metric=metric_name,
+                    response="text",
+                    group_by=[],
+                    filters={},
+                    grain="summary",
+                    limit=100,
+                ),
+            )
+        )
+
+    channel_item = _first_metric_supporting_dimension(
+        (count_item, rate_item, unique_item),
+        dimension="channel",
+    )
+    if channel_item is not None:
+        metric_name, metric, processor = channel_item
+        channel = next(
+            dimension for dimension in processor.group_by if dimension.casefold() == "channel"
+        )
+        label = _metric_display_label(metric_name, metric).casefold()
+        question = f"Compare {label} by {channel}"
+        starters.append(
+            DeterministicChatStarter(
+                key="channel",
+                question=question,
+                intent=ChatIntent(
+                    question=question,
+                    metric=metric_name,
+                    response="chart",
+                    group_by=[channel],
+                    filters={},
+                    grain="summary",
+                    chart=ChartIntent(
+                        kind="bar",
+                        x=channel,
+                        y=metric_name,
+                        value_format=_metric_value_format(metric),
+                    ),
+                    limit=100,
+                ),
+            )
+        )
+
+    date_item = _first_metric_with_time_grain((count_item, rate_item, unique_item))
+    if date_item is not None:
+        metric_name, _metric, _processor, grain = date_item
+        question = "What date range is available?"
+        starters.append(
+            DeterministicChatStarter(
+                key="date_range",
+                question=question,
+                intent=ChatIntent(
+                    question=question,
+                    metric=metric_name,
+                    response="table",
+                    group_by=[],
+                    filters={},
+                    grain=grain,
+                    limit=500,
+                ),
+            )
+        )
+    return starters
+
+
+def _best_deterministic_metric(
+    metric_items: list[tuple[str, model.Metric, model.Processor | None]],
+    *,
+    kind: Literal["count", "rate", "unique"],
+) -> tuple[str, model.Metric, model.Processor] | None:
+    candidates: list[tuple[int, str, model.Metric, model.Processor]] = []
+    for metric_name, metric, processor in metric_items:
+        if processor is None:
+            continue
+        payload = _metric_payload(metric)
+        search_text = _metric_search_text(metric_name, metric, payload)
+        score = 0
+        if kind == "count":
+            expression = payload.get("expression")
+            if metric.kind != "formula" or not isinstance(expression, Mapping):
+                continue
+            if _key(str(expression.get("col", ""))) != "count":
+                continue
+            score = 100 + _term_score(search_text, ("interaction", "count", "event"))
+        elif kind == "rate":
+            if metric.kind != "formula":
+                continue
+            expression = payload.get("expression")
+            if not isinstance(expression, Mapping) or expression.get("op") != "safe_div":
+                continue
+            if not any(term in search_text for term in (" rate", "rate ", "ctr", "engagement")):
+                continue
+            score = 100 + _term_score(
+                search_text,
+                ("engagement rate", "click through rate", "click-through rate", "ctr", "rate"),
+            )
+        else:
+            if metric.kind != "approx_distinct_count":
+                continue
+            score = 100 + _term_score(
+                search_text,
+                ("unique entities", "unique customers", "audience", "reach", "unique"),
+            )
+        candidates.append((score, metric_name, metric, processor))
+    if not candidates:
+        return None
+    _score, metric_name, metric, processor = min(
+        candidates,
+        key=lambda item: (-item[0], item[1].casefold()),
+    )
+    return metric_name, metric, processor
+
+
+def _metric_payload(metric: model.Metric) -> dict[str, Any]:
+    payload = metric.model_dump(mode="python", by_alias=True, exclude_none=True)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _metric_search_text(
+    metric_name: str,
+    metric: model.Metric,
+    payload: Mapping[str, Any],
+) -> str:
+    display = payload.get("display")
+    recipe = payload.get("recipe")
+    values = [metric_name, str(metric.description or "")]
+    if isinstance(display, Mapping):
+        values.extend(str(display.get(key, "")) for key in ("label", "unit", "value_format"))
+    if isinstance(recipe, Mapping):
+        values.append(str(recipe.get("id", "")))
+    return f" {' '.join(values).replace('_', ' ').replace('-', ' ').casefold()} "
+
+
+def _term_score(search_text: str, terms: tuple[str, ...]) -> int:
+    return sum((len(terms) - index) * 10 for index, term in enumerate(terms) if term in search_text)
+
+
+def _metric_display_label(metric_name: str, metric: model.Metric) -> str:
+    display = _metric_payload(metric).get("display")
+    if isinstance(display, Mapping):
+        label = str(display.get("label") or "").strip()
+        if label:
+            return label
+    return _title_from_identifier(metric_name)
+
+
+def _metric_value_format(metric: model.Metric) -> str | None:
+    display = _metric_payload(metric).get("display")
+    if not isinstance(display, Mapping):
+        return None
+    value_format = str(display.get("value_format") or "").strip()
+    return value_format if value_format in _VALUE_FORMATS else None
+
+
+def _first_metric_supporting_dimension(
+    items: tuple[
+        tuple[str, model.Metric, model.Processor] | None,
+        tuple[str, model.Metric, model.Processor] | None,
+        tuple[str, model.Metric, model.Processor] | None,
+    ],
+    *,
+    dimension: str,
+) -> tuple[str, model.Metric, model.Processor] | None:
+    for item in items:
+        if item is not None and any(
+            value.casefold() == dimension.casefold() for value in item[2].group_by
+        ):
+            return item
+    return None
+
+
+def _first_metric_with_time_grain(
+    items: tuple[
+        tuple[str, model.Metric, model.Processor] | None,
+        tuple[str, model.Metric, model.Processor] | None,
+        tuple[str, model.Metric, model.Processor] | None,
+    ],
+) -> tuple[str, model.Metric, model.Processor, str] | None:
+    preferred_grains = ("daily", "weekly", "monthly", "quarterly", "yearly")
+    for item in items:
+        if item is None:
+            continue
+        available = {model.normalize_grain_name(grain) for grain in item[2].grains}
+        for grain in preferred_grains:
+            if grain in available:
+                return *item, grain
+    return None
 
 
 def _title_from_identifier(value: str) -> str:
@@ -742,12 +989,13 @@ def plan_chat_intent(
     """Ask the configured model for a structured intent and validate it."""
 
     logger.info(
-        "Chat intent planning started: model=%s provider=%s api_base=%s question=%r sql_enabled=%s",
-        settings.model,
-        settings.custom_llm_provider or "",
-        settings.api_base or "",
-        _preview(question),
+        "Chat intent planning started: model=%s has_custom_llm_provider=%s "
+        "has_api_base=%s sql_enabled=%s history_message_count=%s",
+        _safe_chat_model_for_log(settings.model),
+        bool(settings.custom_llm_provider),
+        bool(settings.api_base),
         bool(sql_schema),
+        len(history or []),
     )
     prompt = prompt_for_chat_intent(
         catalog,
@@ -770,17 +1018,29 @@ def plan_chat_intent(
             + sql_clause
         ),
     )
-    logger.debug("Chat intent raw model response: response=%r", _preview(raw, limit=1000))
-    intent = parse_chat_intent(raw, catalog, question=question, allow_sql=bool(sql_schema))
-    logger.info(
-        "Chat intent planning completed: metric=%s response=%s grain=%s group_by=%s chart=%s",
-        intent.metric,
-        intent.response,
-        intent.grain,
-        intent.group_by,
-        _chart_log_payload(intent.chart),
-    )
-    return intent, raw
+    try:
+        intent = parse_chat_intent(raw, catalog, question=question, allow_sql=bool(sql_schema))
+    except Exception:
+        logger.warning("Chat intent planning failed: status=invalid_model_intent")
+        failure = ChatIntentPlanningError(
+            "The model returned an invalid query plan. Rephrase the question and try again."
+        )
+    else:
+        logger.info(
+            "Chat intent planning completed: intent_type=%s metric=%s grain=%s "
+            "group_count=%s filter_count=%s chart_kind=%s",
+            intent.response,
+            intent.metric,
+            intent.grain,
+            len(intent.group_by),
+            len(intent.filters),
+            intent.chart.kind if intent.chart is not None else "none",
+        )
+        return intent, raw
+
+    # Raise after leaving the parser exception handler so callers cannot log
+    # provider-generated metric, grain, filter, or chart fragments as context.
+    raise failure
 
 
 def parse_chat_intent(
@@ -794,7 +1054,11 @@ def parse_chat_intent(
     """Parse and validate model-produced chat intent JSON."""
 
     payload = _extract_json_payload(text)
-    logger.debug("Parsing chat intent payload: payload=%s", _json_log_payload(payload))
+    logger.debug(
+        "Parsing chat intent payload: field_count=%s has_nested_intent=%s",
+        len(payload),
+        isinstance(payload.get("intent"), dict),
+    )
     if "intent" in payload and isinstance(payload["intent"], dict):
         payload = payload["intent"]
     response_raw = str(payload.get("response") or "").strip().lower()
@@ -802,7 +1066,7 @@ def parse_chat_intent(
     if response_raw == "clarify" or (clarify_text and not _optional_text(payload.get("metric"))):
         if not clarify_text:
             raise ValueError("clarify response requires a `clarify` question for the user")
-        logger.info("Chat intent asks for clarification: question=%r", _preview(clarify_text))
+        logger.info("Parsed non-query chat intent: intent_type=clarify")
         return _non_query_intent(question, "clarify", clarify=clarify_text)
     sql_text = _optional_text(payload.get("sql"))
     if response_raw == "sql" or (sql_text and not _optional_text(payload.get("metric"))):
@@ -812,7 +1076,7 @@ def parse_chat_intent(
             )
         if not sql_text:
             raise ValueError("sql response requires a `sql` SELECT statement")
-        logger.info("Chat intent escalated to governed SQL: sql=%r", _preview(sql_text))
+        logger.info("Parsed non-query chat intent: intent_type=sql")
         return _non_query_intent(question, "sql", sql=sql_text)
     metric_name = _resolve_metric_name(payload.get("metric"), catalog)
     metric = catalog.metrics.metrics[metric_name]
@@ -871,18 +1135,19 @@ def parse_chat_intent(
         quantiles=bool(payload.get("quantiles")),
     )
     logger.debug(
-        "Validated chat intent: metric=%s response=%s grain=%s group_by=%s filters=%s "
-        "having=%s order_by=%s top_n=%s compare=%s chart=%s limit=%s",
-        intent.metric,
+        "Validated chat intent: intent_type=%s metric=%s grain=%s group_count=%s "
+        "filter_count=%s having_count=%s order_count=%s top_n=%s compare=%s "
+        "chart_kind=%s limit=%s",
         intent.response,
+        intent.metric,
         intent.grain,
-        intent.group_by,
-        list(intent.filters),
-        list(intent.having),
-        intent.order_by,
+        len(intent.group_by),
+        len(intent.filters),
+        len(intent.having),
+        len(intent.order_by),
         intent.top_n,
         intent.compare,
-        _chart_log_payload(intent.chart),
+        intent.chart.kind if intent.chart is not None else "none",
         intent.limit,
     )
     return intent
@@ -958,7 +1223,12 @@ def chart_intent_from_parameters(
         "limit": limit,
     }
     logger.debug(
-        "Building chart intent from explicit parameters: payload=%s", _json_log_payload(payload)
+        "Building chart intent from explicit parameters: group_count=%s filter_count=%s "
+        "having_count=%s order_count=%s",
+        len(group_by),
+        len(filters or {}),
+        len(having or {}),
+        len(order_by or []),
     )
     return parse_chat_intent(
         json.dumps(payload),
@@ -980,16 +1250,17 @@ def execute_chat_intent(
             f"intent with response {intent.response!r} cannot be executed as a metric query"
         )
     logger.info(
-        "Executing chat aggregate query: metric=%s grain=%s group_by=%s filters=%s start=%s "
-        "end=%s having=%s order_by=%s top_n=%s compare=%s limit=%s",
+        "Executing chat aggregate query: metric=%s grain=%s group_count=%s filter_count=%s "
+        "has_start=%s has_end=%s having_count=%s order_count=%s top_n=%s compare=%s "
+        "limit=%s",
         intent.metric,
         intent.grain,
-        intent.group_by,
-        list(intent.filters),
-        intent.start,
-        intent.end,
-        list(intent.having),
-        intent.order_by,
+        len(intent.group_by),
+        len(intent.filters),
+        bool(intent.start),
+        bool(intent.end),
+        len(intent.having),
+        len(intent.order_by),
         intent.top_n,
         intent.compare,
         intent.limit,
@@ -1014,17 +1285,59 @@ def execute_chat_intent(
         rows = rows.head(intent.limit)
     fresh = metric_freshness(workspace_path, catalog, intent.metric, grain=intent.grain)
     logger.info(
-        "Executed chat aggregate query: metric=%s grain=%s rows=%s columns=%s freshness=%s",
+        "Executed chat aggregate query: metric=%s grain=%s rows=%s column_count=%s freshness=%s",
         intent.metric,
         intent.grain,
         rows.height,
-        rows.columns,
+        rows.width,
         freshness_label(fresh),
     )
     return ChatQueryResult(
         intent=intent,
         rows=rows,
         query_summary=_query_summary(intent),
+        freshness=freshness_label(fresh),
+    )
+
+
+def execute_deterministic_chat_query(
+    workspace_path: str | Path,
+    catalog: model.Catalog,
+    starter: DeterministicChatStarter,
+) -> ChatQueryResult:
+    """Execute a no-model starter exclusively through governed aggregate queries."""
+
+    if starter.key != "date_range":
+        return execute_chat_intent(workspace_path, catalog, starter.intent)
+
+    intent = starter.intent
+    rows = query_metric(
+        workspace_path,
+        intent.metric,
+        group_by=[],
+        filters={},
+        grain=intent.grain,
+        include_curve_columns=True,
+    )
+    time_column = _TIME_COLUMN_BY_GRAIN.get(intent.grain)
+    if time_column is None or time_column not in rows.columns:
+        time_column = next((column for column in rows.columns if _is_time_column(column)), None)
+    if rows.is_empty() or time_column is None:
+        bounds = pl.DataFrame(
+            schema={"Available from": pl.String, "Available through": pl.String, "Grain": pl.String}
+        )
+    else:
+        bounds = rows.select(
+            pl.col(time_column).cast(pl.String).min().alias("Available from"),
+            pl.col(time_column).cast(pl.String).max().alias("Available through"),
+            pl.lit(intent.grain).alias("Grain"),
+        )
+    fresh = metric_freshness(workspace_path, catalog, intent.metric, grain=intent.grain)
+    query_summary = f"{_query_summary(intent)} -> min/max {time_column or 'time bucket'}"
+    return ChatQueryResult(
+        intent=intent,
+        rows=bounds,
+        query_summary=query_summary,
         freshness=freshness_label(fresh),
     )
 
@@ -1049,9 +1362,8 @@ def dimension_values(
         return []
     values = rows.get_column(column).drop_nulls().unique(maintain_order=True).head(limit).to_list()
     logger.debug(
-        "Loaded chat dimension values: metric=%s column=%s grain=%s count=%s",
+        "Loaded chat dimension values: metric=%s grain=%s count=%s",
         metric_name,
-        column,
         grain,
         len(values),
     )
@@ -1266,10 +1578,9 @@ def _normalize_chart_kind(
         if candidate in allowed_kinds:
             if requested:
                 logger.info(
-                    "Chat chart kind %r not allowed for metric; defaulted to %s (allowed=%s)",
-                    requested,
+                    "Chat chart kind not allowed for metric: defaulted_kind=%s allowed_kind_count=%s",
                     candidate,
-                    allowed_kinds,
+                    len(allowed_kinds),
                 )
             return candidate
     return allowed_kinds[0] if allowed_kinds else "bar"
@@ -1313,10 +1624,8 @@ def _normalize_chart_x_value(value: object, processor: model.Processor) -> str |
         return _resolve_column_name(raw, processor.group_by)
     except ValueError:
         logger.warning(
-            "Ignoring invalid chart x-axis: raw=%r processor=%s allowed_dimensions=%s",
-            raw,
-            processor.id,
-            processor.group_by,
+            "Ignoring invalid chart x-axis: allowed_dimension_count=%s",
+            len(processor.group_by),
         )
         return None
 
@@ -1331,9 +1640,8 @@ def _normalize_dimension_chart_column(value: object, processor: model.Processor)
         return _resolve_column_name(raw, processor.group_by)
     except ValueError:
         logger.warning(
-            "Ignoring non-dimension chart field: raw=%r processor=%s",
-            raw,
-            processor.id,
+            "Ignoring non-dimension chart field: allowed_dimension_count=%s",
+            len(processor.group_by),
         )
         return None
 
@@ -1351,19 +1659,17 @@ def _normalize_chart_x(
         return requested_x
     if kind == "line" and time_x is not None:
         logger.info(
-            "Defaulted missing/invalid line chart x-axis to time column: normalized_x=%s grain=%s",
-            time_x,
+            "Defaulted missing/invalid line chart x-axis to time column: grain=%s",
             grain,
         )
         return time_x
     fallback = group_by[0] if group_by else time_x
     if fallback is not None:
         logger.info(
-            "Defaulted missing/invalid chart x-axis: normalized_x=%s grain=%s kind=%s group_by=%s",
-            fallback,
+            "Defaulted missing/invalid chart x-axis: grain=%s kind=%s group_count=%s",
             grain,
             kind,
-            group_by,
+            len(group_by),
         )
     return fallback
 
@@ -1381,10 +1687,8 @@ def _default_chart_color(
         if candidate in (x, facet_col):
             continue
         logger.info(
-            "Defaulted missing chart color to grouped dimension: color=%s x=%s group_by=%s",
-            candidate,
-            x,
-            group_by,
+            "Defaulted missing chart color to grouped dimension: group_count=%s",
+            len(group_by),
         )
         return candidate
     return None
@@ -1596,8 +1900,11 @@ def overall_metric_value(
             start=intent.start,
             end=intent.end,
         )
-    except Exception:
-        logger.exception("Failed to load overall metric value: metric=%s", intent.metric)
+    except Exception as exc:
+        logger.error(
+            "Overall metric value load failed: error_type=%s",
+            _safe_chat_error_type(exc),
+        )
         return None
     if rows.height != 1:
         return None
@@ -1652,37 +1959,37 @@ def narrate_chat_result(
     return " ".join(raw.split()).strip()
 
 
-def _preview(value: str, *, limit: int = 240) -> str:
-    single_line = " ".join(value.split())
-    if len(single_line) <= limit:
-        return single_line
-    return f"{single_line[:limit]}..."
+def _safe_chat_model_for_log(model_name: str) -> str:
+    """Return a useful model identifier without exposing local paths or URLs."""
+
+    value = model_name.strip()
+    normalized = value.replace("\\", "/")
+    local_path_markers = ("/Users/", "/home/", "/private/", "/tmp/", "/var/folders/")
+    if (
+        not value
+        or value.startswith(("/", "~", "./", "../", "file:", "http://", "https://"))
+        or re.match(r"^[A-Za-z]:[\\/]", value)
+        or any(marker in normalized for marker in local_path_markers)
+        or any(character in value for character in "\r\n\t")
+    ):
+        return "<redacted-model>"
+    return value[:128]
 
 
-def _chart_log_payload(chart: ChartIntent | None) -> dict[str, Any] | None:
-    if chart is None:
-        return None
-    return {
-        "kind": chart.kind,
-        "x": chart.x,
-        "y": chart.y,
-        "color": chart.color,
-        "facet_col": chart.facet_col,
-        "value_format": chart.value_format,
-    }
+def _safe_chat_error_type(exc: Exception) -> str:
+    """Return a bounded exception class for privacy-safe Chat logs."""
 
-
-def _json_log_payload(payload: Mapping[str, Any]) -> str:
-    try:
-        return json.dumps(payload, sort_keys=True)[:2000]
-    except TypeError:
-        return repr(payload)[:2000]
+    error_type = type(exc).__name__
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error_type):
+        return error_type
+    return "ApplicationError"
 
 
 __all__ = [
     "CHAT_CHART_KINDS",
     "ChartIntent",
     "ChatIntent",
+    "ChatIntentPlanningError",
     "ChatQueryResult",
     "allowed_chart_kinds",
     "catalog_chat_manifest",

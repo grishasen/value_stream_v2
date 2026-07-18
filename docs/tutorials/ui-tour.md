@@ -33,11 +33,12 @@ Open the Streamlit URL printed by the command.
 | Page | Purpose |
 |---|---|
 | Home | Workspace summary, validation state, and quick navigation |
+| Build | Choose a sample-first Studio path or catalog-first Builder path |
 | Data Load | Source discovery, file upload, source runs, and workspace runs |
 | Reports | Dashboard pages, report filters, freshness, charts, and inspect mode |
 | Catalog | Sources, processors, metrics, dashboards, and validation status |
-| Configuration Builder | Catalog-first editing, chat review, settings, and YAML export |
-| AI Configuration Studio | Sample-driven catalog drafting and model-assisted review |
+| Configuration Builder | Catalog-first object drafts, transactional apply, outcome handoff, and workspace export |
+| AI Configuration Studio | Preview-sample drafting with deterministic or model-assisted generation and dependency-closed review |
 | Chat With Data | Aggregate-aware questions over selected metrics |
 | Pipelines / Ops | Runs, chunks, source health, and operational controls |
 
@@ -47,11 +48,17 @@ After the UI starts:
 
 1. Confirm the sidebar shows the expected workspace; open Workspace details to
    check the path and catalog revision.
-2. Open Data Load and confirm source chunks are discovered.
-3. Open Reports and select a dashboard page from the selector row; confirm the
+2. Open Build. Confirm the two choices explain that apply never runs data.
+3. Choose **Start from sample**, select the deterministic demo, and confirm a
+   valid draft can be reached without model credentials. Return to Build.
+4. Choose **Configure manually**. Confirm Back/Continue and the jump outline
+   keep one current task, then open **Export current workspace** and confirm
+   downloads appear before collapsed YAML previews.
+5. Open Data Load and confirm source chunks are discovered.
+6. Open Reports and select a dashboard page from the selector row; confirm the
    view, advanced, and filter actions appear on the second toolbar row.
-4. Switch to Inspect mode for one tile and confirm data is returned.
-5. Open Pipelines / Ops and confirm the latest run appears.
+7. Switch to Inspect mode for one tile and confirm data is returned.
+8. Open Pipelines / Ops and confirm the latest run appears.
 
 ## Related Docs
 

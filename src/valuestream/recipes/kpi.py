@@ -94,7 +94,7 @@ class RecipeMethod(_RecipeModel):
 class RecipeReport(_RecipeModel):
     chart: str = "kpi_card"
     placement: Literal["content", "kpi_strip"] = "kpi_strip"
-    kpi: dict[str, Any] = Field(default_factory=dict)
+    kpi: model.KpiSpec | None = None
 
 
 class KpiRecipe(_RecipeModel):
@@ -386,10 +386,7 @@ def recipe_binding_options(
     fields = _dedupe_strings([*proposal_fields, *processor_recipe_fields(processor)])
     for field in fields:
         for state_type in item.state_types:
-            if any(
-                option.field == field and option.state_type == state_type
-                for option in out
-            ):
+            if any(option.field == field and option.state_type == state_type for option in out):
                 continue
             state_name = _proposed_state_name(
                 processor,
@@ -407,9 +404,7 @@ def recipe_binding_options(
                 RecipeBindingOption(
                     value=state_name,
                     label=" · ".join(
-                        value
-                        for value in (field, recipe_algorithm_label(state_type))
-                        if value
+                        value for value in (field, recipe_algorithm_label(state_type)) if value
                     ),
                     field=field,
                     algorithm=recipe_algorithm_label(state_type),
@@ -546,8 +541,7 @@ def _state_attributes_match(
 ) -> bool:
     values = {"type": spec.type, **dict(spec.model_extra or {})}
     return not any(key in values for key in absent) and all(
-        str(values.get(key, "")).casefold() == value.casefold()
-        for key, value in expected.items()
+        str(values.get(key, "")).casefold() == value.casefold() for key, value in expected.items()
     )
 
 
@@ -582,14 +576,11 @@ def _validate_paired_bindings(
     for item in recipe.inputs:
         if item.different_from and bindings[item.role] == bindings[item.different_from]:
             raise ValueError(
-                f"{item.label} must be different from "
-                f"{item.different_from.replace('_', ' ')}"
+                f"{item.label} must be different from {item.different_from.replace('_', ' ')}"
             )
         if not item.same_attribute_as or not item.match_attribute:
             continue
-        left_value = recipe_binding_attribute(
-            processor, bindings[item.role], item.match_attribute
-        )
+        left_value = recipe_binding_attribute(processor, bindings[item.role], item.match_attribute)
         right_value = recipe_binding_attribute(
             processor, bindings[item.same_attribute_as], item.match_attribute
         )
@@ -615,10 +606,7 @@ def recipe_binding_attribute(
     extra = dict(spec.model_extra or {})
     if attribute == "score_property":
         return str(
-            extra.get("score_property")
-            or extra.get("source_column")
-            or extra.get("score")
-            or ""
+            extra.get("score_property") or extra.get("source_column") or extra.get("score") or ""
         )
     return str(extra.get(attribute, ""))
 

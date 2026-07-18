@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import ast
+import copy
+import logging
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -54,6 +58,958 @@ st.write("Editor body")
     assert not app.exception
     assert [button.label for button in app.button] == ["Save"]
     assert not app.button[0].disabled
+
+
+@pytest.mark.unit
+def test_builder_draft_status_uses_canonical_object_equality() -> None:
+    baseline = {"id": "engagement", "states": {"Count": {"type": "count"}}}
+    equivalent = {
+        "states": {"Count": {"type": "count", "description": None}},
+        "id": "engagement",
+    }
+    changed = {"id": "engagement", "states": {"Count": {"type": "value_sum"}}}
+
+    clean = builder.builder_draft_status("processor:engagement", baseline, equivalent)
+    dirty = builder.builder_draft_status("processor:engagement", baseline, changed)
+
+    assert not clean.dirty
+    assert dirty.dirty
+    assert dirty.revision == dirty.draft_hash[:12]
+
+
+@pytest.mark.unit
+def test_builder_create_template_stays_clean_until_edited_and_discard_resets_it() -> None:
+    state: dict[str, object] = {"builder_processor_mode": "Create New Processor"}
+    template = {"id": "ih_processor", "description": ""}
+
+    clean = builder.builder_template_draft_status(
+        state,
+        "processor:new",
+        "builder_proc_template_baseline_ih_processor",
+        template,
+    )
+    assert not clean.dirty
+
+    state["builder_proc_desc_ih_processor"] = "QA processor"
+    dirty = builder.builder_template_draft_status(
+        state,
+        "processor:new",
+        "builder_proc_template_baseline_ih_processor",
+        {**template, "description": "QA processor"},
+    )
+    builder.update_builder_draft_registry(
+        state,
+        dirty,
+        widget_prefixes=("builder_proc_",),
+    )
+    assert dirty.dirty
+    assert list(state[builder.BUILDER_DRAFTS_KEY]) == ["processor:new"]
+
+    builder.discard_builder_draft(
+        state,
+        dirty.key,
+        widget_prefixes=("builder_proc_",),
+        preserve_widget_keys=("builder_processor_mode",),
+    )
+    assert state[builder.BUILDER_DRAFTS_KEY] == {}
+    assert state["builder_processor_mode"] == "Create New Processor"
+    assert "builder_proc_desc_ih_processor" not in state
+    assert "builder_proc_template_baseline_ih_processor" not in state
+
+    reset = builder.builder_template_draft_status(
+        state,
+        "processor:new",
+        "builder_proc_template_baseline_ih_processor",
+        template,
+    )
+    assert not reset.dirty
+
+
+@pytest.mark.unit
+def test_discarded_create_draft_continues_on_the_first_click() -> None:
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui import builder  # noqa: PLC0415
+        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+
+        st.session_state.setdefault("builder_step", "Processors")
+        st.session_state.setdefault("builder_processor_mode", "Create New Processor")
+        save_slot = st.empty()
+        draft_slot = st.empty()
+        description = st.text_input(
+            "Description",
+            value="",
+            key="builder_proc_desc_template",
+        )
+        status = builder.builder_template_draft_status(
+            st.session_state,
+            "processor:new",
+            "builder_proc_template_baseline",
+            {"id": "template", "description": description},
+        )
+        page._render_editor_primary_action(
+            save_slot=save_slot,
+            draft_slot=draft_slot,
+            status=status,
+            valid=True,
+            widget_prefixes=("builder_proc_",),
+            preserve_widget_keys=("builder_processor_mode",),
+            help_text="Apply test processor",
+        )
+
+    rendered = AppTest.from_function(app).run()
+    rendered = rendered.text_input[0].set_value("QA processor").run()
+    assert any(button.label == "Apply to workspace" for button in rendered.button)
+
+    rendered = (
+        next(button for button in rendered.button if button.label == "Discard draft").click().run()
+    )
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+
+    rendered = (
+        next(button for button in rendered.button if button.label == "Continue").click().run()
+    )
+    assert not rendered.exception
+    assert rendered.session_state["builder_step"] == "Dimensions"
+
+
+@pytest.mark.unit
+def test_post_apply_cleanup_removes_editor_state_and_preserves_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state: dict[str, object] = {
+        "builder_processor_mode": "Create New Processor",
+        "builder_proc_desc_template": "QA processor",
+        "builder_proc_template_baseline": {"description": ""},
+    }
+    status = builder.builder_draft_status(
+        "processor:new",
+        {"description": ""},
+        {"description": "QA processor"},
+    )
+    builder.update_builder_draft_registry(
+        state,
+        status,
+        widget_prefixes=("builder_proc_",),
+    )
+    monkeypatch.setattr(config_builder, "st", SimpleNamespace(session_state=state))
+
+    config_builder._queue_builder_post_apply_cleanup(
+        status=status,
+        widget_prefixes=("builder_proc_",),
+        preserve_widget_keys=("builder_processor_mode",),
+        state_updates={"builder_processor_mode": "Edit Existing Processor"},
+    )
+    config_builder._consume_builder_post_apply_cleanup()
+
+    assert state[builder.BUILDER_DRAFTS_KEY] == {}
+    assert state["builder_processor_mode"] == "Edit Existing Processor"
+    assert "builder_proc_desc_template" not in state
+    assert "builder_proc_template_baseline" not in state
+    assert config_builder.BUILDER_POST_APPLY_CLEANUP_KEY not in state
+
+
+@pytest.mark.unit
+def test_builder_draft_registry_preserves_and_discards_step_state() -> None:
+    state: dict[str, object] = {
+        "builder_source_id_ih": "events",
+        "builder_metric_name": "keep",
+    }
+    status = builder.builder_draft_status("source:ih", {"id": "ih"}, {"id": "events"})
+
+    assert not builder.update_builder_draft_registry(
+        state,
+        status,
+        widget_prefixes=("builder_source_",),
+    )
+    assert builder.update_builder_draft_registry(
+        state,
+        status,
+        widget_prefixes=("builder_source_",),
+    )
+    assert state[builder.BUILDER_DRAFTS_KEY] == {
+        "source:ih": {
+            "revision": status.revision,
+            "baseline_hash": status.baseline_hash,
+            "draft_hash": status.draft_hash,
+            "draft_payload": {"id": "events"},
+            "widget_state": {"builder_source_id_ih": "events"},
+        }
+    }
+
+    state.pop("builder_source_id_ih")
+    assert builder.restore_builder_draft(state, status.key)
+    assert state["builder_source_id_ih"] == "events"
+    assert builder.registered_builder_draft(state, status.key)["draft_payload"] == {"id": "events"}
+
+    builder.discard_builder_draft(
+        state,
+        status.key,
+        widget_prefixes=("builder_source_",),
+    )
+
+    assert state[builder.BUILDER_DRAFTS_KEY] == {}
+    assert "builder_source_id_ih" not in state
+    assert state["builder_metric_name"] == "keep"
+
+
+@pytest.mark.unit
+def test_builder_step_draft_can_be_restored_after_navigation() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import builder
+from valuestream.ui.pages.config_builder import _render_editor_primary_action
+
+def move(step):
+    st.session_state["draft_test_step"] = step
+
+save_slot = st.empty()
+draft_slot = st.empty()
+if st.session_state.get("draft_test_step", "edit") == "edit":
+    description = st.text_input(
+        "Description",
+        value="Persisted description",
+        key="builder_source_description_demo",
+    )
+    status = builder.builder_draft_status(
+        "source:demo",
+        {"description": "Persisted description"},
+        {"description": description},
+    )
+    _render_editor_primary_action(
+        save_slot=save_slot,
+        draft_slot=draft_slot,
+        status=status,
+        valid=True,
+        widget_prefixes=("builder_source_",),
+        help_text="Apply test source",
+    )
+    st.button("Leave editor", on_click=move, args=("away",))
+else:
+    st.write("Another step")
+    st.button("Return to editor", on_click=move, args=("edit",))
+"""
+    ).run()
+
+    assert not app.exception
+    assert [button.label for button in app.button].count("Continue") == 1
+    assert [button.label for button in app.button].count("Apply to workspace") == 0
+
+    app = app.text_input[0].set_value("Session proposal").run()
+    assert not app.exception
+    assert [button.label for button in app.button].count("Continue") == 0
+    assert [button.label for button in app.button].count("Apply to workspace") == 1
+
+    app = next(button for button in app.button if button.label == "Leave editor").click().run()
+    app = next(button for button in app.button if button.label == "Return to editor").click().run()
+
+    assert not app.exception
+    assert [button.label for button in app.button].count("Restore draft") == 1
+    app = next(button for button in app.button if button.label == "Restore draft").click().run()
+
+    assert not app.exception
+    assert app.text_input[0].value == "Session proposal"
+    assert [button.label for button in app.button].count("Apply to workspace") == 1
+
+
+@pytest.mark.unit
+def test_builder_apply_outcome_separates_report_ready_from_data_refresh() -> None:
+    report = builder.builder_apply_outcome("Executive summary")
+    processor = builder.builder_apply_outcome(
+        "Engagement",
+        source_ids=["ih", "ih"],
+        requires_data_run=True,
+    )
+
+    assert not report.requires_data_run
+    assert report.action == "open_report"
+    assert processor.requires_data_run
+    assert processor.action == "run_data"
+    assert processor.source_ids == ("ih",)
+
+
+@pytest.mark.unit
+def test_builder_materialization_impact_ignores_prose_and_presentation() -> None:
+    source = {
+        "id": "ih",
+        "description": "Before",
+        "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+    }
+    processor = {
+        "id": "engagement",
+        "source": "ih",
+        "description": "Before",
+        "states": {"Count": {"type": "count"}},
+    }
+    settings = {
+        "workspace_name": "Demo",
+        "time_zone": "UTC",
+        "calendar_grains": ["Day", "Summary"],
+        "week_start": "monday",
+        "dashboard_theme": {"accent": "pine"},
+    }
+
+    assert not builder.builder_requires_data_run(
+        "source", source, {**source, "description": "After"}
+    )
+    assert not builder.builder_requires_data_run(
+        "processor", processor, {**processor, "description": "After"}
+    )
+    assert not builder.builder_requires_data_run(
+        "workspace_settings",
+        settings,
+        {**settings, "workspace_name": "Renamed", "dashboard_theme": {"accent": "gold"}},
+    )
+    assert not builder.builder_requires_data_run(
+        "metric", {"description": "A"}, {"kind": "formula"}
+    )
+
+
+@pytest.mark.unit
+def test_builder_materialization_impact_detects_computation_changes() -> None:
+    source = {
+        "id": "ih",
+        "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+    }
+    processor = {
+        "id": "engagement",
+        "source": "ih",
+        "states": {"Count": {"type": "count"}},
+    }
+    settings = {
+        "time_zone": "UTC",
+        "calendar_grains": ["Day", "Summary"],
+        "week_start": "monday",
+    }
+
+    assert builder.builder_requires_data_run(
+        "source",
+        source,
+        {**source, "reader": {"kind": "parquet", "file_pattern": "new/*.parquet"}},
+    )
+    assert builder.builder_requires_data_run(
+        "processor",
+        processor,
+        {**processor, "states": {"Count": {"type": "value_sum", "column": "Value"}}},
+    )
+    assert builder.builder_requires_data_run(
+        "workspace_settings",
+        settings,
+        {**settings, "time_zone": "Europe/Berlin"},
+    )
+
+
+@pytest.mark.unit
+def test_direct_builder_render_starts_builder_authoring_journey() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    render_function = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "render"
+    )
+    start_call = next(
+        node
+        for node in ast.walk(render_function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "start_journey"
+    )
+
+    workflow = next(keyword.value for keyword in start_call.keywords if keyword.arg == "workflow")
+
+    assert isinstance(workflow, ast.Attribute)
+    assert workflow.attr == "BUILDER"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("requires_data_run", [True, False])
+def test_builder_apply_event_records_materialization_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+    requires_data_run: bool,
+) -> None:
+    captured: dict[str, object] = {}
+    session_state: dict[str, object] = {}
+
+    def capture(state: object, **kwargs: object) -> bool:
+        captured.update({"state": state, **kwargs})
+        return True
+
+    monkeypatch.setattr(config_builder, "record_event", capture)
+    monkeypatch.setattr(config_builder, "st", SimpleNamespace(session_state=session_state))
+
+    config_builder._record_builder_applied(
+        builder.builder_apply_outcome(
+            "Test object",
+            requires_data_run=requires_data_run,
+        )
+    )
+
+    assert captured["state"] is session_state
+    assert captured["event"].value == "applied"  # type: ignore[union-attr]
+    assert captured["workflow"].value == "builder"  # type: ignore[union-attr]
+    assert captured["stage"].value == "apply"  # type: ignore[union-attr]
+    assert captured["outcome"].value == "success"  # type: ignore[union-attr]
+    assert captured["requires_data_run"] is requires_data_run
+
+
+@pytest.mark.unit
+def test_builder_ready_review_and_apply_events_are_ordered_and_private(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui import builder  # noqa: PLC0415
+        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+
+        status = builder.builder_draft_status(
+            "source:private",
+            {"description": "baseline"},
+            {"description": "PRIVATE-CUSTOMER-42"},
+        )
+        if page._render_editor_primary_action(
+            save_slot=st.empty(),
+            draft_slot=st.empty(),
+            status=status,
+            valid=True,
+            widget_prefixes=("builder_private_",),
+            help_text="Apply the test proposal.",
+        ):
+            page._record_builder_applied(builder.builder_apply_outcome("Private object"))
+
+    rendered = AppTest.from_function(app).run()
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run()
+    )
+
+    assert not rendered.exception
+    valid = caplog.text.index("workflow=builder event=valid_proposal")
+    reviewed = caplog.text.index("workflow=builder event=reviewed")
+    applied = caplog.text.index("workflow=builder event=applied")
+    assert valid < reviewed < applied
+    assert "PRIVATE-CUSTOMER-42" not in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (TimeoutError("private timeout details"), "timeout"),
+        (ValueError("private validation details"), "blocked"),
+        (RuntimeError("PRIVATE-CUSTOMER-42"), "error"),
+    ],
+)
+def test_builder_apply_failure_uses_only_allowlisted_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected: str,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def capture(_state: object, **kwargs: object) -> bool:
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(config_builder, "record_event", capture)
+    monkeypatch.setattr(config_builder, "st", SimpleNamespace(session_state={}))
+
+    config_builder._record_builder_apply_failed(error)
+
+    assert captured["event"].value == "failed"  # type: ignore[union-attr]
+    assert captured["workflow"].value == "builder"  # type: ignore[union-attr]
+    assert captured["stage"].value == "apply"  # type: ignore[union-attr]
+    assert captured["outcome"].value == expected  # type: ignore[union-attr]
+    assert all("PRIVATE" not in str(value) for value in captured.values())
+
+
+@pytest.mark.unit
+def test_builder_preserves_unresolved_data_refresh_across_later_applies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_state: dict[str, object] = {}
+    monkeypatch.setattr(config_builder, "st", SimpleNamespace(session_state=session_state))
+
+    config_builder._store_builder_apply_outcome(
+        builder.builder_apply_outcome(
+            "Engagement processor",
+            source_ids=["ih"],
+            requires_data_run=True,
+        )
+    )
+    config_builder._store_builder_apply_outcome(builder.builder_apply_outcome("Executive report"))
+
+    pending = session_state[config_builder.BUILDER_LAST_OUTCOME_KEY]
+    assert pending["action"] == "run_data"
+    assert pending["source_ids"] == ("ih",)
+
+    config_builder._store_builder_apply_outcome(
+        builder.builder_apply_outcome(
+            "Customer processor",
+            source_ids=["customers"],
+            requires_data_run=True,
+        )
+    )
+
+    merged = session_state[config_builder.BUILDER_LAST_OUTCOME_KEY]
+    assert merged["action"] == "run_data"
+    assert merged["source_ids"] == ("customers", "ih")
+
+
+@pytest.mark.unit
+def test_source_contract_apply_notice_surfaces_data_refresh_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = {
+        "id": "ih",
+        "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+    }
+    changed_source = {
+        **source,
+        "transforms": [
+            {
+                "kind": "derive_column",
+                "column": "HighValue",
+                "expression": {"op": "gt", "left": {"col": "Value"}, "right": 100},
+            }
+        ],
+    }
+    warnings: list[str] = []
+    links: list[tuple[str, str]] = []
+    session_state: dict[str, object] = {"builder_apply_notice": "Source applied."}
+    fake_streamlit = SimpleNamespace(
+        session_state=session_state,
+        success=lambda *_args, **_kwargs: None,
+        warning=lambda message, **_kwargs: warnings.append(str(message)),
+        link_button=lambda label, url, **_kwargs: links.append((str(label), str(url))),
+    )
+    monkeypatch.setattr(config_builder, "st", fake_streamlit)
+
+    requires_data_run = builder.builder_requires_data_run("source", source, changed_source)
+    config_builder._store_builder_apply_outcome(
+        builder.builder_apply_outcome(
+            "Interaction history",
+            source_ids=["ih"],
+            requires_data_run=requires_data_run,
+        )
+    )
+    config_builder._render_apply_notice()
+
+    assert requires_data_run
+    assert warnings == [
+        "**Data refresh required · Interaction history**\n\n"
+        "The workspace configuration is valid, but its aggregate computation contract "
+        "changed. Run ih from Data Load to publish matching aggregates."
+    ]
+    assert links == [("Run data", "/data_load?from=builder")]
+
+
+@pytest.mark.unit
+def test_builder_navigation_supports_jump_back_and_continue(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+
+    assert not rendered.exception
+    labels = [button.label for button in rendered.button]
+    assert labels.count("Back") == 1
+    assert labels.count("Continue") == 1
+    assert labels.count("Apply to workspace") == 0
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Sources").run()
+
+    assert not rendered.exception
+    source_labels = [button.label for button in rendered.button]
+    assert source_labels.count("Continue") == 1
+    assert source_labels.count("Apply to workspace") == 0
+
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Export current workspace").run()
+
+    assert not rendered.exception
+    assert rendered.session_state["builder_step"] == "Export current workspace"
+    assert {item.label for item in rendered.get("download_button")} == {
+        "Download pipelines.yaml",
+        "Download processors.yaml",
+        "Download metrics.yaml",
+        "Download dashboards.yaml",
+    }
+
+
+@pytest.mark.unit
+def test_new_processor_template_is_clean_and_apply_reopens_clean_object(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Processors").run()
+    processor_mode = next(
+        item for item in rendered.segmented_control if item.label == "Processor Mode"
+    )
+    rendered = processor_mode.set_value("Create New Processor").run()
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
+
+    description = next(item for item in rendered.text_input if item.label == "Description")
+    rendered = description.set_value("QA processor").run()
+    assert any(button.label == "Apply to workspace" for button in rendered.button)
+
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert rendered.session_state[builder.BUILDER_DRAFTS_KEY] == {}
+    assert (
+        next(item for item in rendered.segmented_control if item.label == "Processor Mode").value
+        == "Edit Existing Processor"
+    )
+    assert (
+        rendered.session_state[config_builder.BUILDER_LAST_OUTCOME_KEY]["label"] == "QA processor"
+    )
+    created = next(
+        processor
+        for processor in load(tmp_path).processors.processors
+        if processor.id == "ih_processor"
+    )
+    assert builder.processor_to_dict(created)["entities"] == {"subject": "InteractionID"}
+
+
+@pytest.mark.unit
+def test_builder_edit_selectors_lead_with_stable_id_and_keep_human_context(
+    tmp_path: Path,
+) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Sources").run()
+    source = next(item for item in rendered.selectbox if item.label == "Source")
+    assert source.options == ["ih — Ih · Parquet"]
+
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Processors").run()
+    processor = next(item for item in rendered.selectbox if item.label == "Processor")
+    processor_source = next(item for item in rendered.selectbox if item.label == "Source")
+    assert processor.options == ["engagement — Engagement · Binary outcome"]
+    assert processor_source.options == ["ih — Ih · Parquet"]
+
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Dimensions").run()
+    dimension_processor = next(
+        item for item in rendered.selectbox if item.label == "Processor To Edit"
+    )
+    assert dimension_processor.options == ["engagement — Engagement · Binary outcome"]
+
+
+@pytest.mark.unit
+def test_sources_offer_one_click_deterministic_studio_handoff(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Sources").run()
+
+    assert not rendered.exception
+    add_source = next(item for item in rendered.get("link_button") if item.label == "Add source")
+    assert add_source.url == config_builder.BUILDER_ADD_SOURCE_URL
+    assert "mode=deterministic" in add_source.url
+    assert "intent=add_source" in add_source.url
+    assert "return_to=configuration_builder" in add_source.url
+
+
+@pytest.mark.unit
+def test_processor_delete_dialog_uses_human_labels_and_cancel_is_read_only(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    paths = [tmp_path / "catalog" / name for name in builder.CATALOG_FILENAMES]
+    before = {path: path.read_bytes() for path in paths}
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Processors").run(timeout=15)
+    rendered = (
+        next(button for button in rendered.button if button.label == "Delete processor")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert any("Engagement — engagement" in str(item.value) for item in rendered.warning)
+    assert any("overview/portfolio/ctr" in str(item.value) for item in rendered.code)
+    assert next(
+        button for button in rendered.button if button.label == "Delete processor and dependencies"
+    ).disabled
+    rendered = next(button for button in rendered.button if button.label == "Cancel").click().run()
+
+    assert not rendered.exception
+    assert {path: path.read_bytes() for path in paths} == before
+    assert {processor.id for processor in load(tmp_path).processors.processors} == {
+        "engagement",
+        "holdings_lifecycle",
+    }
+
+
+@pytest.mark.unit
+def test_metric_delete_dialog_requires_explicit_tile_choice_and_cancel_is_read_only(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    paths = [tmp_path / "catalog" / name for name in builder.CATALOG_FILENAMES]
+    before = {path: path.read_bytes() for path in paths}
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Metrics").run(timeout=15)
+    metric_action = next(
+        item for item in rendered.segmented_control if item.label == "Metric action"
+    )
+    rendered = metric_action.set_value("Edit Existing Metric").run(timeout=15)
+    rendered = (
+        next(button for button in rendered.button if button.label == "Delete metric")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    warnings = [str(item.value) for item in rendered.warning]
+    assert any("CTR · Formula / state passthrough · Engagement" in value for value in warnings), (
+        warnings
+    )
+    assert any("overview/portfolio/ctr" in str(item.value) for item in rendered.code)
+    delete_action = next(
+        button for button in rendered.button if button.label == "Delete metric and tiles"
+    )
+    assert delete_action.disabled
+    assert any("dependent report tile" in item.label for item in rendered.checkbox)
+    rendered = next(button for button in rendered.button if button.label == "Cancel").click().run()
+
+    assert not rendered.exception
+    assert {path: path.read_bytes() for path in paths} == before
+    assert "CTR" in load(tmp_path).metrics.metrics
+
+
+@pytest.mark.unit
+def test_new_processor_empty_entity_fallback_is_explicit(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    pipelines_path = tmp_path / "catalog" / "pipelines.yaml"
+    pipelines = yaml.safe_load(pipelines_path.read_text(encoding="utf-8"))
+    pipelines["sources"][0]["schema"]["natural_key"] = []
+    pipelines_path.write_text(yaml.safe_dump(pipelines, sort_keys=False), encoding="utf-8")
+    processors_path = tmp_path / "catalog" / "processors.yaml"
+    processors = yaml.safe_load(processors_path.read_text(encoding="utf-8"))
+    # An unsupported reference in another processor is not source-schema evidence.
+    processors["processors"][0]["entities"] = {"subject": "SubjectID"}
+    processors_path.write_text(yaml.safe_dump(processors, sort_keys=False), encoding="utf-8")
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Processors").run()
+    processor_mode = next(
+        item for item in rendered.segmented_control if item.label == "Processor Mode"
+    )
+    rendered = processor_mode.set_value("Create New Processor").run()
+
+    assert not rendered.exception
+    warning_text = "\n".join(item.value for item in rendered.warning)
+    assert "No subject/entity field could be inferred" in warning_text
+    assert "intentionally empty" in warning_text
+    subject = next(item for item in rendered.selectbox if item.label == "Subject Entity Field")
+    assert subject.value == ""
+
+
+@pytest.mark.unit
+def test_builder_metric_mode_switch_can_fill_claimed_fragment_slots(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    builder.write_metric_definition(
+        tmp_path,
+        "CTR",
+        {
+            **builder.build_formula_metric("engagement", "Positives", "Count"),
+            "display": {"label": "Click-through rate"},
+        },
+    )
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Metrics").run()
+    metric_action = next(
+        item for item in rendered.segmented_control if item.label == "Metric action"
+    )
+    rendered = metric_action.set_value("Edit Existing Metric").run()
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
+
+
+@pytest.mark.unit
+def test_metric_from_scratch_template_and_post_apply_editor_are_clean(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Metrics").run()
+    create_from = next(item for item in rendered.segmented_control if item.label == "Create from")
+    rendered = create_from.set_value("From Scratch").run()
+
+    processor = next(item for item in rendered.selectbox if item.label == "Processor")
+    rendered = processor.set_value("engagement").run()
+    metric_kind = next(item for item in rendered.selectbox if item.label == "Metric Kind")
+    rendered = metric_kind.set_value("formula").run()
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
+
+    metric_name = next(item for item in rendered.text_input if item.label == "Metric Display Name")
+    rendered = metric_name.set_value("QA rate").run()
+    metric_id = next(item for item in rendered.text_input if item.label == "Metric ID")
+    assert metric_id.value == ""
+    assert any(button.label == "Apply to workspace" for button in rendered.button)
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
+    assert (
+        next(item for item in rendered.segmented_control if item.label == "Metric action").value
+        == "Edit Existing Metric"
+    )
+    metrics = load(tmp_path).metrics.metrics
+    assert len(metrics) == 2
+    assert "engagement_metric_qa_rate" in metrics
+    assert metrics["engagement_metric_qa_rate"].display.label == "QA rate"
+
+
+@pytest.mark.unit
+def test_export_downloads_render_before_collapsed_yaml_previews() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_export_current_workspace"
+    )
+    downloads = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "download_button"
+    ]
+    expanders = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "expander"
+    ]
+
+    assert downloads
+    assert expanders
+    assert max(node.lineno for node in downloads) < min(node.lineno for node in expanders)
+    assert all(
+        any(
+            keyword.arg == "expanded"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is False
+            for keyword in node.keywords
+        )
+        for node in expanders
+    )
+
+
+@pytest.mark.unit
+def test_empty_editor_frame_has_columns_without_phantom_row() -> None:
+    frame = builder.editor_frame(
+        [],
+        ["Field", "Value", "Enabled"],
+        builder.blank_filter_row,
+    )
+
+    assert frame.is_empty()
+    assert frame.columns == ["Field", "Value", "Enabled"]
+    assert frame.schema == {
+        "Field": pl.String,
+        "Value": pl.String,
+        "Enabled": pl.Boolean,
+    }
+    assert builder.default_rows_from_values({}) == []
+    assert builder.filter_rows_from_expression(None) == []
 
 
 @pytest.mark.unit
@@ -1066,6 +2022,85 @@ def test_metric_to_dict_omits_empty_base_fields() -> None:
 
 
 @pytest.mark.unit
+def test_metric_to_dict_keeps_sparse_authored_display_fields() -> None:
+    metric = model.FormulaMetric.model_validate(
+        {
+            "source": "engagement",
+            "kind": "formula",
+            "expression": {"col": "Count"},
+            "display": {"label": "Interactions"},
+        }
+    )
+
+    data = builder.metric_to_dict(metric)
+
+    assert data["display"] == {"label": "Interactions"}
+
+
+@pytest.mark.unit
+def test_lifecycle_metric_does_not_invent_outputs_for_existing_sparse_yaml() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import forms
+
+ctx = forms.MetricFormContext(state_options=lambda _types: [])
+st.session_state["result"] = forms.metric_kind_fields(
+    "lifecycle_summary",
+    {"source": "lifecycle", "kind": "lifecycle_summary"},
+    ctx,
+    key_prefix="lifecycle_sparse",
+)
+"""
+    ).run()
+
+    assert not app.exception
+    assert app.session_state["result"] == {}
+
+
+@pytest.mark.unit
+def test_set_op_metric_keeps_time_window_operands_read_only() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import forms
+
+seed = {
+    "source": "audiences",
+    "kind": "set_op",
+    "op": "intersection",
+    "operands": [
+        {"state": "Active_theta", "time_window": {"start": "-30d", "end": "-1d"}},
+        {"state": "Active_theta", "time_window": {"start": "-1d", "end": "now"}},
+    ],
+}
+ctx = forms.MetricFormContext(
+    state_options=lambda _types: ["Active_theta", "Known_theta"],
+)
+st.session_state["result"] = forms.metric_kind_fields(
+    "set_op", seed, ctx, key_prefix="windowed_set"
+)
+"""
+    ).run()
+
+    assert not app.exception
+    assert app.session_state["result"] == {
+        "op": "intersection",
+        "operands": [
+            {
+                "state": "Active_theta",
+                "time_window": {"start": "-30d", "end": "-1d"},
+            },
+            {
+                "state": "Active_theta",
+                "time_window": {"start": "-1d", "end": "now"},
+            },
+        ],
+    }
+    assert app.info
+
+
+@pytest.mark.unit
 def test_build_state_defs_uses_direct_editor_rows() -> None:
     processor = model.NumericDistributionProcessor.model_validate(
         {
@@ -1168,6 +2203,267 @@ def test_build_source_definition_can_add_rename_capitalize_defaults_transform() 
 
 
 @pytest.mark.unit
+def test_source_row_add_edit_delete_operations_all_dirty_the_outer_draft() -> None:
+    source = model.Source.model_validate(
+        {
+            "id": "ih",
+            "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+            "schema": {"natural_key": ["InteractionID"]},
+            "defaults": {"Channel": "Unknown"},
+            "transforms": [
+                {
+                    "kind": "filter",
+                    "expression": {"op": "eq", "column": "Channel", "value": "Web"},
+                },
+                {
+                    "kind": "derive_column",
+                    "output": "Margin",
+                    "expression": {
+                        "op": "sub",
+                        "args": [{"col": "Revenue"}, {"col": "Cost"}],
+                    },
+                },
+            ],
+        }
+    )
+    baseline = builder.source_to_dict(source)
+    default_rows = builder.default_rows_from_values(builder.source_defaults(source))
+    filter_rows = builder.filter_rows_from_expression(builder.first_filter_expression(source))
+    calculated_rows = builder.calculated_rows_from_source(source)
+    assert filter_rows is not None
+
+    changes: list[tuple[list[dict], list[dict], list[dict]]] = []
+
+    added_defaults = copy.deepcopy(default_rows)
+    added_defaults.append({"Field": "Region", "Default Value": "Unknown", "Enabled": True})
+    edited_defaults = copy.deepcopy(default_rows)
+    edited_defaults[0]["Default Value"] = "Other"
+    changes.extend(
+        [
+            (added_defaults, filter_rows, calculated_rows),
+            (edited_defaults, filter_rows, calculated_rows),
+            ([], filter_rows, calculated_rows),
+        ]
+    )
+
+    added_filters = copy.deepcopy(filter_rows)
+    added_filters.append({"Field": "Region", "Operator": "==", "Value": "EU", "Enabled": True})
+    edited_filters = copy.deepcopy(filter_rows)
+    edited_filters[0]["Value"] = "Mobile"
+    changes.extend(
+        [
+            (default_rows, added_filters, calculated_rows),
+            (default_rows, edited_filters, calculated_rows),
+            (default_rows, [], calculated_rows),
+        ]
+    )
+
+    added_calculations = copy.deepcopy(calculated_rows)
+    added_calculations.append(
+        {
+            "Name": "RevenueCopy",
+            "Mode": "AST YAML",
+            "Left": "",
+            "Right Kind": "Field",
+            "Right": "",
+            "Expression": "col: Revenue",
+            "Enabled": True,
+        }
+    )
+    edited_calculations = copy.deepcopy(calculated_rows)
+    edited_calculations[0]["Expression"] = "col: Cost"
+    changes.extend(
+        [
+            (default_rows, filter_rows, added_calculations),
+            (default_rows, filter_rows, edited_calculations),
+            (default_rows, filter_rows, []),
+        ]
+    )
+
+    for proposed_defaults, proposed_filters, proposed_calculations in changes:
+        proposed = config_builder._build_source_definition(
+            source=source,
+            source_id=source.id,
+            description=source.description,
+            reader_kind=source.reader.kind,
+            file_pattern=source.reader.file_pattern,
+            group_by_filename=source.reader.group_by_filename,
+            root="",
+            streaming=False,
+            hive_partitioning=False,
+            timestamp_column=source.schema_.timestamp_column,
+            natural_key=list(source.schema_.natural_key),
+            drop_columns=list(source.schema_.drop_columns),
+            default_rows=proposed_defaults,
+            use_rename_capitalize=False,
+            filter_expression=builder.compile_filter_rows(proposed_filters),
+            calculated_rows=proposed_calculations,
+        )
+
+        assert builder.builder_draft_status("source:ih", baseline, proposed).dirty
+
+
+@pytest.mark.unit
+def test_nested_source_and_processor_row_editors_rerun_the_owning_fragment() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    row_editor_names = {
+        "_render_default_values_editor",
+        "_render_filter_rows_editor",
+        "_render_calculated_rows_editor",
+        "_render_state_rows_editor",
+    }
+    row_editors = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in row_editor_names
+    }
+
+    assert set(row_editors) == row_editor_names
+    for function in row_editors.values():
+        assert not any(
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "fragment"
+            for decorator in function.decorator_list
+        )
+
+
+@pytest.mark.unit
+def test_build_source_definition_preserves_untouched_transform_order() -> None:
+    source = model.Source.model_validate(
+        {
+            "id": "sample",
+            "description": "Generated sample",
+            "reader": {
+                "kind": "csv",
+                "file_pattern": "sample.csv",
+                "root": "data/studio",
+            },
+            "schema": {
+                "timestamp_column": "OutcomeTime",
+                "natural_key": ["CustomerID"],
+                "drop_columns": [],
+            },
+            "transforms": [
+                {
+                    "kind": "derive_column",
+                    "output": "SubjectID",
+                    "expression": {"col": "CustomerID"},
+                },
+                {
+                    "kind": "parse_datetime",
+                    "columns": ["OutcomeTime"],
+                    "format": "%+",
+                },
+                {
+                    "kind": "derive_calendar",
+                    "from": "OutcomeTime",
+                    "outputs": ["Day", "Month", "Quarter", "Year"],
+                },
+            ],
+        }
+    )
+
+    source_def = config_builder._build_source_definition(
+        source=source,
+        source_id=source.id,
+        description=source.description,
+        reader_kind=source.reader.kind,
+        file_pattern=source.reader.file_pattern,
+        group_by_filename=source.reader.group_by_filename,
+        root="data/studio",
+        streaming=False,
+        hive_partitioning=False,
+        timestamp_column=source.schema_.timestamp_column,
+        natural_key=list(source.schema_.natural_key),
+        drop_columns=list(source.schema_.drop_columns),
+        default_rows=[],
+        use_rename_capitalize=False,
+        filter_expression=None,
+        calculated_rows=builder.calculated_rows_from_source(source),
+    )
+
+    assert source_def == builder.source_to_dict(source)
+    assert not builder.builder_draft_status(
+        "source:sample", builder.source_to_dict(source), source_def
+    ).dirty
+
+
+@pytest.mark.unit
+def test_preserve_untouched_processor_definition_ignores_materialized_default_states() -> None:
+    processor = model.Processors.model_validate(
+        {
+            "processors": [
+                {
+                    "id": "sample_engagement",
+                    "source": "sample",
+                    "kind": "binary_outcome",
+                    "description": "Generated engagement processor.",
+                    "dimensions": ["Channel"],
+                    "time": {
+                        "column": "OutcomeTime",
+                        "grains": ["Day", "Month", "Summary"],
+                        "aggregation_levels": {"Month": "Day"},
+                    },
+                    "entities": {"subject": "SubjectID"},
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked", "Conversion"],
+                        "negative_values": ["Impression", "Pending"],
+                    },
+                }
+            ]
+        }
+    ).processors[0]
+    proposed = builder.processor_to_dict(processor)
+    proposed["states"] = {
+        name: spec.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for name, spec in model.effective_processor_states(processor).items()
+    }
+
+    preserved = config_builder._preserve_untouched_processor_definition(
+        processor,
+        proposed,
+    )
+
+    assert preserved == builder.processor_to_dict(processor)
+    assert "states" not in preserved
+    assert preserved["time"]["aggregation_levels"] == {"Month": "Day"}
+
+
+@pytest.mark.unit
+def test_preserve_untouched_processor_definition_keeps_real_edits() -> None:
+    processor = model.Processors.model_validate(
+        {
+            "processors": [
+                {
+                    "id": "engagement",
+                    "source": "events",
+                    "kind": "binary_outcome",
+                    "description": "Original description",
+                    "entities": {"subject": "SubjectID"},
+                    "outcome": {"column": "Outcome"},
+                }
+            ]
+        }
+    ).processors[0]
+    proposed = builder.processor_to_dict(processor)
+    proposed["description"] = "Updated description"
+    proposed["time"] = {"column": None, "grains": ["Day", "Month", "Summary"]}
+    proposed["states"] = {
+        name: spec.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for name, spec in model.effective_processor_states(processor).items()
+    }
+
+    preserved = config_builder._preserve_untouched_processor_definition(
+        processor,
+        proposed,
+    )
+
+    assert preserved["description"] == "Updated description"
+
+
+@pytest.mark.unit
 def test_source_field_options_apply_rename_capitalize_to_reader_columns(monkeypatch) -> None:
     source = model.Source.model_validate(
         {
@@ -1210,6 +2506,207 @@ def test_source_field_options_apply_rename_capitalize_to_reader_columns(monkeypa
     assert "pyName" not in options
     assert "pxOutcomeTime" not in options
     assert "pyCustomerID" not in options
+
+
+@pytest.mark.unit
+def test_source_inspection_shares_reads_and_invalidates_on_file_or_source_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_file = tmp_path / "events.parquet"
+    source_file.write_text("first", encoding="utf-8")
+    source = model.Source.model_validate(
+        {
+            "id": "events",
+            "reader": {"kind": "parquet", "file_pattern": "events.parquet"},
+            "schema": {"natural_key": ["CustomerID"]},
+        }
+    )
+    ctx = SimpleNamespace(workspace=tmp_path)
+    calls = {"discover": 0, "read": 0, "cleanup": 0, "status": 0}
+    status_updates: list[dict[str, object]] = []
+
+    def fake_discover(_workspace: Path, _source: model.Source) -> list[SimpleNamespace]:
+        calls["discover"] += 1
+        return [SimpleNamespace(files=(source_file,))]
+
+    def fake_read(_reader: model.Reader, _files: tuple[Path, ...]) -> pl.LazyFrame:
+        calls["read"] += 1
+        return pl.DataFrame({"CustomerID": ["c1", "c2", "c3"], "Outcome": ["Clicked"] * 3}).lazy()
+
+    def fake_status(_label: str, **_kwargs: object):
+        calls["status"] += 1
+        return nullcontext(
+            SimpleNamespace(update=lambda **kwargs: status_updates.append(dict(kwargs)))
+        )
+
+    monkeypatch.setattr(config_builder, "discover", fake_discover)
+    monkeypatch.setattr(config_builder, "read", fake_read)
+    monkeypatch.setattr(
+        config_builder,
+        "cleanup_temporaries",
+        lambda: calls.__setitem__("cleanup", calls["cleanup"] + 1),
+    )
+    monkeypatch.setattr(
+        config_builder,
+        "st",
+        SimpleNamespace(session_state={}, status=fake_status, error=lambda *_args: None),
+    )
+
+    config_builder._clear_source_inspection_cache()
+    assert config_builder._source_sample_columns(ctx, source) == ["CustomerID", "Outcome"]
+    sample = config_builder._source_profile_sample(ctx, source)
+    assert sample is not None
+    assert sample.height == 3
+    assert calls == {"discover": 1, "read": 1, "cleanup": 1, "status": 1}
+
+    config_builder._begin_source_inspection_scope()
+    assert config_builder._source_sample_columns(ctx, source) == ["CustomerID", "Outcome"]
+    assert calls == {"discover": 2, "read": 1, "cleanup": 2, "status": 1}
+
+    source_file.write_text("second version", encoding="utf-8")
+    config_builder._begin_source_inspection_scope()
+    config_builder._source_sample_columns(ctx, source)
+    assert calls == {"discover": 3, "read": 2, "cleanup": 3, "status": 2}
+
+    changed_source = source.model_copy(update={"description": "Changed canonical source"})
+    config_builder._begin_source_inspection_scope()
+    config_builder._source_sample_columns(ctx, changed_source)
+    assert calls == {"discover": 4, "read": 3, "cleanup": 4, "status": 3}
+    assert status_updates[-1]["state"] == "complete"
+
+
+@pytest.mark.unit
+def test_source_inspection_failure_retry_invalidates_only_failed_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    files = {
+        "broken": tmp_path / "broken.parquet",
+        "healthy": tmp_path / "healthy.parquet",
+    }
+    for path in files.values():
+        path.write_text(path.stem, encoding="utf-8")
+    sources = {
+        source_id: model.Source.model_validate(
+            {
+                "id": source_id,
+                "reader": {"kind": "parquet", "file_pattern": f"{source_id}/*.parquet"},
+            }
+        )
+        for source_id in files
+    }
+    ctx = SimpleNamespace(workspace=tmp_path)
+    fail_broken = {"value": True}
+    calls = {"broken": 0, "healthy": 0, "cleanup": 0}
+    errors: list[str] = []
+    buttons: list[dict[str, object]] = []
+
+    def fake_discover(_workspace: Path, source: model.Source) -> list[SimpleNamespace]:
+        return [SimpleNamespace(files=(files[source.id],))]
+
+    def fake_read(_reader: model.Reader, selected: tuple[Path, ...]) -> pl.LazyFrame:
+        source_id = selected[0].stem
+        calls[source_id] += 1
+        if source_id == "broken" and fail_broken["value"]:
+            raise ValueError("private reader details")
+        return pl.DataFrame({"CustomerID": [source_id]}).lazy()
+
+    def fake_button(label: str, **kwargs: object) -> bool:
+        buttons.append({"label": label, **kwargs})
+        return False
+
+    monkeypatch.setattr(config_builder, "discover", fake_discover)
+    monkeypatch.setattr(config_builder, "read", fake_read)
+    monkeypatch.setattr(
+        config_builder,
+        "cleanup_temporaries",
+        lambda: calls.__setitem__("cleanup", calls["cleanup"] + 1),
+    )
+    monkeypatch.setattr(
+        config_builder,
+        "st",
+        SimpleNamespace(
+            session_state={},
+            status=lambda *_args, **_kwargs: nullcontext(
+                SimpleNamespace(update=lambda **_update: None)
+            ),
+            error=errors.append,
+            button=fake_button,
+        ),
+    )
+
+    config_builder._clear_source_inspection_cache()
+    assert config_builder._source_sample_columns(ctx, sources["broken"]) == []
+    assert config_builder._source_sample_columns(ctx, sources["broken"]) == []
+    assert config_builder._source_sample_columns(ctx, sources["healthy"]) == ["CustomerID"]
+    assert calls == {"broken": 1, "healthy": 1, "cleanup": 2}
+    assert len(errors) == 1
+    assert "source `broken`" in errors[0]
+    assert "path pattern `broken/*.parquet`" in errors[0]
+    assert "private reader details" not in errors[0]
+    assert [button["label"] for button in buttons] == ["Retry source inspection"]
+
+    retry = buttons[0]
+    retry["on_click"](*retry["args"])  # type: ignore[operator]
+    fail_broken["value"] = False
+    config_builder._begin_source_inspection_scope()
+    assert config_builder._source_sample_columns(ctx, sources["healthy"]) == ["CustomerID"]
+    assert config_builder._source_sample_columns(ctx, sources["broken"]) == ["CustomerID"]
+    assert calls == {"broken": 2, "healthy": 1, "cleanup": 4}
+
+
+@pytest.mark.unit
+def test_source_inspection_cache_keeps_only_bounded_transformed_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_file = tmp_path / "large.parquet"
+    source_file.write_text("identity", encoding="utf-8")
+    source = model.Source.model_validate(
+        {
+            "id": "large",
+            "reader": {"kind": "parquet", "file_pattern": "large.parquet"},
+        }
+    )
+    ctx = SimpleNamespace(workspace=tmp_path)
+    raw = pl.DataFrame({"RowID": list(range(100)), "Value": list(range(100))})
+
+    monkeypatch.setattr(
+        config_builder,
+        "discover",
+        lambda *_args: [SimpleNamespace(files=(source_file,))],
+    )
+    monkeypatch.setattr(config_builder, "read", lambda *_args: raw.lazy())
+    monkeypatch.setattr(config_builder, "cleanup_temporaries", lambda: None)
+    monkeypatch.setattr(
+        config_builder,
+        "st",
+        SimpleNamespace(
+            session_state={},
+            status=lambda *_args, **_kwargs: nullcontext(
+                SimpleNamespace(update=lambda **_update: None)
+            ),
+            error=lambda *_args: None,
+        ),
+    )
+
+    config_builder._clear_source_inspection_cache()
+    result = config_builder._source_inspection(ctx, source, limit=5)
+
+    assert result.sample is not None
+    assert result.sample.height == 5
+    assert result.raw_schema == (("RowID", "Int64"), ("Value", "Int64"))
+    assert set(vars(result)) == {"key", "raw_schema", "sample", "error_kind"}
+    assert not any(isinstance(value, pl.LazyFrame) for value in vars(result).values())
+    scope = config_builder.st.session_state[config_builder.BUILDER_SOURCE_INSPECTION_SCOPE_KEY]
+    assert all(
+        isinstance(value, config_builder.SourceInspectionKey) for value in scope["keys"].values()
+    )
+    assert len(config_builder._SOURCE_INSPECTION_CACHE) == 1
+    cached = next(iter(config_builder._SOURCE_INSPECTION_CACHE.values()))
+    assert cached.sample is not None
+    assert cached.sample.height == 5
 
 
 @pytest.mark.unit
@@ -1387,6 +2884,110 @@ def test_dimension_recommendation_requires_at_least_three_distinct_values() -> N
         "Recommended",
         "Low-cardinality field suitable for filters and breakdowns.",
     )
+
+
+@pytest.mark.unit
+def test_dimension_promotion_ranks_reviewed_fields_before_avoid() -> None:
+    def row(field: str, recommendation: str) -> dimension_profile.DimensionProfileRow:
+        return dimension_profile.DimensionProfileRow(
+            field=field,
+            dtype="String",
+            non_null=10,
+            null_rate=0.0,
+            cardinality=4,
+            cardinality_rate=0.4,
+            sample_values="",
+            current_usage="",
+            recommendation=recommendation,
+            safe_for_group_by="No" if recommendation == "Avoid" else "Review",
+            reason="test",
+        )
+
+    candidates = config_builder._dimension_promotion_candidates(
+        ["CustomerID", "Channel", "Campaign"],
+        [],
+        [
+            row("CustomerID", "Avoid"),
+            row("Channel", "Recommended"),
+            row("Campaign", "Review"),
+        ],
+    )
+
+    assert candidates == ["Channel", "Campaign", "CustomerID"]
+
+
+@pytest.mark.unit
+def test_dimension_pack_and_promotion_summaries_keep_exact_profile_values() -> None:
+    row = dimension_profile.DimensionProfileRow(
+        field="Campaign",
+        dtype="String",
+        non_null=9,
+        null_rate=0.1,
+        cardinality=4,
+        cardinality_rate=0.4,
+        sample_values="Retention, CrossSell",
+        current_usage="",
+        recommendation="Review",
+        safe_for_group_by="Review",
+        reason="Moderate cardinality; review aggregate growth.",
+    )
+
+    assert config_builder._dimension_pack_summary(
+        ["Channel", "Campaign"],
+        ["Channel"],
+        ["CustomerType"],
+    ) == {
+        "Available in source": ("Channel", "Campaign"),
+        "Already selected": ("Channel",),
+        "Missing from source": ("CustomerType",),
+    }
+    assert config_builder._dimension_promotion_summary(row) == {
+        "Recommendation": "Review",
+        "Group-by safety": "Review",
+        "Cardinality": 4,
+        "Null values": "10.0%",
+        "Reason": "Moderate cardinality; review aggregate growth.",
+    }
+
+
+@pytest.mark.unit
+def test_dimension_badges_render_as_chips_with_collapsed_json_details() -> None:
+    def app() -> None:
+        import json  # noqa: PLC0415
+
+        import streamlit as st  # noqa: PLC0415
+
+        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+
+        summary = page._dimension_pack_summary(
+            ["Channel", "Campaign"],
+            ["Channel"],
+            ["CustomerType"],
+        )
+        page._render_dimension_field_badges(
+            "Available in source", summary["Available in source"], color="blue"
+        )
+        page._render_dimension_field_badges(
+            "Already selected", summary["Already selected"], color="green"
+        )
+        page._render_dimension_field_badges(
+            "Missing from source", summary["Missing from source"], color="orange"
+        )
+        with st.expander("Technical details · Dimension pack", expanded=False):
+            st.code(json.dumps(summary, indent=2), language="json")
+
+    rendered = AppTest.from_function(app).run()
+
+    assert not rendered.exception
+    badge_values = {item.value for item in rendered.markdown if "-badge[" in item.value}
+    assert badge_values == {
+        ":blue-badge[Channel]",
+        ":blue-badge[Campaign]",
+        ":green-badge[Channel]",
+        ":orange-badge[CustomerType]",
+    }
+    assert rendered.expander[0].label == "Technical details · Dimension pack"
+    assert rendered.code[0].language == "json"
 
 
 @pytest.mark.unit
@@ -1622,6 +3223,21 @@ def test_report_library_groups_every_supported_chart_once() -> None:
 
 
 @pytest.mark.unit
+def test_shared_chart_catalog_labels_and_purposes_cover_every_supported_kind() -> None:
+    supported = set(builder.CHART_REQUIRED_FIELDS)
+
+    assert set(builder.CHART_DISPLAY_LABELS) == supported
+    assert set(builder.CHART_DISPLAY_PURPOSES) == supported
+    assert all(builder.chart_kind_label(kind) for kind in supported)
+    assert all(builder.chart_kind_purpose(kind).endswith(".") for kind in supported)
+    assert builder.chart_kind_selector_label("All") == "All chart types"
+    assert builder.chart_kind_selector_label("kpi_card") == "KPI card"
+    assert builder.chart_kind_selector_label("bar_polar") == "Polar bar"
+    assert builder.chart_kind_selector_label("experiment_z_score") == "Experiment z-score"
+    assert config_builder._report_library_chart_label("roc_curve") == "ROC curve"
+
+
+@pytest.mark.unit
 def test_report_library_plotly_previews_cover_every_supported_chart() -> None:
     for chart_type in builder.CHART_REQUIRED_FIELDS:
         figure = config_builder._chart_library_preview(chart_type, theme_base="light")
@@ -1646,6 +3262,146 @@ def test_report_library_searches_business_and_technical_tile_context(tmp_path: P
         "overview/portfolio/holdings_value",
         "overview/portfolio/holdings_rate",
     ]
+    assert set(options[0][3]) == {"id", "title", "metric", "chart", "value"}
+
+
+@pytest.mark.unit
+def test_report_tile_semantic_noop_preserves_exact_authored_defaults() -> None:
+    seed = {
+        "id": "trend",
+        "title": "Trend",
+        "metric": "CTR",
+        "chart": "line",
+        "x": "Day",
+        "y": "CTR",
+        "placement": "content",
+    }
+    rebuilt = {
+        "id": "trend",
+        "title": "Trend",
+        "metric": "CTR",
+        "chart": "line",
+        "x": "Day",
+        "y": "CTR",
+    }
+
+    preserved = config_builder._preserve_untouched_tile_definition(seed, rebuilt)
+
+    assert preserved == seed
+
+
+@pytest.mark.unit
+def test_existing_report_tile_opens_clean_in_visual_editor(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Reports / Tiles").run(timeout=15)
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
+
+
+@pytest.mark.unit
+def test_new_report_tile_template_is_clean_until_edited(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Reports / Tiles").run(timeout=15)
+    rendered = (
+        next(button for button in rendered.button if button.label == "New").click().run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
+
+
+@pytest.mark.unit
+def test_new_report_tile_apply_reopens_the_written_tile_clean(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Reports / Tiles").run(timeout=15)
+    rendered = (
+        next(button for button in rendered.button if button.label == "New").click().run(timeout=15)
+    )
+    metric = [item for item in rendered.selectbox if item.label == "Metric"][-1]
+    rendered = metric.set_value("CTR").run(timeout=15)
+    chart = [item for item in rendered.selectbox if item.label == "Chart"][-1]
+    assert "KPI card" in chart.options
+    assert "kpi_card" not in chart.options
+    rendered = chart.set_value("kpi_card").run(timeout=15)
+    assert any("Technical chart kind: `kpi_card`" in item.value for item in rendered.caption)
+    title = next(item for item in rendered.text_input if item.label == "Tile Title")
+    rendered = title.set_value("QA tile").run(timeout=15)
+
+    assert any(button.label == "Apply to workspace" for button in rendered.button)
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
+    tiles = load(tmp_path).dashboards.dashboards[0].pages[0].tiles
+    assert len(tiles) == 4
+    assert any(tile.title == "QA tile" for tile in tiles)
+
+
+@pytest.mark.unit
+def test_tile_delete_button_names_and_stages_the_exact_library_target(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Reports / Tiles").run(timeout=15)
+    delete_button = next(button for button in rendered.button if button.label.startswith("Delete "))
+
+    assert delete_button.label == "Delete 'CTR'"
+    rendered = delete_button.click().run(timeout=15)
+
+    assert not rendered.exception
+    assert rendered.session_state[config_builder.BUILDER_PENDING_TILE_DELETE_KEY] == {
+        "dashboard_id": "overview",
+        "page_id": "portfolio",
+        "tile_id": "ctr",
+        "title": "CTR",
+    }
+    assert any("overview/portfolio/ctr" in item.value for item in rendered.warning)
+    assert any(button.label == "Apply to workspace" for button in rendered.button)
 
 
 @pytest.mark.unit
@@ -1668,6 +3424,52 @@ def test_visual_report_library_replaces_inventory_dataframe(tmp_path: Path) -> N
     assert rendered.get("plotly_chart")
     assert rendered.segmented_control[0].value == "summary"
     assert rendered.pills
+    chart_filter = next(item for item in rendered.selectbox if item.label == "Chart type")
+    assert chart_filter.options == ["All chart types", "KPI card"]
+    assert chart_filter.value == "All"
+
+
+@pytest.mark.unit
+def test_report_inventory_uses_human_labels_and_keeps_ids_in_details(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    builder.write_metric_definition(
+        tmp_path,
+        "CTR_generated_123",
+        {
+            **builder.build_formula_metric("engagement", "Positives", "Count"),
+            "display": {"label": "Click-through rate"},
+        },
+    )
+    builder.write_tile_definition(
+        tmp_path,
+        dashboard_id="marketing_generated_123",
+        dashboard_title="Marketing overview",
+        page_id="executive_generated_123",
+        page_title="Executive summary",
+        tile={
+            "id": "ctr_generated_123",
+            "title": "Engagement rate",
+            "metric": "CTR_generated_123",
+            "chart": "kpi_card",
+            "value": "CTR_generated_123",
+        },
+    )
+    catalog = load(tmp_path)
+
+    human_rows = config_builder._report_inventory_rows(catalog)
+    technical_rows = config_builder._report_inventory_rows(catalog, technical=True)
+
+    assert human_rows == [
+        {
+            "Dashboard": "Marketing overview",
+            "Page": "Executive summary",
+            "Report": "Engagement rate",
+            "Metric": "Click-through rate",
+            "Chart": "KPI card",
+        }
+    ]
+    assert technical_rows[0]["Metric ID"] == "CTR_generated_123"
+    assert technical_rows[0]["Tile ID"] == "ctr_generated_123"
 
 
 @pytest.mark.unit
@@ -1709,46 +3511,42 @@ def test_large_report_type_group_uses_compact_selector() -> None:
 
 
 @pytest.mark.unit
-def test_generated_catalog_id_uses_name_prefix_and_random_suffix() -> None:
-    generated = config_builder._generated_catalog_id(
-        "Engagement Rate by Offer",
-        "0123456789abcdef",
+def test_stable_catalog_id_is_readable_deterministic_and_collision_safe() -> None:
+    dashboard_id = builder.stable_catalog_id("Sales Overview", fallback="dashboard")
+    page_id = builder.stable_catalog_id(
+        "Engagement",
+        fallback="page",
+        parent_id=dashboard_id,
+    )
+    first = builder.stable_catalog_id(
+        "CTR Trend",
         fallback="tile",
+        parent_id=page_id,
+    )
+    second = builder.stable_catalog_id(
+        "CTR Trend",
+        fallback="tile",
+        parent_id=page_id,
+        existing_ids=[first],
     )
 
-    assert generated == "engagement_rate_by_o_0123456789abcdef"
+    assert dashboard_id == "dashboard_sales_overview"
+    assert page_id == "dashboard_sales_overview_page_engagement"
+    assert first.endswith("_tile_ctr_trend")
+    assert second == f"{first}_2"
 
 
 @pytest.mark.unit
-def test_generated_catalog_id_keeps_identifier_letter_prefixed() -> None:
-    generated = config_builder._generated_catalog_id(
-        "2026 Campaign",
-        "0123456789abcdef",
-        fallback="tile",
+def test_stable_catalog_id_preserves_valid_preferred_id_when_title_changes() -> None:
+    assert (
+        builder.stable_catalog_id(
+            "Renamed page",
+            fallback="page",
+            parent_id="dashboard_sales",
+            preferred_id="original_page_id",
+        )
+        == "original_page_id"
     )
-
-    assert generated == "tile_2026_campaign_0123456789abcdef"
-
-
-@pytest.mark.unit
-def test_stable_random_suffix_uses_eight_random_bytes_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[int] = []
-
-    def fake_token_hex(byte_count: int) -> str:
-        calls.append(byte_count)
-        return "feedfacecafebeef"
-
-    monkeypatch.setattr(config_builder.secrets, "token_hex", fake_token_hex)
-    state: dict[str, object] = {}
-
-    first = config_builder._stable_random_suffix(state, "suffix")
-    second = config_builder._stable_random_suffix(state, "suffix")
-
-    assert first == "feedfacecafebeef"
-    assert second == "feedfacecafebeef"
-    assert calls == [8]
 
 
 @pytest.mark.unit
@@ -1813,7 +3611,7 @@ def test_metric_filter_helpers_scope_metrics_by_source_and_kind(tmp_path: Path) 
 
 
 @pytest.mark.unit
-def test_metric_choice_label_includes_id_source_and_kind(tmp_path: Path) -> None:
+def test_metric_choice_label_leads_with_human_name_then_kind_and_source(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
     builder.write_metric_definition(
         tmp_path,
@@ -1824,8 +3622,122 @@ def test_metric_choice_label_includes_id_source_and_kind(tmp_path: Path) -> None
 
     assert (
         config_builder._metric_choice_label(catalog, "Dropoff")
-        == "Dropoff · engagement · Formula / state passthrough"
+        == "Dropoff · Formula / state passthrough · Engagement"
     )
+
+
+@pytest.mark.unit
+def test_artifact_identity_formatters_switch_context_without_losing_identity() -> None:
+    source = model.Source.model_validate(
+        {
+            "id": "ih",
+            "description": "Interaction history. Additional implementation detail is omitted.",
+            "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+        }
+    )
+    processor = model.BinaryOutcomeProcessor.model_validate(
+        {
+            "id": "engagement",
+            "source": "ih",
+            "kind": "binary_outcome",
+            "description": "Customer engagement",
+        }
+    )
+
+    assert config_builder._source_choice_label_edit(source) == (
+        "ih — Interaction history · Parquet"
+    )
+    assert config_builder._source_choice_label_human(source) == (
+        "Interaction history — ih · Parquet"
+    )
+    assert config_builder._processor_choice_label_edit(processor) == (
+        "engagement — Customer engagement · Binary outcome"
+    )
+    assert config_builder._processor_choice_label_human(processor) == (
+        "Customer engagement — engagement · Binary outcome"
+    )
+    assert config_builder._processor_choice_label("engagement", {"engagement": processor}) == (
+        "Customer engagement — engagement · Binary outcome"
+    )
+
+
+@pytest.mark.unit
+def test_new_processor_template_uses_selected_source_identity_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sources = [
+        model.Source.model_validate(
+            {
+                "id": "interactions",
+                "reader": {"kind": "parquet", "file_pattern": "interactions/*.parquet"},
+                "schema": {"natural_key": ["InteractionID"]},
+            }
+        ),
+        model.Source.model_validate(
+            {
+                "id": "accounts",
+                "reader": {"kind": "parquet", "file_pattern": "accounts/*.parquet"},
+                "schema": {"natural_key": ["AccountKey"]},
+            }
+        ),
+    ]
+    ctx = SimpleNamespace(
+        workspace=Path("."),
+        catalog=SimpleNamespace(
+            pipelines=SimpleNamespace(sources=sources),
+            processors=SimpleNamespace(processors=[]),
+        ),
+    )
+    monkeypatch.setattr(
+        config_builder,
+        "_source_sample_columns",
+        lambda _ctx, source, **_kwargs: [source.schema_.natural_key[0], "Outcome"],
+    )
+
+    processor = config_builder._new_processor_template(ctx, "accounts")
+    processor_def = builder.processor_to_dict(processor)
+
+    assert processor.source == "accounts"
+    assert processor.id == "accounts_processor"
+    assert processor_def["entities"] == {"subject": "AccountKey"}
+    assert "SubjectID" not in yaml.safe_dump(processor_def)
+
+
+@pytest.mark.unit
+def test_new_processor_template_uses_observed_identity_or_stays_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = model.Source.model_validate(
+        {
+            "id": "events",
+            "reader": {"kind": "parquet", "file_pattern": "events/*.parquet"},
+            "schema": {"natural_key": []},
+        }
+    )
+    ctx = SimpleNamespace(
+        workspace=Path("."),
+        catalog=SimpleNamespace(
+            pipelines=SimpleNamespace(sources=[source]),
+            processors=SimpleNamespace(processors=[]),
+        ),
+    )
+
+    monkeypatch.setattr(
+        config_builder,
+        "_source_sample_columns",
+        lambda *_args, **_kwargs: ["Outcome", "CustomerToken"],
+    )
+    observed = builder.processor_to_dict(config_builder._new_processor_template(ctx, "events"))
+    assert observed["entities"] == {"subject": "CustomerToken"}
+
+    monkeypatch.setattr(
+        config_builder,
+        "_source_sample_columns",
+        lambda *_args, **_kwargs: ["Outcome", "Channel"],
+    )
+    empty = builder.processor_to_dict(config_builder._new_processor_template(ctx, "events"))
+    assert "entities" not in empty
+    assert "SubjectID" not in yaml.safe_dump(empty)
 
 
 @pytest.mark.unit
@@ -2076,12 +3988,26 @@ def test_catalog_transaction_restores_all_files_when_a_write_fails(tmp_path: Pat
 
 
 @pytest.mark.unit
-def test_catalog_transaction_rolls_back_post_write_validation_failure(tmp_path: Path) -> None:
+def test_validated_catalog_transaction_rolls_back_all_post_write_changes(
+    tmp_path: Path,
+) -> None:
     _write_builder_catalog(tmp_path)
-    before = {name: (tmp_path / "catalog" / name).read_text() for name in builder.CATALOG_FILENAMES}
+    metrics_path = tmp_path / "catalog" / "metrics.yaml"
+    metrics_path.write_bytes(metrics_path.read_bytes().replace(b"\n", b"\r\n"))
+    before = {
+        name: (tmp_path / "catalog" / name).read_bytes() for name in builder.CATALOG_FILENAMES
+    }
 
     def install_invalid_metric() -> None:
-        with builder.catalog_transaction(tmp_path):
+        with builder.validated_catalog_transaction(tmp_path):
+            builder.write_workspace_settings(
+                tmp_path,
+                workspace_name="should_roll_back",
+                time_zone="Europe/Berlin",
+                calendar_grains=["Day", "Summary"],
+                week_start="sunday",
+                dashboard_theme={"colorway": ["#ff0000"]},
+            )
             builder.write_metric_definition(
                 tmp_path,
                 "BrokenReach",
@@ -2091,13 +4017,164 @@ def test_catalog_transaction_rolls_back_post_write_validation_failure(tmp_path: 
                     "state": "Missing_theta",
                 },
             )
-            builder.require_valid_workspace(tmp_path)
 
     with pytest.raises(ValueError, match="changes were rolled back"):
         install_invalid_metric()
 
-    after = {name: (tmp_path / "catalog" / name).read_text() for name in builder.CATALOG_FILENAMES}
+    after = {name: (tmp_path / "catalog" / name).read_bytes() for name in builder.CATALOG_FILENAMES}
     assert after == before
+
+
+@pytest.mark.unit
+def test_configuration_builder_never_runs_data_from_apply() -> None:
+    source = Path(config_builder.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    called_names = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    imported_names = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+
+    assert "run_source" not in called_names
+    assert "run_source" not in imported_names
+    assert "Save & Run" not in source
+    assert "& Run Source" not in source
+    assert "Create & Run" not in source
+
+
+@pytest.mark.unit
+def test_tile_deletion_is_staged_behind_the_step_apply_action() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    tile_builder = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_tile_builder"
+    )
+    guarded_delete_calls = 0
+
+    class DeleteGuardVisitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.apply_depth = 0
+
+        def visit_If(self, node: ast.If) -> None:
+            guarded = (
+                isinstance(node.test, ast.Call)
+                and isinstance(node.test.func, ast.Name)
+                and node.test.func.id == "_render_editor_primary_action"
+            )
+            self.apply_depth += int(guarded)
+            self.generic_visit(node)
+            self.apply_depth -= int(guarded)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            nonlocal guarded_delete_calls
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "delete_tile_definition":
+                assert self.apply_depth > 0
+                guarded_delete_calls += 1
+            self.generic_visit(node)
+
+    DeleteGuardVisitor().visit(tile_builder)
+
+    assert guarded_delete_calls == 1
+
+
+@pytest.mark.unit
+def test_sketch_exploration_does_not_preselect_topk_or_avoid_fields() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    sketch_panel = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_sketch_exploration_panel"
+    )
+    calls = [node for node in ast.walk(sketch_panel) if isinstance(node, ast.Call)]
+    topk_checkbox = next(
+        node
+        for node in calls
+        if isinstance(node.func, ast.Attribute)
+        and node.func.attr == "checkbox"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "Top frequent values"
+    )
+    topk_selector = next(
+        node
+        for node in calls
+        if isinstance(node.func, ast.Attribute)
+        and node.func.attr == "selectbox"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "Top-K Field"
+    )
+    checkbox_default = next(
+        keyword.value for keyword in topk_checkbox.keywords if keyword.arg == "value"
+    )
+    selector_index = next(
+        keyword.value for keyword in topk_selector.keywords if keyword.arg == "index"
+    )
+
+    assert isinstance(checkbox_default, ast.Constant)
+    assert checkbox_default.value is False
+    assert isinstance(selector_index, ast.IfExp)
+    assert isinstance(selector_index.orelse, ast.Constant)
+    assert selector_index.orelse.value is None
+
+
+@pytest.mark.unit
+def test_configuration_builder_catalog_mutations_use_validated_transaction() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    catalog_mutators = {
+        "delete_tile_definition",
+        "write_dashboards_definition",
+        "write_metric_definition",
+        "write_metrics_definition",
+        "write_page_settings",
+        "write_pipelines_definition",
+        "write_processor_definition",
+        "write_processors_definition",
+        "write_source_definition",
+        "write_tile_definition",
+        "write_workspace_settings",
+    }
+    violations: list[tuple[str, int]] = []
+
+    class CatalogMutationVisitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.validated_transaction_depth = 0
+
+        def visit_With(self, node: ast.With) -> None:
+            guarded = any(
+                isinstance(item.context_expr, ast.Call)
+                and isinstance(item.context_expr.func, ast.Attribute)
+                and isinstance(item.context_expr.func.value, ast.Name)
+                and item.context_expr.func.value.id == "builder"
+                and item.context_expr.func.attr == "validated_catalog_transaction"
+                for item in node.items
+            )
+            self.validated_transaction_depth += int(guarded)
+            self.generic_visit(node)
+            self.validated_transaction_depth -= int(guarded)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "builder"
+                and func.attr in catalog_mutators
+                and self.validated_transaction_depth == 0
+            ):
+                violations.append((func.attr, node.lineno))
+            self.generic_visit(node)
+
+    CatalogMutationVisitor().visit(tree)
+
+    assert violations == []
 
 
 @pytest.mark.unit
@@ -2121,6 +4198,33 @@ def test_write_workspace_settings_updates_catalog_defaults_and_theme(tmp_path: P
     assert catalog.dashboards.theme == {"colorway": ["#0055aa"], "font": {"family": "Inter"}}
     ok, issues = builder.validate_workspace(tmp_path)
     assert ok, issues
+
+
+@pytest.mark.unit
+def test_settings_editor_keeps_an_explicit_empty_calendar_draft_clean(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    pipelines_path = tmp_path / "catalog" / "pipelines.yaml"
+    pipelines = yaml.safe_load(pipelines_path.read_text(encoding="utf-8"))
+    pipelines["defaults"] = {
+        "time_zone": "UTC",
+        "calendar": {"grains": [], "week_start": "monday"},
+    }
+    pipelines_path.write_text(yaml.safe_dump(pipelines, sort_keys=False), encoding="utf-8")
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Settings").run()
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert any("Select at least one calendar grain" in item.value for item in rendered.warning)
 
 
 @pytest.mark.unit
@@ -2163,6 +4267,16 @@ def test_chat_description_rows_preserve_catalog_and_custom_keys(tmp_path: Path) 
         "engagement": "Catalog processor description.",
         "legacy_family": "Legacy label.",
     }
+
+
+@pytest.mark.unit
+def test_chat_description_rows_preserve_case_variant_custom_keys() -> None:
+    rows = config_builder._chat_description_rows(
+        [("sample", "Dataset")],
+        {"SAMPLE": "Configured legacy spelling."},
+    )
+
+    assert config_builder._chat_description_map(rows) == {"SAMPLE": "Configured legacy spelling."}
 
 
 @pytest.mark.unit
@@ -2262,6 +4376,281 @@ def test_build_derive_column_transforms_supports_builder_rows() -> None:
             },
         }
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, True),
+        ("", True),
+        (float("nan"), True),
+        (True, True),
+        (False, False),
+        ("true", True),
+        ("False", False),
+        (1, True),
+        (0, False),
+    ],
+)
+def test_editor_row_enabled_strictly_normalizes_grid_values(value: object, expected: bool) -> None:
+    assert builder.editor_row_enabled(value) is expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("enabled", [None, ""])
+def test_grid_added_rows_with_missing_enabled_values_are_included(enabled: object) -> None:
+    transforms = builder.build_derive_column_transforms(
+        [
+            {
+                "Name": "Margin",
+                "Mode": "AST YAML",
+                "Expression": "op: sub\nargs:\n  - {col: Revenue}\n  - {col: Cost}",
+                "Enabled": enabled,
+            }
+        ]
+    )
+
+    assert transforms == [
+        {
+            "kind": "derive_column",
+            "output": "Margin",
+            "expression": {
+                "op": "sub",
+                "args": [{"col": "Revenue"}, {"col": "Cost"}],
+            },
+        }
+    ]
+    assert builder.build_default_values(
+        [{"Field": "Channel", "Default Value": "Unknown", "Enabled": enabled}]
+    ) == {"Channel": "Unknown"}
+    assert builder.compile_filter_rows(
+        [{"Field": "Channel", "Operator": "==", "Value": "Web", "Enabled": enabled}]
+    ) == {"op": "eq", "column": "Channel", "value": "Web"}
+
+
+@pytest.mark.unit
+def test_calculated_expression_validation_translates_case_repro_errors() -> None:
+    result = builder.validate_calculated_expression(
+        "AST YAML",
+        """op: case
+when:
+  - cond: {column: Revenue, value: 100}
+    then: {lit: High}
+otherwise: {lit: Standard}
+""",
+    )
+
+    assert not result.valid
+    assert result.messages == (
+        "`when[0].cond` must be a condition such as `{op: gt, column: Revenue, value: 100}`.",
+        "`else` is required for a `case` expression.",
+        "`otherwise` is not supported for `case`; use `else:` instead.",
+    )
+    assert "union_tag_not_found" in result.technical_details
+    assert "extra_forbidden" in result.technical_details
+    assert all("union_tag" not in message for message in result.messages)
+
+
+@pytest.mark.unit
+def test_calculated_expression_validation_covers_yaml_and_guarded_polars() -> None:
+    valid_yaml = builder.validate_calculated_expression(
+        "AST YAML",
+        builder.calculated_expression_example("AST YAML"),
+    )
+    invalid_yaml = builder.validate_calculated_expression(
+        "AST YAML",
+        "op: case\nwhen: [",
+    )
+    valid_polars = builder.validate_calculated_expression(
+        "Polars",
+        'pl.col("Revenue") - pl.col("Cost")',
+    )
+    invalid_polars = builder.validate_calculated_expression(
+        "Polars",
+        "foo + 1",
+    )
+
+    assert valid_yaml.valid
+    assert valid_polars.valid
+    assert not invalid_yaml.valid
+    assert invalid_yaml.messages[0].startswith("Expression YAML is not valid near line")
+    assert invalid_yaml.technical_details
+    assert not invalid_polars.valid
+    assert invalid_polars.messages == (
+        "Only the `pl` namespace is available in a Polars expression.",
+    )
+    assert "unsupported name" in invalid_polars.technical_details
+
+
+@pytest.mark.unit
+def test_calculated_expression_editor_requires_explicit_apply_and_cancel() -> None:
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui import builder  # noqa: PLC0415
+        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+
+        calc_key = "builder_source_calcs_test"
+        editor_key = "builder_source_calcs_editor_test"
+        if calc_key not in st.session_state:
+            st.session_state[calc_key] = [
+                {
+                    "Name": "RevenueBand",
+                    "Mode": "AST YAML",
+                    "Left": "",
+                    "Right Kind": "Field",
+                    "Right": "",
+                    "Expression": "col: Revenue",
+                    "Enabled": True,
+                }
+            ]
+        frame = builder.editor_frame(
+            st.session_state[calc_key],
+            ["Name", "Enabled", "Mode", "Expression", "Left", "Right Kind", "Right"],
+            builder.blank_calculated_row,
+        )
+        page._render_calculated_rows_editor(calc_key, editor_key, frame)
+
+    rendered = AppTest.from_function(app).run()
+
+    assert not rendered.exception
+    assert rendered.text_area[0].label == "AST YAML expression"
+    assert rendered.text_area[0].value == "col: Revenue"
+    assert {button.label for button in rendered.button} == {
+        "Cancel changes",
+        "Apply expression",
+    }
+
+    invalid = (
+        "op: case\n"
+        "when:\n"
+        "  - cond: {column: Revenue, value: 100}\n"
+        "    then: {lit: High}\n"
+        "otherwise: {lit: Standard}"
+    )
+    rendered = rendered.text_area[0].set_value(invalid).run()
+
+    assert not rendered.exception
+    assert rendered.session_state["builder_source_calcs_test"][0]["Expression"] == "col: Revenue"
+    assert rendered.session_state["builder_source_calcs_test_expression_pending"] is True
+    assert any("Working expression is not applied yet" in item.value for item in rendered.warning)
+    assert {
+        "`when[0].cond` must be a condition such as `{op: gt, column: Revenue, value: 100}`.",
+        "`else` is required for a `case` expression.",
+        "`otherwise` is not supported for `case`; use `else:` instead.",
+    }.issubset({item.value for item in rendered.error})
+    apply_button = next(button for button in rendered.button if button.label == "Apply expression")
+    assert apply_button.disabled
+    assert any("union_tag_not_found" in item.value for item in rendered.code)
+
+    valid = builder.calculated_expression_example("AST YAML")
+    rendered = rendered.text_area[0].set_value(valid).run()
+    apply_button = next(button for button in rendered.button if button.label == "Apply expression")
+    assert not apply_button.disabled
+    rendered = apply_button.click().run()
+
+    assert not rendered.exception
+    assert rendered.session_state["builder_source_calcs_test"][0]["Expression"] == valid
+    assert rendered.session_state["builder_source_calcs_test_expression_pending"] is False
+    assert any(
+        "Expression applied to the calculated row" in item.value for item in rendered.success
+    )
+
+    rendered = rendered.text_area[0].set_value("col: Cost").run()
+    rendered = (
+        next(button for button in rendered.button if button.label == "Cancel changes").click().run()
+    )
+
+    assert not rendered.exception
+    assert rendered.text_area[0].value == valid
+    assert rendered.session_state["builder_source_calcs_test"][0]["Expression"] == valid
+    assert rendered.session_state["builder_source_calcs_test_expression_pending"] is False
+
+
+@pytest.mark.unit
+def test_pending_expression_blocks_source_apply_until_explicit_expression_apply(
+    tmp_path: Path,
+) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        if "qa_expression_seeded" not in st.session_state:
+            st.session_state["qa_expression_seeded"] = True
+            st.session_state["builder_source_calcs_ih"] = [
+                {
+                    "Name": "RevenueCopy",
+                    "Mode": "AST YAML",
+                    "Left": "",
+                    "Right Kind": "Field",
+                    "Right": "",
+                    "Expression": "col: Revenue",
+                    "Enabled": True,
+                }
+            ]
+            st.session_state["builder_source_calcs_editor_ih_expression_draft_0"] = "col: Cost"
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Sources").run()
+
+    assert not rendered.exception
+    workspace_apply = next(
+        button for button in rendered.button if button.label == "Apply to workspace"
+    )
+    assert workspace_apply.disabled
+    assert any("Working expression is not applied yet" in item.value for item in rendered.warning)
+
+    expression_apply = next(
+        button for button in rendered.button if button.label == "Apply expression"
+    )
+    assert not expression_apply.disabled
+    rendered = expression_apply.click().run()
+
+    assert not rendered.exception
+    workspace_apply = next(
+        button for button in rendered.button if button.label == "Apply to workspace"
+    )
+    assert not workspace_apply.disabled
+    assert rendered.session_state["builder_source_calcs_ih"][0]["Expression"] == "col: Cost"
+
+
+@pytest.mark.unit
+def test_all_grid_row_enabled_checkboxes_default_true() -> None:
+    tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
+    function_names = {
+        "_render_default_values_editor",
+        "_render_filter_rows_editor",
+        "_render_calculated_rows_editor",
+        "_render_state_rows_editor",
+    }
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in function_names
+    ]
+
+    assert {function.name for function in functions} == function_names
+    for function in functions:
+        checkbox_calls = [
+            node
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "CheckboxColumn"
+        ]
+        assert len(checkbox_calls) == 1
+        default = next(
+            keyword.value for keyword in checkbox_calls[0].keywords if keyword.arg == "default"
+        )
+        assert isinstance(default, ast.Constant)
+        assert default.value is True
 
 
 @pytest.mark.unit
@@ -2425,6 +4814,204 @@ def test_delete_source_cascade_rolls_back_every_configuration_file(
         builder.delete_source_cascade(tmp_path, "holdings")
 
     assert {path: path.read_text(encoding="utf-8") for path in paths} == before
+
+
+@pytest.mark.unit
+def test_processor_cascade_plan_is_transitive_and_names_exact_report_paths(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    plan = builder.processor_cascade_plan(load(tmp_path), "holdings_lifecycle")
+
+    assert plan.processor_id == "holdings_lifecycle"
+    assert plan.metric_ids == ("HoldingsRate", "HoldingsValue")
+    assert plan.tile_locations == (
+        "overview/portfolio/holdings_rate",
+        "overview/portfolio/holdings_value",
+    )
+    assert plan.page_filter_locations == ("overview/portfolio/HoldingType",)
+
+
+@pytest.mark.unit
+def test_delete_processor_cascade_removes_only_named_target_and_keeps_aggregates(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    aggregate = tmp_path / "aggregates" / "holdings" / "holdings_lifecycle" / "part.parquet"
+    aggregate.parent.mkdir(parents=True)
+    aggregate.write_bytes(b"persisted aggregate")
+
+    deleted = builder.delete_processor_cascade(tmp_path, "holdings_lifecycle")
+
+    assert deleted.metric_ids == ("HoldingsRate", "HoldingsValue")
+    remaining = load(tmp_path)
+    assert [source.id for source in remaining.pipelines.sources] == ["ih", "holdings"]
+    assert [processor.id for processor in remaining.processors.processors] == ["engagement"]
+    assert list(remaining.metrics.metrics) == ["CTR"]
+    page = remaining.dashboards.dashboards[0].pages[0]
+    assert [tile.id for tile in page.tiles] == ["ctr"]
+    assert [filter_spec.field for filter_spec in page.filters] == ["Channel"]
+    assert aggregate.read_bytes() == b"persisted aggregate"
+    ai_config = yaml.safe_load((tmp_path / "ai.yaml").read_text(encoding="utf-8"))
+    assert ai_config["chat_with_data"]["dataset_descriptions"] == {
+        "ih": "Interactions",
+        "holdings": "Product holdings",
+    }
+    assert ai_config["chat_with_data"]["metric_descriptions"] == {
+        "engagement": "Interaction processor",
+        "CTR": "Engagement rate",
+    }
+    ok, issues = builder.validate_workspace(tmp_path)
+    assert ok, issues
+
+
+@pytest.mark.unit
+def test_delete_processor_without_dependencies_is_valid(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    builder.write_processor_definition(
+        tmp_path,
+        {
+            "id": "unused_processor",
+            "source": "ih",
+            "kind": "binary_outcome",
+            "group_by": ["Channel"],
+            "states": {"Count": {"type": "count"}},
+        },
+    )
+    builder.require_valid_workspace(tmp_path)
+
+    plan = builder.delete_processor_cascade(tmp_path, "unused_processor")
+
+    assert plan.metric_ids == ()
+    assert plan.tile_locations == ()
+    assert "unused_processor" not in {
+        processor.id for processor in load(tmp_path).processors.processors
+    }
+
+
+@pytest.mark.unit
+def test_delete_processor_cascade_rolls_back_on_post_write_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    paths = [
+        *(tmp_path / "catalog" / name for name in builder.CATALOG_FILENAMES),
+        tmp_path / "ai.yaml",
+    ]
+    before = {path: path.read_bytes() for path in paths}
+    monkeypatch.setattr(
+        builder,
+        "require_valid_workspace",
+        lambda _workspace: (_ for _ in ()).throw(ValueError("processor validation failed")),
+    )
+
+    with pytest.raises(ValueError, match="processor validation failed"):
+        builder.delete_processor_cascade(tmp_path, "holdings_lifecycle")
+
+    assert {path: path.read_bytes() for path in paths} == before
+
+
+@pytest.mark.unit
+def test_metric_delete_plan_blocks_dependent_metrics_and_names_target_tiles(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    catalog = load(tmp_path)
+
+    blocked = builder.metric_delete_plan(catalog, "HoldingsValue")
+    exact = builder.metric_delete_plan(catalog, "CTR")
+
+    assert blocked.dependent_metric_ids == ("HoldingsRate",)
+    assert blocked.tile_locations == ("overview/portfolio/holdings_value",)
+    assert exact.dependent_metric_ids == ()
+    assert exact.tile_locations == ("overview/portfolio/ctr",)
+    assert exact.page_filter_locations == ("overview/portfolio/Channel",)
+    with pytest.raises(ValueError, match=r"dependent metric.*HoldingsRate"):
+        builder.delete_metric_definition(tmp_path, "HoldingsValue", cascade_tiles=True)
+    assert list(load(tmp_path).metrics.metrics) == ["CTR", "HoldingsValue", "HoldingsRate"]
+
+
+@pytest.mark.unit
+def test_metric_delete_requires_explicit_tile_cascade_then_deletes_exact_target(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    before = {
+        path: path.read_bytes()
+        for path in [
+            tmp_path / "catalog" / "metrics.yaml",
+            tmp_path / "catalog" / "dashboards.yaml",
+            tmp_path / "ai.yaml",
+        ]
+    }
+
+    with pytest.raises(ValueError, match="choose the tile cascade explicitly"):
+        builder.delete_metric_definition(tmp_path, "CTR", cascade_tiles=False)
+    assert {path: path.read_bytes() for path in before} == before
+
+    deleted = builder.delete_metric_definition(tmp_path, "CTR", cascade_tiles=True)
+
+    assert deleted.metric_id == "CTR"
+    remaining = load(tmp_path)
+    assert list(remaining.metrics.metrics) == ["HoldingsValue", "HoldingsRate"]
+    assert [processor.id for processor in remaining.processors.processors] == [
+        "engagement",
+        "holdings_lifecycle",
+    ]
+    page = remaining.dashboards.dashboards[0].pages[0]
+    assert [tile.id for tile in page.tiles] == ["holdings_value", "holdings_rate"]
+    assert [filter_spec.field for filter_spec in page.filters] == ["HoldingType"]
+    ai_config = yaml.safe_load((tmp_path / "ai.yaml").read_text(encoding="utf-8"))
+    assert "CTR" not in ai_config["chat_with_data"]["metric_descriptions"]
+    assert "engagement" in ai_config["chat_with_data"]["metric_descriptions"]
+    ok, issues = builder.validate_workspace(tmp_path)
+    assert ok, issues
+
+
+@pytest.mark.unit
+def test_delete_metric_without_report_dependencies_is_valid(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    builder.write_metric_definition(
+        tmp_path,
+        "Unused",
+        {
+            "source": "engagement",
+            "kind": "formula",
+            "expression": {"col": "Count"},
+            "display": {"label": "Unused QA metric"},
+        },
+    )
+    builder.require_valid_workspace(tmp_path)
+
+    plan = builder.delete_metric_definition(tmp_path, "Unused", cascade_tiles=False)
+
+    assert plan.tile_locations == ()
+    assert "Unused" not in load(tmp_path).metrics.metrics
+
+
+@pytest.mark.unit
+def test_delete_metric_rolls_back_catalog_and_chat_on_validation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    paths = [
+        *(tmp_path / "catalog" / name for name in builder.CATALOG_FILENAMES),
+        tmp_path / "ai.yaml",
+    ]
+    before = {path: path.read_bytes() for path in paths}
+    monkeypatch.setattr(
+        builder,
+        "require_valid_workspace",
+        lambda _workspace: (_ for _ in ()).throw(ValueError("metric validation failed")),
+    )
+
+    with pytest.raises(ValueError, match="metric validation failed"):
+        builder.delete_metric_definition(tmp_path, "CTR", cascade_tiles=True)
+
+    assert {path: path.read_bytes() for path in paths} == before
 
 
 def _write_builder_catalog(workspace: Path) -> None:
@@ -2607,3 +5194,55 @@ def _numeric_distribution_catalog() -> model.Catalog:
             "dashboards": {"dashboards": []},
         }
     )
+
+
+@pytest.mark.unit
+def test_builder_continue_escalates_to_full_app_rerun() -> None:
+    """Continue is rendered from inside step fragments.
+
+    An ``on_click`` callback would advance session state but only rerun the
+    fragment, so the page would never move. Assigning the instantiated Jump
+    widget key inline raises StreamlitAPIException. The inline handler must
+    set only the plain step key and escalate with ``st.rerun(scope="app")``.
+    """
+
+    import inspect  # noqa: PLC0415 - focused source guard
+    import textwrap  # noqa: PLC0415 - focused source guard
+
+    source = textwrap.dedent(inspect.getsource(config_builder._render_continue_primary))
+    tree = ast.parse(source)
+
+    button_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "button"
+    ]
+    assert button_calls
+    for call in button_calls:
+        assert all(keyword.arg != "on_click" for keyword in call.keywords)
+
+    rerun_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "rerun"
+    ]
+    assert any(
+        any(
+            keyword.arg == "scope" and getattr(keyword.value, "value", None) == "app"
+            for keyword in call.keywords
+        )
+        for call in rerun_calls
+    )
+
+    assigned_keys = [
+        target.slice.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant)
+    ]
+    assert "builder_step_jump" not in assigned_keys

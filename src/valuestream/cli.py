@@ -393,7 +393,12 @@ def serve(workspace_dir: str, *, port: int, browser: bool) -> None:
         "--workspace",
         workspace_dir,
     ]
-    raise SystemExit(subprocess.run(args, check=False).returncode)
+    env = dict(os.environ)
+    # Keep Arrow off its bundled mimalloc: it segfaults in per-thread heap
+    # init on macOS arm64 under Streamlit's thread-per-rerun model. app.py
+    # sets the same default for direct `streamlit run` launches.
+    env.setdefault("ARROW_DEFAULT_MEMORY_POOL", "system")
+    raise SystemExit(subprocess.run(args, check=False, env=env).returncode)
 
 
 @main.command("serve-mcp")

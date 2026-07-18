@@ -24,7 +24,7 @@ docs/
   guides/           # task-oriented how-tos: users/, configuration/, operations/
   concepts/         # explanation: product, business, architecture, domain, adr/
   reference/        # information-oriented manuals: cli, dsl, processors, ...
-  design/           # engineering design & history: replacement design, plans, mockups
+  design/           # engineering design & history: the master replacement design
   meta/             # this guide
 ```
 
@@ -58,12 +58,6 @@ Read the concepts pages first for orientation, then go deep in this order.
 | 7 | [Readers & formats](../reference/readers-and-formats.md) | File-discovery rules, reader catalog, transform catalog | 25 min |
 | 8 | [Chart catalog](../reference/chart-catalog.md) | Plotly chart kinds, required tile fields, render outlines | 15 min |
 | 9 | [FAQ](../reference/faq.md) | Q&A by area: storage, config, ingestion, querying, ops, security | reference |
-| 10 | [Implementation plan](../design/implementation-plan.md) | Repo layout, tooling, phased delivery | 30 min |
-| 11 | [Reporting backlog](../design/reporting-backlog.md) | Current reporting-usability delivery backlog | 15 min |
-| 12 | [KPI recipe backlog](../design/kpi-recipe-backlog.md) | Shared KPI catalog and workflow delivery backlog | 15 min |
-
-Visual sketches (sitemap, ingestion flow, dashboard, tile anatomy, Builder,
-Pipelines) live in [`design/mockups/`](../design/mockups/index.html).
 
 ## Content Rules
 
@@ -81,7 +75,7 @@ Pipelines) live in [`design/mockups/`](../design/mockups/index.html).
   before roadmap content.
 - Include verification steps after procedures that change data or artifacts.
 - No phase numbers in filenames or titles — delivery history belongs in the
-  implementation plan and the changelog.
+  git history.
 - Every processor / metric / chart is referred to by its **kind** name (e.g.
   `binary_outcome`, `formula`, `line`) once introduced.
 - All YAML examples must validate against the JSON Schemas under `schemas/`.
@@ -117,8 +111,7 @@ all of these from the docs. If you can't, file a doc bug.
 - [ ] What chart kinds exist and what fields do they need? → chart catalog §3
 - [ ] What happens when config changes? → domain model §5; FAQ §A4–A5
 - [ ] How do I migrate from the legacy app? → migration guide; replacement design §12; FAQ §I
-- [ ] What's the build plan? → implementation plan §5–7
-- [ ] What technology and version do I need? → implementation plan §3
+- [ ] What technology and version do I need? → getting-started tutorial; `pyproject.toml`
 
 ## Maintenance Checklist
 

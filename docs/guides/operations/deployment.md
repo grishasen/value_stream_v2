@@ -50,6 +50,12 @@ Streamlit itself provides no authentication. For anything beyond a trusted
 network, put the UI behind a reverse proxy that terminates TLS and enforces
 access (e.g. nginx with SSO), and treat the host as single-tenant.
 
+The revised top-level Build entry is enabled by default. During a measured
+authoring rollout, set `VALUESTREAM_AUTHORING_V2=0` to hide that entry and keep
+the two authoring pages under Settings. See the
+[configuration authoring rollout runbook](authoring-rollout.md); the flag does
+not change YAML, transaction, validation, or ingestion semantics.
+
 ## Serving the API and MCP
 
 ```sh

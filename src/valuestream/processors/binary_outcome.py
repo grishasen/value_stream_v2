@@ -82,13 +82,19 @@ class BinaryOutcomeProcessor:
         source_schema = source.collect_schema()
         existing = set(source_schema.names())
         time_columns = grain_levels.chunk_time_group_columns(existing, self.config)
-        group_keys = [
-            column
-            for column in [*self.group_by_columns, *time_columns]
-            if column and column in existing
-        ]
+        group_keys = list(
+            dict.fromkeys(
+                column
+                for column in [*self.group_by_columns, *time_columns]
+                if column and column in existing
+            )
+        )
         variant_column = extra.get("variant_column")
-        if isinstance(variant_column, str) and variant_column in existing:
+        if (
+            isinstance(variant_column, str)
+            and variant_column in existing
+            and variant_column not in group_keys
+        ):
             group_keys.append(variant_column)
 
         agg_exprs = self._agg_exprs(existing, source_schema)

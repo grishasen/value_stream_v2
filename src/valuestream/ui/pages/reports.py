@@ -37,6 +37,13 @@ from valuestream.ui.data import (
     tile_to_dict,
 )
 from valuestream.ui.freshness import freshness_label
+from valuestream.ui.instrumentation import (
+    AuthoringEvent,
+    AuthoringOutcome,
+    AuthoringStage,
+    record_event,
+    workflow_from_handoff,
+)
 from valuestream.ui.presentation import resolve_tile_presentation
 from valuestream.ui.theme import dashboard_theme
 from valuestream.utils.logger import get_logger
@@ -198,14 +205,34 @@ ADVANCED_SETTING_KEYS = {
 
 def render(ctx: ValueStreamContext) -> None:
     """Render configured dashboards as the Value Stream reports workspace."""
+    handoff_workflow = workflow_from_handoff(st.query_params.get("from"))
     if not ctx.catalog.dashboards.dashboards:
+        if handoff_workflow is not None:
+            record_event(
+                st.session_state,
+                event=AuthoringEvent.FAILED,
+                workflow=handoff_workflow,
+                stage=AuthoringStage.REPORT,
+                outcome=AuthoringOutcome.BLOCKED,
+                once=True,
+            )
         components.render_page_header("Reports", "No dashboards configured.", status="pending")
         st.info("No dashboards configured.")
         return
+    if handoff_workflow is not None:
+        record_event(
+            st.session_state,
+            event=AuthoringEvent.REPORT_OPENED,
+            workflow=handoff_workflow,
+            stage=AuthoringStage.REPORT,
+            outcome=AuthoringOutcome.SUCCESS,
+            once=True,
+        )
 
     dashboard = _selected_dashboard(ctx)
     page = _selected_page(dashboard)
     freshnesses = _page_freshnesses(ctx, page)
+    latest_data_date, latest_data_label = _latest_page_data_coverage(freshnesses)
     first_fresh = freshnesses[0] if freshnesses else None
 
     components.render_page_header(
@@ -214,7 +241,11 @@ def render(ctx: ValueStreamContext) -> None:
     )
 
     dashboard, page, filters, start, end, view_mode, advanced_mode = _report_toolbar(
-        ctx, dashboard, page
+        ctx,
+        dashboard,
+        page,
+        latest_data_date=latest_data_date,
+        latest_data_label=latest_data_label,
     )
     inspect_mode = view_mode == REPORT_VIEW_INSPECT
     # ``freshnesses`` from above is still valid: the toolbar widgets read the
@@ -249,7 +280,12 @@ def render(ctx: ValueStreamContext) -> None:
 
 
 def _report_toolbar(
-    ctx: ValueStreamContext, dashboard: Any, page: Any
+    ctx: ValueStreamContext,
+    dashboard: Any,
+    page: Any,
+    *,
+    latest_data_date: dt.date | None = None,
+    latest_data_label: str | None = None,
 ) -> tuple[Any, Any, dict[str, Any], dt.date | None, dt.date | None, str, bool]:
     report_pages = tuple(
         report_page
@@ -303,6 +339,7 @@ def _report_toolbar(
                 ctx,
                 page,
                 capabilities=filter_capabilities,
+                latest_data_date=latest_data_date,
             )
             st.button(
                 "Clear",
@@ -321,6 +358,15 @@ def _report_toolbar(
             capabilities=filter_capabilities,
             report_pages=report_pages,
         )
+        active_preset = str(st.session_state.get(f"reports_time_preset_{page.id}") or "")
+        notice = _latest_data_notice(
+            active_preset,
+            today=dt.date.today(),
+            latest_data_date=latest_data_date,
+            latest_data_label=latest_data_label,
+        )
+        if notice:
+            st.caption(notice)
     return dashboard, page, filters, start, end, view_mode, bool(advanced_mode)
 
 
@@ -359,6 +405,7 @@ def _filter_controls(
     page: model.DashboardPage,
     *,
     capabilities: list[FilterCapability] | None = None,
+    latest_data_date: dt.date | None = None,
 ) -> tuple[dict[str, Any], dt.date | None, dt.date | None]:
     filters: dict[str, Any] = {}
     today = dt.date.today()
@@ -372,17 +419,12 @@ def _filter_controls(
         key=preset_key,
         format_func=_time_preset_label,
     )
-    start: dt.date | None = None
-    end: dt.date | None = None
-    if preset == "last_7_days":
-        start, end = today - dt.timedelta(days=6), today
-    elif preset == "last_30_days":
-        start, end = today - dt.timedelta(days=29), today
-    elif preset == "last_90_days":
-        start, end = today - dt.timedelta(days=89), today
-    elif preset == "year_to_date":
-        start, end = dt.date(today.year, 1, 1), today
-    elif preset == "custom":
+    start, end = _relative_time_bounds(
+        str(preset or ""),
+        today=today,
+        latest_data_date=latest_data_date,
+    )
+    if preset == "custom":
         selected_range = st.date_input(
             "Custom range",
             value=(today - dt.timedelta(days=30), today),
@@ -409,6 +451,43 @@ def _filter_controls(
         )
         filters.update(parse_filter_text(raw))
     return filters, start, end
+
+
+def _relative_time_bounds(
+    preset: str,
+    *,
+    today: dt.date,
+    latest_data_date: dt.date | None,
+) -> tuple[dt.date | None, dt.date | None]:
+    """Resolve relative report presets against the latest aggregate coverage."""
+
+    anchor = min(today, latest_data_date) if latest_data_date is not None else today
+    days = {
+        "last_7_days": 7,
+        "last_30_days": 30,
+        "last_90_days": 90,
+    }.get(preset)
+    if days is not None:
+        return anchor - dt.timedelta(days=days - 1), anchor
+    if preset == "year_to_date":
+        return dt.date(anchor.year, 1, 1), anchor
+    return None, None
+
+
+def _latest_data_notice(
+    preset: str,
+    *,
+    today: dt.date,
+    latest_data_date: dt.date | None,
+    latest_data_label: str | None,
+) -> str | None:
+    """Explain when a relative range is anchored before today's date."""
+
+    relative = preset in {"last_7_days", "last_30_days", "last_90_days", "year_to_date"}
+    if not relative or latest_data_date is None or latest_data_date >= today:
+        return None
+    through = latest_data_label or latest_data_date.isoformat()
+    return f"Showing latest available data (through {through})."
 
 
 def _time_preset_label(value: str) -> str:
@@ -463,7 +542,7 @@ def _filter_control(
             selected = st.multiselect(
                 capability.label,
                 options,
-                placeholder="Choose or type values",
+                placeholder="All — choose or type values",
                 accept_new_options=True,
                 key=key,
                 help=coverage,
@@ -522,9 +601,7 @@ def _filter_options(
     tile while retaining a fallback for an empty or not-yet-ready first plot.
     """
 
-    supported_tiles = [
-        tile for tile in page.tiles if tile.id in capability.supported_tile_ids
-    ]
+    supported_tiles = [tile for tile in page.tiles if tile.id in capability.supported_tile_ids]
     plot_tiles = [tile for tile in supported_tiles if tile.placement != "kpi_strip"]
     kpi_tiles = [tile for tile in supported_tiles if tile.placement == "kpi_strip"]
     for tile in [*plot_tiles, *kpi_tiles]:
@@ -599,9 +676,7 @@ def _filter_chip_labels(
     chips: list[str] = []
     if start and end:
         if time_preset:
-            chips.append(
-                f"{_time_preset_label(time_preset)} · {_compact_date_range(start, end)}"
-            )
+            chips.append(f"{_time_preset_label(time_preset)} · {_compact_date_range(start, end)}")
         else:
             chips.append(f"Time: {start.isoformat()} to {end.isoformat()}")
     chips.extend(f"{key}: {_filter_chip_value(value)}" for key, value in filters.items())
@@ -629,8 +704,7 @@ def _compact_date_range(start: dt.date, end: dt.date) -> str:
     separator = "\N{EN DASH}"
     if start.year != end.year:
         return (
-            f"{start_month} {start.day}, {start.year}{separator}"
-            f"{end_month} {end.day}, {end.year}"
+            f"{start_month} {start.day}, {start.year}{separator}{end_month} {end.day}, {end.year}"
         )
     if start.month == end.month:
         return f"{start_month} {start.day}{separator}{end.day}, {end.year}"
@@ -732,6 +806,49 @@ def _page_freshnesses(ctx: ValueStreamContext, page: Any) -> list[Any]:
         seen.add(key)
         out.append(cached_metric_freshness(ctx.workspace, ctx.catalog, metric, grain=grain))
     return out
+
+
+def _latest_page_data_coverage(freshnesses: Iterable[Any]) -> tuple[dt.date | None, str | None]:
+    """Return the latest usable date and its authored aggregate-period label."""
+
+    candidates: list[tuple[dt.date, str]] = []
+    for freshness in freshnesses:
+        label = str(getattr(freshness, "latest_period", "") or "").strip()
+        coverage_end = _aggregate_period_end(label)
+        if coverage_end is not None:
+            candidates.append((coverage_end, label))
+    if not candidates:
+        return None, None
+    return max(candidates, key=lambda item: item[0])
+
+
+def _aggregate_period_end(value: str) -> dt.date | None:
+    """Interpret aggregate period labels as inclusive coverage end dates."""
+
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return dt.date.fromisoformat(text[:10])
+    except ValueError:
+        pass
+    try:
+        month = dt.datetime.strptime(text[:7], "%Y-%m").date()
+    except ValueError:
+        month = None
+    if month is not None:
+        return dt.date(
+            month.year,
+            month.month,
+            calendar.monthrange(month.year, month.month)[1],
+        )
+    try:
+        year = int(text[:4])
+    except ValueError:
+        return None
+    if text[:4] == text:
+        return dt.date(year, 12, 31)
+    return None
 
 
 def _page_status_banner(
@@ -1347,6 +1464,24 @@ def _tile_card(
             elapsed_ms = (time.perf_counter() - start_time) * 1000
             is_native_table = str(tile_dict.get("chart", "")).casefold() == "table"
             table_data = _native_table_data(tile_dict, rows) if is_native_table else None
+            if rows.is_empty():
+                _render_empty_tile_result(
+                    header_slot,
+                    dashboard,
+                    page,
+                    configured_tile,
+                    tile_dict,
+                    grain=grain,
+                    fresh=fresh,
+                    rows=rows,
+                    inspect_mode=inspect_mode,
+                    filters=filters,
+                    start=start,
+                    end=end,
+                    ignored_filters=ignored_filters,
+                    elapsed_ms=elapsed_ms,
+                )
+                return
             figure = (
                 None
                 if is_native_table
@@ -1433,6 +1568,109 @@ def _tile_card(
             st.error(str(exc))
             with st.expander("Tile YAML", expanded=False):
                 st.code(yaml.safe_dump(tile_dict, sort_keys=False), language="yaml")
+
+
+def _render_empty_tile_result(
+    header_slot: Any,
+    dashboard: Any,
+    page: Any,
+    configured_tile: Mapping[str, Any],
+    tile_dict: dict[str, Any],
+    *,
+    grain: str,
+    fresh: Any,
+    rows: pl.DataFrame,
+    inspect_mode: bool,
+    filters: Mapping[str, Any],
+    start: dt.date | None,
+    end: dt.date | None,
+    ignored_filters: list[str] | tuple[str, ...],
+    elapsed_ms: float,
+) -> None:
+    with header_slot.container():
+        tile_inspect, _, _ = _tile_header(
+            dashboard,
+            page,
+            configured_tile,
+            tile_dict,
+            grain,
+            fresh,
+            rows,
+            None,
+            inspect_mode=inspect_mode,
+        )
+    _render_empty_tile_recovery(
+        page,
+        configured_tile,
+        filters=filters,
+        start=start,
+        end=end,
+        ignored_filters=ignored_filters,
+    )
+    if tile_inspect:
+        st.caption(f"{freshness_label(fresh)} | 0 row(s) | {elapsed_ms:.0f} ms")
+        _tile_inspectors(tile_dict, rows)
+
+
+def _empty_tile_message(
+    *,
+    filters: Mapping[str, Any],
+    start: dt.date | None,
+    end: dt.date | None,
+    ignored_filters: list[str] | tuple[str, ...],
+) -> tuple[str, bool]:
+    """Describe an empty aggregate result and whether broadening can recover it."""
+
+    active_scope: list[str] = []
+    if start and end:
+        active_scope.append(f"date range {start.isoformat()} to {end.isoformat()}")
+    if filters:
+        active_scope.append(f"{len(filters)} active filter(s)")
+    if active_scope:
+        ignored = (
+            " Some active filters are unsupported by this chart: "
+            + ", ".join(ignored_filters)
+            + "."
+            if ignored_filters
+            else ""
+        )
+        return (
+            "No aggregate rows match " + " and ".join(active_scope) + "." + ignored,
+            True,
+        )
+    return (
+        "Aggregate rows are not materialized for this metric and grain yet. "
+        "Run Data Load or inspect freshness before retrying.",
+        False,
+    )
+
+
+def _render_empty_tile_recovery(
+    page: Any,
+    tile: Mapping[str, Any],
+    *,
+    filters: Mapping[str, Any],
+    start: dt.date | None,
+    end: dt.date | None,
+    ignored_filters: list[str] | tuple[str, ...],
+) -> None:
+    message, recoverable = _empty_tile_message(
+        filters=filters,
+        start=start,
+        end=end,
+        ignored_filters=ignored_filters,
+    )
+    if not recoverable:
+        st.info(message, icon=":material/database:")
+        return
+    st.warning(message, icon=":material/filter_alt_off:")
+    if st.button(
+        "Show all available data",
+        key=f"reports_show_all_{page.id}_{tile.get('id', 'tile')}",
+        icon=":material/date_range:",
+    ):
+        _clear_filter_state(page)
+        st.rerun(scope="app")
 
 
 def _tile_header(

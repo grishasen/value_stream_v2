@@ -7,11 +7,14 @@ truth is the workspace catalog: ``pipelines.yaml``, ``processors.yaml``,
 
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 import traceback
 import uuid
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from enum import StrEnum
 from typing import Any
 
 import polars as pl
@@ -544,10 +547,23 @@ def catalog_prompt_dictionaries() -> dict[str, Any]:
     }
 
 
-def prompt_draft_sections(draft: dict[str, Any]) -> dict[str, Any]:
-    """Return the draft sections included in AI prompts."""
+def prompt_draft_sections(
+    draft: dict[str, Any],
+    *,
+    hidden_fields: list[str] | None = None,
+    preserve_fields: list[str] | None = None,
+) -> dict[str, Any]:
+    """Return prompt-safe draft sections with unapproved field names removed."""
 
-    return _prompt_draft(draft)
+    prompt_draft = _prompt_draft(draft)
+    if not hidden_fields:
+        return prompt_draft
+    redacted = redact_hidden_field_mentions(
+        prompt_draft,
+        hidden_fields,
+        preserve_fields=preserve_fields,
+    )
+    return redacted if isinstance(redacted, dict) else {}
 
 
 @dataclass(frozen=True)
@@ -562,6 +578,236 @@ class AICallSettings:
     reasoning_effort: str = ""
     verbosity: str = ""
     timeout_seconds: int = 90
+
+
+class AIProviderFailureCategory(StrEnum):
+    """Privacy-safe categories shared by AI provider call surfaces."""
+
+    CONFIGURATION = "configuration"
+    AUTHENTICATION = "authentication"
+    AUTHORIZATION = "authorization"
+    RATE_LIMIT = "rate_limit"
+    TIMEOUT = "timeout"
+    NETWORK = "network"
+    PROVIDER = "provider"
+    RESPONSE_VALIDATION = "response_validation"
+    INTERNAL = "internal"
+
+
+_AI_PROVIDER_CATEGORY_RETRYABLE: dict[AIProviderFailureCategory, bool] = {
+    AIProviderFailureCategory.CONFIGURATION: False,
+    AIProviderFailureCategory.AUTHENTICATION: False,
+    AIProviderFailureCategory.AUTHORIZATION: False,
+    AIProviderFailureCategory.RATE_LIMIT: True,
+    AIProviderFailureCategory.TIMEOUT: True,
+    AIProviderFailureCategory.NETWORK: True,
+    AIProviderFailureCategory.PROVIDER: True,
+    AIProviderFailureCategory.RESPONSE_VALIDATION: True,
+    AIProviderFailureCategory.INTERNAL: False,
+}
+
+
+@dataclass(frozen=True)
+class AIProviderFailureClassification:
+    """Bounded provider-failure metadata that is safe for logs and UI state."""
+
+    category: AIProviderFailureCategory
+    retryable: bool
+
+
+class AIProviderCallError(RuntimeError):
+    """A provider failure safe to show in UI and record in caller logs."""
+
+    def __init__(
+        self,
+        *,
+        call_id: str,
+        error_type: str,
+        permission_denied: bool,
+        category: AIProviderFailureCategory | str | None = None,
+    ) -> None:
+        self.call_id = call_id
+        self.error_type = error_type
+        self.permission_denied = permission_denied
+        self.category = _coerce_ai_provider_failure_category(
+            category,
+            permission_denied=permission_denied,
+        )
+        self.retryable = _AI_PROVIDER_CATEGORY_RETRYABLE[self.category]
+        detail = " due to insufficient permissions" if permission_denied else f" ({error_type})"
+        super().__init__(f"AI provider call failed{detail}. Reference: {call_id}.")
+
+
+class AIProviderResponseValidationError(ValueError):
+    """A provider response did not satisfy the bounded completion contract."""
+
+
+AI_PROVIDER_PREFLIGHT_MAX_TIMEOUT_SECONDS = 5
+_AI_PROVIDER_LOCAL_NAMES = frozenset({"local", "lm_studio", "ollama", "vllm"})
+
+
+@dataclass(frozen=True)
+class AIProviderPreflightReceipt:
+    """Privacy-safe receipt for one successful provider capability check."""
+
+    reference: str
+    timeout_seconds: int
+
+
+def validate_ai_provider_settings(settings: AICallSettings) -> None:
+    """Validate required provider settings locally without network work."""
+
+    if ai_provider_settings_configured(settings):
+        return
+    reference = uuid.uuid4().hex[:12]
+    logger.warning(
+        "LLM provider configuration blocked: reference=%s failure_category=configuration "
+        "retryable=False",
+        reference,
+    )
+    raise AIProviderCallError(
+        call_id=reference,
+        error_type="ProviderConfigurationError",
+        permission_denied=False,
+        category=AIProviderFailureCategory.CONFIGURATION,
+    )
+
+
+def ai_provider_settings_configured(settings: AICallSettings) -> bool:
+    """Return whether the settings can reach a hosted or local provider."""
+
+    model_name = settings.model.strip()
+    provider_name = (settings.custom_llm_provider or model_name.partition("/")[0]).casefold()
+    return bool(
+        model_name
+        and (settings.api_key or settings.api_base or provider_name in _AI_PROVIDER_LOCAL_NAMES)
+    )
+
+
+def ai_provider_preflight_cache_key(
+    settings: AICallSettings,
+    *,
+    capability: str = "chat_completion",
+) -> str:
+    """Return a secret-free fingerprint for a session preflight cache."""
+
+    credential_digest = (
+        hashlib.sha256(settings.api_key.encode("utf-8")).hexdigest() if settings.api_key else ""
+    )
+    payload = "\x1f".join(
+        (
+            capability,
+            settings.model,
+            settings.custom_llm_provider,
+            settings.api_base,
+            credential_digest,
+        )
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def preflight_ai_provider(
+    settings: AICallSettings,
+    *,
+    call: Callable[..., str] | None = None,
+) -> AIProviderPreflightReceipt:
+    """Run one independent, bounded READY check for a configured provider."""
+
+    validate_ai_provider_settings(settings)
+    reference = uuid.uuid4().hex[:12]
+    timeout_seconds = min(
+        max(1, int(settings.timeout_seconds)),
+        AI_PROVIDER_PREFLIGHT_MAX_TIMEOUT_SECONDS,
+    )
+    preflight_settings = replace(settings, timeout_seconds=timeout_seconds)
+    provider_call = call or call_litellm
+    logger.info(
+        "LLM provider preflight started: reference=%s timeout_seconds=%s",
+        reference,
+        timeout_seconds,
+    )
+    response: Any = None
+    failure: AIProviderCallError | None = None
+    try:
+        response = provider_call(
+            preflight_settings,
+            "Reply with READY.",
+            system_prompt=(
+                "This is a capability preflight. Do not request or infer data. "
+                "Reply with READY only."
+            ),
+        )
+    except AIProviderCallError as exc:
+        logger.warning(
+            "LLM provider preflight failed: reference=%s failure_category=%s retryable=%s",
+            exc.call_id,
+            exc.category,
+            exc.retryable,
+        )
+        raise
+    except PermissionError:
+        # Caller-owned local policy gates, including Studio sharing consent, are
+        # deliberately not reclassified as provider failures.
+        raise
+    except Exception as exc:
+        classification = classify_ai_provider_failure(exc)
+        failure = AIProviderCallError(
+            call_id=reference,
+            error_type=_safe_error_type_for_log(exc),
+            permission_denied=classification.category
+            in {
+                AIProviderFailureCategory.AUTHENTICATION,
+                AIProviderFailureCategory.AUTHORIZATION,
+            },
+            category=classification.category,
+        )
+
+    if failure is not None:
+        logger.warning(
+            "LLM provider preflight failed: reference=%s failure_category=%s retryable=%s",
+            failure.call_id,
+            failure.category,
+            failure.retryable,
+        )
+        raise failure
+    if not isinstance(response, str) or response.strip().casefold() != "ready":
+        failure = AIProviderCallError(
+            call_id=reference,
+            error_type="AIProviderPreflightResponseError",
+            permission_denied=False,
+            category=AIProviderFailureCategory.RESPONSE_VALIDATION,
+        )
+        logger.warning(
+            "LLM provider preflight failed: reference=%s failure_category=%s retryable=%s",
+            failure.call_id,
+            failure.category,
+            failure.retryable,
+        )
+        raise failure
+    logger.info("LLM provider preflight completed: reference=%s status=ready", reference)
+    return AIProviderPreflightReceipt(reference=reference, timeout_seconds=timeout_seconds)
+
+
+@dataclass(frozen=True)
+class DraftCandidateResult:
+    """Result of a bounded generate, parse, merge, and validate operation.
+
+    Invalid model output is deliberately not exposed as a candidate. Callers can
+    keep the previously accepted revision in place and show ``issues`` as a safe
+    retry receipt instead of accidentally placing broken YAML into review state.
+    """
+
+    draft: dict[str, Any] | None
+    issues: tuple[str, ...]
+    attempts: int
+    last_response: str = ""
+    failure_stage: str = ""
+
+    @property
+    def ok(self) -> bool:
+        """Return whether a validated candidate is available."""
+
+        return self.draft is not None and not self.issues
 
 
 def generate_schema_preview(
@@ -772,6 +1018,69 @@ def merge_draft_sections(base_draft: dict[str, Any], sections: dict[str, Any]) -
     return merged
 
 
+def generate_validated_candidate(
+    *,
+    base_draft: dict[str, Any],
+    prompt: str,
+    call: Callable[[str], str],
+    repair_prompt: Callable[[dict[str, Any], list[str], str], str],
+    max_repairs: int = 2,
+) -> DraftCandidateResult:
+    """Generate one valid catalog candidate with at most two internal repairs.
+
+    The operation boundary is intentionally small and deterministic: every model
+    response is parsed, merged onto the same accepted base, and fully validated
+    before it can leave this function. A repair response may replace complete
+    sections of the latest parseable attempt, while an unparseable response falls
+    back to the accepted base. Provider exceptions are allowed to propagate so the
+    UI can preserve their safe call reference and offer an explicit retry.
+    """
+
+    repairs_remaining = min(max(int(max_repairs), 0), 2)
+    current_prompt = prompt
+    repair_base = _deepcopy_yaml(base_draft)
+    last_response = ""
+    issues: list[str] = []
+    failure_stage = ""
+
+    for attempt in range(1, repairs_remaining + 2):
+        last_response = call(current_prompt)
+        try:
+            sections = parse_ai_yaml_sections(last_response)
+        except (TypeError, ValueError, yaml.YAMLError):
+            failure_stage = "parse"
+            issues = [
+                "The model response was not valid catalog YAML. Return complete catalog sections."
+            ]
+            candidate = repair_base
+            trace = "Model response parsing failed before catalog validation."
+        else:
+            candidate = merge_draft_sections(repair_base, sections)
+            ok, issues = validate_draft_catalog(candidate)
+            if ok:
+                return DraftCandidateResult(
+                    draft=candidate,
+                    issues=(),
+                    attempts=attempt,
+                    last_response=last_response,
+                )
+            failure_stage = "validation"
+            repair_base = candidate
+            trace = validation_trace_for_repair(candidate)
+
+        if attempt > repairs_remaining:
+            break
+        current_prompt = repair_prompt(candidate, list(issues), trace)
+
+    return DraftCandidateResult(
+        draft=None,
+        issues=tuple(issues),
+        attempts=repairs_remaining + 1,
+        last_response=last_response,
+        failure_stage=failure_stage,
+    )
+
+
 def filter_draft_by_selection(
     draft: dict[str, Any],
     *,
@@ -965,55 +1274,380 @@ def call_litellm(
     if settings.custom_llm_provider:
         request_kwargs["custom_llm_provider"] = settings.custom_llm_provider
 
-    logger.info(
-        "LLM call started: call_id=%s settings=%s system_prompt=%r user_prompt=%r",
-        call_id,
-        _litellm_log_settings(settings),
-        system_prompt,
-        prompt,
-    )
+    log_settings = _litellm_log_settings(settings)
+    logger.info("LLM call started: call_id=%s settings=%s", call_id, log_settings)
     started_at = time.perf_counter()
     try:
         response = litellm_completion(**request_kwargs)
         content = _litellm_message_content(response)
-    except Exception:
-        logger.exception(
-            "LLM call failed: call_id=%s duration_ms=%.2f",
+    except Exception as exc:
+        error_type = _safe_error_type_for_log(exc)
+        classification = classify_ai_provider_failure(exc)
+        logger.error(
+            "LLM call failed: call_id=%s model=%s duration_ms=%.2f status=error "
+            "failure_category=%s retryable=%s error_type=%s",
             call_id,
+            log_settings["model"],
             (time.perf_counter() - started_at) * 1000,
+            classification.category,
+            classification.retryable,
+            error_type,
         )
-        raise
-    logger.info(
-        "LLM call completed: call_id=%s duration_ms=%.2f response=%r",
-        call_id,
-        (time.perf_counter() - started_at) * 1000,
-        content,
-    )
-    return content
+        failure = AIProviderCallError(
+            call_id=call_id,
+            error_type=error_type,
+            permission_denied=classification.category
+            in {
+                AIProviderFailureCategory.AUTHENTICATION,
+                AIProviderFailureCategory.AUTHORIZATION,
+            },
+            category=classification.category,
+        )
+    else:
+        response_metadata = _litellm_response_log_metadata(response)
+        logger.info(
+            "LLM call completed: call_id=%s model=%s duration_ms=%.2f metadata=%s",
+            call_id,
+            log_settings["model"],
+            (time.perf_counter() - started_at) * 1000,
+            response_metadata,
+        )
+        return content
+
+    # Raise outside the provider exception handler so caller tracebacks cannot
+    # retain or re-log the raw exception text, request body, credentials, or paths.
+    raise failure
 
 
 def _litellm_log_settings(settings: AICallSettings) -> dict[str, Any]:
     return {
-        "model": settings.model,
-        "api_base": settings.api_base,
-        "custom_llm_provider": settings.custom_llm_provider,
+        "model": _safe_model_for_log(settings.model),
+        "has_api_base": bool(settings.api_base),
+        "has_custom_llm_provider": bool(settings.custom_llm_provider),
         "temperature": settings.temperature,
-        "reasoning_effort": settings.reasoning_effort,
-        "verbosity": settings.verbosity,
+        "has_reasoning_effort": bool(settings.reasoning_effort),
+        "has_verbosity": bool(settings.verbosity),
         "timeout_seconds": settings.timeout_seconds,
         "has_api_key": bool(settings.api_key),
     }
 
 
+def _safe_model_for_log(model: str) -> str:
+    """Return a useful model identifier without exposing filesystem locations."""
+
+    value = model.strip()
+    normalized = value.replace("\\", "/")
+    local_path_markers = ("/Users/", "/home/", "/private/", "/tmp/", "/var/folders/")
+    if (
+        not value
+        or value.startswith(("/", "~", "./", "../", "file:", "http://", "https://"))
+        or re.match(r"^[A-Za-z]:[\\/]", value)
+        or any(marker in normalized for marker in local_path_markers)
+        or any(character in value for character in "\r\n\t")
+    ):
+        return "<redacted-model>"
+    return value[:128]
+
+
+def _litellm_response_log_metadata(response: Any) -> dict[str, Any]:
+    """Return non-content response metadata suitable for routine logs."""
+
+    metadata: dict[str, Any] = {"status": "success"}
+    choices = _field(response, "choices")
+    if choices:
+        finish_reason = _safe_status_for_log(_field(choices[0], "finish_reason"))
+        if finish_reason:
+            metadata["status"] = finish_reason
+
+    usage = _field(response, "usage")
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        count = _field(usage, key)
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            metadata[key] = count
+    return metadata
+
+
+def _safe_status_for_log(value: Any) -> str:
+    """Return a bounded provider status without accepting arbitrary text."""
+
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip().lower()
+    if normalized in {
+        "stop",
+        "length",
+        "tool_calls",
+        "function_call",
+        "content_filter",
+        "cancelled",
+        "timeout",
+        "error",
+    }:
+        return normalized
+    return "other"
+
+
+def _safe_error_type_for_log(exc: Exception) -> str:
+    """Return a bounded exception class name without provider-controlled text."""
+
+    name = type(exc).__name__
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", name):
+        return name
+    return "ProviderError"
+
+
+def classify_ai_provider_failure(exc: Exception) -> AIProviderFailureClassification:
+    """Classify a failure without inspecting provider-controlled message text."""
+
+    status_code = _provider_failure_status_code(exc)
+    error_code = _provider_failure_code(exc)
+    type_names = _provider_failure_type_names(exc)
+    category = _provider_failure_category(status_code, error_code, type_names)
+
+    return AIProviderFailureClassification(
+        category=category,
+        retryable=_AI_PROVIDER_CATEGORY_RETRYABLE[category],
+    )
+
+
+_PROVIDER_FAILURE_EXACT_STATUS: dict[int, AIProviderFailureCategory] = {
+    401: AIProviderFailureCategory.AUTHENTICATION,
+    403: AIProviderFailureCategory.AUTHORIZATION,
+    408: AIProviderFailureCategory.TIMEOUT,
+    429: AIProviderFailureCategory.RATE_LIMIT,
+    504: AIProviderFailureCategory.TIMEOUT,
+}
+_PROVIDER_CONFIGURATION_STATUS = frozenset({400, 404, 405, 409, 410, 412, 415, 422})
+_PROVIDER_FAILURE_CATEGORY_ORDER = (
+    AIProviderFailureCategory.AUTHENTICATION,
+    AIProviderFailureCategory.AUTHORIZATION,
+    AIProviderFailureCategory.RATE_LIMIT,
+    AIProviderFailureCategory.TIMEOUT,
+    AIProviderFailureCategory.NETWORK,
+    AIProviderFailureCategory.RESPONSE_VALIDATION,
+    AIProviderFailureCategory.CONFIGURATION,
+    AIProviderFailureCategory.PROVIDER,
+)
+_PROVIDER_FAILURE_CODES: dict[AIProviderFailureCategory, frozenset[str]] = {
+    AIProviderFailureCategory.CONFIGURATION: frozenset(
+        {
+            "bad_request",
+            "configuration_error",
+            "context_length_exceeded",
+            "invalid_model",
+            "invalid_request",
+            "model_not_found",
+            "unsupported_parameter",
+        }
+    ),
+    AIProviderFailureCategory.AUTHENTICATION: frozenset(
+        {
+            "authentication_error",
+            "invalid_api_key",
+            "invalid_authentication",
+            "unauthorized",
+        }
+    ),
+    AIProviderFailureCategory.AUTHORIZATION: frozenset(
+        {
+            "authorization_error",
+            "forbidden",
+            "insufficient_permissions",
+            "permission_denied",
+        }
+    ),
+    AIProviderFailureCategory.RATE_LIMIT: frozenset(
+        {
+            "insufficient_quota",
+            "rate_limit",
+            "rate_limit_error",
+            "rate_limit_exceeded",
+            "too_many_requests",
+        }
+    ),
+    AIProviderFailureCategory.TIMEOUT: frozenset({"request_timeout", "timed_out", "timeout"}),
+    AIProviderFailureCategory.NETWORK: frozenset(
+        {
+            "api_connection_error",
+            "connection_error",
+            "connection_refused",
+            "network_error",
+        }
+    ),
+    AIProviderFailureCategory.PROVIDER: frozenset(
+        {"api_error", "provider_error", "server_error", "service_unavailable"}
+    ),
+    AIProviderFailureCategory.RESPONSE_VALIDATION: frozenset(
+        {"invalid_response", "response_validation_error"}
+    ),
+    AIProviderFailureCategory.INTERNAL: frozenset(),
+}
+
+
+_PROVIDER_FAILURE_TYPE_NAMES: dict[AIProviderFailureCategory, frozenset[str]] = {
+    AIProviderFailureCategory.CONFIGURATION: frozenset(
+        {
+            "badrequesterror",
+            "configurationerror",
+            "configerror",
+            "contentpolicyviolationerror",
+            "contextwindowexceedederror",
+            "invalidrequesterror",
+            "notfounderror",
+            "unprocessableentityerror",
+            "unsupportedparamserror",
+        }
+    ),
+    AIProviderFailureCategory.AUTHENTICATION: frozenset(
+        {"authenticationerror", "unauthorizederror"}
+    ),
+    AIProviderFailureCategory.AUTHORIZATION: frozenset(
+        {"authorizationerror", "permissiondeniederror"}
+    ),
+    AIProviderFailureCategory.RATE_LIMIT: frozenset({"ratelimiterror", "toomanyrequestserror"}),
+    AIProviderFailureCategory.TIMEOUT: frozenset(
+        {
+            "apitimeouterror",
+            "connecttimeout",
+            "pooltimeout",
+            "readtimeout",
+            "requesttimeouterror",
+            "timeout",
+            "timeouterror",
+            "writetimeout",
+        }
+    ),
+    AIProviderFailureCategory.NETWORK: frozenset(
+        {
+            "apiconnectionerror",
+            "clientconnectionerror",
+            "connecterror",
+            "connectionabortederror",
+            "connectionerror",
+            "connectionrefusederror",
+            "connectionreseterror",
+            "networkerror",
+            "serverconnectionerror",
+        }
+    ),
+    AIProviderFailureCategory.PROVIDER: frozenset(
+        {
+            "apierror",
+            "badgatewayerror",
+            "internalservererror",
+            "serviceunavailableerror",
+        }
+    ),
+    AIProviderFailureCategory.RESPONSE_VALIDATION: frozenset(
+        {
+            "aiproviderresponsevalidationerror",
+            "jsondecodeerror",
+            "responsevalidationerror",
+            "validationerror",
+        }
+    ),
+    AIProviderFailureCategory.INTERNAL: frozenset(),
+}
+
+
+def _provider_failure_category(
+    status_code: int | None,
+    error_code: str,
+    type_names: frozenset[str],
+) -> AIProviderFailureCategory:
+    if status_code in _PROVIDER_FAILURE_EXACT_STATUS:
+        return _PROVIDER_FAILURE_EXACT_STATUS[status_code]
+    for category in _PROVIDER_FAILURE_CATEGORY_ORDER:
+        if error_code in _PROVIDER_FAILURE_CODES[category]:
+            return category
+    for category in _PROVIDER_FAILURE_CATEGORY_ORDER:
+        if type_names & _PROVIDER_FAILURE_TYPE_NAMES[category]:
+            return category
+    if status_code in _PROVIDER_CONFIGURATION_STATUS:
+        return AIProviderFailureCategory.CONFIGURATION
+    if status_code is not None and 500 <= status_code <= 599:
+        return AIProviderFailureCategory.PROVIDER
+    return AIProviderFailureCategory.INTERNAL
+
+
+def _coerce_ai_provider_failure_category(
+    category: AIProviderFailureCategory | str | None,
+    *,
+    permission_denied: bool,
+) -> AIProviderFailureCategory:
+    if category is None:
+        return (
+            AIProviderFailureCategory.AUTHORIZATION
+            if permission_denied
+            else AIProviderFailureCategory.PROVIDER
+        )
+    try:
+        return AIProviderFailureCategory(category)
+    except ValueError:
+        return (
+            AIProviderFailureCategory.AUTHORIZATION
+            if permission_denied
+            else AIProviderFailureCategory.PROVIDER
+        )
+
+
+def _provider_failure_type_names(exc: Exception) -> frozenset[str]:
+    """Return bounded class names from the exception hierarchy."""
+
+    names: set[str] = set()
+    for cls in type(exc).__mro__:
+        name = cls.__name__
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", name):
+            names.add(name.casefold())
+    return frozenset(names)
+
+
+def _provider_failure_status_code(exc: Exception) -> int | None:
+    """Return a bounded HTTP status without reading exception text or bodies."""
+
+    owners = [exc]
+    response = _safe_exception_attribute(exc, "response")
+    if response is not None:
+        owners.append(response)
+    for owner in owners:
+        for attribute in ("status_code", "http_status", "status"):
+            value = _safe_exception_attribute(owner, attribute)
+            if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+                return value
+            if isinstance(value, str) and re.fullmatch(r"[1-5][0-9]{2}", value):
+                return int(value)
+    return None
+
+
+def _provider_failure_code(exc: Exception) -> str:
+    """Return an allowlist-shaped provider code without reading error messages."""
+
+    for attribute in ("code", "error_code"):
+        value = _safe_exception_attribute(exc, attribute)
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip().casefold().replace("-", "_").replace(".", "_")
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", normalized):
+            return normalized
+    return ""
+
+
+def _safe_exception_attribute(value: Any, attribute: str) -> Any:
+    try:
+        return getattr(value, attribute, None)
+    except Exception:  # pragma: no cover - defensive third-party exception behavior
+        return None
+
+
 def _litellm_message_content(response: Any) -> str:
     choices = _field(response, "choices")
     if not choices:
-        raise ValueError("LiteLLM response did not include choices")
+        raise AIProviderResponseValidationError("LiteLLM response did not include choices")
     first = choices[0]
     message = _field(first, "message")
     content = _field(message, "content")
     if content is None:
-        raise ValueError("LiteLLM response did not include message content")
+        raise AIProviderResponseValidationError("LiteLLM response did not include message content")
     return str(content)
 
 
@@ -1037,31 +1671,64 @@ def _catalog_prompt(
     validation_issues: list[str] | None = None,
     validation_trace: str = "",
 ) -> str:
+    hidden_names = {field.casefold() for field in hidden_fields}
+    prompt_approved_fields = [
+        field for field in approved_fields if field.casefold() not in hidden_names
+    ]
+    prompt_approved_schema = [
+        row
+        for row in approved_schema
+        if str(row.get("column") or "").casefold() not in hidden_names
+    ]
+    prompt_approved_schema = redact_hidden_field_mentions(
+        prompt_approved_schema,
+        hidden_fields,
+        preserve_fields=prompt_approved_fields,
+    )
+    safe_file_name = redact_hidden_field_mentions(
+        file_name, hidden_fields, preserve_fields=prompt_approved_fields
+    )
+    safe_user_goals = redact_hidden_field_mentions(
+        user_goals, hidden_fields, preserve_fields=prompt_approved_fields
+    )
+    safe_change_request = redact_hidden_field_mentions(
+        change_request, hidden_fields, preserve_fields=prompt_approved_fields
+    )
+    safe_validation_issues = redact_hidden_field_mentions(
+        validation_issues or [],
+        hidden_fields,
+        preserve_fields=prompt_approved_fields,
+    )
+    safe_validation_trace = redact_hidden_field_mentions(
+        validation_trace, hidden_fields, preserve_fields=prompt_approved_fields
+    )
+    safe_extra_rules = redact_hidden_field_mentions(
+        extra_rules, hidden_fields, preserve_fields=prompt_approved_fields
+    )
     goals_text = ""
-    if user_goals.strip():
+    if safe_user_goals.strip():
         goals_text = (
             "Business requirements from the user. Satisfy each requirement with concrete "
             "processors, metrics, and report tiles where the approved schema allows it; "
             "skip requirements the schema cannot support:\n"
-            f"{user_goals.strip()}\n\n"
+            f"{safe_user_goals.strip()}\n\n"
         )
     change_text = ""
-    if change_request.strip():
-        change_text = f"Change request from the user:\n{change_request.strip()}\n\n"
+    if safe_change_request.strip():
+        change_text = f"Change request from the user:\n{safe_change_request.strip()}\n\n"
     issue_text = ""
-    if validation_issues:
+    if safe_validation_issues:
         issue_text = "\nValidation errors to fix:\n" + yaml.safe_dump(
-            validation_issues, sort_keys=False
+            safe_validation_issues, sort_keys=False
         )
-    if validation_trace.strip():
+    if safe_validation_trace.strip():
         issue_text += "\nValidation exception traceback, if available:\n"
-        issue_text += validation_trace.strip()
+        issue_text += safe_validation_trace.strip()
         issue_text += "\n"
-    rules = "\n".join(f"- {rule}" for rule in extra_rules)
+    rules = "\n".join(f"- {rule}" for rule in safe_extra_rules)
     field_roles = _approved_field_role_dictionary(
-        approved_schema,
-        approved_fields=approved_fields,
-        hidden_fields=hidden_fields,
+        prompt_approved_schema,
+        approved_fields=prompt_approved_fields,
     )
     hard_rules = "\n".join(f"- {rule}" for rule in _hard_output_rules())
     final_self_check = "\n".join(
@@ -1071,7 +1738,7 @@ def _catalog_prompt(
         f"{task}\n\n"
         f"{goals_text}"
         f"{change_text}"
-        f"Source sample: {file_name}\n\n"
+        f"Source sample: {safe_file_name}\n\n"
         "Application structure dictionary:\n"
         f"{yaml.safe_dump(_APPLICATION_STRUCTURE_DICTIONARY, sort_keys=False)}\n"
         "Catalog schema dictionary:\n"
@@ -1088,10 +1755,11 @@ def _catalog_prompt(
         f"{yaml.safe_dump(field_roles, sort_keys=False)}\n"
         f"Rules:\n{rules}\n\n"
         f"Hard output rules:\n{hard_rules}\n\n"
-        f"Approved fields:\n{yaml.safe_dump(approved_fields, sort_keys=False)}\n"
-        f"Hidden fields:\n{yaml.safe_dump(hidden_fields, sort_keys=False)}\n"
-        f"Approved schema preview:\n{yaml.safe_dump(approved_schema, sort_keys=False)}\n"
-        f"Current draft:\n{yaml.safe_dump(_prompt_draft(current_draft), sort_keys=False)}"
+        f"Approved fields:\n{yaml.safe_dump(prompt_approved_fields, sort_keys=False)}\n"
+        f"Hidden field count: {len(hidden_fields)}\n"
+        f"Approved schema preview:\n{yaml.safe_dump(prompt_approved_schema, sort_keys=False)}\n"
+        "Current draft:\n"
+        f"{yaml.safe_dump(prompt_draft_sections(current_draft, hidden_fields=hidden_fields, preserve_fields=prompt_approved_fields), sort_keys=False)}"
         f"{issue_text}\n\n"
         f"Final self-check before returning:\n{final_self_check}\n\n"
         "Return valid YAML only. Do not wrap the answer in prose or Markdown fences."
@@ -1102,14 +1770,12 @@ def _approved_field_role_dictionary(
     approved_schema: list[dict[str, Any]],
     *,
     approved_fields: list[str],
-    hidden_fields: list[str],
 ) -> dict[str, list[str]]:
     schema_by_field = {
         str(row.get("column")): row
         for row in approved_schema
         if isinstance(row, dict) and row.get("column") is not None
     }
-    hidden = set(hidden_fields)
     roles: dict[str, list[str]] = {
         "safe_dimension_candidates": [],
         "time_candidates": [],
@@ -1125,9 +1791,6 @@ def _approved_field_role_dictionary(
         dtype = str(row.get("dtype", "")).casefold()
         unique = _safe_int(row.get("unique"))
         normalized = field.casefold()
-        if field in hidden:
-            roles["avoid_for_group_by_or_filters"].append(field)
-            continue
         if _is_time_field(field, dtype):
             roles["time_candidates"].append(field)
         if _is_numeric_dtype(dtype) and not _looks_like_identifier(field):
@@ -1148,6 +1811,68 @@ def _approved_field_role_dictionary(
         ):
             roles["clv_candidates"].append(field)
     return {key: _dedupe(values) for key, values in roles.items()}
+
+
+def redact_hidden_field_mentions(
+    value: Any,
+    hidden_fields: list[str],
+    *,
+    preserve_fields: list[str] | None = None,
+) -> Any:
+    """Recursively replace unapproved field-name mentions in dynamic prompt data.
+
+    A hidden name is redacted even inside a longer identifier, because generated
+    object ids such as ``CustomerID_metric`` derive from the hidden field. The
+    exception is an identifier that belongs to a preserved (approved) field:
+    hidden ``Outcome`` must not corrupt approved ``OutcomeTime`` — a different
+    field — or the model would receive a schema it cannot satisfy.
+    """
+
+    preserved = {field.casefold() for field in (preserve_fields or []) if field}
+    rules = tuple(
+        (
+            re.compile(rf"[A-Za-z0-9_]*{re.escape(field)}[A-Za-z0-9_]*", re.IGNORECASE),
+            re.compile(re.escape(field), re.IGNORECASE),
+            # Preserved names that contain this hidden name: an identifier built
+            # from one of them mentions the hidden name only via the approved
+            # field, so it must stay intact.
+            tuple(name for name in preserved if field.casefold() in name),
+        )
+        for field in sorted({field for field in hidden_fields if field}, key=len, reverse=True)
+    )
+
+    def redact_token(token: str, mention: re.Pattern[str], covering: tuple[str, ...]) -> str:
+        folded = token.casefold()
+        if folded in preserved or any(name in folded for name in covering):
+            return token
+        return mention.sub("<hidden-field>", token)
+
+    def redact_text(text: str) -> str:
+        for token_pattern, mention, covering in rules:
+            text = token_pattern.sub(
+                lambda match, mention=mention, covering=covering: redact_token(
+                    match.group(0), mention, covering
+                ),
+                text,
+            )
+        return text
+
+    def redact(item: Any) -> Any:
+        if isinstance(item, str):
+            return redact_text(item)
+        if isinstance(item, dict):
+            cleaned: dict[Any, Any] = {}
+            for key, nested_item in item.items():
+                safe_key = redact(key) if isinstance(key, str) else key
+                cleaned[safe_key] = redact(nested_item)
+            return cleaned
+        if isinstance(item, list):
+            return [redact(nested_item) for nested_item in item]
+        if isinstance(item, tuple):
+            return tuple(redact(nested_item) for nested_item in item)
+        return item
+
+    return redact(value)
 
 
 def _hard_output_rules() -> tuple[str, ...]:

@@ -118,6 +118,34 @@ def test_filter_dedup_variant_group_by_and_value_states() -> None:
     assert hll.estimate(out["Customers"][0]) == pytest.approx(2, rel=0.02)
 
 
+def test_duplicate_variant_group_key_is_defensively_deduplicated() -> None:
+    processor = _processor(
+        {
+            "id": "p",
+            "source": "ih",
+            "kind": "binary_outcome",
+            "group_by": ["Variant"],
+            "variant_column": "Variant",
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
+        }
+    )
+    frame = pl.DataFrame(
+        {
+            "Variant": ["Test", "Control"],
+            "Outcome": ["Clicked", "Impression"],
+        }
+    )
+
+    out = processor.chunk_aggregate(frame.lazy(), _ctx())
+
+    assert out.columns.count("Variant") == 1
+    assert out.select("Count").sum().item() == 2
+
+
 def test_topk_recipe_state_builds_from_any_configured_source_field() -> None:
     processor = _processor(
         {

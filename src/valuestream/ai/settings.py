@@ -24,7 +24,7 @@ def load_llm_settings_config(workspace: str | Path) -> tuple[Path | None, dict[s
     """Load ``ai.llm`` settings from a workspace-local AI config file."""
 
     root = Path(workspace)
-    logger.debug("Loading AI LLM settings: workspace=%s", root)
+    logger.debug("Loading AI LLM settings")
     for path in _candidate_config_paths(root):
         loaded = _read_ai_config(path)
         if loaded is None:
@@ -33,19 +33,18 @@ def load_llm_settings_config(workspace: str | Path) -> tuple[Path | None, dict[s
             return path, {}
         ai_config = loaded.get("ai", loaded)
         if not isinstance(ai_config, dict):
-            logger.warning("Ignoring AI settings file with non-mapping ai section: path=%s", path)
+            logger.warning("Ignoring AI settings file with non-mapping ai section")
             return path, {}
         llm_config = ai_config.get("llm", ai_config)
         if not isinstance(llm_config, dict):
-            logger.warning("Ignoring AI settings file with non-mapping llm section: path=%s", path)
+            logger.warning("Ignoring AI settings file with non-mapping llm section")
             return path, {}
         logger.info(
-            "Loaded AI LLM settings: path=%s keys=%s",
-            path,
+            "Loaded AI LLM settings: keys=%s",
             sorted(key for key in llm_config if key != "api_key"),
         )
         return path, llm_config
-    logger.debug("No AI LLM settings file found: workspace=%s", root)
+    logger.debug("No AI LLM settings file found")
     return None, {}
 
 
@@ -53,7 +52,7 @@ def load_chat_with_data_config(workspace: str | Path) -> tuple[Path | None, dict
     """Load chat-only prompt and description settings from workspace ``ai.yaml``."""
 
     root = Path(workspace)
-    logger.debug("Loading Chat With Data settings: workspace=%s", root)
+    logger.debug("Loading Chat With Data settings")
     for path in _candidate_config_paths(root):
         loaded = _read_ai_config(path)
         if loaded is None:
@@ -67,7 +66,7 @@ def load_chat_with_data_config(workspace: str | Path) -> tuple[Path | None, dict
         if not isinstance(chat_config, dict):
             return path, _default_chat_with_data_config()
         return path, _normalize_chat_with_data_config(chat_config)
-    logger.debug("No Chat With Data settings file found: workspace=%s", root)
+    logger.debug("No Chat With Data settings file found")
     return None, _default_chat_with_data_config()
 
 
@@ -154,11 +153,11 @@ def _candidate_config_paths(root: Path) -> list[Path]:
 
 def _read_ai_config(path: Path) -> Any | None:
     if not path.is_file():
-        logger.debug("Skipping AI settings candidate because it is not a file: path=%s", path)
+        logger.debug("Skipping AI settings candidate because it is not a file")
         return None
     loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(loaded, dict):
-        logger.warning("Ignoring AI settings file with non-mapping YAML: path=%s", path)
+        logger.warning("Ignoring AI settings file with non-mapping YAML")
     return loaded
 
 

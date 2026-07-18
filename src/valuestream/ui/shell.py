@@ -5,13 +5,17 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
 
 from valuestream.ui.context import ValueStreamContext
+from valuestream.ui.feature_flags import authoring_v2_enabled
+from valuestream.ui.instrumentation import abandon_active_journey, workflow_from_handoff
 from valuestream.ui.pages import (
     ai_config_studio,
+    build,
     catalog,
     chat,
     config_builder,
@@ -32,6 +36,7 @@ class NavigationPage:
     icon: str
     target: Callable[[], None]
     default: bool = False
+    indent: bool = False
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,7 +53,7 @@ def configure_page() -> None:
         page_title="Value Stream",
         page_icon=":material/analytics:",
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="auto",
     )
     init_plotly_theme()
     apply_app_chrome_tuning()
@@ -65,7 +70,7 @@ def render_navigation(ctx: ValueStreamContext) -> None:
     with st.sidebar:
         with st.container(key="vs_brand"):
             st.markdown("Value Stream")
-        st.caption(f"Workspace · {ctx.catalog.pipelines.workspace}")
+        st.caption(f"Workspace · {_workspace_identity_label(ctx)}")
         with st.popover(
             "Workspace details",
             icon=":material/info:",
@@ -91,27 +96,28 @@ def render_navigation(ctx: ValueStreamContext) -> None:
                 selected_title=str(getattr(pg, "title", "")),
             )
 
+    _record_authoring_navigation_exit(str(getattr(pg, "title", "")))
     pg.run()
 
 
+def _record_authoring_navigation_exit(selected_title: str) -> None:
+    """Capture observable in-app abandonment without browser unload hooks."""
+
+    if selected_title in {"Build", "Configuration Builder", "AI Configuration Studio"}:
+        return
+    if selected_title in {"Reports", "Data Load"} and workflow_from_handoff(
+        st.query_params.get("from")
+    ):
+        return
+    abandon_active_journey(st.session_state)
+
+
 def _navigation_pages(ctx: ValueStreamContext) -> list[NavigationPage]:
-    return [
+    pages = [
         NavigationPage("Home", "Home", ":material/home:", lambda: home.render(ctx), default=True),
         NavigationPage("Analysis", "Reports", ":material/area_chart:", lambda: reports.render(ctx)),
         NavigationPage("Analysis", "Chat With Data", ":material/chat:", lambda: chat.render(ctx)),
         NavigationPage("Settings", "Catalog", ":material/database:", lambda: catalog.render(ctx)),
-        NavigationPage(
-            "Settings",
-            "Configuration Builder",
-            ":material/build:",
-            lambda: config_builder.render(ctx),
-        ),
-        NavigationPage(
-            "Settings",
-            "AI Configuration Studio",
-            ":material/network_intelligence:",
-            lambda: ai_config_studio.render(ctx),
-        ),
         NavigationPage(
             "Data Integration",
             "Data Load",
@@ -125,6 +131,41 @@ def _navigation_pages(ctx: ValueStreamContext) -> list[NavigationPage]:
             lambda: ops.render(ctx),
         ),
     ]
+    authoring_section = "Build" if authoring_v2_enabled() else "Settings"
+    authoring_pages = (
+        [
+            NavigationPage(
+                authoring_section,
+                "Build",
+                ":material/construction:",
+                lambda: build.render(ctx),
+            )
+        ]
+        if authoring_v2_enabled()
+        else []
+    )
+    # Under the Build landing page, the two authoring tools read as its
+    # children; without the landing page they stay flat section entries.
+    tools_indented = authoring_v2_enabled()
+    authoring_pages.extend(
+        [
+            NavigationPage(
+                authoring_section,
+                "Configuration Builder",
+                ":material/build:",
+                lambda: config_builder.render(ctx),
+                indent=tools_indented,
+            ),
+            NavigationPage(
+                authoring_section,
+                "AI Configuration Studio",
+                ":material/network_intelligence:",
+                lambda: ai_config_studio.render(ctx),
+                indent=tools_indented,
+            ),
+        ]
+    )
+    return [*pages[:3], *authoring_pages, *pages[3:]]
 
 
 def _navigation_sections(
@@ -183,7 +224,12 @@ def _render_sidebar_links(
         expander_key = f"nav_section_{_url_path(section)}_{_url_path(active_section)}"
         with st.expander(section, expanded=section == active_section, key=expander_key):
             for page in section_pages:
-                st.page_link(
+                container = st
+                if page.indent:
+                    # Children of a section landing page read as a submenu:
+                    # a spacer column insets the link and its highlight pill.
+                    _, container = st.columns([0.08, 0.92], gap="small")
+                container.page_link(
                     page_lookup[(section, page.title)],
                     label=page.title,
                     icon=page.icon,
@@ -208,6 +254,14 @@ def _active_navigation_section(
 def _page_matches(page: NavigationPage, query: str) -> bool:
     searchable = f"{page.section} {page.title}".casefold()
     return query in searchable
+
+
+def _workspace_identity_label(ctx: ValueStreamContext) -> str:
+    """Disambiguate the catalog identity from its filesystem directory."""
+
+    catalog_name = str(ctx.catalog.pipelines.workspace)
+    directory = Path(ctx.workspace).name or str(ctx.workspace)
+    return f"{catalog_name} · {directory}"
 
 
 def _page(

@@ -370,6 +370,35 @@ show that a first run or backfill is required. Optional backfill for a widening
 therefore refers to historical coverage, not permission to derive a missing
 state from old aggregate files.
 
+### Authoring revision (UI-local)
+
+An authoring revision is a UI lifecycle object, not another catalog entity and
+not a durable raw-data store. It consists of a canonical proposed catalog
+object or multi-file bundle, its revision digest, one validation verdict for
+that digest, and explicit review state. Editing changes the digest and clears
+the prior verdict/review. Applying a reviewed revision produces ordinary YAML
+catalog files and a new catalog hash inside the catalog transaction.
+
+Configuration Builder may checkpoint the non-secret, JSON-safe subset of its
+draft registry under workspace `meta/` for seven days. The checkpoint is
+recovery metadata rather than a Catalog entity: it never includes prompts,
+credentials, provider/sample payloads, bytes, or DataFrames, and restore still
+requires current-baseline reconciliation and validation before Apply. Removing
+the final recoverable draft removes the checkpoint.
+
+| Displayed state | Domain evidence | Permitted transition |
+|---|---|---|
+| Editing draft | Proposed canonical object differs from applied YAML | Validate or discard |
+| Ready for review | Revision-keyed validation has zero blocking issues | Review dependency-closed changes |
+| Reviewed | User accepted a valid dependency-consistent set for that revision | Apply transactionally |
+| Applied | Catalog write and post-write validation succeeded | Classify materialization impact |
+| Data refresh required | Source/processor computation contract changed | Explicit handoff to Data Load |
+| Report ready | Existing aggregates satisfy the applied catalog | Open Reports through the query layer |
+
+Uploaded Studio samples and their derived preview frames remain session-local
+inputs to authoring. They do not become production source files or persisted
+aggregates merely because a draft references their schema.
+
 The migration tool (`valuestream migrate`) classifies each change automatically and reports the action required.
 
 ## 6. Examples

@@ -19,18 +19,45 @@ def test_serve_accepts_missing_workspace(monkeypatch: pytest.MonkeyPatch, tmp_pa
     class Completed:
         returncode = 0
 
-    def fake_run(args: list[str], *, check: bool) -> Completed:
+    def fake_run(args: list[str], *, check: bool, env: dict[str, str]) -> Completed:
         captured["args"] = args
         captured["check"] = check
+        captured["env"] = env
         return Completed()
 
     monkeypatch.setattr("valuestream.cli.subprocess.run", fake_run)
+    monkeypatch.delenv("ARROW_DEFAULT_MEMORY_POOL", raising=False)
 
     result = CliRunner().invoke(main, ["serve", str(workspace), "--headless"])
 
     assert result.exit_code == 0, result.output
     assert captured["check"] is False
     assert str(workspace) in captured["args"]
+    # Arrow's bundled mimalloc segfaults in per-thread heap init under
+    # Streamlit's thread-per-rerun model; serve must default to the OS pool.
+    assert captured["env"]["ARROW_DEFAULT_MEMORY_POOL"] == "system"
+
+
+@pytest.mark.unit
+def test_serve_preserves_operator_memory_pool_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class Completed:
+        returncode = 0
+
+    def fake_run(args: list[str], *, check: bool, env: dict[str, str]) -> Completed:
+        captured["env"] = env
+        return Completed()
+
+    monkeypatch.setattr("valuestream.cli.subprocess.run", fake_run)
+    monkeypatch.setenv("ARROW_DEFAULT_MEMORY_POOL", "jemalloc")
+
+    result = CliRunner().invoke(main, ["serve", str(tmp_path / "ws"), "--headless"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["env"]["ARROW_DEFAULT_MEMORY_POOL"] == "jemalloc"
 
 
 @pytest.mark.unit
