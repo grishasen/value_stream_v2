@@ -1134,6 +1134,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/security/" class="md-nav__link">
         
   
@@ -1870,6 +1898,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#57-authoring-calculated-fields-in-configuration-builder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Authoring calculated fields in Configuration Builder
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2257,146 +2296,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -2567,6 +2466,17 @@
     <span class="md-ellipsis">
       
         5.6 Snapshot state with where
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-authoring-calculated-fields-in-configuration-builder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Authoring calculated fields in Configuration Builder
       
     </span>
   </a>
@@ -3119,6 +3029,38 @@ ident <span class="o">::=</span> /[A-Za-z_][A-Za-z0-9_]*/
 <span class="w">  </span><span class="nt">ChurnedSubs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> where</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">eq</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">status</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">churned</span><span class="p p-Indicator">}}</span>
 </code></pre></div>
 <p>The <code>where</code> predicate is itself an expression node — same grammar.</p>
+<h3 id="57-authoring-calculated-fields-in-configuration-builder">5.7 Authoring calculated fields in Configuration Builder<a class="headerlink" href="#57-authoring-calculated-fields-in-configuration-builder" title="Permanent link">&para;</a></h3>
+<p>The Source step keeps calculated fields in a compact overview grid. <code>Name</code>,
+<code>Enabled</code>, and <code>Mode</code> remain visible there; the Expression column is a read-only
+preview. Rows added through the grid default to <code>Enabled: true</code>, including when
+the browser reports the new checkbox as blank.</p>
+<p>For <code>AST YAML</code> and <code>Polars</code> modes, select the calculated row in the focused
+expression editor below the grid:</p>
+<ol>
+<li>Edit the expression in the multiline input.</li>
+<li>Resolve the live, field-level validation messages.</li>
+<li>Choose <strong>Apply expression</strong> to copy the working text into the calculated row,
+   or <strong>Cancel changes</strong> to restore that row's current expression.</li>
+</ol>
+<p>The working text is session-local until Apply expression is chosen. Grid reruns
+do not overwrite it, and the UI labels unapplied expression work explicitly.
+Workspace Apply is disabled while a focused expression remains unapplied, so a
+different grid edit cannot silently discard the working text.
+Raw parser or Pydantic details remain available in a collapsed <strong>Technical
+details</strong> disclosure.</p>
+<p>Conditional branches require a complete expression under <code>cond</code> and use
+<code>else</code>, not <code>otherwise</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">case</span>
+<span class="nt">when</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">cond</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">gt</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Revenue</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">100</span><span class="p p-Indicator">}</span>
+<span class="w">    </span><span class="nt">then</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">lit</span><span class="p">:</span><span class="w"> </span><span class="nv">High</span><span class="p p-Indicator">}</span>
+<span class="nt">else</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">lit</span><span class="p">:</span><span class="w"> </span><span class="nv">Standard</span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>Direct Polars mode accepts the guarded expression subset documented by the
+translator. It must return a <code>polars.Expr</code> and only the <code>pl</code> namespace is
+available:</p>
+<div class="highlight"><pre><span></span><code><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;Revenue&quot;</span><span class="p">)</span> <span class="o">-</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;Cost&quot;</span><span class="p">)</span>
+</code></pre></div>
 <hr />
 <h2 id="6-validation-rules">6. Validation rules<a class="headerlink" href="#6-validation-rules" title="Permanent link">&para;</a></h2>
 <p>The <code>valuestream validate</code> command runs these checks before any data is touched.</p>

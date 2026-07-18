@@ -1134,6 +1134,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/security/" class="md-nav__link">
         
   
@@ -2315,146 +2343,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -2778,7 +2666,7 @@
 </tr>
 <tr>
 <td>Companion docs</td>
-<td>design/replacement-design.md (detailed), concepts/domain-model.md, reference/processors.md, reference/algorithms.md, reference/readers-and-formats.md, reference/expression-dsl.md, reference/chart-catalog.md, design/implementation-plan.md, reference/faq.md</td>
+<td>design/replacement-design.md (detailed), concepts/domain-model.md, reference/processors.md, reference/algorithms.md, reference/readers-and-formats.md, reference/expression-dsl.md, reference/chart-catalog.md, reference/faq.md</td>
 </tr>
 <tr>
 <td>Audience</td>
@@ -3184,11 +3072,31 @@ exists with the recorded size. The normal ingestion path does not reopen the
 new file merely to recover metadata it already knows. Recovery still
 deep-scans embedded provenance before publishing an interrupted run.</p>
 <h3 id="configuration-authoring-surfaces">Configuration authoring surfaces<a class="headerlink" href="#configuration-authoring-surfaces" title="Permanent link">&para;</a></h3>
-<p>Value Stream has two Streamlit authoring paths over the same YAML catalog:</p>
+<p>Value Stream exposes a top-level <strong>Build</strong> choice over two Streamlit authoring
+paths backed by the same YAML catalog. <strong>Start from a sample</strong> enters AI
+Configuration Studio; <strong>Configure the current workspace</strong> enters Configuration
+Builder. The landing page chooses a workflow but does not create a third
+authoring store.</p>
 <ul>
-<li><strong>Configuration Builder</strong> is the catalog-first, validation-first editor for the active workspace. It has one main builder flow with steps for workspace health, sources, processors, dimensions, metrics, reports/tiles, chat review, settings, and save/export. Source steps edit reader runtime settings, schema keys, defaults, dataset filters, and calculated fields. Filters are authored either as rule rows (<code>field</code>, <code>operator</code>, <code>value</code>, <code>enabled</code>) or raw expression-AST YAML; calculated fields become <code>derive_column</code> transforms with typed AST expressions. Processor steps edit group-by dimensions, grains, states, and optional processor filters. Metric and report steps edit display metadata, page filters/time presets, KPI behavior, descriptions, and scales in addition to chart fields. Page-settings writes merge into the existing page and preserve its tiles, dashboard layout, and theme. Chat review shows which aggregate metrics will be available to Chat With Data and edits chat-only LLM prompt/description guidance in <code>ai.yaml</code>; settings edit workspace defaults plus dashboard theme.</li>
-<li><strong>AI Configuration Studio</strong> is the sample-driven, model-assisted draft workflow. It starts from an uploaded sample, detects reader/runtime defaults, maps required identity/time/outcome fields, applies defaults, compiles filter rules/raw AST, applies calculated fields, derives calendar fields, and asks the user to approve the working field catalog. Governed Copilot operations for defaults, dataset filters, and calculated fields mutate the source pipeline; a Filters-step request cannot fall back to a processor mutation. The shared AI prompt dictionary enumerates the complete closed expression DSL with exact node shapes, including <code>concat</code> as an AST operation with <code>args</code> and optional <code>sep</code>. Accepted source-filter patches synchronize back into the rule/raw-AST editor before its next render. Its schema dictionary, generation/repair prompts, deterministic report generator, and review controls understand the same metric-display, page-filter, KPI, and scale properties. Applying a draft validates and writes sources, processors, metrics, dashboards, and <code>ai.yaml</code> inside one rollback boundary, preserving theme, layout, page, tile, and chat-guidance properties. Deterministic generation remains available as a baseline/review fallback inside the same draft boundary.</li>
+<li><strong>Configuration Builder</strong> is the catalog-first, validation-first editor for the active workspace. Its compact outline covers workspace health, sources, processors, dimensions, metrics, reports/tiles, chat review, settings, and <strong>Export current workspace</strong>. Each object editor compares a canonical session-local revision with the applied object. Internal navigation preserves a dirty revision until the user applies or discards it; simply visiting a step cannot make it dirty. A current object exposes exactly one <strong>Apply to workspace</strong> action, and apply never starts ingestion. Source steps edit reader runtime settings, schema keys, defaults, dataset filters, and calculated fields. Filters are authored either as rule rows (<code>field</code>, <code>operator</code>, <code>value</code>, <code>enabled</code>) or raw expression-AST YAML; calculated fields become <code>derive_column</code> transforms with typed AST expressions. Processor steps edit group-by dimensions, grains, states, and optional processor filters. Metric and report steps edit display metadata, page filters/time presets, KPI behavior, descriptions, and scales in addition to chart fields. Page-settings writes merge into the existing page and preserve its tiles, dashboard layout, and theme. Chat review shows which aggregate metrics will be available to Chat With Data and edits chat-only LLM prompt/description guidance in <code>ai.yaml</code>; settings edit workspace defaults plus dashboard theme.</li>
+<li><strong>Configuration Builder checkpointing</strong> persists only privacy-filtered,
+  JSON-safe draft registry state, the current step, a UTC timestamp, and the
+  full base-catalog hash in <code>meta/config_builder_checkpoint.json</code>. Prompt,
+  credential, provider, sample/upload, raw-provider, bytes, and DataFrame state
+  is never written; a draft that would become incomplete is omitted. Restore
+  remains subject to the object baseline and validation gates, catalog drift
+  requires explicit reconciliation, and the file expires after seven days or
+  is deleted when the recoverable registry becomes empty.</li>
+<li><strong>AI Configuration Studio</strong> is the sample-first, optionally model-assisted draft workflow. Uploaded bytes are preview-only; the user separately reviews the generated production source plan. CSV, Parquet, JSON, and explicitly detected Pega/archive samples receive format-specific reader defaults, while unsupported archive shapes fail before a misleading source can be drafted. Required-field mappings select only fields present in the approved schema. Sample values are excluded from model prompts by default. Approved schema names, types, null counts, and unique counts remain part of the prompt, while hidden field names are excluded. Every sample-backed model action requires confirmation of the exact sample, provider, model, endpoint route, approved fields, and example-value scope; changing that scope invalidates the confirmation and its widget state. User-initiated model work preflights the configured provider/model/credential capability, reports a safe corrective action, and caches a successful check for the session. Generation parses, merges, and validates a candidate before review; a bounded sequence of at most two repair passes may run inside the same named operation. An unrecoverable candidate is discarded while the last valid draft remains available, with deterministic generation as the validated fallback. Review uses semantic, dependency-closed bundles in the main canvas; removals require explicit selection and exact YAML stays collapsed. Governed Copilot remains available for read-only explanation while bundles are pending but blocks mutations that could overwrite them. Applying a reviewed revision validates and writes sources, processors, metrics, dashboards, and <code>ai.yaml</code> inside one rollback boundary, preserving theme, layout, page, tile, and chat-guidance properties.</li>
 </ul>
+<p>Both workflows display one revision ledger: editing draft → ready for review →
+reviewed → applied → data refresh required or report ready. Validation is keyed
+by the canonical revision, so a field change invalidates the prior verdict and
+review. Current-workspace and draft verdicts are never presented as if they
+describe the same object.</p>
+<p>Every Builder catalog mutation and its post-write validation share one
+rollback boundary. A failed write or invalid resulting workspace restores all
+affected catalog files before control returns to the UI.</p>
 <p>Both metric steps also expose one shared, versioned KPI recipe library. The
 packaged recipe YAML is an inert authoring artifact: it describes business
 questions, aggregate capability requirements, metric templates, method
@@ -3209,7 +3117,18 @@ rollback boundary. The changed processor requires the first ingestion run for
 a new workspace or replay/backfill for existing aggregates; recipe
 installation never starts that data operation or converts one stored sketch
 family into another.</p>
-<p>Both surfaces use structured YAML parsing and the closed expression AST. Neither writes free-form Python or mutates the workspace until the user presses an explicit apply action; every apply re-runs catalog validation.</p>
+<p>Both surfaces use structured YAML parsing and the closed expression AST.
+Neither writes free-form Python or mutates the workspace until the user presses
+an explicit apply action; every apply re-runs catalog validation. Apply then
+classifies whether existing aggregates can open a report or whether the user
+must continue to Data Load. The latter is a handoff, not an implicit run.</p>
+<p>Privacy-safe authoring instrumentation records only allowlisted workflow,
+stage, event, outcome, bounded duration/count, and materialization-required
+flags under an anonymous session journey. It has no arbitrary metadata field,
+so sample/field values, object identifiers, local paths, prompts, credentials,
+and provider error text cannot be attached. The revised entry can be hidden
+with <code>VALUESTREAM_AUTHORING_V2=0</code> during measured rollout. See the
+<a href="../../guides/operations/authoring-rollout/">authoring rollout guide</a>.</p>
 <h2 id="11-technology-stack-and-rationale">11. Technology stack and rationale<a class="headerlink" href="#11-technology-stack-and-rationale" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3590,7 +3509,6 @@ only the chunks whose final durable marker is <code>ok</code>.</p>
 <li>reference/readers-and-formats.md — file format specs.</li>
 <li>reference/chart-catalog.md — Plotly chart bindings.</li>
 <li>reference/faq.md — common questions; check this when stuck.</li>
-<li>design/implementation-plan.md — phased build plan.</li>
 </ol>
 
 

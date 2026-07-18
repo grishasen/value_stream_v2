@@ -1230,6 +1230,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/security/" class="md-nav__link">
         
   
@@ -2119,146 +2147,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -2404,6 +2292,10 @@ so <code>examples/demo</code> validates and has ingested aggregates.</p>
 <td>Workspace summary, validation state, and quick navigation</td>
 </tr>
 <tr>
+<td>Build</td>
+<td>Choose a sample-first Studio path or catalog-first Builder path</td>
+</tr>
+<tr>
 <td>Data Load</td>
 <td>Source discovery, file upload, source runs, and workspace runs</td>
 </tr>
@@ -2417,11 +2309,11 @@ so <code>examples/demo</code> validates and has ingested aggregates.</p>
 </tr>
 <tr>
 <td>Configuration Builder</td>
-<td>Catalog-first editing, chat review, settings, and YAML export</td>
+<td>Catalog-first object drafts, transactional apply, outcome handoff, and workspace export</td>
 </tr>
 <tr>
 <td>AI Configuration Studio</td>
-<td>Sample-driven catalog drafting and model-assisted review</td>
+<td>Preview-sample drafting with deterministic or model-assisted generation and dependency-closed review</td>
 </tr>
 <tr>
 <td>Chat With Data</td>
@@ -2438,6 +2330,12 @@ so <code>examples/demo</code> validates and has ingested aggregates.</p>
 <ol>
 <li>Confirm the sidebar shows the expected workspace; open Workspace details to
    check the path and catalog revision.</li>
+<li>Open Build. Confirm the two choices explain that apply never runs data.</li>
+<li>Choose <strong>Start from sample</strong>, select the deterministic demo, and confirm a
+   valid draft can be reached without model credentials. Return to Build.</li>
+<li>Choose <strong>Configure manually</strong>. Confirm Back/Continue and the jump outline
+   keep one current task, then open <strong>Export current workspace</strong> and confirm
+   downloads appear before collapsed YAML previews.</li>
 <li>Open Data Load and confirm source chunks are discovered.</li>
 <li>Open Reports and select a dashboard page from the selector row; confirm the
    view, advanced, and filter actions appear on the second toolbar row.</li>

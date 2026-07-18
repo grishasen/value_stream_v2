@@ -1254,6 +1254,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../operations/security/" class="md-nav__link">
         
   
@@ -2143,146 +2171,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -2492,7 +2380,11 @@ under <code>meta/</code> remain available for audit.</p>
 <li>Open Reports.</li>
 <li>Select a dashboard and page from the sidebar.</li>
 <li>Use the compact toolbar for Presentation/Inspect mode, Advanced mode, and Filters.</li>
-<li>Choose a date preset and up to three primary business filters; open More filters for secondary controls.</li>
+<li>Choose a date preset and up to three primary business filters; open More filters for secondary controls.
+   Relative presets such as Last 30 days and Year to date are anchored to the
+   latest available aggregate period when the workspace contains historical
+   data. Reports states when it has applied this clamp. Custom date ranges are
+   always used exactly as entered.</li>
 <li>Read the highlighted calendar chip for the active date preset and exact date
    range (for example, <code>Last 90 days · Apr 16–Jul 14, 2026</code>). Click it to reset
    the time range to all time across every report page. Other active chips show
@@ -2503,6 +2395,12 @@ under <code>meta/</code> remain available for audit.</p>
    also offer View data. Table tiles are already native sortable dataframes and
    export their displayed rows directly to CSV.</li>
 </ol>
+<p>An empty tile distinguishes two cases. If the active date range or filters
+exclude all aggregate rows, the tile names that scope and offers <strong>Show all
+available data</strong>; this is an explicit action and never rewrites a custom range
+silently. If the all-time, unfiltered query is empty, the tile instead reports
+that the metric/grain is not materialized and directs you to Data Load or the
+freshness receipt. Unsupported filters are named separately from both states.</p>
 <p>Summary metric cards use compact display values such as <code>349K</code> and <code>120M</code>
 when no explicit catalog <code>value_format</code> is configured. Help text and report
 detail views remain the place for exact values.</p>
@@ -2518,7 +2416,9 @@ compatible ordinary plots in page order and uses the distinct values returned
 by the first plot that has data; an empty or not-yet-ready plot falls through to
 the next compatible plot. This avoids querying and combining every chart just
 to open the filter panel. You can also type a value that is not suggested, and
-the control remains editable when no aggregate suggestions are available.</p>
+the control remains editable when no aggregate suggestions are available.
+An empty selection means <strong>All</strong>; All is not stored as a concrete filter value
+and therefore cannot coexist with a subset.</p>
 <p>If a filter has no effect on one tile, the tile's backing processor does not
 persist that dimension — see
 <a href="../../operations/troubleshooting/">troubleshooting</a>.</p>

@@ -1134,6 +1134,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/security/" class="md-nav__link">
         
   
@@ -2141,146 +2169,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -2547,8 +2435,8 @@ that is not yet a processor state is shown as a proposal, not as unavailable.</p
    <code>processors.yaml</code>, <code>metrics.yaml</code>, and <code>dashboards.yaml</code> patches.</li>
 <li>When a processor state is proposed, review the source, source fields,
    affected states, and current/proposed processor computation hashes.</li>
-<li>Apply explicitly. If materialization is required, run the named source from
-   Data Load (or use <strong>Save Draft &amp; Run Source</strong> in AI Configuration Studio).</li>
+<li>Apply explicitly. If materialization is required, follow the named source
+   handoff to Data Load and start the run there.</li>
 </ol>
 <p>Configuration Builder writes any proposed processor state first, followed by
 the materialized metric and optional tile. All writes and post-write catalog
@@ -2557,11 +2445,11 @@ restores every catalog file. After success, the Builder reloads the catalog,
 switches to <strong>Edit Existing Metric</strong>, opens the new metric, and presents a
 direct Data Load handoff when the processor contract changed.</p>
 <p>AI Configuration Studio adds the same processor/metric/tile artifacts to its
-session-local draft. The workspace remains unchanged until <strong>Save &amp; Export</strong>
-applies that draft. Applying a draft uses one rollback boundary for all four
-catalog files plus <code>ai.yaml</code>, including post-write validation. Recipe
-confirmation itself never starts ingestion; the separate <strong>Apply Draft &amp; Run
-Source</strong> action is the explicit materialization approval.</p>
+session-local draft. The workspace remains unchanged until <strong>Apply to
+workspace</strong> writes the reviewed revision. Applying uses one rollback boundary
+for all four catalog files plus <code>ai.yaml</code>, including post-write validation.
+Recipe confirmation and apply never start ingestion; the outcome links to Data
+Load when the processor contract requires materialization.</p>
 <p>An installed metric carries recipe provenance as ordinary permissive metric
 metadata:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">metrics</span><span class="p">:</span>
@@ -2705,8 +2593,7 @@ convert or merge different sketch families together.</p>
 <li>An installed metric records the recipe ID/version so future upgrade tooling
   can show a diff instead of silently migrating it.</li>
 <li>Workspace-owned recipes, approval owners, deprecation, upgrade assistance,
-  and report packs are planned in the
-  <a href="../../design/kpi-recipe-backlog/">KPI recipe backlog</a>.</li>
+  and report packs are planned future work, not current behavior.</li>
 </ul>
 <h2 id="aggregate-and-backfill-rules">Aggregate and Backfill Rules<a class="headerlink" href="#aggregate-and-backfill-rules" title="Permanent link">&para;</a></h2>
 <p>Installing a recipe that uses an already configured state does not change the

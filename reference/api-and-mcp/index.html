@@ -1134,6 +1134,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/security/" class="md-nav__link">
         
   
@@ -2152,146 +2180,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -2443,9 +2331,9 @@
 <h1 id="api-and-mcp-reference">API and MCP Reference<a class="headerlink" href="#api-and-mcp-reference" title="Permanent link">&para;</a></h1>
 <p>The read-only HTTP API and the local stdio MCP server expose the same
 governed tool layer over the aggregate query path. Neither surface mutates the
-catalog or aggregate store, and neither exposes raw source rows. Design
-rationale and provider setup live in
-<a href="../../design/chat-with-data-mlp1/">Chat With Data MLP1</a>; the security posture
+catalog or aggregate store, and neither exposes raw source rows. LLM provider
+setup for the in-app planner is in
+<a href="../../guides/users/chat-with-data/">Chat with data</a>; the security posture
 is summarized in <a href="../../guides/operations/security/">Security</a>.</p>
 <div class="highlight"><pre><span></span><code>Streamlit Chat page      MCP client (stdio)          HTTP API client
         |                          |                          |

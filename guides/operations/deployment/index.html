@@ -14,7 +14,7 @@
         <link rel="prev" href="../migration/">
       
       
-        <link rel="next" href="../security/">
+        <link rel="next" href="../authoring-rollout/">
       
       
         
@@ -1287,6 +1287,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../security/" class="md-nav__link">
         
   
@@ -2176,146 +2204,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -2510,6 +2398,11 @@ already-processed chunks, and is safe to re-run. A minimal cron entry:</p>
 <p>Streamlit itself provides no authentication. For anything beyond a trusted
 network, put the UI behind a reverse proxy that terminates TLS and enforces
 access (e.g. nginx with SSO), and treat the host as single-tenant.</p>
+<p>The revised top-level Build entry is enabled by default. During a measured
+authoring rollout, set <code>VALUESTREAM_AUTHORING_V2=0</code> to hide that entry and keep
+the two authoring pages under Settings. See the
+<a href="../authoring-rollout/">configuration authoring rollout runbook</a>; the flag does
+not change YAML, transaction, validation, or ingestion semantics.</p>
 <h2 id="serving-the-api-and-mcp">Serving the API and MCP<a class="headerlink" href="#serving-the-api-and-mcp" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">VALUESTREAM_API_TOKEN</span><span class="o">=</span>replace-me
 uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-api<span class="w"> </span>/data/valuestream/prod<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>

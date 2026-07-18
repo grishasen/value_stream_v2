@@ -834,10 +834,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#use-chat-without-a-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Chat Without a Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#configure-a-model" class="md-nav__link">
     <span class="md-ellipsis">
       
         Configure a Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-preflight-and-retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider Preflight and Retry
       
     </span>
   </a>
@@ -1234,6 +1256,34 @@
     
   
     Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
   
 
     
@@ -2143,146 +2193,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -2338,10 +2248,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#use-chat-without-a-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use Chat Without a Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#configure-a-model" class="md-nav__link">
     <span class="md-ellipsis">
       
         Configure a Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-preflight-and-retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider Preflight and Retry
       
     </span>
   </a>
@@ -2410,9 +2342,31 @@
 
 
 <h1 id="chat-with-data">Chat With Data<a class="headerlink" href="#chat-with-data" title="Permanent link">&para;</a></h1>
-<p>Chat With Data queries persisted aggregate metrics through an LLM intent
-planner configured in <code>&lt;workspace&gt;/ai.yaml</code>. If the planner is disabled or no
-model is configured, the chat input remains disabled.</p>
+<p>Chat With Data queries persisted aggregate metrics. An optional LLM intent
+planner configured in <code>&lt;workspace&gt;/ai.yaml</code> supports free-form questions. Five
+catalog-backed aggregate quick questions remain available when that planner is
+disabled, not configured, or temporarily unreachable.</p>
+<h2 id="use-chat-without-a-model">Use Chat Without a Model<a class="headerlink" href="#use-chat-without-a-model" title="Permanent link">&para;</a></h2>
+<p>Open <strong>Aggregate quick questions · no model required</strong> to run the supported
+deterministic templates. Chat offers each template only when the catalog has
+the corresponding metric, dimension, or time grain:</p>
+<ul>
+<li>total count;</li>
+<li>CTR or engagement rate;</li>
+<li>approximate unique entities or customers;</li>
+<li>count breakdown by <code>Channel</code>;</li>
+<li>available aggregate date range.</li>
+</ul>
+<p>These buttons map directly to catalog-validated intents and call the same
+governed aggregate query layer used by dashboards. The date-range template
+computes its bounds from aggregate time buckets; it does not scan source data.
+Answers retain the normal query summary and freshness/provenance label.</p>
+<p>No-model mode is intentionally not a natural-language parser. It does not
+interpret different wording, filters, arbitrary dimensions, comparisons, or
+follow-up questions. The free-form chat input stays disabled until a model is
+configured and the planner is enabled. If a configured provider is
+unreachable, the quick-question buttons remain usable; enable or restore the
+planner for anything outside the listed templates.</p>
 <h2 id="configure-a-model">Configure a Model<a class="headerlink" href="#configure-a-model" title="Permanent link">&para;</a></h2>
 <p>Create <code>&lt;workspace&gt;/ai.yaml</code> with a LiteLLM model string. Keep secrets in
 environment variables, not in the file:</p>
@@ -2423,14 +2377,45 @@ environment variables, not in the file:</p>
 <span class="w">    </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.1</span>
 <span class="w">    </span><span class="nt">timeout_seconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120</span>
 </code></pre></div>
-<p>Local Ollama, OpenAI, and Anthropic setups — plus MCP registration for Claude
-Code — are documented step by step in
-<a href="../../../design/chat-with-data-mlp1/">Chat With Data MLP1</a>.</p>
+<p><code>model</code> is a LiteLLM model string — the example above targets OpenAI with the
+key read from <code>OPENAI_API_KEY</code>. <code>api_base</code> and <code>custom_provider</code> support local
+or proxy-backed providers:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Local Ollama (after `ollama pull llama3.1` and `ollama serve`)</span>
+<span class="nt">ai</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">llm</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ollama/llama3.1</span>
+<span class="w">    </span><span class="nt">api_base</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://localhost:11434</span>
+<span class="w">    </span><span class="nt">custom_provider</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ollama</span>
+<span class="w">    </span><span class="nt">api_key_env</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+
+<span class="c1"># Anthropic (export ANTHROPIC_API_KEY first)</span>
+<span class="nt">ai</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">llm</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic/claude-sonnet-4-6</span>
+<span class="w">    </span><span class="nt">api_key_env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANTHROPIC_API_KEY</span>
+</code></pre></div>
+<p>The Chat page also lets you override these values for the current Streamlit
+session. MCP clients such as Claude Code should use the local stdio MCP server
+instead of the Chat page; registration steps are in the
+<a href="../../../reference/api-and-mcp/">API &amp; MCP reference</a>.</p>
 <p>Configuration Builder's Chat Review step can edit <code>chat_with_data</code> settings in
 <code>ai.yaml</code>: a generic agent prompt plus dataset and metric descriptions that are
 used only in the LLM planning prompt.</p>
+<h2 id="provider-preflight-and-retry">Provider Preflight and Retry<a class="headerlink" href="#provider-preflight-and-retry" title="Permanent link">&para;</a></h2>
+<p>Before a free-form planner, governed-SQL planner, or narrative request, Chat
+runs the same independent <code>READY</code> capability check used by AI Configuration
+Studio. The check is limited to five seconds and cached for the current model,
+provider, endpoint, and credential. Missing configuration is rejected locally;
+it does not create a provider request.</p>
+<p>A classified failure shows a correlation reference without exposing provider
+messages, prompts, credentials, query values, or local paths. Retryable
+failures offer <strong>Retry provider check</strong>, which bypasses the short negative
+cache. A failed check does not append the submitted question or an error turn
+to chat history. Aggregate quick questions never run this preflight and remain
+available while the provider is unavailable.</p>
 <h2 id="ask-questions">Ask Questions<a class="headerlink" href="#ask-questions" title="Permanent link">&para;</a></h2>
-<p>The LLM planner can return text, tables, or simple charts. For example:</p>
+<p>With a model configured, the LLM planner can return text, tables, or simple
+charts. For example:</p>
 <div class="highlight"><pre><span></span><code>Plot daily CTR by customer type and channel
 </code></pre></div>
 <p>The app validates that the metric, dimensions, and time bucket are available
@@ -2456,10 +2441,10 @@ Data for sensitive raw samples. See
 <a href="../../operations/security/">Security</a> for the full posture.</p>
 <h2 id="related-docs">Related Docs<a class="headerlink" href="#related-docs" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../../../design/chat-with-data-mlp1/">Chat With Data MLP1 design</a> — intent
-  schema, chart allowlist, provider setup, and operational notes.</li>
 <li><a href="../../../reference/api-and-mcp/">API &amp; MCP reference</a> — the same governed
-  tool layer for programmatic clients.</li>
+  tool layer for programmatic clients, including Claude Code registration.</li>
+<li><a href="../../operations/security/">Security</a> — the LLM boundary and governed SQL
+  posture.</li>
 </ul>
 
 

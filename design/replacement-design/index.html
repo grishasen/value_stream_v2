@@ -14,7 +14,7 @@
         <link rel="prev" href="../../reference/faq/">
       
       
-        <link rel="next" href="../implementation-plan/">
+        <link rel="next" href="../../meta/documentation-guide/">
       
       
         
@@ -1114,6 +1114,34 @@
     
   
     Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
   
 
     
@@ -2916,146 +2944,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -5285,17 +5173,29 @@ failure of that fallback fails the whole chunk.</p>
 <li><strong>Reports / Tiles</strong> — search/filter a report library, create/duplicate/delete tiles, use visual chart-field mapping or raw YAML fallback, inspect chart recipe metadata, preview against aggregates, and save into <code>dashboards.yaml</code>.</li>
 <li><strong>Chat Review</strong> — review the aggregate metrics, processors, and persisted group-by fields exposed to Chat With Data; confirm catalog validation and LLM settings readiness before relying on chat answers; edit chat-only <code>ai.yaml</code> guidance such as the generic agent prompt plus dataset/metric descriptions used by the LLM planner.</li>
 <li><strong>Settings</strong> — edit <code>pipelines.yaml</code> workspace defaults such as workspace name, time zone, calendar grains, and week start, plus <code>dashboards.yaml</code> theme settings.</li>
-<li><strong>Save &amp; Export</strong> — show and download each catalog file independently because Value Stream stores YAML across <code>pipelines.yaml</code>, <code>processors.yaml</code>, <code>metrics.yaml</code>, and <code>dashboards.yaml</code>.</li>
+<li><strong>Export current workspace</strong> — put validation and individual catalog-file downloads before collapsed YAML previews. Export describes the applied workspace; it is not a save action for an unapplied object draft.</li>
 </ul>
-<p>The implemented Builder presents these areas through a compact step selector
-with Previous/Next actions and a phase progress bar. Validation and review
-status are summarized in Workspace Health rather than duplicated above every
-step. Shared report/home metric cards use breakpoint-aware grids, and both UI
-and Plotly themes use explicit light/dark surface and contrast tokens.</p>
+<p>The implemented Builder presents these areas through a compact jump outline,
+Back/Continue actions, and one current task. A changed object becomes a
+canonical, session-local revision with one visible <strong>Apply to workspace</strong>
+action; navigation preserves it until Apply or Discard. Successful apply ends
+in either <strong>Open report</strong> or an explicit <strong>Run data</strong> handoff. Validation and
+review status are summarized in Workspace Health rather than duplicated above
+every step. Shared report/home metric cards use breakpoint-aware grids, and
+both UI and Plotly themes use explicit light/dark surface and contrast tokens.
+While safe drafts exist, Builder also maintains an atomic seven-day recovery
+checkpoint under workspace <code>meta/</code>. It contains only JSON-safe, non-secret
+registry state, step, timestamp, and full base-catalog hash. Catalog drift
+requires explicit reconciliation, all restored objects retain their normal
+baseline/validation gates, and an empty or explicitly discarded registry
+removes the checkpoint.</p>
 <p>AI Configuration Studio remains a separate guided workflow because it starts from a sample file rather than an existing catalog:</p>
 <ul>
-<li><strong>Sample</strong> — upload/select a source sample and review runtime reader controls.</li>
-<li><strong>Required fields</strong> — map subject, outcome time, decision time, and outcome fields.</li>
+<li><strong>Sample</strong> — upload/select a preview sample, or load the deterministic demo,
+  then separately review a format-aware production source plan. Uploaded bytes
+  are not staged for ingestion by this step.</li>
+<li><strong>Required fields</strong> — map subject, outcome time, decision time, and outcome
+  fields with selectors restricted to the reviewed schema.</li>
 <li><strong>Defaults, filters, calculations</strong> — use the same row editors as the Builder; filters compile to AST, calculations compile to <code>derive_column</code> transforms.</li>
 <li><strong>Governed Copilot preprocessing</strong> — source defaults, dataset filters, and
   calculated fields can be added, replaced, or removed through closed Copilot
@@ -5308,8 +5208,21 @@ and Plotly themes use explicit light/dark surface and contrast tokens.</p>
   the session draft and are then synchronized into the Defaults and
   Filters/Calculations row editors before those widgets render again.</li>
 <li><strong>Approve fields</strong> — choose which working fields are eligible for draft metric/report generation and which sample values may be shared with a future LLM.</li>
-<li><strong>Draft</strong> — generate reviewed YAML drafts. LLM responses can populate source, processor, metric, report, chat-readiness, workspace-default, and dashboard-theme settings; deterministic generation remains available as a baseline and fallback.</li>
-<li><strong>Save &amp; Export</strong> — download draft YAML; the persistent <strong>Save draft</strong> action in the upper-right of the Studio status panel applies the accepted draft through the same structured writers. Sources, processors, metrics, dashboards, and <code>ai.yaml</code> share one rollback boundary that includes post-write catalog validation. <strong>Save Draft &amp; Run Source</strong> is the separate explicit materialization action.</li>
+<li><strong>Draft</strong> — preflight the selected provider capability, then generate, parse,
+  merge, validate, and if necessary run up to two bounded repair passes. Only
+  a valid revision can enter review. Provider failures lead with safe corrective copy;
+  timeout/retry preserves the last valid draft. Deterministic generation is
+  available without model configuration.</li>
+<li><strong>Review</strong> — present semantic, dependency-closed bundles in the main canvas
+  with safe-addition, individual-review, and reject paths. Removals start
+  rejected. Copilot may explain pending changes but cannot mutate underneath
+  them; exact YAML is a collapsed detail.</li>
+<li><strong>Apply and export</strong> — one <strong>Apply to workspace</strong> action writes the explicitly
+  reviewed revision through the structured writers. Sources, processors,
+  metrics, dashboards, and <code>ai.yaml</code> share one rollback boundary including
+  post-write validation. Apply never starts a source. The outcome routes to
+  Reports when aggregates are usable or to Data Load when materialization is
+  required; downloads remain available above collapsed previews.</li>
 </ul>
 <h3 id="112-plotly-chart-kinds-catalog-parity-with-current-app">11.2 Plotly chart kinds (catalog parity with current app)<a class="headerlink" href="#112-plotly-chart-kinds-catalog-parity-with-current-app" title="Permanent link">&para;</a></h3>
 <table>
@@ -5431,7 +5344,8 @@ set for Claude Code and similar MCP clients:</p>
 </ul>
 <p>REST, remote HTTP MCP, OAuth/OIDC auth, dashboard tile tools, lineage drilldown,
 and generated-code analysis remain later surfaces. See
-<code>docs/design/chat-with-data-mlp1.md</code> for provider setup and runbooks.</p>
+<code>docs/guides/users/chat-with-data.md</code> for provider setup and
+<code>docs/reference/api-and-mcp.md</code> for the MCP and HTTP API runbooks.</p>
 <hr />
 <h2 id="12-migration-strategy-from-the-current-app">12. Migration Strategy from the Current App<a class="headerlink" href="#12-migration-strategy-from-the-current-app" title="Permanent link">&para;</a></h2>
 <h3 id="121-mapping-table">12.1 Mapping table<a class="headerlink" href="#121-mapping-table" title="Permanent link">&para;</a></h3>

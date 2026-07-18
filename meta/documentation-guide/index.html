@@ -11,7 +11,7 @@
       
       
       
-        <link rel="prev" href="../../design/kickoff-prompt/">
+        <link rel="prev" href="../../design/replacement-design/">
       
       
       
@@ -1132,6 +1132,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/security/" class="md-nav__link">
         
   
@@ -2023,146 +2051,6 @@
                 
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
     
   
   
@@ -2501,7 +2389,7 @@ to exactly one genre; roles enter through the reading paths on the home page.</p
   guides/           # task-oriented how-tos: users/, configuration/, operations/
   concepts/         # explanation: product, business, architecture, domain, adr/
   reference/        # information-oriented manuals: cli, dsl, processors, ...
-  design/           # engineering design &amp; history: replacement design, plans, mockups
+  design/           # engineering design &amp; history: the master replacement design
   meta/             # this guide
 </code></pre></div>
 <p>Rules of placement: a page that teaches by doing is a tutorial; a page that
@@ -2611,28 +2499,8 @@ designs) is not user documentation and stays under <code>design/</code>.</p>
 <td>Q&amp;A by area: storage, config, ingestion, querying, ops, security</td>
 <td>reference</td>
 </tr>
-<tr>
-<td>10</td>
-<td><a href="../../design/implementation-plan/">Implementation plan</a></td>
-<td>Repo layout, tooling, phased delivery</td>
-<td>30 min</td>
-</tr>
-<tr>
-<td>11</td>
-<td><a href="../../design/reporting-backlog/">Reporting backlog</a></td>
-<td>Current reporting-usability delivery backlog</td>
-<td>15 min</td>
-</tr>
-<tr>
-<td>12</td>
-<td><a href="../../design/kpi-recipe-backlog/">KPI recipe backlog</a></td>
-<td>Shared KPI catalog and workflow delivery backlog</td>
-<td>15 min</td>
-</tr>
 </tbody>
 </table>
-<p>Visual sketches (sitemap, ingestion flow, dashboard, tile anatomy, Builder,
-Pipelines) live in <a href="../../design/mockups/"><code>design/mockups/</code></a>.</p>
 <h2 id="content-rules">Content Rules<a class="headerlink" href="#content-rules" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Start each page with the reader outcome: what the page helps the reader do.</li>
@@ -2649,7 +2517,7 @@ Pipelines) live in <a href="../../design/mockups/"><code>design/mockups/</code><
   before roadmap content.</li>
 <li>Include verification steps after procedures that change data or artifacts.</li>
 <li>No phase numbers in filenames or titles — delivery history belongs in the
-  implementation plan and the changelog.</li>
+  git history.</li>
 <li>Every processor / metric / chart is referred to by its <strong>kind</strong> name (e.g.
   <code>binary_outcome</code>, <code>formula</code>, <code>line</code>) once introduced.</li>
 <li>All YAML examples must validate against the JSON Schemas under <code>schemas/</code>.</li>
@@ -2684,8 +2552,7 @@ all of these from the docs. If you can't, file a doc bug.</p>
 <li>[ ] What chart kinds exist and what fields do they need? → chart catalog §3</li>
 <li>[ ] What happens when config changes? → domain model §5; FAQ §A4–A5</li>
 <li>[ ] How do I migrate from the legacy app? → migration guide; replacement design §12; FAQ §I</li>
-<li>[ ] What's the build plan? → implementation plan §5–7</li>
-<li>[ ] What technology and version do I need? → implementation plan §3</li>
+<li>[ ] What technology and version do I need? → getting-started tutorial; <code>pyproject.toml</code></li>
 </ul>
 <h2 id="maintenance-checklist">Maintenance Checklist<a class="headerlink" href="#maintenance-checklist" title="Permanent link">&para;</a></h2>
 <p>Update the docs when any of the following changes:</p>

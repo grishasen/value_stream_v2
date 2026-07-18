@@ -1134,6 +1134,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/security/" class="md-nav__link">
         
   
@@ -2612,146 +2640,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -3627,7 +3515,10 @@ previous successful aggregate until the new run commits.</p>
 <span class="w">  </span><span class="nt">drop_columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pxObjClass</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pxApplication</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pxOutboundChannelInfo</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># optional</span>
 </code></pre></div>
 <h3 id="82-parse_datetime">8.2 <code>parse_datetime</code><a class="headerlink" href="#82-parse_datetime" title="Permanent link">&para;</a></h3>
-<p>Parses string columns into <code>Datetime</code>.</p>
+<p>Parses string columns into <code>Datetime</code>. The transform is "ensure datetime":
+columns a reader already typed as datetime (CSV date inference, Parquet
+schemas) pass through unchanged, so the same source configuration works for
+string-timestamp previews and typed runtime reads.</p>
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parse_datetime</span>
 <span class="w">  </span><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">OutcomeTime</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DecisionTime</span><span class="p p-Indicator">]</span>
 <span class="w">  </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z&quot;</span><span class="w">   </span><span class="c1"># strptime format</span>

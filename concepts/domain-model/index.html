@@ -1134,6 +1134,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/operations/authoring-rollout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration authoring rollout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guides/operations/security/" class="md-nav__link">
         
   
@@ -1987,6 +2015,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="5. Compatibility classes for config changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authoring-revision-ui-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authoring revision (UI-local)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2706,146 +2751,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../design/implementation-plan/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Implementation plan
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/reporting-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Reporting backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kpi-recipe-backlog/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    KPI recipe backlog
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/chat-with-data-mlp1/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Chat With Data MLP1
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../design/kickoff-prompt/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Kickoff prompt
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../meta/documentation-guide/" class="md-nav__link">
         
   
@@ -3454,6 +3359,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="5. Compatibility classes for config changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authoring-revision-ui-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authoring revision (UI-local)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3922,6 +3844,63 @@ with the new schema. Until ingestion publishes the new contract, report tiles
 show that a first run or backfill is required. Optional backfill for a widening
 therefore refers to historical coverage, not permission to derive a missing
 state from old aggregate files.</p>
+<h3 id="authoring-revision-ui-local">Authoring revision (UI-local)<a class="headerlink" href="#authoring-revision-ui-local" title="Permanent link">&para;</a></h3>
+<p>An authoring revision is a UI lifecycle object, not another catalog entity and
+not a durable raw-data store. It consists of a canonical proposed catalog
+object or multi-file bundle, its revision digest, one validation verdict for
+that digest, and explicit review state. Editing changes the digest and clears
+the prior verdict/review. Applying a reviewed revision produces ordinary YAML
+catalog files and a new catalog hash inside the catalog transaction.</p>
+<p>Configuration Builder may checkpoint the non-secret, JSON-safe subset of its
+draft registry under workspace <code>meta/</code> for seven days. The checkpoint is
+recovery metadata rather than a Catalog entity: it never includes prompts,
+credentials, provider/sample payloads, bytes, or DataFrames, and restore still
+requires current-baseline reconciliation and validation before Apply. Removing
+the final recoverable draft removes the checkpoint.</p>
+<table>
+<thead>
+<tr>
+<th>Displayed state</th>
+<th>Domain evidence</th>
+<th>Permitted transition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Editing draft</td>
+<td>Proposed canonical object differs from applied YAML</td>
+<td>Validate or discard</td>
+</tr>
+<tr>
+<td>Ready for review</td>
+<td>Revision-keyed validation has zero blocking issues</td>
+<td>Review dependency-closed changes</td>
+</tr>
+<tr>
+<td>Reviewed</td>
+<td>User accepted a valid dependency-consistent set for that revision</td>
+<td>Apply transactionally</td>
+</tr>
+<tr>
+<td>Applied</td>
+<td>Catalog write and post-write validation succeeded</td>
+<td>Classify materialization impact</td>
+</tr>
+<tr>
+<td>Data refresh required</td>
+<td>Source/processor computation contract changed</td>
+<td>Explicit handoff to Data Load</td>
+</tr>
+<tr>
+<td>Report ready</td>
+<td>Existing aggregates satisfy the applied catalog</td>
+<td>Open Reports through the query layer</td>
+</tr>
+</tbody>
+</table>
+<p>Uploaded Studio samples and their derived preview frames remain session-local
+inputs to authoring. They do not become production source files or persisted
+aggregates merely because a draft references their schema.</p>
 <p>The migration tool (<code>valuestream migrate</code>) classifies each change automatically and reports the action required.</p>
 <h2 id="6-examples">6. Examples<a class="headerlink" href="#6-examples" title="Permanent link">&para;</a></h2>
 <h3 id="61-source-chunk-aggregate">6.1 Source → Chunk → Aggregate<a class="headerlink" href="#61-source-chunk-aggregate" title="Permanent link">&para;</a></h3>
