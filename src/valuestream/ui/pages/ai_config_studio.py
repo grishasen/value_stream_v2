@@ -127,6 +127,7 @@ CATALOG_DRAFT_STEPS = [
 ]
 AI_CALLS_ENABLED_STATE_KEY = "ai_studio_ai_calls_enabled"
 AI_SHARING_CONFIRMATION_STATE_KEY = "ai_studio_ai_sharing_confirmed_signature"
+AI_REPLACEMENT_CONFIRM_STATE_KEY = "ai_studio_replacement_confirmed_signature"
 AI_SHARING_CONFIRMATION_WIDGET_PREFIX = "ai_studio_ai_sharing_consent_"
 AI_SHARING_CONTRACT_STATE_KEY = "ai_studio_ai_sharing_contract_signature"
 CATALOG_DRAFT_SOURCE = "catalog"
@@ -2194,7 +2195,7 @@ def _save_export(
             st.code(text, language="yaml")
 
 
-def _render_workspace_save_bar(ctx: ValueStreamContext) -> None:  # noqa: PLR0912
+def _render_workspace_save_bar(ctx: ValueStreamContext) -> None:  # noqa: PLR0912, PLR0915
     """Apply the accepted AI draft from one consistent final action."""
 
     feedback = st.session_state.pop("ai_studio_workspace_save_feedback", None)
@@ -2204,15 +2205,26 @@ def _render_workspace_save_bar(ctx: ValueStreamContext) -> None:  # noqa: PLR091
     ok = False
     issues: list[str] = []
     reviewed = False
+    signature = ""
     if isinstance(draft, dict):
         snapshot = _draft_validation_snapshot(draft)
         ok, issues = snapshot.ok, list(snapshot.issues)
+        signature = snapshot.signature
         reviewed = st.session_state.get("ai_studio_reviewed_signature") == snapshot.signature
 
     published = bool(
         isinstance(draft, dict)
         and st.session_state.get("ai_studio_published_signature") == _draft_signature(draft)
     )
+    replacement: dict[str, list[str]] = {}
+    if isinstance(draft, dict) and ok and not published:
+        replacement = _workspace_replacement_impact(getattr(ctx, "catalog", None), draft)
+    replacement_confirmed = (
+        not replacement or st.session_state.get(AI_REPLACEMENT_CONFIRM_STATE_KEY) == signature
+    )
+    if replacement and not pending:
+        _render_replacement_disclosure(replacement, signature, confirmed=replacement_confirmed)
+        replacement_confirmed = st.session_state.get(AI_REPLACEMENT_CONFIRM_STATE_KEY) == signature
     if not isinstance(draft, dict):
         caption = "Generate and accept a draft before saving it to the workspace."
     elif pending:
@@ -2228,6 +2240,10 @@ def _render_workspace_save_bar(ctx: ValueStreamContext) -> None:  # noqa: PLR091
         )
     elif published:
         caption = "This revision is applied to the active workspace."
+    elif not replacement_confirmed:
+        caption = (
+            "Confirm the removal of the existing catalog objects listed above before applying."
+        )
     else:
         caption = "Apply the reviewed in-session revision to the active workspace catalog."
 
@@ -2242,6 +2258,7 @@ def _render_workspace_save_bar(ctx: ValueStreamContext) -> None:  # noqa: PLR091
             or not reviewed
             or not source_ready
             or published
+            or not replacement_confirmed
         ),
         help=(
             "Writes the reviewed catalog revision only. Running source data is a separate, "
@@ -2263,6 +2280,7 @@ def _render_workspace_save_bar(ctx: ValueStreamContext) -> None:  # noqa: PLR091
                 "requires_data_run": requires_data_run,
                 "run_status": "not_started" if requires_data_run else "not_required",
                 "source_count": len(draft.get("pipelines", {}).get("sources", []) or []),
+                "removed_object_count": sum(len(names) for names in replacement.values()),
             }
             record_event(
                 st.session_state,
@@ -2297,6 +2315,85 @@ def _render_workspace_save_bar(ctx: ValueStreamContext) -> None:  # noqa: PLR091
                 "The revision was written, but the workspace catalog needs attention.",
                 icon=":material/warning:",
             )
+
+
+def _workspace_replacement_impact(
+    catalog: Any,
+    draft: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Return active-catalog objects an apply of this draft would remove.
+
+    ``_apply_draft`` replaces every catalog section wholesale, so a draft that
+    was not built from the current workspace silently deletes anything it does
+    not include. Review bundles diff draft revisions against the draft's own
+    baseline and can never surface these removals, so the apply action must.
+    """
+
+    if catalog is None:
+        return {}
+
+    def draft_ids(section: Any, key: str) -> set[str]:
+        items = section.get(key) if isinstance(section, dict) else None
+        if isinstance(items, dict):
+            return {str(name) for name in items}
+        if isinstance(items, list):
+            return {
+                str(item.get("id")) for item in items if isinstance(item, dict) and item.get("id")
+            }
+        return set()
+
+    draft_sources = draft_ids(draft.get("pipelines"), "sources")
+    draft_processors = draft_ids(draft.get("processors"), "processors")
+    draft_metrics = draft_ids(draft.get("metrics"), "metrics")
+    draft_dashboards = draft_ids(draft.get("dashboards"), "dashboards")
+    impact = {
+        "sources": sorted(
+            source.id for source in catalog.pipelines.sources if source.id not in draft_sources
+        ),
+        "processors": sorted(
+            processor.id
+            for processor in catalog.processors.processors
+            if processor.id not in draft_processors
+        ),
+        "metrics": sorted(name for name in catalog.metrics.metrics if name not in draft_metrics),
+        "dashboards": sorted(
+            dashboard.id
+            for dashboard in catalog.dashboards.dashboards
+            if dashboard.id not in draft_dashboards
+        ),
+    }
+    return {kind: names for kind, names in impact.items() if names}
+
+
+def _render_replacement_disclosure(
+    replacement: dict[str, list[str]],
+    signature: str,
+    *,
+    confirmed: bool,
+) -> None:
+    """Require explicit consent before an apply removes existing catalog objects."""
+
+    summary = " · ".join(f"{len(names)} {kind}" for kind, names in replacement.items())
+    st.warning(
+        "Applying this revision replaces the active catalog. It removes existing "
+        f"objects the draft does not include: {summary}."
+    )
+    with st.expander("Removed by this apply", expanded=False):
+        for kind, names in replacement.items():
+            st.write(f"**{kind.title()}**: " + ", ".join(names))
+    checked = st.checkbox(
+        "Remove these existing objects when applying",
+        value=confirmed,
+        key=f"ai_studio_replace_confirm_{signature[:16]}",
+        help=(
+            "Required once for this exact draft revision. Changing the draft "
+            "requires confirming the removals again."
+        ),
+    )
+    if checked:
+        st.session_state[AI_REPLACEMENT_CONFIRM_STATE_KEY] = signature
+    elif st.session_state.get(AI_REPLACEMENT_CONFIRM_STATE_KEY) == signature:
+        st.session_state[AI_REPLACEMENT_CONFIRM_STATE_KEY] = ""
 
 
 def _processors_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
@@ -6223,20 +6320,22 @@ def _render_outcome_receipt() -> None:
         else:
             st.warning("The workspace needs attention before this revision can be used.")
         requires_data_run = bool(receipt.get("requires_data_run"))
-        components.key_value_strip(
-            [
-                {"label": "Revision", "value": receipt.get("revision", "")},
-                {
-                    "label": "Configuration",
-                    "value": "Applied" if receipt.get("applied") else "Blocked",
-                },
-                {
-                    "label": "Data impact",
-                    "value": "Run required" if requires_data_run else "No computation change",
-                },
-                {"label": "Sources", "value": int(receipt.get("source_count", 0))},
-            ]
-        )
+        rows = [
+            {"label": "Revision", "value": receipt.get("revision", "")},
+            {
+                "label": "Configuration",
+                "value": "Applied" if receipt.get("applied") else "Blocked",
+            },
+            {
+                "label": "Data impact",
+                "value": "Run required" if requires_data_run else "No computation change",
+            },
+            {"label": "Sources", "value": int(receipt.get("source_count", 0))},
+        ]
+        removed_count = int(receipt.get("removed_object_count", 0) or 0)
+        if removed_count:
+            rows.append({"label": "Removed existing objects", "value": removed_count})
+        components.key_value_strip(rows)
         if requires_data_run:
             st.link_button(
                 "Run data",

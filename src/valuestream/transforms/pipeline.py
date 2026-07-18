@@ -24,11 +24,15 @@ def _apply_one(frame: pl.LazyFrame, transform: model.Transform) -> pl.LazyFrame:
         names = frame.collect_schema().names()
         return frame.rename(dict(zip(names, capitalize_fields(names), strict=False)))
     if isinstance(transform, model.ParseDatetime):
+        # Readers may already type these columns (CSV date inference, parquet
+        # schemas). Parsing is "ensure datetime": only string columns need
+        # strptime, so the same config works for preview and runtime reads.
+        schema = frame.collect_schema()
         return frame.with_columns(
             [
                 pl.col(column).str.strptime(pl.Datetime, format=transform.format, strict=False)
                 for column in transform.columns
-                if column in frame.collect_schema().names()
+                if column in schema.names() and schema[column] == pl.String
             ]
         )
     if isinstance(transform, model.DeriveCalendar):

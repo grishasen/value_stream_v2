@@ -11,12 +11,30 @@ from __future__ import annotations
 
 import datetime as dt
 import shutil
+import sys
 from pathlib import Path
 
 import polars as pl
 import pytest
 
 from valuestream.engine import run_workspace
+
+
+@pytest.fixture(autouse=True)
+def _preserve_main_module() -> object:
+    """Restore ``sys.modules['__main__']`` after each test.
+
+    Streamlit's AppTest executes pages as ``__main__`` via a temp wrapper
+    script that is not import-safe. If it leaks, a later test that spawns
+    worker processes (parallel ingestion) re-imports that wrapper in the
+    child and the process pool breaks with a NameError.
+    """
+
+    main_module = sys.modules.get("__main__")
+    yield
+    if main_module is not None and sys.modules.get("__main__") is not main_module:
+        sys.modules["__main__"] = main_module
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEMO_CATALOG = REPO_ROOT / "examples" / "demo" / "catalog"

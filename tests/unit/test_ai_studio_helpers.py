@@ -2307,3 +2307,99 @@ def _base_draft() -> dict:
             ]
         },
     }
+
+
+def _catalog_with_extras() -> model.Catalog:
+    catalog_payload = _base_draft()
+    catalog_payload["pipelines"]["sources"].append(
+        {
+            "id": "holdings",
+            "reader": {"kind": "csv", "file_pattern": "holdings/*.csv"},
+            "schema": {"timestamp_column": "OutcomeTime", "natural_key": ["CustomerID"]},
+        }
+    )
+    catalog_payload["metrics"]["metrics"]["Revenue"] = {
+        "source": "engagement",
+        "kind": "formula",
+        "expression": {"col": "Count"},
+    }
+    return model.Catalog.model_validate(catalog_payload)
+
+
+@pytest.mark.unit
+def test_workspace_replacement_impact_lists_objects_the_draft_would_remove() -> None:
+    impact = ai_config_studio_page._workspace_replacement_impact(
+        _catalog_with_extras(), _base_draft()
+    )
+
+    assert impact == {"sources": ["holdings"], "metrics": ["Revenue"]}
+    assert ai_config_studio_page._workspace_replacement_impact(None, _base_draft()) == {}
+    assert (
+        ai_config_studio_page._workspace_replacement_impact(
+            model.Catalog.model_validate(_base_draft()), _base_draft()
+        )
+        == {}
+    )
+
+
+@pytest.mark.unit
+def test_workspace_apply_requires_explicit_replacement_consent() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app(draft: dict, catalog_payload: dict, confirm: bool) -> None:
+        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.config import model as config_model  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state["ai_studio_draft"] = draft
+        st.session_state["ai_studio_pending_draft"] = None
+        st.session_state["ai_studio_reviewed_signature"] = page._draft_signature(draft)
+        st.session_state["ai_studio_sample_source_plan"] = page.SampleSourcePlan(
+            "CSV",
+            "sample",
+            "csv",
+            "data",
+            "sample.csv",
+            production_ready=True,
+        )
+        st.session_state["ai_studio_reader_kind"] = "csv"
+        st.session_state["ai_studio_reader_root"] = "data"
+        st.session_state["ai_studio_file_pattern"] = "sample.csv"
+        st.session_state["ai_studio_published_signature"] = ""
+        if confirm:
+            st.session_state[page.AI_REPLACEMENT_CONFIRM_STATE_KEY] = page._draft_signature(draft)
+        page._render_workspace_save_bar(
+            SimpleNamespace(
+                workspace=".",
+                catalog=config_model.Catalog.model_validate(catalog_payload),
+            )
+        )
+
+    catalog_payload = _base_draft()
+    catalog_payload["metrics"]["metrics"]["Revenue"] = {
+        "source": "engagement",
+        "kind": "formula",
+        "expression": {"col": "Count"},
+    }
+
+    blocked = AppTest.from_function(
+        app,
+        kwargs={"draft": _base_draft(), "catalog_payload": catalog_payload, "confirm": False},
+    ).run()
+    confirmed = AppTest.from_function(
+        app,
+        kwargs={"draft": _base_draft(), "catalog_payload": catalog_payload, "confirm": True},
+    ).run()
+
+    assert not blocked.exception
+    apply_button = next(b for b in blocked.button if b.label == "Apply to workspace")
+    assert apply_button.disabled
+    assert any("removes existing" in str(w.value) for w in blocked.warning)
+    assert any("Remove these existing objects" in c.label for c in blocked.checkbox)
+
+    assert not confirmed.exception
+    apply_button = next(b for b in confirmed.button if b.label == "Apply to workspace")
+    assert not apply_button.disabled

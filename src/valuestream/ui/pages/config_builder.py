@@ -375,16 +375,23 @@ def _render_continue_primary(save_slot: Any) -> None:
     """Render the current step's primary Continue action."""
     next_step = _next_builder_step()
     save_slot.empty()
-    save_slot.button(
+    clicked = save_slot.button(
         "Continue",
         type="primary",
         icon=":material/arrow_forward:",
         disabled=next_step is None,
         width="stretch",
         key=f"builder_primary_continue_{st.session_state.get('builder_step', 'step')}",
-        on_click=_set_builder_step,
-        args=(next_step or BUILDER_STEPS[-1],),
     )
+    if clicked and next_step is not None:
+        # Most editors render this action from inside a fragment. An on_click
+        # callback would advance session state but only rerun the fragment, so
+        # the page would never move; escalate to a full-app rerun instead.
+        # Only the plain step key may change here: the Jump widget key is
+        # already instantiated for this run, and _builder_steps re-syncs it
+        # before the widget is created on the next run.
+        st.session_state["builder_step"] = next_step
+        st.rerun(scope="app")
 
 
 class _ApplyActionSlot:
@@ -1376,17 +1383,20 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         filter_expression=compiled_filter,
         calculated_rows=st.session_state[calc_key] if calculated_rows_valid else [],
     )
-    _technical_yaml(
-        "Generated source transforms",
-        yaml.safe_dump(
-            {"transforms": source_def.get("transforms", [])},
-            sort_keys=False,
-        ),
-    )
-    _technical_yaml(
-        "Generated source YAML",
-        yaml.safe_dump({"sources": [source_def]}, sort_keys=False),
-    )
+    with components.bordered_panel(
+        "Generated configuration",
+    ):
+        _technical_yaml(
+            "Generated source transforms",
+            yaml.safe_dump(
+                {"transforms": source_def.get("transforms", [])},
+                sort_keys=False,
+            ),
+        )
+        _technical_yaml(
+            "Generated source YAML",
+            yaml.safe_dump({"sources": [source_def]}, sort_keys=False),
+        )
     draft_status = builder.builder_draft_status(
         f"source:{source.id}",
         builder.source_to_dict(source),

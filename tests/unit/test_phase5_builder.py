@@ -3636,3 +3636,55 @@ def _numeric_distribution_catalog() -> model.Catalog:
             "dashboards": {"dashboards": []},
         }
     )
+
+
+@pytest.mark.unit
+def test_builder_continue_escalates_to_full_app_rerun() -> None:
+    """Continue is rendered from inside step fragments.
+
+    An ``on_click`` callback would advance session state but only rerun the
+    fragment, so the page would never move. Assigning the instantiated Jump
+    widget key inline raises StreamlitAPIException. The inline handler must
+    set only the plain step key and escalate with ``st.rerun(scope="app")``.
+    """
+
+    import inspect  # noqa: PLC0415 - focused source guard
+    import textwrap  # noqa: PLC0415 - focused source guard
+
+    source = textwrap.dedent(inspect.getsource(config_builder._render_continue_primary))
+    tree = ast.parse(source)
+
+    button_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "button"
+    ]
+    assert button_calls
+    for call in button_calls:
+        assert all(keyword.arg != "on_click" for keyword in call.keywords)
+
+    rerun_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "rerun"
+    ]
+    assert any(
+        any(
+            keyword.arg == "scope" and getattr(keyword.value, "value", None) == "app"
+            for keyword in call.keywords
+        )
+        for call in rerun_calls
+    )
+
+    assigned_keys = [
+        target.slice.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant)
+    ]
+    assert "builder_step_jump" not in assigned_keys
