@@ -48,7 +48,7 @@ def render(ctx: ValueStreamContext) -> None:
         value=False,
         help="Re-run chunks even when the current files and catalog hash were already processed.",
     )
-    run_col, rebuild_col = st.columns([0.55, 0.45], vertical_alignment="center")
+    run_col, rebuild_col = st.columns([0.5, 0.5], vertical_alignment="center")
     if run_col.button("Run All Sources", type="primary", icon=":material/play_arrow:"):
         _run_all(ctx, force=force_all)
     if rebuild_col.button(
@@ -71,7 +71,7 @@ def render(ctx: ValueStreamContext) -> None:
 
 def _ordered_sources(sources: Iterable[Any]) -> list[Any]:
     """Show newer/default-adjacent sources first without mutating the catalog."""
-    return list(reversed(list(sources)))
+    return list(sources)
 
 
 def _source_tab_label(source_id: str) -> str:
