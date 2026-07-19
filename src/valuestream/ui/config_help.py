@@ -42,11 +42,11 @@ FIELD_HELP: dict[str, str] = {
     ),
     "source.file_pattern": _tip(
         "Glob matched below the source root. Keep it narrow enough to exclude unrelated files.",
-        "Data-Decision-*.zip",
+        "**/*.zip or **/*.parquet",
     ),
     "source.group_pattern": _tip(
         "Optional regular expression that extracts a logical file group from each filename.",
-        "Data-(?P<group>[^-]+)-",
+        r"(?<=/Day=)\d{4}-\d{2}-\d{2} for hive files or _(\d{8})T\d{6}_GMT\.zip$ for Pega DS export",
     ),
     "source.root": _tip(
         "Directory resolved relative to the workspace unless an absolute path is supplied.",

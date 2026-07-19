@@ -16,6 +16,8 @@ _CHROME_TOKENS: dict[str, dict[str, str]] = {
         "muted": "#52606d",
         "border": "#d5dee8",
         "action": "#275dad",
+        "attention": "#b45309",
+        "attention-soft": "#fff7ed",
         "verified": "#0f766e",
         "sage": "#e7eef8",
         "soft": "#eef3f8",
@@ -31,6 +33,8 @@ _CHROME_TOKENS: dict[str, dict[str, str]] = {
         "muted": "#a9b5c2",
         "border": "#304052",
         "action": "#6ea8fe",
+        "attention": "#fbbf24",
+        "attention-soft": "rgba(245, 158, 11, 0.12)",
         "verified": "#4fd1c5",
         "sage": "#18263a",
         "soft": "#18212c",
@@ -286,6 +290,48 @@ __VS_ACTIVE_CSS_VARS__
         div[data-testid="stButtonGroup"] button[aria-checked="true"] {
             background: var(--vs-sage) !important;
             border-color: var(--vs-action) !important;
+            color: var(--vs-ink) !important;
+        }
+
+        div[class*="st-key-vs_ai_copilot_primary"] {
+            background: var(--vs-sage);
+            border-color: var(--vs-action) !important;
+            border-left: 0.35rem solid var(--vs-action) !important;
+            border-radius: 0.8rem;
+            box-shadow: 0 0.35rem 1rem var(--vs-shadow);
+            margin: 0.35rem 0 1rem;
+            padding: 0.25rem 0.35rem 0.15rem;
+        }
+
+        div[class*="st-key-vs_ai_copilot_primary"] [data-testid="stChatInput"] {
+            background: var(--vs-card);
+            border-radius: 0.7rem;
+        }
+
+        div[class*="st-key-vs_ai_copilot_primary"] h3 {
+            margin-bottom: 0.15rem;
+        }
+
+        div[class*="st-key-vs_ai_sharing_consent"] {
+            background: var(--vs-attention-soft);
+            border: 1px solid var(--vs-attention);
+            border-left-width: 0.3rem;
+            border-radius: 0.7rem;
+            box-shadow: 0 1px 2px var(--vs-shadow);
+            padding: 0.75rem 1rem 0.7rem;
+        }
+
+        div[class*="st-key-vs_ai_sharing_consent"]:has(input:checked) {
+            background: var(--vs-metric-delta-bg);
+            border-color: var(--vs-verified);
+        }
+
+        div[class*="st-key-vs_ai_sharing_consent"] [data-testid="stCheckbox"] label p {
+            color: var(--vs-ink) !important;
+            font-weight: 650;
+        }
+
+        div[class*="st-key-vs_ai_sharing_consent"] [data-testid="stCaptionContainer"] p {
             color: var(--vs-ink) !important;
         }
 

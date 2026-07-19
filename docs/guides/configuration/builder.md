@@ -103,6 +103,20 @@ deterministic, sample-first mode. The handoff stays on the active workspace and
 keeps the current Builder authoring journey. The reviewed revision carries the
 existing catalog forward and adds the generated source bundle; a duplicate
 Source ID is rejected instead of silently editing the existing source.
+The selected sample seeds a recursive file pattern from its extension, such as
+`**/*.parquet`, under the inferred workspace root. Narrow that pattern in
+Runtime Settings when the source should include fewer files.
+
+When **Use Rename / Capitalize Transform** is enabled, the Sample preview changes
+immediately to the transformed schema. Every later field control and validation
+uses those transformed names: for example, select `Channel` in required-field
+mapping, defaults, filters, calculations, field approval, processors, and
+Copilot operations after a source `pyChannel` becomes `Channel`. Metric
+dimension properties, dashboard page filters, and report tile fields follow
+the same contract. A stale raw reference such as `pyChannel` is rejected while
+the transform is enabled.
+Turning the transform off restores the raw schema and remaps compatible editor
+state back to the source names.
 
 Choose **Cancel and return to Builder** before Apply, or **Return to
 Configuration Builder** from the revision receipt after Apply. Applying the

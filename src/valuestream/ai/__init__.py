@@ -17,6 +17,7 @@ from valuestream.ai.copilot import (
     run_copilot_tool_loop,
     update_metric_definition,
     update_processor_definition,
+    validate_draft_field_contract,
 )
 from valuestream.ai.settings import (
     configured_api_key,
@@ -78,6 +79,7 @@ __all__ = [
     "update_metric_definition",
     "update_processor_definition",
     "validate_draft_catalog",
+    "validate_draft_field_contract",
     "validation_trace_for_repair",
     "write_chat_with_data_config",
 ]

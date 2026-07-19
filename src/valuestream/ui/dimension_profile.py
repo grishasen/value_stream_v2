@@ -40,6 +40,8 @@ MEASURE_OR_TIME_HINTS = (
 )
 ACTIVE_PROCESSOR_REASON = "Already modeled in processor group-by."
 ACTIVE_SELECTION_REASON = "Already selected as a group-by field."
+CALENDAR_GRANULARITY_FIELDS = ("Day", "Month", "Quarter", "Year")
+CALENDAR_GRANULARITY_REASON = "Explicit calendar granularity for time-based aggregate breakdowns."
 PEGA_CDH_CORE_PACK = "Pega/CDH Core"
 DIMENSION_PACKS: dict[str, tuple[str, ...]] = {
     PEGA_CDH_CORE_PACK: (
@@ -260,14 +262,18 @@ def default_group_by_fields(
     required_fields: Iterable[str] = (),
     limit: int = 5,
 ) -> list[str]:
-    """Choose initial group-by fields from approved low-cardinality dimensions."""
+    """Choose initial group-by fields, reserving room for calendar granularities."""
     approved_set = {str(field) for field in approved_fields if field in sample.columns}
     rows = dimension_profile_rows(sample, protected_fields=required_fields)
-    return [
+    recommended = [
         row.field
         for row in rows
         if row.field in approved_set and row.recommendation == "Recommended"
-    ][:limit]
+    ]
+    calendar = [field for field in CALENDAR_GRANULARITY_FIELDS if field in recommended]
+    business = [field for field in recommended if field not in CALENDAR_GRANULARITY_FIELDS]
+    business_limit = max(0, limit - len(calendar))
+    return [*business[:business_limit], *calendar][:limit]
 
 
 def dimension_pack_names() -> list[str]:
@@ -366,6 +372,9 @@ def dimension_recommendation(
     if current_usage:
         recommendation = "Active"
         reason = active_reason
+    elif field in CALENDAR_GRANULARITY_FIELDS:
+        recommendation = "Recommended"
+        reason = CALENDAR_GRANULARITY_REASON
     elif protected or looks_like_identity_field(field) or looks_like_measure_or_time_field(field):
         recommendation = "Avoid"
         reason = "Identity, timestamp, measure, outcome, or processor-control field."

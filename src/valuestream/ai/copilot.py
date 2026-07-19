@@ -9,10 +9,11 @@ workspace catalog.
 
 from __future__ import annotations
 
+import ast as py_ast
 import copy
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
 
@@ -35,12 +36,167 @@ from valuestream.recipes import (
     recipe_readiness,
 )
 from valuestream.utils.logger import get_logger
+from valuestream.utils.names import capitalize_fields
 
 logger = get_logger(__name__)
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _HISTORY_LIMIT = 8
 _COVERAGE_STATUSES = ("covered", "partial", "missing")
+
+_CALENDAR_RESULT_FIELDS = frozenset(
+    {
+        "Day",
+        "day",
+        "as_of_date",
+        "Week",
+        "week",
+        "Month",
+        "month",
+        "Quarter",
+        "quarter",
+        "Year",
+        "year",
+        "Summary",
+        "Period",
+        "period",
+        "grain",
+    }
+)
+_TILE_SINGLE_FIELD_KEYS = frozenset(
+    {
+        "x",
+        "y",
+        "y2",
+        "line_y",
+        "color",
+        "value",
+        "values",
+        "names",
+        "size",
+        "error_y",
+        "error_y_plus",
+        "error_y_minus",
+        "error_y_lower",
+        "error_y_upper",
+        "error_x",
+        "error_x_lower",
+        "error_x_upper",
+        "facet_row",
+        "facet_col",
+        "facet_column",
+        "animation_frame",
+        "animation_group",
+        "date",
+        "r",
+        "theta",
+        "source",
+        "target",
+        "property",
+        "locations",
+        "location",
+        "lat",
+        "lon",
+        "sort_by",
+        "text",
+        "symbol",
+        "hover_name",
+        "measure",
+        "z",
+        "fallback_property",
+        "reference",
+        "delta_reference",
+    }
+)
+_TILE_MULTI_FIELD_KEYS = frozenset({"path", "columns", "group_by", "custom_data"})
+_SCALAR_STATE_TYPES = frozenset(
+    {"count", "value_sum", "min", "max", "pooled_mean", "pooled_variance"}
+)
+_VARIANT_RESULT_FIELDS = frozenset(
+    {
+        "Count",
+        "Positives",
+        "Negatives",
+        "CTR",
+        "TestCTR",
+        "ControlCTR",
+        "TestSampleSize",
+        "ControlSampleSize",
+        "AbsoluteRateDifference",
+        "AbsoluteRateDifference_CI_Low",
+        "AbsoluteRateDifference_CI_High",
+        "Lift",
+        "Lift_Z_Score",
+        "Lift_P_Val",
+        "StdErr",
+    }
+)
+_CONTINGENCY_RESULT_FIELDS = frozenset(
+    {
+        "Count",
+        "Positives",
+        "Negatives",
+        "chi2_stat",
+        "chi2_dof",
+        "chi2_p_val",
+        "chi2_odds_ratio_stat",
+        "chi2_odds_ratio_ci_low",
+        "chi2_odds_ratio_ci_high",
+        "g_stat",
+        "g_dof",
+        "g_p_val",
+        "g_odds_ratio_stat",
+        "g_odds_ratio_ci_low",
+        "g_odds_ratio_ci_high",
+        "z_score",
+        "z_p_val",
+    }
+)
+_PROPORTION_RESULT_FIELDS = frozenset(
+    {
+        "Count",
+        "Positives",
+        "Negatives",
+        "z_score",
+        "z_p_val",
+    }
+)
+_LIFECYCLE_RESULT_FIELDS = frozenset(
+    {
+        "customers_count",
+        "unique_holdings",
+        "lifetime_value",
+        "MinPurchasedDate",
+        "MaxPurchasedDate",
+        "frequency",
+        "recency",
+        "tenure",
+        "monetary_value",
+        "r_quartile",
+        "f_quartile",
+        "m_quartile",
+        "rfm_seg",
+        "rfm_segment",
+        "rfm_score",
+    }
+)
+_CURVE_RESULT_FIELDS = frozenset(
+    {
+        "roc_auc",
+        "average_precision",
+        "tpr",
+        "fpr",
+        "precision",
+        "recall",
+        "pos_fraction",
+        # These are deterministic chart-factory outputs derived from fpr/tpr.
+        "sample_fraction",
+        "gain",
+        "lift",
+    }
+)
+_CALIBRATION_RESULT_FIELDS = frozenset({"bin", "predicted", "observed"})
+_QUANTILE_RESULT_SUFFIXES = frozenset({"Median", "p25", "p75", "p90", "p95", "Min", "Max"})
 
 OPERATION_DICTIONARY: dict[str, Any] = {
     "set_source_default": {
@@ -279,6 +435,237 @@ def apply_draft_operations(
         updated, summary = handler(updated, operation)
         summaries.append(summary)
     return updated, summaries
+
+
+def remap_operation_field_names(
+    operations: list[dict[str, Any]],
+    field_name_mapping: Mapping[str, str] | None,
+) -> list[dict[str, Any]]:
+    """Normalize known raw schema names in field-bearing operation slots.
+
+    The provider is still constrained by the effective-schema validator. This helper only
+    removes a deterministic source of unnecessary repair turns: a model may repeat a raw name
+    that the prompt explicitly maps to an effective post-transform name. Free text, scalar
+    filter values, identifiers, and calculated output names are deliberately left unchanged.
+    """
+
+    mapping = {
+        str(raw): str(effective)
+        for raw, effective in (field_name_mapping or {}).items()
+        if str(raw).strip() and str(effective).strip() and str(raw) != str(effective)
+    }
+    if not mapping:
+        return copy.deepcopy(operations)
+    return [_remap_operation_field_names(operation, mapping) for operation in operations]
+
+
+def _remap_operation_field_names(
+    operation: dict[str, Any], mapping: Mapping[str, str]
+) -> dict[str, Any]:
+    updated = copy.deepcopy(operation)
+    kind = str(updated.get("op") or "")
+    if kind in {"set_source_default", "remove_source_default"}:
+        _remap_scalar_key(updated, "field", mapping)
+    elif kind in {"set_source_filter", "set_calculated_field"}:
+        updated["expression"] = _remap_expression_fields(updated.get("expression"), mapping)
+    elif kind == "set_processor" and isinstance(updated.get("processor"), dict):
+        updated["processor"] = _remap_processor_fields(updated["processor"], mapping)
+    elif kind == "set_metric" and isinstance(updated.get("metric"), dict):
+        # Metric formulas reference aggregate states, not raw schema columns. The comparison
+        # variant is the one metric property that directly names a source dimension.
+        _remap_scalar_key(updated["metric"], "variant_column", mapping)
+    elif kind == "set_tile" and isinstance(updated.get("tile"), dict):
+        updated["tile"] = _remap_tile_fields(updated["tile"], mapping)
+    elif kind == "set_dashboards" and isinstance(updated.get("dashboards"), dict):
+        updated["dashboards"] = _remap_dashboard_fields(updated["dashboards"], mapping)
+    return updated
+
+
+def _mapped_field(value: Any, mapping: Mapping[str, str]) -> Any:
+    return mapping.get(value, value) if isinstance(value, str) else value
+
+
+def _remap_scalar_key(target: dict[str, Any], key: str, mapping: Mapping[str, str]) -> None:
+    if key in target:
+        target[key] = _mapped_field(target[key], mapping)
+
+
+def _remap_field_sequence(value: Any, mapping: Mapping[str, str]) -> Any:
+    if isinstance(value, list):
+        return [_mapped_field(item, mapping) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_mapped_field(item, mapping) for item in value)
+    return _mapped_field(value, mapping)
+
+
+def _remap_expression_fields(value: Any, mapping: Mapping[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: (
+                _mapped_field(item, mapping)
+                if key in {"col", "column"}
+                else _remap_expression_fields(item, mapping)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_remap_expression_fields(item, mapping) for item in value]
+    return copy.deepcopy(value)
+
+
+def _remap_processor_fields(  # noqa: PLR0912
+    processor: dict[str, Any], mapping: Mapping[str, str]
+) -> dict[str, Any]:
+    updated = copy.deepcopy(processor)
+    for key in ("group_by", "dimensions", "dedup_keys", "properties", "score_properties"):
+        if key in updated:
+            updated[key] = _remap_field_sequence(updated[key], mapping)
+    for key in (
+        "outcome_column",
+        "variant_column",
+        "entity",
+        "recurring_period_column",
+        "recurring_cost_column",
+    ):
+        _remap_scalar_key(updated, key, mapping)
+    for section, keys in (
+        ("time", ("column",)),
+        ("outcome", ("column",)),
+        ("entities", ("subject",)),
+        ("touchpoint", ("customer_column", "event_column")),
+    ):
+        nested = updated.get(section)
+        if isinstance(nested, dict):
+            for key in keys:
+                _remap_scalar_key(nested, key, mapping)
+    keys = updated.get("keys")
+    if isinstance(keys, dict):
+        updated["keys"] = {key: _mapped_field(value, mapping) for key, value in keys.items()}
+    for key in ("score_columns", "scores"):
+        value = updated.get(key)
+        if isinstance(value, dict):
+            updated[key] = {
+                name: (
+                    _remap_processor_column_row(item, mapping)
+                    if isinstance(item, dict)
+                    else _mapped_field(item, mapping)
+                )
+                for name, item in value.items()
+            }
+        elif isinstance(value, list):
+            updated[key] = [
+                _remap_processor_column_row(item, mapping)
+                if isinstance(item, dict)
+                else _mapped_field(item, mapping)
+                for item in value
+            ]
+        elif isinstance(value, str):
+            updated[key] = _mapped_field(value, mapping)
+    for key in ("value_aggs", "milestones"):
+        rows = updated.get(key)
+        if isinstance(rows, list):
+            updated[key] = [
+                _remap_processor_column_row(row, mapping)
+                if isinstance(row, dict)
+                else copy.deepcopy(row)
+                for row in rows
+            ]
+    if "filter" in updated:
+        updated["filter"] = _remap_expression_fields(updated["filter"], mapping)
+    stages = updated.get("stages")
+    if isinstance(stages, list):
+        for stage in stages:
+            if isinstance(stage, dict) and "when" in stage:
+                stage["when"] = _remap_expression_fields(stage["when"], mapping)
+    states = updated.get("states")
+    state_rows = list(states.values()) if isinstance(states, dict) else states
+    if isinstance(state_rows, list):
+        for state in state_rows:
+            if not isinstance(state, dict):
+                continue
+            _remap_scalar_key(state, "source_column", mapping)
+            if "where" in state:
+                state["where"] = _remap_expression_fields(state["where"], mapping)
+    return updated
+
+
+def _remap_processor_column_row(row: dict[str, Any], mapping: Mapping[str, str]) -> dict[str, Any]:
+    updated = copy.deepcopy(row)
+    _remap_scalar_key(updated, "column", mapping)
+    return updated
+
+
+def _remap_tile_fields(  # noqa: PLR0912
+    tile: dict[str, Any], mapping: Mapping[str, str]
+) -> dict[str, Any]:
+    updated = copy.deepcopy(tile)
+    for key in _TILE_SINGLE_FIELD_KEYS:
+        if key in updated:
+            updated[key] = _remap_field_sequence(updated[key], mapping)
+    for key in _TILE_MULTI_FIELD_KEYS:
+        if key in updated:
+            updated[key] = _remap_field_sequence(updated[key], mapping)
+    facets = updated.get("facets")
+    if isinstance(facets, dict):
+        for key in ("row", "col", "column"):
+            _remap_scalar_key(facets, key, mapping)
+    hover_data = updated.get("hover_data")
+    if isinstance(hover_data, dict):
+        updated["hover_data"] = {
+            str(_mapped_field(field, mapping)): copy.deepcopy(value)
+            for field, value in hover_data.items()
+        }
+    elif hover_data is not None:
+        updated["hover_data"] = _remap_field_sequence(hover_data, mapping)
+    filters = updated.get("filters")
+    if isinstance(filters, dict):
+        # Mapping keys are field names; mapping values are user data and must remain exact.
+        updated["filters"] = {
+            str(_mapped_field(field, mapping)): copy.deepcopy(value)
+            for field, value in filters.items()
+        }
+    conditional = updated.get("conditional_formatting")
+    if isinstance(conditional, list):
+        for rule in conditional:
+            if isinstance(rule, dict):
+                _remap_scalar_key(rule, "column", mapping)
+    labels = updated.get("labels")
+    if isinstance(labels, dict):
+        updated["labels"] = {
+            str(_mapped_field(field, mapping)): copy.deepcopy(label)
+            for field, label in labels.items()
+        }
+    return updated
+
+
+def _remap_dashboard_fields(
+    dashboards: dict[str, Any], mapping: Mapping[str, str]
+) -> dict[str, Any]:
+    updated = copy.deepcopy(dashboards)
+    rows = updated.get("dashboards")
+    if not isinstance(rows, list):
+        return updated
+    for dashboard in rows:
+        pages = dashboard.get("pages") if isinstance(dashboard, dict) else None
+        if not isinstance(pages, list):
+            continue
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            filters = page.get("filters")
+            if isinstance(filters, list):
+                for spec in filters:
+                    if isinstance(spec, dict):
+                        _remap_scalar_key(spec, "field", mapping)
+            tiles = page.get("tiles")
+            if isinstance(tiles, list):
+                page["tiles"] = [
+                    _remap_tile_fields(tile, mapping)
+                    if isinstance(tile, dict)
+                    else copy.deepcopy(tile)
+                    for tile in tiles
+                ]
+    return updated
 
 
 def update_processor_definition(
@@ -864,6 +1251,9 @@ def _expression_field_references(value: Any) -> set[str]:
             for key in ("col", "column")
             if isinstance(value.get(key), str) and str(value[key]).strip()
         }
+        polars_text = value.get("polars")
+        if isinstance(polars_text, str):
+            fields.update(_polars_field_references(polars_text))
         for item in value.values():
             fields.update(_expression_field_references(item))
         return fields
@@ -875,12 +1265,1171 @@ def _expression_field_references(value: Any) -> set[str]:
     return set()
 
 
+def _polars_field_references(text: str) -> set[str]:
+    """Extract literal ``pl.col`` references without evaluating provider text."""
+
+    try:
+        parsed = py_ast.parse(text, mode="eval")
+    except SyntaxError:
+        return set()
+    fields: set[str] = set()
+    for node in py_ast.walk(parsed):
+        if not isinstance(node, py_ast.Call) or not isinstance(node.func, py_ast.Attribute):
+            continue
+        if (
+            node.func.attr != "col"
+            or not isinstance(node.func.value, py_ast.Name)
+            or node.func.value.id != "pl"
+            or not node.args
+        ):
+            continue
+        first = node.args[0]
+        values = first.elts if isinstance(first, py_ast.List | py_ast.Tuple) else [first]
+        fields.update(
+            str(value.value).strip()
+            for value in values
+            if isinstance(value, py_ast.Constant)
+            and isinstance(value.value, str)
+            and str(value.value).strip()
+        )
+    return fields
+
+
 def _expression_contains_key(value: Any, key: str) -> bool:
     if isinstance(value, dict):
         return key in value or any(_expression_contains_key(item, key) for item in value.values())
     if isinstance(value, list):
         return any(_expression_contains_key(item, key) for item in value)
     return False
+
+
+def _field_contract_source_ids(draft: dict[str, Any], source_id: str | None) -> set[str]:
+    sources = draft.get("pipelines", {}).get("sources", [])
+    source_ids = (
+        {
+            str(source.get("id"))
+            for source in sources
+            if isinstance(source, dict) and source.get("id")
+        }
+        if isinstance(sources, list)
+        else set()
+    )
+    requested = str(source_id or "").strip()
+    if requested:
+        return {requested} if requested in source_ids else set()
+    return source_ids if len(source_ids) == 1 else set()
+
+
+def _field_contract_scope_issues(draft: dict[str, Any], source_id: str | None) -> list[str]:
+    sources = draft.get("pipelines", {}).get("sources", [])
+    available = (
+        {
+            str(source.get("id"))
+            for source in sources
+            if isinstance(source, dict) and source.get("id")
+        }
+        if isinstance(sources, list)
+        else set()
+    )
+    requested = str(source_id or "").strip()
+    if requested and requested not in available:
+        return [
+            f"The active field-contract source {requested!r} does not exist in the candidate. "
+            "Keep the sampled source id unchanged."
+        ]
+    if not requested and len(available) > 1:
+        return [
+            "Field-contract validation requires an explicit active source id when the "
+            "candidate contains multiple sources."
+        ]
+    if not available:
+        return ["Field-contract validation requires the sampled source in the candidate."]
+    return []
+
+
+def _processor_ids_for_sources(draft: dict[str, Any], source_ids: set[str]) -> set[str]:
+    processors = draft.get("processors", {}).get("processors", [])
+    if not isinstance(processors, list):
+        return set()
+    return {
+        str(processor.get("id"))
+        for processor in processors
+        if isinstance(processor, dict)
+        and processor.get("id")
+        and str(processor.get("source") or "") in source_ids
+    }
+
+
+def _tile_uses_processors(
+    draft: dict[str, Any], tile: dict[str, Any], processor_ids: set[str]
+) -> bool:
+    metric_name = str(tile.get("metric") or "").strip()
+    metrics = draft.get("metrics", {}).get("metrics", {})
+    metric = metrics.get(metric_name) if isinstance(metrics, dict) else None
+    return isinstance(metric, dict) and str(metric.get("source") or "") in processor_ids
+
+
+def _operation_field_contract_issues(  # noqa: PLR0912, PLR0915
+    draft: dict[str, Any],
+    operations: list[dict[str, Any]],
+    approved_fields: list[str],
+    *,
+    source_id: str | None = None,
+) -> list[str]:
+    """Validate Copilot field references against the effective approved schema.
+
+    Catalog validation intentionally infers a best-effort source schema from processor
+    declarations. That makes it unsuitable as the only Copilot guard: a stale raw field can
+    otherwise seed its own inferred schema after ``rename_capitalize``. This check uses the
+    sample-backed approved schema as the authoritative input-field contract while keeping
+    calculated/default outputs and metric result columns available in the same tool turn.
+    """
+
+    allowed_source_fields = {str(field).strip() for field in approved_fields if str(field).strip()}
+    scope_issues = _field_contract_scope_issues(draft, source_id)
+    if scope_issues:
+        return scope_issues
+    source_ids = _field_contract_source_ids(draft, source_id)
+    processor_ids = _processor_ids_for_sources(draft, source_ids)
+    issues: list[str] = []
+    for operation in operations:
+        kind = str(operation.get("op") or "")
+        if kind == "set_source_default":
+            if str(operation.get("source") or "") not in source_ids:
+                continue
+            field_name = str(operation.get("field") or "").strip()
+            if field_name:
+                output_issues = _output_field_name_issues(
+                    kind,
+                    {field_name},
+                    allowed_source_fields,
+                )
+                issues.extend(output_issues)
+                if not output_issues:
+                    allowed_source_fields.add(field_name)
+            continue
+        if kind == "set_calculated_field":
+            if str(operation.get("source") or "") not in source_ids:
+                continue
+            issues.extend(
+                _field_reference_issues(
+                    kind,
+                    _expression_field_references(operation.get("expression")),
+                    allowed_source_fields,
+                )
+            )
+            field_name = str(operation.get("name") or "").strip()
+            if field_name:
+                output_issues = _output_field_name_issues(
+                    kind,
+                    {field_name},
+                    allowed_source_fields,
+                )
+                issues.extend(output_issues)
+                if not output_issues:
+                    allowed_source_fields.add(field_name)
+            continue
+        if kind == "set_source_filter":
+            if str(operation.get("source") or "") not in source_ids:
+                continue
+            issues.extend(
+                _field_reference_issues(
+                    kind,
+                    _expression_field_references(operation.get("expression")),
+                    allowed_source_fields,
+                )
+            )
+            continue
+        if kind == "set_processor":
+            processor = operation.get("processor")
+            if isinstance(processor, dict) and str(processor.get("source") or "") in source_ids:
+                processor_ids.add(str(processor.get("id") or ""))
+                issues.extend(
+                    _field_reference_issues(
+                        kind,
+                        _processor_field_references(processor),
+                        allowed_source_fields,
+                    )
+                )
+            continue
+        if kind == "set_metric":
+            metric = operation.get("metric")
+            if isinstance(metric, dict) and str(metric.get("source") or "") in processor_ids:
+                issues.extend(
+                    _field_reference_issues(
+                        kind,
+                        _metric_source_field_references(metric),
+                        allowed_source_fields,
+                    )
+                )
+            continue
+        if kind == "set_tile":
+            tile = operation.get("tile")
+            if isinstance(tile, dict) and _tile_uses_processors(draft, tile, processor_ids):
+                issues.extend(
+                    _tile_field_contract_issues(
+                        draft,
+                        tile,
+                        operation_name=kind,
+                    )
+                )
+            continue
+        if kind == "set_dashboards":
+            dashboards = operation.get("dashboards")
+            if isinstance(dashboards, dict):
+                issues.extend(
+                    _dashboard_field_contract_issues(
+                        draft,
+                        dashboards,
+                        processor_ids=processor_ids,
+                    )
+                )
+    return list(dict.fromkeys(issues))
+
+
+def validate_draft_field_contract(  # noqa: PLR0912
+    draft: dict[str, Any],
+    approved_fields: list[str],
+    *,
+    source_id: str | None = None,
+    source_fields: list[str] | None = None,
+    baseline_draft: dict[str, Any] | None = None,
+    expected_rename_capitalize: bool | None = None,
+) -> tuple[bool, list[str]]:
+    """Validate a sample-backed draft against its effective approved fields.
+
+    This complements catalog validation, whose intentionally inferred source schema cannot
+    prove that processor and report references came from the post-transform sample schema.
+    Raw source declarations before ``rename_capitalize`` remain outside this contract; every
+    downstream transform, processor, page filter, and chart field is checked.
+    """
+
+    allowed_fields = {str(field).strip() for field in approved_fields if str(field).strip()}
+    source_input_fields = {
+        str(field).strip()
+        for field in (source_fields if source_fields is not None else approved_fields)
+        if str(field).strip()
+    }
+    scope_issues = _field_contract_scope_issues(draft, source_id)
+    if scope_issues:
+        return False, scope_issues
+    source_ids = _field_contract_source_ids(draft, source_id)
+    issues: list[str] = []
+    if expected_rename_capitalize is not None:
+        issues.extend(
+            _source_naming_contract_issues(
+                draft,
+                source_ids,
+                expected_rename_capitalize=expected_rename_capitalize,
+            )
+        )
+    if baseline_draft is not None:
+        issues.extend(_inactive_scope_mutation_issues(draft, baseline_draft, source_ids))
+    carry_unmodified_active_artifacts = bool(
+        baseline_draft is not None
+        and not _active_source_naming_contract_changed(draft, baseline_draft, source_ids)
+    )
+    sources = draft.get("pipelines", {}).get("sources", [])
+    source_outputs: set[str] = set()
+    if isinstance(sources, list):
+        for source in sources:
+            if isinstance(source, dict) and str(source.get("id") or "") in source_ids:
+                source_issues, outputs = _source_field_contract_issues(
+                    source,
+                    source_input_fields,
+                )
+                issues.extend(source_issues)
+                source_outputs.update(outputs)
+
+    processors = draft.get("processors", {}).get("processors", [])
+    baseline_processors = _processor_definitions_by_id(baseline_draft)
+    processor_ids: set[str] = set()
+    if isinstance(processors, list):
+        for processor in processors:
+            if (
+                not isinstance(processor, dict)
+                or str(processor.get("source") or "") not in source_ids
+            ):
+                continue
+            processor_id = str(processor.get("id") or "<unknown>")
+            processor_ids.add(processor_id)
+            if (
+                carry_unmodified_active_artifacts
+                and baseline_processors.get(processor_id) == processor
+            ):
+                continue
+            processor_fields = set(source_outputs)
+            processor_fields.update(
+                source_input_fields
+                if baseline_processors.get(processor_id) == processor
+                else allowed_fields
+            )
+            issues.extend(
+                _field_reference_issues(
+                    f"processor {processor_id!r}",
+                    _processor_field_references(processor),
+                    processor_fields,
+                )
+            )
+
+    metrics = draft.get("metrics", {}).get("metrics", {})
+    baseline_metrics = _metric_definitions_by_name(baseline_draft)
+    if isinstance(metrics, dict):
+        for metric_name, metric in metrics.items():
+            if not isinstance(metric, dict) or str(metric.get("source") or "") not in processor_ids:
+                continue
+            if (
+                carry_unmodified_active_artifacts
+                and baseline_metrics.get(str(metric_name)) == metric
+            ):
+                continue
+            metric_fields = set(source_outputs)
+            metric_fields.update(
+                source_input_fields
+                if baseline_metrics.get(str(metric_name)) == metric
+                else allowed_fields
+            )
+            issues.extend(
+                _field_reference_issues(
+                    f"metric {metric_name!r}",
+                    _metric_source_field_references(metric),
+                    metric_fields,
+                )
+            )
+
+    dashboards = draft.get("dashboards")
+    if isinstance(dashboards, dict):
+        issues.extend(
+            _dashboard_field_contract_issues(
+                draft,
+                dashboards,
+                processor_ids=processor_ids,
+            )
+        )
+    unique_issues = list(dict.fromkeys(issues))
+    return not unique_issues, unique_issues
+
+
+def _inactive_scope_mutation_issues(
+    draft: dict[str, Any],
+    baseline_draft: dict[str, Any],
+    source_ids: set[str],
+) -> list[str]:
+    """Block AI candidates from changing artifacts outside the sampled source graph."""
+
+    issues: list[str] = []
+    current_sources = _source_definitions_by_id(draft)
+    baseline_sources = _source_definitions_by_id(baseline_draft)
+    inactive_source_ids = (set(current_sources) | set(baseline_sources)) - source_ids
+    if any(current_sources.get(key) != baseline_sources.get(key) for key in inactive_source_ids):
+        issues.append(
+            "The candidate changes a source outside the active sampled-source contract. "
+            "Keep non-active sources unchanged."
+        )
+
+    current_processors = _processor_definitions_by_id(draft)
+    baseline_processors = _processor_definitions_by_id(baseline_draft)
+    active_processor_ids = {
+        processor_id
+        for processor_id in set(current_processors) | set(baseline_processors)
+        if _artifact_stays_in_scope(
+            baseline_processors.get(processor_id),
+            current_processors.get(processor_id),
+            source_ids,
+        )
+    }
+    inactive_processor_ids = (
+        set(current_processors) | set(baseline_processors)
+    ) - active_processor_ids
+    if any(
+        current_processors.get(key) != baseline_processors.get(key)
+        for key in inactive_processor_ids
+    ):
+        issues.append(
+            "The candidate changes a processor outside the active sampled-source contract. "
+            "Keep non-active processors unchanged."
+        )
+
+    current_metrics = _metric_definitions_by_name(draft)
+    baseline_metrics = _metric_definitions_by_name(baseline_draft)
+    active_metric_names = {
+        metric_name
+        for metric_name in set(current_metrics) | set(baseline_metrics)
+        if _artifact_stays_in_scope(
+            baseline_metrics.get(metric_name),
+            current_metrics.get(metric_name),
+            active_processor_ids,
+        )
+    }
+    inactive_metric_names = (set(current_metrics) | set(baseline_metrics)) - active_metric_names
+    if any(current_metrics.get(key) != baseline_metrics.get(key) for key in inactive_metric_names):
+        issues.append(
+            "The candidate changes a metric outside the active sampled-source contract. "
+            "Keep non-active metrics unchanged."
+        )
+
+    current_reports = _inactive_dashboard_projection(draft, active_metric_names)
+    baseline_reports = _inactive_dashboard_projection(baseline_draft, active_metric_names)
+    if current_reports != baseline_reports:
+        issues.append(
+            "The candidate changes a report artifact outside the active sampled-source "
+            "contract. Keep non-active dashboards, pages, filters, and tiles unchanged."
+        )
+    return issues
+
+
+def _active_source_naming_contract_changed(
+    draft: dict[str, Any],
+    baseline_draft: dict[str, Any],
+    source_ids: set[str],
+) -> bool:
+    current = _source_definitions_by_id(draft)
+    baseline = _source_definitions_by_id(baseline_draft)
+    return any(
+        _source_naming_contract(current.get(source_id))
+        != _source_naming_contract(baseline.get(source_id))
+        for source_id in source_ids
+    )
+
+
+def _source_naming_contract(source: dict[str, Any] | None) -> dict[str, Any] | None:
+    if source is None:
+        return None
+    transforms = source.get("transforms")
+    naming_transforms = [
+        copy.deepcopy(transform)
+        for transform in (transforms if isinstance(transforms, list) else [])
+        if isinstance(transform, dict)
+        and str(transform.get("kind") or "") in {"rename_capitalize", "drop_columns"}
+    ]
+    return {
+        "schema": copy.deepcopy(source.get("schema")),
+        "naming_transforms": naming_transforms,
+    }
+
+
+def _source_naming_contract_issues(
+    draft: dict[str, Any],
+    source_ids: set[str],
+    *,
+    expected_rename_capitalize: bool,
+) -> list[str]:
+    """Reject drafts whose active source disagrees with the sampled schema contract."""
+
+    sources = _source_definitions_by_id(draft)
+    issues: list[str] = []
+    for source_id in sorted(source_ids):
+        source = sources.get(source_id)
+        transforms = source.get("transforms") if isinstance(source, dict) else None
+        rename_count = sum(
+            1
+            for transform in (transforms if isinstance(transforms, list) else [])
+            if isinstance(transform, dict) and transform.get("kind") == "rename_capitalize"
+        )
+        has_rename = rename_count > 0
+        if has_rename == expected_rename_capitalize and rename_count <= 1:
+            continue
+        expected = "include exactly one" if expected_rename_capitalize else "not include"
+        issues.append(
+            f"Active source {source_id!r} does not match the effective field-name contract: "
+            f"it must {expected} rename_capitalize transform. Reconcile the draft with the "
+            "current Sample settings before changing downstream fields."
+        )
+    return issues
+
+
+def _artifact_stays_in_scope(
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+    parent_ids: set[str],
+) -> bool:
+    definitions = [definition for definition in (before, after) if definition is not None]
+    return bool(definitions) and all(
+        str(definition.get("source") or "") in parent_ids for definition in definitions
+    )
+
+
+def _source_definitions_by_id(
+    draft: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    if not draft:
+        return {}
+    sources = draft.get("pipelines", {}).get("sources", [])
+    if not isinstance(sources, list):
+        return {}
+    return {
+        str(source.get("id")): source
+        for source in sources
+        if isinstance(source, dict) and source.get("id")
+    }
+
+
+def _inactive_dashboard_projection(
+    draft: dict[str, Any], active_metric_names: set[str]
+) -> dict[str, Any]:
+    dashboards = draft.get("dashboards")
+    if not isinstance(dashboards, dict):
+        return {}
+    projected_dashboards: list[dict[str, Any]] = []
+    rows = dashboards.get("dashboards")
+    for dashboard in rows if isinstance(rows, list) else []:
+        if not isinstance(dashboard, dict):
+            continue
+        projected_pages: list[dict[str, Any]] = []
+        pages = dashboard.get("pages")
+        for page in pages if isinstance(pages, list) else []:
+            if not isinstance(page, dict):
+                continue
+            tiles = page.get("tiles")
+            inactive_tiles = [
+                copy.deepcopy(tile)
+                for tile in (tiles if isinstance(tiles, list) else [])
+                if isinstance(tile, dict)
+                and str(tile.get("metric") or "") not in active_metric_names
+            ]
+            if not inactive_tiles:
+                continue
+            projected_page = copy.deepcopy(page)
+            projected_page["tiles"] = inactive_tiles
+            projected_pages.append(projected_page)
+        if not projected_pages:
+            continue
+        projected_dashboard = copy.deepcopy(dashboard)
+        projected_dashboard["pages"] = projected_pages
+        projected_dashboards.append(projected_dashboard)
+    if not projected_dashboards:
+        return {}
+    projection = {
+        key: copy.deepcopy(value) for key, value in dashboards.items() if key != "dashboards"
+    }
+    projection["dashboards"] = projected_dashboards
+    return projection
+
+
+def _processor_definitions_by_id(
+    draft: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    if not draft:
+        return {}
+    processors = draft.get("processors", {}).get("processors", [])
+    if not isinstance(processors, list):
+        return {}
+    return {
+        str(processor.get("id")): processor
+        for processor in processors
+        if isinstance(processor, dict) and processor.get("id")
+    }
+
+
+def _metric_definitions_by_name(
+    draft: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    if not draft:
+        return {}
+    metrics = draft.get("metrics", {}).get("metrics", {})
+    if not isinstance(metrics, dict):
+        return {}
+    return {str(name): metric for name, metric in metrics.items() if isinstance(metric, dict)}
+
+
+def _source_field_contract_issues(  # noqa: PLR0912, PLR0915
+    source: dict[str, Any],
+    approved_fields: set[str],
+) -> tuple[list[str], set[str]]:
+    source_id = str(source.get("id") or "<unknown>")
+    transforms = source.get("transforms")
+    if not isinstance(transforms, list):
+        return [], set()
+    rename_indexes = [
+        index
+        for index, transform in enumerate(transforms)
+        if isinstance(transform, dict) and transform.get("kind") == "rename_capitalize"
+    ]
+    enforce_from = rename_indexes[0] + 1 if rename_indexes else 0
+    available = set(approved_fields)
+    outputs: set[str] = set()
+    if not rename_indexes:
+        defaults = source.get("defaults")
+        if isinstance(defaults, dict):
+            default_fields = {str(field) for field in defaults if str(field).strip()}
+            outputs.update(default_fields - available)
+            available.update(default_fields)
+
+    issues: list[str] = []
+    for index, transform in enumerate(transforms):
+        if not isinstance(transform, dict) or index < enforce_from:
+            continue
+        kind = str(transform.get("kind") or "")
+        operation_name = f"source {source_id!r} transform {index} ({kind})"
+        references: set[str] = set()
+        new_outputs: set[str] = set()
+        if kind == "defaults":
+            values = transform.get("values")
+            if isinstance(values, dict):
+                new_outputs.update(str(field) for field in values if str(field).strip())
+        elif kind == "derive_column":
+            references.update(_expression_field_references(transform.get("expression")))
+            new_outputs.update(_string_field_values(transform.get("output")))
+        elif kind == "filter":
+            references.update(_expression_field_references(transform.get("expression")))
+        elif kind == "parse_datetime":
+            references.update(_string_field_values(transform.get("columns")))
+        elif kind == "derive_calendar":
+            references.update(_string_field_values(transform.get("from")))
+            new_outputs.update(_string_field_values(transform.get("outputs")))
+        elif kind == "derive_action_id":
+            references.update(_string_field_values(transform.get("parts")))
+            new_outputs.add("ActionID")
+        elif kind == "dedup":
+            references.update(_string_field_values(transform.get("keys")))
+        elif kind == "cast":
+            columns = transform.get("columns")
+            if isinstance(columns, dict):
+                references.update(str(field) for field in columns if str(field).strip())
+        elif kind == "drop_columns":
+            references.update(_string_field_values(transform.get("columns")))
+        elif kind == "coalesce":
+            references.update(_string_field_values(transform.get("columns")))
+            new_outputs.update(_string_field_values(transform.get("output")))
+        issues.extend(_field_reference_issues(operation_name, references, available))
+        issues.extend(_output_field_name_issues(operation_name, new_outputs, available))
+        outputs.update(new_outputs - available)
+        available.update(new_outputs)
+    return issues, outputs
+
+
+def _field_reference_issues(
+    operation_name: str,
+    references: set[str],
+    allowed_fields: set[str],
+    *,
+    contract_label: str = "effective approved schema",
+) -> list[str]:
+    issues: list[str] = []
+    for field_name in sorted(references - allowed_fields, key=str.casefold):
+        renamed = capitalize_fields([field_name])[0]
+        if renamed != field_name and renamed in allowed_fields:
+            issues.append(
+                f"{operation_name} references stale raw field {field_name!r}. "
+                f"Use {renamed!r} from the effective schema after rename_capitalize."
+            )
+            continue
+        issues.append(
+            f"{operation_name} references field {field_name!r}, which is not in the "
+            f"{contract_label}."
+        )
+    return issues
+
+
+def _output_field_name_issues(
+    operation_name: str,
+    outputs: set[str],
+    available_fields: set[str],
+) -> list[str]:
+    issues: list[str] = []
+    for field_name in sorted(outputs, key=str.casefold):
+        renamed = capitalize_fields([field_name])[0]
+        if renamed == field_name or renamed not in available_fields:
+            continue
+        issues.append(
+            f"{operation_name} creates stale raw field {field_name!r}, which would shadow "
+            f"effective field {renamed!r} after rename_capitalize. Use {renamed!r} or choose "
+            "a genuinely new output name."
+        )
+    return issues
+
+
+def _processor_field_references(processor: dict[str, Any]) -> set[str]:  # noqa: PLR0912
+    references: set[str] = set()
+    for key in (
+        "group_by",
+        "dimensions",
+        "dedup_keys",
+        "properties",
+        "score_properties",
+    ):
+        references.update(_string_field_values(processor.get(key)))
+    for key in (
+        "outcome_column",
+        "variant_column",
+        "entity",
+        "recurring_period_column",
+        "recurring_cost_column",
+    ):
+        references.update(_string_field_values(processor.get(key)))
+
+    time_spec = processor.get("time")
+    if isinstance(time_spec, dict):
+        references.update(_string_field_values(time_spec.get("column")))
+    outcome = processor.get("outcome")
+    if isinstance(outcome, dict):
+        references.update(_string_field_values(outcome.get("column")))
+    entities = processor.get("entities")
+    if isinstance(entities, dict):
+        references.update(_string_field_values(entities.get("subject")))
+    touchpoint = processor.get("touchpoint")
+    if isinstance(touchpoint, dict):
+        for key in ("customer_column", "event_column"):
+            references.update(_string_field_values(touchpoint.get(key)))
+    lifecycle_keys = processor.get("keys")
+    if isinstance(lifecycle_keys, dict):
+        for value in lifecycle_keys.values():
+            references.update(_string_field_values(value))
+    for key in ("score_columns", "scores"):
+        values = processor.get(key)
+        if isinstance(values, dict):
+            for value in values.values():
+                references.update(_string_field_values(value))
+        elif isinstance(values, list):
+            for value in values:
+                if isinstance(value, dict):
+                    references.update(_string_field_values(value.get("column")))
+                else:
+                    references.update(_string_field_values(value))
+        else:
+            references.update(_string_field_values(values))
+    for key in ("value_aggs", "milestones"):
+        rows = processor.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict):
+                references.update(_string_field_values(row.get("column")))
+
+    references.update(_expression_field_references(processor.get("filter")))
+    stages = processor.get("stages")
+    if isinstance(stages, list):
+        for stage in stages:
+            if isinstance(stage, dict):
+                references.update(_expression_field_references(stage.get("when")))
+    states = processor.get("states")
+    state_specs = list(states.values()) if isinstance(states, dict) else states
+    if isinstance(state_specs, list):
+        for spec in state_specs:
+            if not isinstance(spec, dict):
+                continue
+            references.update(_string_field_values(spec.get("source_column")))
+            references.update(_expression_field_references(spec.get("where")))
+    try:
+        typed = model.Processors.model_validate({"processors": [processor]}).processors[0]
+    except (TypeError, ValueError):
+        return references
+    references.update(_processor_state_source_fields(typed))
+    return references
+
+
+def _processor_state_source_fields(processor: model.Processor) -> set[str]:
+    """Mirror the runtime's explicit and implicit state input-column contract."""
+
+    references: set[str] = set()
+    sketch_state_types = {"cpc", "hll", "theta", "topk"}
+    source_state_types = {"value_sum", "min", "max", *sketch_state_types}
+    for name, state in model.effective_processor_states(processor).items():
+        extra = dict(state.model_extra or {})
+        if isinstance(processor, model.NumericDistributionProcessor) and extra.get("per_property"):
+            continue
+        source_column = extra.get("source_column")
+        if source_column:
+            references.add(str(source_column))
+            continue
+        if state.type not in source_state_types:
+            continue
+        if isinstance(processor, model.EntitySetProcessor) and state.type in sketch_state_types:
+            references.add(str((processor.model_extra or {}).get("entity", "CustomerID")))
+        elif isinstance(processor, model.ScoreDistributionProcessor) and state.type in {
+            "cpc",
+            "hll",
+            "theta",
+        }:
+            references.add("CustomerID")
+        elif isinstance(processor, model.SnapshotProcessor) and state.type in sketch_state_types:
+            references.add(str((processor.model_extra or {}).get("entity", "CustomerID")))
+        elif not isinstance(processor, model.EntityLifecycleProcessor):
+            references.add(name)
+    return references
+
+
+def _metric_source_field_references(metric: dict[str, Any]) -> set[str]:
+    """Return metric properties that name source/aggregate dimension columns."""
+
+    kind = str(metric.get("kind") or "")
+    if kind in {"variant_compare", "contingency_test", "proportion_test"}:
+        return _string_field_values(metric.get("variant_column"))
+    return set()
+
+
+def _string_field_values(value: Any) -> set[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return {stripped} if stripped else set()
+    if isinstance(value, list | tuple | set):
+        return {stripped for item in value if isinstance(item, str) and (stripped := item.strip())}
+    return set()
+
+
+def _mapping_field_values(value: Any, keys: set[str]) -> set[str]:
+    if not isinstance(value, dict):
+        return set()
+    return {
+        stripped
+        for key in keys
+        if isinstance(value.get(key), str) and (stripped := str(value[key]).strip())
+    }
+
+
+def _configured_funnel_stage_names(draft: dict[str, Any], metric_name: str) -> set[str]:
+    processor = _processor_for_metric(draft, metric_name)
+    if processor is None or str(processor.get("kind") or "") != "funnel":
+        return set()
+    stages = processor.get("stages")
+    configured = {
+        str(stage.get("name") or "").strip()
+        for stage in (stages if isinstance(stages, list) else [])
+        if isinstance(stage, dict) and str(stage.get("name") or "").strip()
+    }
+    if configured:
+        return configured
+    states = processor.get("states")
+    return {
+        str(name).removesuffix("_Count")
+        for name, spec in (states.items() if isinstance(states, dict) else [])
+        if isinstance(spec, dict) and spec.get("type") == "count" and str(name).endswith("_Count")
+    }
+
+
+def _tile_stage_contract_issues(
+    draft: dict[str, Any],
+    tile: dict[str, Any],
+    allowed_fields: set[str],
+    *,
+    operation_name: str,
+) -> list[str]:
+    """Validate dual-purpose funnel stages without treating category values as columns."""
+
+    stages = _string_field_values(tile.get("stages"))
+    if not stages:
+        return []
+    configured = _configured_funnel_stage_names(draft, str(tile.get("metric") or ""))
+    issues: list[str] = []
+    for stage in sorted(stages, key=str.casefold):
+        if stage in configured:
+            continue
+        renamed = capitalize_fields([stage])[0]
+        if renamed != stage and renamed in allowed_fields:
+            issues.append(
+                f"{operation_name} references stale raw field {stage!r} in funnel stages. "
+                f"Use {renamed!r} from the effective schema after rename_capitalize."
+            )
+        elif configured:
+            issues.append(
+                f"{operation_name} references funnel stage {stage!r}, which is not one of "
+                f"the configured processor stages: {', '.join(sorted(configured))}."
+            )
+    return issues
+
+
+def _tile_field_contract_issues(
+    draft: dict[str, Any],
+    tile: dict[str, Any],
+    *,
+    operation_name: str,
+) -> list[str]:
+    metric_name = str(tile.get("metric") or "").strip()
+    allowed_fields = set(_CALENDAR_RESULT_FIELDS)
+    allowed_fields.update(_metric_result_fields(draft, metric_name))
+    allowed_fields.update(_processor_result_fields(draft, metric_name))
+    references: set[str] = set()
+    for key in _TILE_SINGLE_FIELD_KEYS - {
+        "property",
+        "fallback_property",
+        "reference",
+        "delta_reference",
+    }:
+        references.update(_string_field_values(tile.get(key)))
+    for key in ("reference", "delta_reference"):
+        references.update(_non_numeric_field_values(tile.get(key)))
+    for key in _TILE_MULTI_FIELD_KEYS:
+        references.update(_string_field_values(tile.get(key)))
+    references.update(_mapping_field_values(tile.get("facets"), {"row", "col", "column"}))
+    hover_data = tile.get("hover_data")
+    references.update(_string_field_values(hover_data))
+    if isinstance(hover_data, dict):
+        references.update(str(field).strip() for field in hover_data if str(field).strip())
+    filters = tile.get("filters")
+    if isinstance(filters, dict):
+        references.update(str(field).strip() for field in filters if str(field).strip())
+    conditional = tile.get("conditional_formatting")
+    if isinstance(conditional, list):
+        for rule in conditional:
+            if isinstance(rule, dict):
+                references.update(_string_field_values(rule.get("column")))
+    issues = _field_reference_issues(
+        operation_name,
+        references,
+        allowed_fields,
+        contract_label="queryable fields for this tile's metric",
+    )
+    property_fields = _string_field_values(tile.get("property"))
+    property_fields.update(_string_field_values(tile.get("fallback_property")))
+    descriptive_fields = allowed_fields | _processor_property_fields(draft, metric_name)
+    issues.extend(
+        _field_reference_issues(
+            operation_name,
+            property_fields,
+            descriptive_fields,
+            contract_label="queryable or descriptive-property fields for this tile's metric",
+        )
+    )
+    labels = tile.get("labels")
+    if isinstance(labels, dict):
+        semantic_keys = (
+            _TILE_SINGLE_FIELD_KEYS
+            | _TILE_MULTI_FIELD_KEYS
+            | {
+                "score",
+                "stage",
+            }
+        )
+        label_fields = {
+            str(field).strip()
+            for field in labels
+            if str(field).strip() and str(field).strip() not in semantic_keys
+        }
+        issues.extend(
+            _field_reference_issues(
+                operation_name,
+                label_fields,
+                descriptive_fields,
+                contract_label="labelable fields for this tile's metric",
+            )
+        )
+    issues.extend(
+        _tile_stage_contract_issues(
+            draft,
+            tile,
+            descriptive_fields,
+            operation_name=operation_name,
+        )
+    )
+    return issues
+
+
+def _non_numeric_field_values(value: Any) -> set[str]:
+    """Return string field names while excluding chart scalar-number strings."""
+
+    values = _string_field_values(value)
+    fields: set[str] = set()
+    for item in values:
+        try:
+            float(item)
+        except ValueError:
+            fields.add(item)
+    return fields
+
+
+def _dashboard_field_contract_issues(
+    draft: dict[str, Any],
+    dashboards: dict[str, Any],
+    *,
+    processor_ids: set[str] | None = None,
+) -> list[str]:
+    issues: list[str] = []
+    dashboard_rows = dashboards.get("dashboards")
+    if not isinstance(dashboard_rows, list):
+        return issues
+    for dashboard in dashboard_rows:
+        if not isinstance(dashboard, dict):
+            continue
+        pages = dashboard.get("pages")
+        if not isinstance(pages, list):
+            continue
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            tiles = page.get("tiles")
+            if not isinstance(tiles, list):
+                continue
+            target_tiles = [
+                tile
+                for tile in tiles
+                if isinstance(tile, dict)
+                and (processor_ids is None or _tile_uses_processors(draft, tile, processor_ids))
+            ]
+            if not target_tiles:
+                continue
+            page_filters = page.get("filters")
+            if isinstance(page_filters, list):
+                target_group_fields = {
+                    field
+                    for tile in target_tiles
+                    for field in _processor_group_fields(
+                        draft,
+                        str(tile.get("metric") or ""),
+                    )
+                }
+                other_tiles = [
+                    tile for tile in tiles if isinstance(tile, dict) and tile not in target_tiles
+                ]
+                other_group_fields = {
+                    field
+                    for tile in other_tiles
+                    for field in _processor_group_fields(
+                        draft,
+                        str(tile.get("metric") or ""),
+                    )
+                }
+                references = {
+                    str(spec.get("field") or "").strip()
+                    for spec in page_filters
+                    if isinstance(spec, dict) and str(spec.get("field") or "").strip()
+                }
+                if other_tiles:
+                    references = {
+                        field
+                        for field in references
+                        if field in target_group_fields
+                        or (
+                            field not in other_group_fields
+                            and capitalize_fields([field])[0] != field
+                            and capitalize_fields([field])[0] in target_group_fields
+                        )
+                    }
+                issues.extend(
+                    _field_reference_issues(
+                        "set_dashboards page filter",
+                        references,
+                        target_group_fields,
+                        contract_label="aggregate dimensions available to the page's metrics",
+                    )
+                )
+            for tile in target_tiles:
+                issues.extend(
+                    _tile_field_contract_issues(
+                        draft,
+                        tile,
+                        operation_name="set_dashboards tile",
+                    )
+                )
+    return issues
+
+
+def _metric_result_fields(  # noqa: PLR0912
+    draft: dict[str, Any], metric_name: str
+) -> set[str]:
+    if not metric_name:
+        return set()
+    metrics = draft.get("metrics", {}).get("metrics", {})
+    metric = metrics.get(metric_name) if isinstance(metrics, dict) else None
+    if not isinstance(metric, dict):
+        return {metric_name}
+    try:
+        typed = model.Metrics.model_validate({"metrics": {metric_name: metric}}).metrics[
+            metric_name
+        ]
+    except (TypeError, ValueError):
+        typed = None
+    kind = typed.kind if typed is not None else str(metric.get("kind") or "")
+    if kind == "lifecycle_summary":
+        fields = _string_field_values(metric.get("outputs")) & _LIFECYCLE_RESULT_FIELDS
+        if not fields:
+            fields = set(_LIFECYCLE_RESULT_FIELDS)
+    else:
+        fields = {metric_name}
+        fields.update(_string_field_values(metric.get("outputs")))
+        fields.update(_string_field_values(metric.get("output")))
+    if kind == "variant_compare":
+        fields.update(_VARIANT_RESULT_FIELDS)
+    elif kind == "contingency_test":
+        fields.update(_CONTINGENCY_RESULT_FIELDS)
+    elif kind == "proportion_test":
+        fields.update(_PROPORTION_RESULT_FIELDS)
+    elif kind == "curve_from_digests":
+        fields.update(_CURVE_RESULT_FIELDS)
+    elif kind == "calibration_from_digests":
+        fields.update(_CALIBRATION_RESULT_FIELDS)
+    elif kind == "tdigest_quantile":
+        state = str(metric.get("state") or "")
+        property_name = state
+        for suffix in ("_tdigest", "_kll"):
+            if property_name.endswith(suffix):
+                property_name = property_name.removesuffix(suffix)
+                break
+        if property_name:
+            fields.update(f"{property_name}_{suffix}" for suffix in _QUANTILE_RESULT_SUFFIXES)
+    fields.update(
+        f"{field}{suffix}"
+        for field in tuple(fields)
+        for suffix in ("_prev", "_delta", "_pct_change")
+    )
+    return fields
+
+
+def _processor_result_fields(draft: dict[str, Any], metric_name: str) -> set[str]:
+    processor = _processor_for_metric(draft, metric_name)
+    if processor is None:
+        return set()
+    fields = _string_field_values(processor.get("group_by"))
+    fields.update(_string_field_values(processor.get("dimensions")))
+    metrics = draft.get("metrics", {}).get("metrics", {})
+    metric = metrics.get(metric_name) if isinstance(metrics, dict) else None
+    if isinstance(metric, dict) and metric.get("kind") == "lifecycle_summary":
+        # Lifecycle queries project only configured metric outputs; internal
+        # aggregate states are not directly queryable by report tiles.
+        return fields
+    try:
+        typed = model.Processors.model_validate({"processors": [processor]}).processors[0]
+    except (TypeError, ValueError):
+        states = processor.get("states")
+        if isinstance(states, dict):
+            fields.update(
+                str(name)
+                for name, spec in states.items()
+                if isinstance(spec, dict) and spec.get("type") in _SCALAR_STATE_TYPES
+            )
+        return fields
+    fields.update(
+        name
+        for name, state in model.effective_processor_states(typed).items()
+        if state.type in _SCALAR_STATE_TYPES
+    )
+    return fields
+
+
+def _processor_for_metric(draft: dict[str, Any], metric_name: str) -> dict[str, Any] | None:
+    metrics = draft.get("metrics", {}).get("metrics", {})
+    metric = metrics.get(metric_name) if isinstance(metrics, dict) else None
+    if not isinstance(metric, dict):
+        return None
+    processor_id = str(metric.get("source") or "").strip()
+    processors = draft.get("processors", {}).get("processors", [])
+    if not isinstance(processors, list):
+        return None
+    return next(
+        (
+            item
+            for item in processors
+            if isinstance(item, dict) and str(item.get("id") or "") == processor_id
+        ),
+        None,
+    )
+
+
+def _processor_group_fields(draft: dict[str, Any], metric_name: str) -> set[str]:
+    processor = _processor_for_metric(draft, metric_name)
+    if processor is None:
+        return set()
+    return _string_field_values(processor.get("group_by")) | _string_field_values(
+        processor.get("dimensions")
+    )
+
+
+def _processor_property_fields(draft: dict[str, Any], metric_name: str) -> set[str]:
+    processor = _processor_for_metric(draft, metric_name)
+    if processor is None:
+        return set()
+    return _string_field_values(processor.get("properties")) | _string_field_values(
+        processor.get("score_properties")
+    )
 
 
 def _calculated_transform_index(source: dict[str, Any], field_name: str) -> int | None:
@@ -991,25 +2540,28 @@ def draft_patches(base: dict[str, Any], proposed: dict[str, Any]) -> list[DraftP
     """Return independently reviewable structural changes between two drafts."""
 
     patches: list[DraftPatch] = []
+    source_patches = _source_naming_patches(base, proposed)
+    atomic_source_ids = {patch.object_id for patch in source_patches}
+    patches.extend(source_patches)
     patches.extend(
         _mapping_patches(
             "source_filters",
-            _source_filters_by_id(base),
-            _source_filters_by_id(proposed),
+            _without_sources(_source_filters_by_id(base), atomic_source_ids),
+            _without_sources(_source_filters_by_id(proposed), atomic_source_ids),
         )
     )
     patches.extend(
         _mapping_patches(
             "source_defaults",
-            _source_defaults_by_key(base),
-            _source_defaults_by_key(proposed),
+            _without_sources(_source_defaults_by_key(base), atomic_source_ids),
+            _without_sources(_source_defaults_by_key(proposed), atomic_source_ids),
         )
     )
     patches.extend(
         _mapping_patches(
             "calculated_fields",
-            _calculated_fields_by_key(base),
-            _calculated_fields_by_key(proposed),
+            _without_sources(_calculated_fields_by_key(base), atomic_source_ids),
+            _without_sources(_calculated_fields_by_key(proposed), atomic_source_ids),
         )
     )
     patches.extend(
@@ -1067,8 +2619,9 @@ def draft_patch_bundles(
     changes travel with changed report tiles that reference them. Report structure
     is included when the affected dashboard or page is part of the same change.
     Source-derived fields are also kept with changed consumers when their names are
-    referenced directly. Each bundle is validated as a complete candidate against
-    the supplied draft validator.
+    referenced directly. A changed source naming contract is represented by one full
+    source patch and travels with changed artifacts in that source's consumer graph.
+    Each bundle is validated as a complete candidate against the supplied draft validator.
     """
 
     patches = draft_patches(base, proposed)
@@ -1156,6 +2709,7 @@ def merge_selected_draft_patches(
     patches = draft_patches(base, proposed)
     merged = copy.deepcopy(base)
     patch_setters = {
+        "sources": _set_source_value,
         "source_filters": _set_source_filters_patch_value,
         "source_defaults": _set_source_default_patch_value,
         "calculated_fields": _set_calculated_field_patch_value,
@@ -1206,6 +2760,10 @@ def run_copilot_tool_loop(
     operation_policy: dict[str, str] | None = None,
     hidden_fields: list[str] | None = None,
     approved_fields: list[str] | None = None,
+    field_contract_source_id: str | None = None,
+    field_contract_source_fields: list[str] | None = None,
+    field_name_mapping: Mapping[str, str] | None = None,
+    expected_rename_capitalize: bool | None = None,
     read_only: bool = False,
     pending_summary: str = "",
 ) -> CopilotRun:
@@ -1232,6 +2790,12 @@ def run_copilot_tool_loop(
         response = call_model(current_prompt)
         responses.append(response)
         turn = parse_copilot_response(response)
+        if turn.operations and field_name_mapping:
+            turn = CopilotTurn(
+                reply=turn.reply,
+                operations=remap_operation_field_names(turn.operations, field_name_mapping),
+                questions=turn.questions,
+            )
         last_turn = turn
         if read_only and turn.operations:
             blocked_message = (
@@ -1276,7 +2840,27 @@ def run_copilot_tool_loop(
                 issues = [str(exc)]
             else:
                 summaries.extend(operation_summaries)
-                ok, issues = validate(candidate)
+                contract_issues: list[str] = []
+                if approved_fields is not None:
+                    contract_issues.extend(
+                        _operation_field_contract_issues(
+                            candidate,
+                            turn.operations,
+                            approved_fields,
+                            source_id=field_contract_source_id,
+                        )
+                    )
+                    _candidate_ok, candidate_issues = validate_draft_field_contract(
+                        candidate,
+                        approved_fields,
+                        source_id=field_contract_source_id,
+                        source_fields=field_contract_source_fields,
+                        baseline_draft=draft,
+                        expected_rename_capitalize=expected_rename_capitalize,
+                    )
+                    contract_issues.extend(candidate_issues)
+                    contract_issues = list(dict.fromkeys(contract_issues))
+                ok, issues = (False, contract_issues) if contract_issues else validate(candidate)
                 if ok:
                     return CopilotRun(
                         turn=turn,
@@ -1384,9 +2968,20 @@ def _dependency_closed_patch_keys(
         if left_root != right_root:
             parent[right_root] = left_root
 
+    source_patches = [patch for patch in patches if patch.section == "sources"]
     processor_patches = [patch for patch in patches if patch.section == "processors"]
     metric_patches = [patch for patch in patches if patch.section == "metrics"]
     tile_patches = [patch for patch in patches if patch.section == "tiles"]
+    _connect_source_naming_dependencies(
+        base,
+        proposed,
+        patches,
+        source_patches,
+        processor_patches,
+        metric_patches,
+        tile_patches,
+        connect,
+    )
     _connect_processor_metric_tile_dependencies(
         processor_patches,
         metric_patches,
@@ -1406,6 +3001,73 @@ def _dependency_closed_patch_keys(
     for patch in patches:
         grouped.setdefault(find(patch.key), set()).add(patch.key)
     return sorted(grouped.values(), key=lambda keys: min(order[key] for key in keys))
+
+
+def _connect_source_naming_dependencies(
+    base: dict[str, Any],
+    proposed: dict[str, Any],
+    patches: list[DraftPatch],
+    source_patches: list[DraftPatch],
+    processor_patches: list[DraftPatch],
+    metric_patches: list[DraftPatch],
+    tile_patches: list[DraftPatch],
+    connect: Callable[[DraftPatch, DraftPatch], None],
+) -> None:
+    """Join a source naming transition to changed artifacts in its consumer graph."""
+
+    if not source_patches:
+        return
+    processor_definitions = (_processors_by_id(base), _processors_by_id(proposed))
+    metric_definitions = (_metrics_by_name(base), _metrics_by_name(proposed))
+    structure_patch = next(
+        (patch for patch in patches if patch.key == "dashboards:structure"),
+        None,
+    )
+    base_structure_nodes = _dashboard_structure_nodes(base)
+    proposed_structure_nodes = _dashboard_structure_nodes(proposed)
+    changed_structure_nodes = (
+        {
+            key
+            for key in set(base_structure_nodes) | set(proposed_structure_nodes)
+            if base_structure_nodes.get(key) != proposed_structure_nodes.get(key)
+        }
+        if structure_patch is not None
+        else set()
+    )
+
+    for source_patch in source_patches:
+        source_id = source_patch.object_id
+        processor_ids = {
+            processor_id
+            for definitions in processor_definitions
+            for processor_id, definition in definitions.items()
+            if str(definition.get("source") or "") == source_id
+        }
+        metric_ids = {
+            metric_id
+            for definitions in metric_definitions
+            for metric_id, definition in definitions.items()
+            if str(definition.get("source") or "") in processor_ids
+        }
+        for processor_patch in processor_patches:
+            if processor_patch.object_id in processor_ids or source_id in _patch_property_values(
+                processor_patch, "source"
+            ):
+                connect(source_patch, processor_patch)
+        for metric_patch in metric_patches:
+            if (
+                metric_patch.object_id in metric_ids
+                or _patch_property_values(metric_patch, "source") & processor_ids
+            ):
+                connect(source_patch, metric_patch)
+        for tile_patch in tile_patches:
+            if _patch_property_values(tile_patch, "metric") & metric_ids:
+                connect(source_patch, tile_patch)
+        if structure_patch is not None:
+            active_nodes = _dashboard_nodes_using_metrics(base, metric_ids)
+            active_nodes.update(_dashboard_nodes_using_metrics(proposed, metric_ids))
+            if changed_structure_nodes & active_nodes:
+                connect(source_patch, structure_patch)
 
 
 def _connect_processor_metric_tile_dependencies(
@@ -1545,16 +3207,43 @@ def _dashboard_structure_nodes(draft: dict[str, Any]) -> dict[str, dict[str, Any
     return nodes
 
 
+def _dashboard_nodes_using_metrics(draft: dict[str, Any], metric_ids: set[str]) -> set[str]:
+    nodes: set[str] = set()
+    dashboards = draft.get("dashboards", {}).get("dashboards", [])
+    if not isinstance(dashboards, list):
+        return nodes
+    for dashboard in dashboards:
+        if not isinstance(dashboard, dict) or not dashboard.get("id"):
+            continue
+        dashboard_id = str(dashboard["id"])
+        pages = dashboard.get("pages", [])
+        if not isinstance(pages, list):
+            continue
+        for page in pages:
+            if not isinstance(page, dict) or not page.get("id"):
+                continue
+            tiles = page.get("tiles", [])
+            if not isinstance(tiles, list) or not any(
+                isinstance(tile, dict) and str(tile.get("metric") or "") in metric_ids
+                for tile in tiles
+            ):
+                continue
+            nodes.add(f"dashboard:{dashboard_id}")
+            nodes.add(f"page:{dashboard_id}/{page['id']}")
+    return nodes
+
+
 def _bundle_title(patches: list[DraftPatch]) -> str:
     priority = {
-        "processors": 0,
-        "metrics": 1,
-        "tiles": 2,
-        "calculated_fields": 3,
-        "source_filters": 4,
-        "source_defaults": 5,
-        "dashboards": 6,
-        "chat_with_data": 7,
+        "sources": 0,
+        "processors": 1,
+        "metrics": 2,
+        "tiles": 3,
+        "calculated_fields": 4,
+        "source_filters": 5,
+        "source_defaults": 6,
+        "dashboards": 7,
+        "chat_with_data": 8,
     }
     primary = min(
         patches,
@@ -1568,6 +3257,7 @@ def _bundle_title(patches: list[DraftPatch]) -> str:
     object_name = primary.object_id.rsplit("/", 1)[-1]
     label = _title_from_identifier(object_name)
     noun = {
+        "sources": "source configuration",
         "processors": "processing flow",
         "metrics": "metric",
         "tiles": "report tile",
@@ -1586,6 +3276,7 @@ def _bundle_title(patches: list[DraftPatch]) -> str:
 
 def _bundle_summary(patches: list[DraftPatch]) -> str:
     labels = {
+        "sources": "source configuration",
         "processors": "processing flow",
         "metrics": "metric",
         "tiles": "report tile",
@@ -1666,6 +3357,43 @@ def _mapping_patches(
             )
         )
     return patches
+
+
+def _source_naming_patches(
+    base: dict[str, Any],
+    proposed: dict[str, Any],
+) -> list[DraftPatch]:
+    """Represent each naming-contract transition as one complete source patch."""
+
+    before = _source_definitions_by_id(base)
+    after = _source_definitions_by_id(proposed)
+    patches: list[DraftPatch] = []
+    for source_id in sorted(set(before) | set(after), key=str.casefold):
+        old = before.get(source_id)
+        new = after.get(source_id)
+        if _source_naming_contract(old) == _source_naming_contract(new):
+            continue
+        patches.append(
+            DraftPatch(
+                key=f"sources:{source_id}",
+                section="sources",
+                object_id=source_id,
+                change=_change_kind(old, new),
+                before=copy.deepcopy(old),
+                after=copy.deepcopy(new),
+            )
+        )
+    return patches
+
+
+def _without_sources(values: dict[str, Any], source_ids: set[str]) -> dict[str, Any]:
+    """Suppress granular source patches already contained by a full source patch."""
+
+    return {
+        object_id: value
+        for object_id, value in values.items()
+        if object_id.partition("/")[0] not in source_ids
+    }
 
 
 def _change_kind(before: Any, after: Any) -> str:
@@ -1786,6 +3514,30 @@ def _set_processor_value(draft: dict[str, Any], processor_id: str, value: Any) -
         processors[index] = copy.deepcopy(value)
 
 
+def _set_source_value(draft: dict[str, Any], source_id: str, value: Any) -> None:
+    sources = draft.setdefault("pipelines", {}).setdefault("sources", [])
+    if not isinstance(sources, list):
+        raise ValueError("Draft pipelines section does not contain a sources list")
+    index = next(
+        (
+            index
+            for index, item in enumerate(sources)
+            if isinstance(item, dict) and item.get("id") == source_id
+        ),
+        None,
+    )
+    if value is None:
+        if index is not None:
+            sources.pop(index)
+        return
+    if not isinstance(value, dict) or str(value.get("id") or "") != source_id:
+        raise ValueError(f"Invalid source patch for '{source_id}'")
+    if index is None:
+        sources.append(copy.deepcopy(value))
+    else:
+        sources[index] = copy.deepcopy(value)
+
+
 def _source_object_parts(object_id: str) -> tuple[str, str]:
     source_id, separator, field_name = object_id.partition("/")
     if not separator or not source_id or not field_name:
@@ -1902,6 +3654,8 @@ def prompt_for_copilot(
     approved_fields: list[str],
     hidden_fields: list[str],
     current_draft: dict[str, Any],
+    rename_capitalize_enabled: bool = False,
+    approved_field_name_mapping: dict[str, str] | None = None,
     read_only: bool = False,
     pending_summary: str = "",
 ) -> str:
@@ -1972,12 +3726,36 @@ def prompt_for_copilot(
             "change, ask them to accept or reject the pending proposal first.\n\n"
             f"{summary_text}"
         )
+    field_mapping = {
+        str(raw): str(effective)
+        for raw, effective in (approved_field_name_mapping or {}).items()
+        if str(raw) and str(effective) and str(raw) != str(effective)
+    }
+    raw_name_rule = (
+        "- Raw names are valid only in declarations that run before rename_capitalize; "
+        "never use them in downstream operations.\n"
+        if rename_capitalize_enabled
+        else "- No rename boundary is active; approved names are the physical and downstream "
+        "field names.\n"
+    )
+    naming_contract_text = (
+        "Effective field-name contract:\n"
+        f"- rename_capitalize is {'enabled' if rename_capitalize_enabled else 'disabled'}.\n"
+        "- Approved fields below are the authoritative post-transform names. Use them "
+        "exactly in downstream filters, calculations, processors, metrics, and reports.\n"
+        "- Never translate an approved name to another spelling or claim an exact approved "
+        "name is unapproved.\n"
+        f"{raw_name_rule}"
+        f"- Approved raw-to-effective mappings: "
+        f"{yaml.safe_dump(field_mapping, sort_keys=False).strip() if field_mapping else 'none'}\n\n"
+    )
     return (
         "You are the configuration copilot inside Value Stream's AI Configuration Studio. "
         "You help the user turn free-form requests into reviewable draft changes.\n\n"
         f"The user is on the {_step_name(step)!r} studio step. {_step_hint(step)} "
         f"{_step_operation_rule(step)}\n\n"
         f"{mode_text}"
+        f"{naming_contract_text}"
         "Respond with a single JSON object and nothing else:\n"
         '{"reply": str, "operations": [Operation], "questions": '
         '[{"question": str, "options": [str]}]}\n'

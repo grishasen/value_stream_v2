@@ -988,6 +988,43 @@ def test_validator_rejects_variant_column_duplicated_in_group_by() -> None:
 
 
 @pytest.mark.unit
+def test_validator_evolves_observed_source_columns_through_rename_capitalize() -> None:
+    catalog = model.Catalog.model_validate(
+        {
+            "pipelines": {
+                "workspace": "sample_backed",
+                "sources": [
+                    {
+                        "id": "events",
+                        "reader": {"kind": "parquet", "file_pattern": "**/*.parquet"},
+                        "transforms": [
+                            {"kind": "rename_capitalize"},
+                            {
+                                "kind": "filter",
+                                "expression": {
+                                    "op": "eq",
+                                    "column": "Channel",
+                                    "value": "Web",
+                                },
+                            },
+                        ],
+                    }
+                ],
+            },
+            "processors": {"processors": []},
+            "metrics": {"metrics": {}},
+            "dashboards": {"dashboards": []},
+        }
+    )
+
+    assert not validate_catalog(catalog).ok
+    result = validate_catalog(catalog, source_columns_by_id={"events": ["pyChannel"]})
+
+    assert result.ok
+    assert result.issues == []
+
+
+@pytest.mark.unit
 class TestSchemaParity:
     def test_disk_matches_models(self) -> None:
         on_disk = {

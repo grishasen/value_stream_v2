@@ -1243,13 +1243,26 @@ AI Configuration Studio remains a separate guided workflow because it starts fro
 - **Governed Copilot preprocessing** — source defaults, dataset filters, and
   calculated fields can be added, replaced, or removed through closed Copilot
   operations. Dataset filters become source `filter` transforms before
-  processor fan-out; the Filters-step operation policy rejects processor edits.
+  processor fan-out; each preprocessing step uses an operation allowlist, so a
+  Filters request cannot synthesize a field through Defaults or mutate another
+  catalog area.
   Calculations receive the complete expression-AST operator catalog and exact
   node shapes, including `concat` with `args` and optional `sep`, so model
   capability is bounded by the same closed DSL that validation enforces. Each
   changed field is an independent before/after patch; accepted patches update
   the session draft and are then synchronized into the Defaults and
   Filters/Calculations row editors before those widgets render again.
+- **Effective field-name contract** — Copilot is always open above the manual
+  controls and receives the authoritative post-transform approved names plus
+  approved raw-to-effective mappings. Provider operations are canonically
+  remapped only in field-reference slots before validation; free-form
+  preprocessing editors reject stale raw names with the effective replacement.
+  Observed physical sample columns seed semantic catalog validation and evolve
+  through the configured transform order. If `rename_capitalize`, the active source, or its naming schema no
+  longer matches an accepted revision, Studio blocks provider calls, review
+  evidence, and Apply. The accepted revision remains visible; deterministic
+  regeneration emits the complete source definition and changed consumers as
+  one dependency-closed bundle so reconciliation is explicit and atomic.
 - **Approve fields** — choose which working fields are eligible for draft metric/report generation and which sample values may be shared with a future LLM.
 - **Draft** — preflight the selected provider capability, then generate, parse,
   merge, validate, and if necessary run up to two bounded repair passes. Only

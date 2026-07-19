@@ -45,7 +45,7 @@ def _workspace_state(sample_relative: str, sample_identity: str) -> dict[str, ob
         "ai_studio_month_column": "",
         "ai_studio_year_column": "",
         "ai_studio_quarter_column": "",
-        "ai_studio_rename_capitalize": False,
+        "ai_studio_rename_capitalize_enabled": False,
         "ai_studio_defaults": [{"Field": "Channel", "Default Value": "Unknown"}],
         "ai_studio_filter_mode": "Rules",
         "ai_studio_filter_rows": [
@@ -253,6 +253,8 @@ def test_ai_studio_checkpoint_drift_expiry_invalid_and_cleanup(tmp_path: Path) -
 def test_ai_studio_checkpoint_restores_after_restart_and_revalidates(tmp_path: Path) -> None:
     _sample, relative, identity = _prepare_workspace(tmp_path)
     state = _workspace_state(relative, identity)
+    state.pop("ai_studio_rename_capitalize_enabled")
+    state["ai_studio_rename_capitalize"] = True
     ai_studio_checkpoint.write_ai_studio_checkpoint(
         tmp_path,
         session_state=state,
@@ -276,10 +278,21 @@ def test_ai_studio_checkpoint_restores_after_restart_and_revalidates(tmp_path: P
     assert refreshed.session_state["ai_studio_defaults"] == [
         {"Field": "Channel", "Default Value": "Unknown"}
     ]
+    assert refreshed.session_state["ai_studio_rename_capitalize_enabled"] is True
+    assert "ai_studio_rename_capitalize" not in refreshed.session_state
     restored_draft = refreshed.session_state["ai_studio_draft"]
     restored_signature = studio_page._draft_signature(restored_draft)
-    assert refreshed.session_state["ai_studio_reviewed_signature"] == restored_signature
-    assert restored_signature in refreshed.session_state["ai_studio_validation_cache"]
+    assert refreshed.session_state["ai_studio_reviewed_signature"] == ""
+    validation_cache = refreshed.session_state["ai_studio_validation_cache"]
+    matching_entries = [
+        entry for key, entry in validation_cache.items() if key.startswith(f"{restored_signature}:")
+    ]
+    assert matching_entries
+    assert any(
+        "active field-contract source 'events' does not exist" in issue.lower()
+        for entry in matching_entries
+        for issue in entry["issues"]
+    )
     assert "ai_studio_sample_bytes" not in refreshed.session_state
     assert studio_page.AI_SHARING_RECEIPT_STATE_KEY not in refreshed.session_state
 

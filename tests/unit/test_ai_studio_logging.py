@@ -32,6 +32,125 @@ class _ProviderSignalError(RuntimeError):
 
 
 @pytest.mark.unit
+def test_candidate_parse_failure_logs_only_safe_attempt_metadata(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raw_response = (
+        "metrics:\n  metrics: [\n"
+        "    PRIVATE-CUSTOMER-42 /Users/alice/private.csv sk-response-secret"
+    )
+    caplog.set_level(logging.DEBUG, logger=ai_studio.__name__)
+
+    result = ai_studio.generate_validated_candidate(
+        base_draft={},
+        prompt="Prompt contains PRIVATE-PROMPT-CUSTOMER and sk-prompt-secret",
+        call=lambda _prompt: raw_response,
+        repair_prompt=lambda _draft, _issues, _trace: "PRIVATE-REPAIR-PROMPT",
+        max_repairs=0,
+        operation="catalog_draft",
+    )
+
+    assert not result.ok
+    assert f"reference={result.reference}" in caplog.text
+    assert "operation=catalog_draft" in caplog.text
+    assert "attempt=1 role=generation stage=parse status=failed" in caplog.text
+    assert f"response_chars={len(raw_response)}" in caplog.text
+    assert "sections=none issue_count=1 issue_areas=other:1" in caplog.text
+    assert "error_type=ParserError" in caplog.text
+    assert "AI draft candidate exhausted" in caplog.text
+    assert "final_stage=parse issue_count=1 issue_areas=other:1" in caplog.text
+    assert "PRIVATE-CUSTOMER-42" not in caplog.text
+    assert "/Users/alice/private.csv" not in caplog.text
+    assert "sk-response-secret" not in caplog.text
+    assert "PRIVATE-PROMPT-CUSTOMER" not in caplog.text
+    assert "sk-prompt-secret" not in caplog.text
+    assert "PRIVATE-REPAIR-PROMPT" not in caplog.text
+
+
+@pytest.mark.unit
+def test_candidate_validation_failure_never_logs_issue_or_response_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raw_response = """\
+metrics:
+  metrics:
+    PRIVATE-METRIC-ID:
+      source: PRIVATE-SOURCE-ID
+"""
+    issues = [
+        "processors.processors.0.PRIVATE-ID: invalid /Users/alice/private.yaml",
+        "source 'PRIVATE-SOURCE-ID' references stale raw field 'secret_name'",
+    ]
+    caplog.set_level(logging.DEBUG, logger=ai_studio.__name__)
+
+    result = ai_studio.generate_validated_candidate(
+        base_draft={},
+        prompt="Configure PRIVATE-CUSTOMER-42",
+        call=lambda _prompt: raw_response,
+        repair_prompt=lambda _draft, _issues, _trace: "repair",
+        max_repairs=0,
+        validate=lambda _candidate: (False, issues),
+        operation="copilot_filter",
+    )
+
+    assert not result.ok
+    assert f"reference={result.reference}" in caplog.text
+    assert "operation=copilot_filter" in caplog.text
+    assert "attempt=1 role=generation stage=validation status=failed" in caplog.text
+    assert "sections=metrics issue_count=2" in caplog.text
+    assert "issue_areas=processor:1,field_contract:1" in caplog.text
+    assert "final_stage=validation issue_count=2" in caplog.text
+    assert "PRIVATE-CUSTOMER-42" not in caplog.text
+    assert "PRIVATE-METRIC-ID" not in caplog.text
+    assert "PRIVATE-SOURCE-ID" not in caplog.text
+    assert "PRIVATE-ID" not in caplog.text
+    assert "/Users/alice/private.yaml" not in caplog.text
+    assert "secret_name" not in caplog.text
+
+
+@pytest.mark.unit
+def test_candidate_repair_logs_share_reference_without_catalog_identifiers(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    responses = iter(
+        [
+            "metrics: {metrics: {PRIVATE-REJECTED-METRIC: {}}}",
+            "metrics: {metrics: {PRIVATE-ACCEPTED-METRIC: {}}}",
+        ]
+    )
+    validation_calls = 0
+
+    def validate(_candidate: dict) -> tuple[bool, list[str]]:
+        nonlocal validation_calls
+        validation_calls += 1
+        if validation_calls == 1:
+            return False, ["metrics.PRIVATE-REJECTED-METRIC: invalid PRIVATE-VALUE"]
+        return True, []
+
+    caplog.set_level(logging.DEBUG, logger=ai_studio.__name__)
+    result = ai_studio.generate_validated_candidate(
+        base_draft={},
+        prompt="PRIVATE-INITIAL-PROMPT",
+        call=lambda _prompt: next(responses),
+        repair_prompt=lambda _draft, _issues, _trace: "PRIVATE-REPAIR-PROMPT",
+        max_repairs=1,
+        validate=validate,
+        operation="catalog_draft",
+    )
+
+    assert result.ok
+    assert caplog.text.count(f"reference={result.reference}") == 3
+    assert "attempt=1 role=generation stage=validation status=failed" in caplog.text
+    assert "attempt=2 role=repair stage=validated status=success" in caplog.text
+    assert "AI draft candidate exhausted" not in caplog.text
+    assert "PRIVATE-REJECTED-METRIC" not in caplog.text
+    assert "PRIVATE-ACCEPTED-METRIC" not in caplog.text
+    assert "PRIVATE-VALUE" not in caplog.text
+    assert "PRIVATE-INITIAL-PROMPT" not in caplog.text
+    assert "PRIVATE-REPAIR-PROMPT" not in caplog.text
+
+
+@pytest.mark.unit
 def test_call_litellm_logs_only_safe_operational_metadata(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,

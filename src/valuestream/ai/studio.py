@@ -12,7 +12,7 @@ import re
 import time
 import traceback
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
@@ -47,6 +47,18 @@ _REPAIRABLE_CONTINGENCY_TEST_RE = re.compile(
     r"Input should be 'chi2', 'g' or 'z'$"
 )
 _LOW_CARDINALITY_LIMIT = 50
+_DRAFT_DIAGNOSTIC_MAX_ISSUES = 8
+_DRAFT_DIAGNOSTIC_MAX_ISSUE_CHARS = 512
+_DRAFT_DIAGNOSTIC_MAX_POSITION = 1_000_000
+_DRAFT_DIAGNOSTIC_ISSUE_AREAS = (
+    "source",
+    "processor",
+    "metric",
+    "report",
+    "chat",
+    "field_contract",
+    "other",
+)
 logger = get_logger(__name__)
 
 _APPLICATION_STRUCTURE_DICTIONARY: dict[str, Any] = {
@@ -73,6 +85,20 @@ _APPLICATION_STRUCTURE_DICTIONARY: dict[str, Any] = {
 _CATALOG_SCHEMA_DICTIONARY: dict[str, Any] = {
     "processors.yaml": {
         "shape": {"processors": ["Processor"]},
+        "state_type_enum": [
+            "count",
+            "value_sum",
+            "min",
+            "max",
+            "pooled_mean",
+            "pooled_variance",
+            "tdigest",
+            "kll",
+            "cpc",
+            "hll",
+            "theta",
+            "topk",
+        ],
         "processor_fields": {
             "id": "stable snake_case id, unique within processors.yaml",
             "source": "existing pipelines source id",
@@ -84,7 +110,11 @@ _CATALOG_SCHEMA_DICTIONARY: dict[str, Any] = {
                 "grains": ["Day", "Month", "Quarter", "Year", "Summary"],
                 "aggregation_levels": "optional logical grain -> physical grain map",
             },
-            "states": "mapping of state_name -> {type, source_column?, ...}; not a list",
+            "states": (
+                "optional mapping of state_name -> {type, source_column?, ...}; not a list; "
+                "every type must be one of state_type_enum (value_sum not sum, "
+                "pooled_mean not mean, pooled_variance not var)"
+            ),
             "filter": "optional expression AST over approved source fields",
         },
     },
@@ -134,7 +164,12 @@ _CATALOG_SCHEMA_DICTIONARY: dict[str, Any] = {
             "scale_mode": "absolute, index_100, or percent_change for line/stacked_area",
             "value_format": "optional tile override for metric display.value_format",
             "filters": "optional mapping of approved low-cardinality field -> allowed values",
-            "chart_specific_fields": "x/y/color/value/path/etc from approved fields or metric outputs",
+            "chart_data_fields": (
+                "x, y, value, color, and the other keys listed in "
+                "chart_required_field_dictionary are top-level tile keys beside "
+                "id/title/metric/chart; never nest them under chart_specific_fields, "
+                "options, or any other mapping"
+            ),
         },
     },
 }
@@ -146,7 +181,8 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
             "outcome.column",
             "outcome.positive_values",
             "outcome.negative_values",
-            "variant_column when creating experiment metrics",
+            "variant_column when creating experiment metrics; never repeat it in "
+            "dimensions/group_by because the processor persists it automatically",
             "value_aggs for revenue or monetary sums",
             "touchpoint for conversion touchpoint counts",
         ],
@@ -162,6 +198,11 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
         "purpose": "descriptive distributions and percentiles for approved numeric properties",
         "key_fields": ["properties", "quantile_engine", "sketch_build_mode"],
         "defaults": {"sketch_build_mode": "bulk"},
+        "authoring": (
+            "declare numeric source columns in properties and omit states; the engine "
+            "derives every state below automatically, so never author states such as "
+            "<Property>_Sum, <Property>_Mean, or <Property>_Var manually"
+        ),
         "derived_states": [
             "<Property>_Count",
             "<Property>_Sum",
@@ -177,6 +218,11 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
         "purpose": "model score quality, ROC/PR curves, calibration, and score summaries",
         "key_fields": ["score_properties", "outcome", "sketch_build_mode"],
         "defaults": {"sketch_build_mode": "bulk"},
+        "authoring": (
+            "declare score_properties and outcome and omit states; the default states "
+            "below are derived automatically, and explicit states would replace them "
+            "and break curve metrics"
+        ),
         "default_states": [
             "Count",
             "<ScoreProperty>_tdigest_positives",
@@ -310,46 +356,95 @@ _METRIC_KIND_DICTIONARY: dict[str, Any] = {
     },
 }
 
-_CHART_REQUIRED_FIELD_DICTIONARY: dict[str, list[str]] = {
-    "line": ["x", "y"],
-    "stacked_area": ["x", "y", "color"],
-    "bar": ["x", "y"],
-    "kpi_card": ["value"],
-    "waterfall": ["x", "y"],
-    "pareto": ["x", "y"],
-    "treemap": ["path", "color"],
-    "heatmap": ["x", "y", "color"],
-    "cohort_heatmap": ["x", "y", "color"],
-    "scatter": ["x", "y"],
-    "combo": ["x", "y", "y2"],
-    "interval": ["x", "y"],
-    "donut": ["names", "values"],
-    "geo_map": ["locations", "value"],
-    "table": [],
-    "calendar_heatmap": ["date", "value"],
-    "bar_polar": ["r", "theta", "color"],
-    "sankey": ["source", "target", "value"],
-    "gauge": ["value"],
-    "funnel": ["stages", "color"],
-    "boxplot": ["x", "y"],
-    "histogram": ["property"],
-    "calibration_curve": [],
-    "roc_curve": [],
-    "precision_recall_curve": [],
-    "gain_curve": [],
-    "lift_curve": [],
-    "rfm_density": [],
-    "exposure": [],
-    "corr": ["x", "y"],
-    "model": [],
-    "descriptive_line": ["x", "property", "score"],
-    "descriptive_boxplot": ["x", "property"],
-    "descriptive_histogram": ["property"],
-    "descriptive_heatmap": ["x", "y", "property", "score"],
-    "descriptive_funnel": ["x", "color", "stages"],
-    "experiment_z_score": ["x", "y"],
-    "experiment_odds_ratio": ["x", "y"],
-    "clv_treemap": ["path"],
+_CHART_REQUIRED_FIELD_DICTIONARY: dict[str, Any] = {
+    "authoring_rules": [
+        "Chart data fields (x, y, value, color, ...) are top-level tile keys beside "
+        "id/title/metric/chart; never nest them under another mapping.",
+        "required_fields_by_chart lists mandatory tile keys per chart; 'a|b' means "
+        "at least one of those alternative keys must be set.",
+        "x and date keys usually take a time grain (Day, Month, Quarter, Year) or an "
+        "approved low-cardinality dimension.",
+        "y and value keys take one metric output column; a formula metric outputs a "
+        "column named after the metric id, so y or value is the metric id itself.",
+        "For variant_compare or contingency_test metrics, y/value must name one listed "
+        "metric output such as Lift or CTR, and x is usually the variant column.",
+        "color, names, and path keys take approved low-cardinality dimensions.",
+    ],
+    "required_fields_by_chart": {
+        "line": ["x", "y"],
+        "stacked_area": ["x", "y", "color"],
+        "bar": ["x", "y"],
+        "kpi_card": ["value|y"],
+        "waterfall": ["x", "y"],
+        "pareto": ["x", "y"],
+        "treemap": ["path|x|names"],
+        "heatmap": ["x", "y", "color"],
+        "cohort_heatmap": ["x", "y", "color"],
+        "scatter": ["x", "y"],
+        "combo": ["x", "y", "y2"],
+        "interval": ["x", "y"],
+        "donut": ["names|x", "values|value|y"],
+        "geo_map": ["locations", "value"],
+        "table": [],
+        "calendar_heatmap": ["date|x", "value|y"],
+        "bar_polar": ["r", "theta", "color"],
+        "sankey": ["source", "target", "value"],
+        "gauge": ["value|y"],
+        "funnel": ["stages", "color"],
+        "boxplot": ["x", "y|property"],
+        "histogram": ["property|x|y"],
+        "calibration_curve": [],
+        "roc_curve": [],
+        "precision_recall_curve": [],
+        "gain_curve": [],
+        "lift_curve": [],
+        "rfm_density": [],
+        "exposure": [],
+        "corr": ["x", "y"],
+        "model": [],
+        "descriptive_line": ["x", "property", "score"],
+        "descriptive_boxplot": ["x", "property|y"],
+        "descriptive_histogram": ["property|x|y"],
+        "descriptive_heatmap": ["x", "y", "property", "score"],
+        "descriptive_funnel": ["x", "color", "stages"],
+        "experiment_z_score": ["x", "y"],
+        "experiment_odds_ratio": ["x", "y"],
+        "clv_treemap": ["path|x|names"],
+    },
+    "tile_examples": {
+        "kpi_card": {
+            "id": "engagement_ctr_kpi",
+            "title": "Engagement CTR",
+            "metric": "engagement_ctr",
+            "chart": "kpi_card",
+            "placement": "kpi_strip",
+            "value": "engagement_ctr",
+        },
+        "line": {
+            "id": "engagement_ctr_trend",
+            "title": "CTR Trend by Day",
+            "metric": "engagement_ctr",
+            "chart": "line",
+            "x": "Day",
+            "y": "engagement_ctr",
+        },
+        "bar": {
+            "id": "conversion_rate_by_channel",
+            "title": "Conversion Rate by Channel",
+            "metric": "conversion_rate",
+            "chart": "bar",
+            "x": "Channel",
+            "y": "conversion_rate",
+        },
+        "kpi_card_from_variant_compare": {
+            "id": "click_lift_kpi",
+            "title": "Click Lift",
+            "metric": "click_experiment_lift",
+            "chart": "kpi_card",
+            "placement": "kpi_strip",
+            "value": "Lift",
+        },
+    },
 }
 
 _EXPRESSION_AST_DICTIONARY: dict[str, Any] = {
@@ -789,6 +884,23 @@ def preflight_ai_provider(
 
 
 @dataclass(frozen=True)
+class DraftAttemptDiagnostic:
+    """Bounded, user-safe evidence for one catalog generation attempt."""
+
+    attempt: int
+    role: str
+    stage: str
+    issues: tuple[str, ...]
+    issue_count: int
+    issue_areas: tuple[tuple[str, int], ...]
+    sections: tuple[str, ...]
+    response_chars: int
+    error_type: str = ""
+    line: int | None = None
+    column: int | None = None
+
+
+@dataclass(frozen=True)
 class DraftCandidateResult:
     """Result of a bounded generate, parse, merge, and validate operation.
 
@@ -802,6 +914,8 @@ class DraftCandidateResult:
     attempts: int
     last_response: str = ""
     failure_stage: str = ""
+    attempt_diagnostics: tuple[DraftAttemptDiagnostic, ...] = ()
+    reference: str = ""
 
     @property
     def ok(self) -> bool:
@@ -854,6 +968,8 @@ def prompt_for_config_draft(
     return _catalog_prompt(
         task=(
             "Create a richer Value Stream catalog draft from this approved schema. "
+            "Create as many distinct valid processors as possible from the approved schema "
+            "and business requirements. "
             "Return only YAML for processors, metrics, dashboards, and optional chat_with_data."
         ),
         file_name=file_name,
@@ -872,7 +988,8 @@ def prompt_for_config_draft(
             "Add metric display metadata when the business label, unit, format, or favorable direction is clear.",
             "Use explicit kpi_strip placement only for scalar kpi_card tiles; never infer KPI cards from arbitrary charts.",
             "Author page filters only for processor aggregate dimensions and declare compatible_tiles when coverage is partial.",
-            "Prefer a small useful set over a large speculative catalog.",
+            "Do not stop after a minimal baseline: include every useful, non-duplicative "
+            "processor whose required fields and valid state definitions are available.",
         ],
     )
 
@@ -1025,6 +1142,8 @@ def generate_validated_candidate(
     call: Callable[[str], str],
     repair_prompt: Callable[[dict[str, Any], list[str], str], str],
     max_repairs: int = 2,
+    validate: Callable[[dict[str, Any]], tuple[bool, list[str]]] | None = None,
+    operation: str = "catalog_candidate",
 ) -> DraftCandidateResult:
     """Generate one valid catalog candidate with at most two internal repairs.
 
@@ -1037,47 +1156,224 @@ def generate_validated_candidate(
     """
 
     repairs_remaining = min(max(int(max_repairs), 0), 2)
+    candidate_validator = validate or validate_draft_catalog
     current_prompt = prompt
     repair_base = _deepcopy_yaml(base_draft)
     last_response = ""
     issues: list[str] = []
     failure_stage = ""
+    attempt_diagnostics: list[DraftAttemptDiagnostic] = []
+    reference = uuid.uuid4().hex[:12]
+    safe_operation = _safe_candidate_operation_for_log(operation)
+    max_attempts = repairs_remaining + 1
+    logger.info(
+        "AI draft candidate started: reference=%s operation=%s max_attempts=%s",
+        reference,
+        safe_operation,
+        max_attempts,
+    )
 
-    for attempt in range(1, repairs_remaining + 2):
+    for attempt in range(1, max_attempts + 1):
+        role = "generation" if attempt == 1 else "repair"
         last_response = call(current_prompt)
         try:
             sections = parse_ai_yaml_sections(last_response)
-        except (TypeError, ValueError, yaml.YAMLError):
+        except (TypeError, ValueError, yaml.YAMLError) as exc:
             failure_stage = "parse"
             issues = [
                 "The model response was not valid catalog YAML. Return complete catalog sections."
             ]
             candidate = repair_base
             trace = "Model response parsing failed before catalog validation."
+            line, column = _safe_parse_position(exc)
+            diagnostic = _draft_attempt_diagnostic(
+                attempt=attempt,
+                role=role,
+                stage="parse",
+                issues=issues,
+                sections=(),
+                response=last_response,
+                error_type=_safe_error_type_for_log(exc),
+                line=line,
+                column=column,
+            )
+            attempt_diagnostics.append(diagnostic)
+            _log_draft_attempt(reference, safe_operation, diagnostic)
         else:
             candidate = merge_draft_sections(repair_base, sections)
-            ok, issues = validate_draft_catalog(candidate)
+            ok, issues = candidate_validator(candidate)
             if ok:
+                diagnostic = _draft_attempt_diagnostic(
+                    attempt=attempt,
+                    role=role,
+                    stage="validated",
+                    issues=[],
+                    sections=tuple(key for key in _SECTION_KEYS if key in sections),
+                    response=last_response,
+                )
+                attempt_diagnostics.append(diagnostic)
+                _log_draft_attempt(reference, safe_operation, diagnostic)
                 return DraftCandidateResult(
                     draft=candidate,
                     issues=(),
                     attempts=attempt,
                     last_response=last_response,
+                    attempt_diagnostics=tuple(attempt_diagnostics),
+                    reference=reference,
                 )
             failure_stage = "validation"
             repair_base = candidate
             trace = validation_trace_for_repair(candidate)
+            diagnostic = _draft_attempt_diagnostic(
+                attempt=attempt,
+                role=role,
+                stage="validation",
+                issues=issues,
+                sections=tuple(key for key in _SECTION_KEYS if key in sections),
+                response=last_response,
+            )
+            attempt_diagnostics.append(diagnostic)
+            _log_draft_attempt(reference, safe_operation, diagnostic)
 
         if attempt > repairs_remaining:
             break
         current_prompt = repair_prompt(candidate, list(issues), trace)
 
+    final_diagnostic = attempt_diagnostics[-1]
+    logger.warning(
+        "AI draft candidate exhausted: reference=%s operation=%s attempts=%s "
+        "final_stage=%s issue_count=%s issue_areas=%s",
+        reference,
+        safe_operation,
+        max_attempts,
+        failure_stage,
+        final_diagnostic.issue_count,
+        ",".join(f"{area}:{count}" for area, count in final_diagnostic.issue_areas) or "none",
+    )
     return DraftCandidateResult(
         draft=None,
         issues=tuple(issues),
-        attempts=repairs_remaining + 1,
+        attempts=max_attempts,
         last_response=last_response,
         failure_stage=failure_stage,
+        attempt_diagnostics=tuple(attempt_diagnostics),
+        reference=reference,
+    )
+
+
+def _draft_attempt_diagnostic(
+    *,
+    attempt: int,
+    role: str,
+    stage: str,
+    issues: list[str],
+    sections: tuple[str, ...],
+    response: Any,
+    error_type: str = "",
+    line: int | None = None,
+    column: int | None = None,
+) -> DraftAttemptDiagnostic:
+    return DraftAttemptDiagnostic(
+        attempt=attempt,
+        role=role,
+        stage=stage,
+        issues=_bounded_draft_diagnostic_issues(issues),
+        issue_count=len(issues),
+        issue_areas=_draft_issue_area_counts(issues),
+        sections=tuple(section for section in _SECTION_KEYS if section in sections),
+        response_chars=len(response) if isinstance(response, str) else 0,
+        error_type=error_type,
+        line=line,
+        column=column,
+    )
+
+
+def _bounded_draft_diagnostic_issues(issues: list[str]) -> tuple[str, ...]:
+    bounded: list[str] = []
+    for issue in issues[:_DRAFT_DIAGNOSTIC_MAX_ISSUES]:
+        text = " ".join(str(issue).split())
+        if len(text) > _DRAFT_DIAGNOSTIC_MAX_ISSUE_CHARS:
+            text = text[: _DRAFT_DIAGNOSTIC_MAX_ISSUE_CHARS - 1] + "…"
+        bounded.append(text)
+    return tuple(bounded)
+
+
+def _draft_issue_area_counts(issues: list[str]) -> tuple[tuple[str, int], ...]:
+    counts: dict[str, int] = dict.fromkeys(_DRAFT_DIAGNOSTIC_ISSUE_AREAS, 0)
+    for issue in issues:
+        counts[_draft_issue_area(str(issue))] += 1
+    return tuple((area, counts[area]) for area in _DRAFT_DIAGNOSTIC_ISSUE_AREAS if counts[area])
+
+
+def _draft_issue_area(issue: str) -> str:
+    normalized = issue.casefold()
+    if any(
+        token in normalized
+        for token in (
+            "effective approved schema",
+            "field-name contract",
+            "stale raw field",
+            "approved field",
+        )
+    ):
+        area = "field_contract"
+    elif normalized.startswith(("pipelines", "sources[", "source ")):
+        area = "source"
+    elif normalized.startswith(("processors", "processor ")):
+        area = "processor"
+    elif normalized.startswith(("metrics", "metric ")):
+        area = "metric"
+    elif normalized.startswith(("dashboards", "tiles", "report ", "set_dashboards")):
+        area = "report"
+    elif normalized.startswith(("chat_with_data", "chat ")):
+        area = "chat"
+    else:
+        area = "other"
+    return area
+
+
+def _safe_parse_position(exc: BaseException) -> tuple[int | None, int | None]:
+    mark = _safe_exception_attribute(exc, "problem_mark")
+    return (
+        _safe_one_based_position(_safe_exception_attribute(mark, "line")),
+        _safe_one_based_position(_safe_exception_attribute(mark, "column")),
+    )
+
+
+def _safe_one_based_position(value: Any) -> int | None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return None
+    return min(value + 1, _DRAFT_DIAGNOSTIC_MAX_POSITION)
+
+
+def _safe_candidate_operation_for_log(operation: str) -> str:
+    value = str(operation).strip().casefold()
+    return value if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", value) else "catalog_candidate"
+
+
+def _log_draft_attempt(
+    reference: str,
+    operation: str,
+    diagnostic: DraftAttemptDiagnostic,
+) -> None:
+    log = logger.info if diagnostic.stage == "validated" else logger.debug
+    log(
+        "AI draft candidate attempt: reference=%s operation=%s attempt=%s role=%s "
+        "stage=%s status=%s response_chars=%s sections=%s issue_count=%s "
+        "issue_areas=%s error_type=%s line=%s column=%s",
+        reference,
+        operation,
+        diagnostic.attempt,
+        diagnostic.role,
+        diagnostic.stage,
+        "success" if diagnostic.stage == "validated" else "failed",
+        diagnostic.response_chars,
+        ",".join(diagnostic.sections) or "none",
+        diagnostic.issue_count,
+        ",".join(f"{area}:{count}" for area, count in diagnostic.issue_areas) or "none",
+        diagnostic.error_type or "none",
+        diagnostic.line if diagnostic.line is not None else "none",
+        diagnostic.column if diagnostic.column is not None else "none",
     )
 
 
@@ -1140,8 +1436,12 @@ def section_name_diff(
     }
 
 
-def validate_draft_catalog(draft: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Validate an in-memory draft catalog."""
+def validate_draft_catalog(
+    draft: dict[str, Any],
+    *,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+) -> tuple[bool, list[str]]:
+    """Validate an in-memory draft catalog against optional observed source columns."""
 
     try:
         catalog = model.Catalog.model_validate(_catalog_sections_for_validation(draft))
@@ -1150,8 +1450,9 @@ def validate_draft_catalog(draft: dict[str, Any]) -> tuple[bool, list[str]]:
             f"{'.'.join(map(str, error['loc']))}: {error['msg']}" for error in exc.errors()
         ]
     except Exception as exc:
-        return False, [str(exc)]
-    result = validate_catalog(catalog)
+        error_type = _safe_error_type_for_log(exc)
+        return False, [f"Catalog validation could not complete ({error_type})."]
+    result = validate_catalog(catalog, source_columns_by_id=source_columns_by_id)
     return result.ok, [f"{issue.location}: {issue.message}" for issue in result.issues]
 
 
@@ -1887,11 +2188,20 @@ def _hard_output_rules() -> tuple[str, ...]:
         "Do not use hidden fields, IDs, raw timestamps, free text, or high-cardinality fields as filters or chart facets.",
         "Every processor id, metric id, dashboard id, page id, and tile id must be stable, unique, and YAML-safe.",
         "Every processor source must reference an existing source id from the current draft pipelines.",
+        "Every explicit processor state type must be one of count, value_sum, min, max, pooled_mean, "
+        "pooled_variance, tdigest, kll, cpc, hll, theta, or topk; sum, mean, avg, var, and variance "
+        "are invalid state types.",
+        "numeric_distribution and score_distribution processors derive per-property states from "
+        "properties/score_properties automatically; never author states such as <Property>_Sum, "
+        "<Property>_Mean, or <Property>_Var manually.",
+        "Never repeat a processor's variant_column in dimensions/group_by; the processor persists "
+        "the variant column automatically.",
         "Every metric source must reference a processor id returned in processors or already present in current draft.",
         "Every metric must use only states that exist on its source processor.",
         "Every formula metric expression must reference only scalar state columns or declared depends_on metrics.",
         "Every dashboard tile.metric must reference a metric id returned in metrics or already present in current draft.",
-        "Every tile chart must include the fields required by chart_required_field_dictionary.",
+        "Every tile must set the chart's required data fields from chart_required_field_dictionary "
+        "as top-level tile keys; kpi_card needs value, line and bar need x and y.",
         "Every chart field must be an approved field, a time field, or a known output of that tile's metric.",
         "Choose chart kinds compatible with the metric's processor and output shape.",
         "Keep metrics and dashboards internally consistent; remove tiles/pages that depend on missing fields.",
@@ -1899,7 +2209,8 @@ def _hard_output_rules() -> tuple[str, ...]:
         "If CLV/lifecycle fields are unavailable, omit entity_lifecycle processors, CLV metrics, and CLV reports.",
         "If numeric descriptive properties are unavailable, omit numeric_distribution processors and descriptive reports.",
         "Set sketch_build_mode to bulk for every numeric_distribution and score_distribution processor; legacy is an explicit rollback escape hatch.",
-        "Prefer a small coherent catalog over broad speculative coverage.",
+        "Maximize useful processor coverage while keeping the catalog coherent; never add "
+        "speculative or invalid objects merely to increase counts.",
     )
 
 
@@ -1909,8 +2220,13 @@ def _self_check_rules() -> tuple[str, ...]:
         "Every processor filter, funnel stage condition, and metric expression uses valid expression AST structure.",
         "Every metric source exists in processors.",
         "Every metric state reference exists on the source processor with the required state type.",
+        "Every explicit processor state type is a valid state_type_enum value, and no "
+        "numeric_distribution or score_distribution processor hand-authors derived states.",
+        "No processor repeats its variant_column in dimensions/group_by.",
         "Every metric depends_on value exists in metrics.",
         "Every report/dashboard tile metric exists in metrics.",
+        "Every tile defines its chart's required data fields as top-level tile keys: kpi_card and "
+        "gauge define value, line/bar/scatter define x and y, per chart_required_field_dictionary.",
         "Every report/dashboard tile field exists in approved fields, time fields, or known metric output columns.",
         "No experiment, CLV, model-score, or descriptive object is present without the required approved fields.",
         "No legacy TOML-only keys are present.",

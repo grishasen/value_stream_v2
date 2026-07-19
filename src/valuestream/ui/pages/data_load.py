@@ -43,6 +43,20 @@ def render(ctx: ValueStreamContext) -> None:
         components.render_validation_summary(ctx.validation.issues, ok=False)
         st.stop()
 
+    sources = _ordered_sources(ctx.catalog.pipelines.sources)
+    if not sources:
+        st.info(
+            "No data sources are configured for this workspace. Add a source in "
+            "AI Configuration Studio before loading or rebuilding data."
+        )
+        st.link_button(
+            "Add source in AI Configuration Studio",
+            "/ai_configuration_studio",
+            icon=":material/add_circle:",
+            type="primary",
+        )
+        return
+
     force_all = st.toggle(
         "Force rebuild",
         value=False,
@@ -62,7 +76,6 @@ def render(ctx: ValueStreamContext) -> None:
         st.session_state["data_load_clean_rebuild_confirm"] = False
         _clean_rebuild_dialog(ctx)
 
-    sources = _ordered_sources(ctx.catalog.pipelines.sources)
     tabs = st.tabs([_source_tab_label(source.id) for source in sources])
     for tab, source in zip(tabs, sources, strict=True):
         with tab:

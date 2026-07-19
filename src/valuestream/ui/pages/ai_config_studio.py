@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import time
 import zipfile
 from collections import Counter
@@ -46,6 +47,7 @@ from valuestream.ai import (
     update_metric_definition,
     update_processor_definition,
     validate_draft_catalog,
+    validate_draft_field_contract,
     validation_trace_for_repair,
 )
 from valuestream.ai.copilot import (
@@ -56,6 +58,7 @@ from valuestream.ai.settings import load_llm_settings_config, write_chat_with_da
 from valuestream.ai.studio import (
     AI_PROVIDER_PREFLIGHT_MAX_TIMEOUT_SECONDS,
     AIProviderCallError,
+    DraftAttemptDiagnostic,
     DraftCandidateResult,
     ai_provider_preflight_cache_key,
     generate_validated_candidate,
@@ -169,9 +172,13 @@ FIELD_APPROVAL_EDITOR_COLUMNS = [
 EDITABLE_FIELD_COLUMNS = ("Approve", "Send To AI")
 REASONING_EFFORT_OPTIONS = ("", "minimal", "low", "medium", "high", "xhigh")
 VERBOSITY_OPTIONS = ("", "low", "medium", "high")
-AI_STUDIO_UPLOAD_MAX_BYTES = 64 * 1024 * 1024
-AI_STUDIO_ARCHIVE_EXPANDED_MAX_BYTES = 128 * 1024 * 1024
+AI_STUDIO_UPLOAD_MAX_BYTES = 512 * 1024 * 1024
+AI_STUDIO_ARCHIVE_EXPANDED_MAX_BYTES = 1024 * 1024 * 1024
 AI_STUDIO_ARCHIVE_MAX_MEMBERS = 64
+AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY = "ai_studio_rename_capitalize_enabled"
+AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY = "ai_studio_rename_capitalize"
+AI_STUDIO_RENAME_CAPITALIZE_WIDGET_KEY = "ai_studio_rename_capitalize_transform"
+AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY = "ai_studio_schema_contract_stale"
 AI_STUDIO_CHECKPOINT_CONTEXT_KEY = "ai_studio_checkpoint_context"
 AI_STUDIO_CHECKPOINT_LOADED_WORKSPACE_KEY = "ai_studio_checkpoint_loaded_workspace"
 AI_STUDIO_CHECKPOINT_PENDING_KEY = "ai_studio_checkpoint_pending"
@@ -411,17 +418,17 @@ def _render_studio(  # noqa: PLR0912, PLR0915
         steps,
         statuses=_phase_statuses(approved_fields, preprocessing_error),
     )
+    _render_schema_contract_notice(steps)
 
     if ai_calls_enabled:
         _render_ai_data_sharing_confirmation(approved_fields)
+        _render_copilot_panel(step, working, approved_fields)
         if st.session_state.get("ai_studio_pending_draft") is not None:
             st.info(
                 "A validated proposal is waiting for review. Accept or discard the complete "
                 "change bundles before editing the accepted revision."
             )
             _render_pending_draft_review()
-            with st.expander("Ask AI about this proposal", expanded=False):
-                _render_copilot_panel(step, working, approved_fields)
         else:
             _render_selected_step(
                 ctx,
@@ -433,8 +440,6 @@ def _render_studio(  # noqa: PLR0912, PLR0915
                 preprocessing_error,
                 ai_calls_enabled=ai_calls_enabled,
             )
-            with st.expander("Ask AI about this step", expanded=False):
-                _render_copilot_panel(step, working, approved_fields)
     else:
         _render_selected_step(
             ctx,
@@ -667,6 +672,15 @@ def _apply_staged_ai_studio_checkpoint(
         if draft_only and key not in draft_keys:
             continue
         st.session_state[key] = copy.deepcopy(value)
+    if (
+        not draft_only
+        and AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY not in state
+        and AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY in state
+    ):
+        st.session_state[AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = bool(
+            state[AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY]
+        )
+    _migrate_rename_capitalize_state()
 
     draft = state.get("ai_studio_draft")
     snapshot: DraftValidationSnapshot | None = None
@@ -810,6 +824,35 @@ def _render_studio_step_header(
     return current_step
 
 
+def _render_schema_contract_notice(steps: list[str]) -> None:
+    """Keep a stale accepted revision visible while blocking unsafe downstream edits."""
+
+    if not st.session_state.get(AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY):
+        return
+    st.warning(
+        "Source field naming changed after this revision was created. The accepted revision "
+        "is still available for comparison, but AI changes and Apply are blocked until you "
+        "generate and review an updated draft against the effective schema."
+    )
+    st.button(
+        "Review updated draft",
+        key="ai_studio_reconcile_schema_contract",
+        type="primary",
+        icon=":material/rule:",
+        on_click=_queue_schema_contract_review,
+        args=(steps,),
+    )
+
+
+def _queue_schema_contract_review(steps: list[str]) -> None:
+    """Queue Draft navigation before the phase-scoped step widget is rendered again."""
+
+    target = steps[6]
+    st.session_state["ai_studio_step"] = target
+    st.session_state["ai_studio_jump_step"] = target
+    st.session_state["ai_studio_next_step"] = target
+
+
 def _render_studio_step_navigation(step: str, steps: list[str]) -> None:
     """Keep the next decision visible at the bottom of every Studio step."""
 
@@ -909,7 +952,11 @@ def _phase_statuses(
         statuses["Draft"] = "complete" if snapshot.ok and not pending else "attention"
         reviewed = st.session_state.get("ai_studio_reviewed_signature") == signature
         statuses["Review"] = "complete" if snapshot.ok and reviewed and not pending else "attention"
-        if st.session_state.get("ai_studio_published_signature") == signature:
+        if (
+            snapshot.ok
+            and reviewed
+            and st.session_state.get("ai_studio_published_signature") == signature
+        ):
             statuses["Apply"] = "complete"
         elif snapshot.ok and reviewed:
             statuses["Apply"] = "attention"
@@ -1484,8 +1531,9 @@ def _sample_source_plan(
         or {"pyoutcome", "pxoutcometime"}.issubset(column_names)
         or "pxinteractionid" in column_names
     )
-    root = Path(workspace_relative).parent.as_posix() if workspace_relative else "data/studio"
-    pattern = Path(file_name).name
+    root = _sample_runtime_root(workspace_relative)
+    suffix = Path(file_name).suffix
+    pattern = f"**/*{suffix}" if suffix else Path(file_name).name
     if capability and capability.key == "csv":
         return SampleSourcePlan(
             "CSV",
@@ -1536,6 +1584,19 @@ def _sample_source_plan(
         requires_runtime_confirmation=True,
         note="Convert this sample to CSV or Parquet before building a runtime source.",
     )
+
+
+def _sample_runtime_root(workspace_relative: str) -> str:
+    """Infer a dataset root above any Hive-style ``key=value`` partitions."""
+
+    if not workspace_relative:
+        return "data/studio"
+    root = Path(workspace_relative).parent
+    key, separator, value = root.name.partition("=")
+    while key and separator and value:
+        root = root.parent
+        key, separator, value = root.name.partition("=")
+    return root.as_posix()
 
 
 def _sample_error_message(exc: Exception) -> str:
@@ -2000,7 +2061,9 @@ def _initialize_state(sample: pl.DataFrame) -> None:  # noqa: PLR0915
     st.session_state["ai_studio_filter_mode"] = "Rules"
     st.session_state["ai_studio_raw_filter"] = ""
     st.session_state["ai_studio_calculations"] = []
-    st.session_state["ai_studio_rename_capitalize"] = False
+    st.session_state[AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = False
+    st.session_state.pop(AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY, None)
+    st.session_state.pop(AI_STUDIO_RENAME_CAPITALIZE_WIDGET_KEY, None)
     st.session_state["ai_studio_rename_capitalize_applied"] = False
     st.session_state["ai_studio_approved_fields"] = []
     st.session_state["ai_studio_example_fields"] = []
@@ -2009,11 +2072,13 @@ def _initialize_state(sample: pl.DataFrame) -> None:  # noqa: PLR0915
     _clear_ai_sharing_confirmation()
     _clear_schema_widget_state()
     st.session_state["ai_studio_draft"] = None
+    st.session_state["ai_studio_draft_source"] = ""
     st.session_state["ai_studio_pending_draft"] = None
     st.session_state["ai_studio_pending_base_draft"] = None
     st.session_state["ai_studio_pending_kind"] = ""
     st.session_state["ai_studio_pending_prompt"] = ""
     st.session_state["ai_studio_last_ai_response"] = ""
+    st.session_state.pop("ai_studio_last_candidate_failure", None)
     st.session_state["ai_studio_raw_metrics_yaml"] = ""
     st.session_state["ai_studio_raw_dashboards_yaml"] = ""
     st.session_state["ai_studio_copilot_history"] = []
@@ -2026,6 +2091,7 @@ def _initialize_state(sample: pl.DataFrame) -> None:  # noqa: PLR0915
     st.session_state["ai_studio_reviewed_signature"] = ""
     st.session_state["ai_studio_validation_cache"] = {}
     st.session_state["ai_studio_outcome_receipt"] = None
+    st.session_state[AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY] = False
 
 
 def _sample_step(
@@ -2033,47 +2099,6 @@ def _sample_step(
     raw_sample: pl.DataFrame,
     schema_sample: pl.DataFrame,
 ) -> None:
-    plan = st.session_state.get("ai_studio_sample_source_plan")
-    if isinstance(plan, SampleSourcePlan):
-        with components.bordered_panel(
-            "Source plan",
-            "The preview parser and production reader are shown separately so this draft "
-            "does not imply data is runnable when it is not.",
-        ):
-            components.key_value_strip(
-                [
-                    {"label": "Sample format", "value": plan.format_label},
-                    {"label": "Runtime reader", "value": plan.reader_kind},
-                    {"label": "Workspace root", "value": plan.root},
-                    {"label": "File pattern", "value": plan.file_pattern},
-                    {
-                        "label": "Runtime status",
-                        "value": "Ready" if plan.production_ready else "Preview only",
-                    },
-                ]
-            )
-            if plan.requires_runtime_confirmation:
-                st.warning(plan.note)
-            else:
-                st.caption(plan.note)
-            if (
-                not plan.production_ready
-                and st.session_state.get("ai_studio_sample_origin") == "upload"
-                and st.session_state.get("ai_studio_sample_bytes")
-            ):
-                st.caption(
-                    "The upload is still in memory. Stage it under the workspace data folder "
-                    "before running this source."
-                )
-                if st.button(
-                    "Stage sample in workspace",
-                    icon=":material/save:",
-                    key="ai_studio_stage_uploaded_sample",
-                ):
-                    relative = _stage_uploaded_sample(ctx.workspace)
-                    st.session_state["ai_studio_workspace_sample_active"] = relative
-                    st.session_state["ai_studio_sample_origin"] = "workspace"
-                    st.rerun()
     if _ai_calls_enabled():
         with components.bordered_panel(
             "Business Requirements",
@@ -2118,46 +2143,39 @@ def _sample_step(
             help=config_help.field_help("source.timestamp_format"),
         )
         c7, c8 = st.columns(2, gap="small")
-        c7.markdown("Streaming", help=config_help.field_help("source.streaming"))
         st.session_state["ai_studio_streaming"] = c7.toggle(
             "Streaming",
             value=st.session_state["ai_studio_streaming"],
             help=config_help.field_help("source.streaming"),
-            label_visibility="collapsed",
         )
-        c8.markdown("Hive-style", help=config_help.field_help("source.hive_partitioning"))
         st.session_state["ai_studio_hive_partitioning"] = c8.toggle(
             "Hive Partitioned",
             value=st.session_state["ai_studio_hive_partitioning"],
             help=config_help.field_help("source.hive_partitioning"),
-            label_visibility="collapsed",
         )
-        st.session_state["ai_studio_rename_capitalize"] = st.toggle(
-            "Use Rename / Capitalize Transform",
-            key="ai_studio_rename_capitalize_transform",
-            help=config_help.field_help("source.rename_capitalize"),
-        )
-        if st.session_state["ai_studio_rename_capitalize"]:
+        _render_rename_capitalize_toggle()
+        if _rename_capitalize_enabled():
             st.caption(
                 "`rename_capitalize` converts source columns to the legacy Pega-aware "
                 "capitalized schema, for example `pyName` to `Name`."
             )
 
-        with st.expander("Technical details · planned transforms", expanded=False):
+        with st.expander(
+            "Technical details · planned transforms",
+            expanded=_rename_capitalize_enabled(),
+        ):
             st.code(
                 yaml.safe_dump(
                     {
                         "transforms": (
-                            [{"kind": "rename_capitalize"}]
-                            if st.session_state["ai_studio_rename_capitalize"]
-                            else []
+                            [{"kind": "rename_capitalize"}] if _rename_capitalize_enabled() else []
                         )
                     },
                     sort_keys=False,
                 ),
                 language="yaml",
             )
-    _set_effective_schema_state(raw_sample)
+    _set_effective_schema_state(schema_sample)
     _sample_preview(raw_sample, schema_sample)
     with components.bordered_panel(
         "Current Workspace Sources", "Existing catalog sources are shown for context."
@@ -2372,6 +2390,7 @@ def _render_defaults_editor(sample: pl.DataFrame) -> None:
             },
         )
         st.session_state["ai_studio_defaults"] = builder.normalize_editor_rows(edited)
+        _render_stale_preprocessing_field_feedback("Defaults")
         missing = [
             name
             for name in ("SubjectID", "OutcomeTime", "Day")
@@ -2444,6 +2463,7 @@ def _render_filters_editor(sample: pl.DataFrame, filter_frame: pl.DataFrame) -> 
                 placeholder="op: in\ncolumn: Outcome\nvalues: [Impression, Clicked, Pending, Conversion]",
                 help=config_help.field_help("source.filter_ast"),
             )
+        _render_stale_preprocessing_field_feedback("Filters")
     _persist_ai_studio_checkpoint()
 
 
@@ -2513,6 +2533,7 @@ def _render_calculations_editor(
             },
         )
         st.session_state["ai_studio_calculations"] = builder.normalize_editor_rows(edited)
+        _render_stale_preprocessing_field_feedback("Calculations")
         try:
             transforms = builder.build_derive_column_transforms(
                 st.session_state["ai_studio_calculations"]
@@ -2581,6 +2602,7 @@ def _render_approve_fields_step(sample: pl.DataFrame) -> None:
             approved_fields=approved_fields,
             example_fields=example_fields,
         )
+        editor_key = _schema_widget_key(f"ai_studio_field_approval_editor_{normalized_query}")
         edited = st.data_editor(
             editor_frame,
             width="stretch",
@@ -2588,7 +2610,14 @@ def _render_approve_fields_step(sample: pl.DataFrame) -> None:
             height=520,
             # The key scopes stored edits to one filter view; the checkbox
             # state itself lives in the approval session keys below.
-            key=_schema_widget_key(f"ai_studio_field_approval_editor_{normalized_query}"),
+            key=editor_key,
+            on_change=_on_field_approval_editor_change,
+            args=(
+                editor_key,
+                tuple(visible_fields),
+                tuple(available_fields),
+                tuple(required),
+            ),
             disabled=[
                 column for column in editor_frame.columns if column not in EDITABLE_FIELD_COLUMNS
             ],
@@ -2892,7 +2921,7 @@ def _ai_draft(  # noqa: PLR0912, PLR0915
         vertical_alignment="center",
     )
     if action_col1.button("Review deterministic draft", type="secondary"):
-        ok, issues = validate_draft_catalog(baseline)
+        ok, issues = _validate_draft_for_active_schema(baseline, approved_fields)
         if ok:
             if ai_calls_enabled:
                 _queue_pending_candidate(
@@ -2940,18 +2969,15 @@ def _ai_draft(  # noqa: PLR0912, PLR0915
                 )
                 status.update(
                     label=(
-                        f"Validated draft ready after {result.attempts} attempt(s)"
+                        f"Validated draft ready after {_attempt_count_label(result.attempts)}"
                         if queued
-                        else f"No valid draft after {result.attempts} attempt(s)"
+                        else f"No valid draft after {_attempt_count_label(result.attempts)}"
                     ),
                     state="complete" if queued else "error",
                 )
             if queued:
                 st.rerun()
-            st.error(
-                "The model could not produce a valid catalog after two repair passes. "
-                "The accepted revision is unchanged; review provider settings or retry."
-            )
+            _render_candidate_failure(result, operation_label="AI draft")
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _log_ai_operation_failure("AI draft generation", exc)
             _render_ai_operation_error(exc, operation="AI draft generation")
@@ -2963,7 +2989,13 @@ def _ai_draft(  # noqa: PLR0912, PLR0915
 
     current = st.session_state.get("ai_studio_draft")
     if current:
-        st.success(f"Draft accepted for review. Current workspace hash: `{ctx.catalog_hash}`.")
+        if _current_candidate_failure() is not None:
+            st.info(
+                "The current accepted draft was preserved and is separate from the failed "
+                f"model response. Workspace hash: `{ctx.catalog_hash}`."
+            )
+        else:
+            st.success(f"Draft accepted for review. Current workspace hash: `{ctx.catalog_hash}`.")
         _draft_counts(current)
     elif ai_calls_enabled and not ai_settings:
         st.info("Configure a LiteLLM model in the sidebar or use the deterministic draft.")
@@ -2986,9 +3018,15 @@ def _studio_apply_readiness(  # noqa: PLR0912
     pending = st.session_state.get("ai_studio_pending_draft") is not None
     snapshot = _draft_validation_snapshot(draft) if isinstance(draft, dict) else None
     signature = snapshot.signature if snapshot is not None else ""
-    reviewed = bool(snapshot and st.session_state.get("ai_studio_reviewed_signature") == signature)
+    reviewed = bool(
+        snapshot
+        and snapshot.ok
+        and st.session_state.get("ai_studio_reviewed_signature") == signature
+    )
     published = bool(
-        snapshot and st.session_state.get("ai_studio_published_signature") == signature
+        snapshot
+        and snapshot.ok
+        and st.session_state.get("ai_studio_published_signature") == signature
     )
     source_ready = _production_source_ready()
     replacement = (
@@ -3380,7 +3418,9 @@ def _save_export(
         st.write("#### Export YAML")
         st.warning(readiness.export_disabled_reason)
         return
-    reviewed = st.session_state.get("ai_studio_reviewed_signature") == snapshot.signature
+    reviewed = bool(
+        snapshot.ok and st.session_state.get("ai_studio_reviewed_signature") == snapshot.signature
+    )
     if snapshot.ok and not reviewed:
         st.warning(
             "This exact revision has not been reviewed. Validation proves structural safety; "
@@ -3445,6 +3485,7 @@ def _render_workspace_save_bar(
 
     published = bool(
         isinstance(draft, dict)
+        and ok
         and st.session_state.get("ai_studio_published_signature") == _draft_signature(draft)
     )
     replacement: dict[str, list[str]] = {}
@@ -4761,10 +4802,7 @@ def _ai_reports(
                 )
             if queued:
                 st.rerun()
-            st.error(
-                "The report proposal did not satisfy validation after two bounded repair "
-                "passes. The accepted revision is unchanged."
-            )
+            _render_candidate_failure(result, operation_label="Report proposal")
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _log_ai_operation_failure("Report refresh", exc)
             _render_ai_operation_error(exc, operation="Report refresh")
@@ -5082,27 +5120,13 @@ def _reports_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
 
     keys = tile_keys(draft)
     if keys:
-        _reconcile_keep_selection(
-            st.session_state,
-            key="ai_studio_tiles_to_keep",
-            options=keys,
-            revision=snapshot.signature,
-        )
-        selected_tiles = st.multiselect(
-            "Tiles To Keep",
-            options=keys,
-            format_func=lambda key: _tile_choice_label(draft, key),
-            key="ai_studio_tiles_to_keep",
-            help=config_help.field_help("ai.keep_tiles"),
-        )
-        if st.button("Update Draft: Tile Selection", type="primary", disabled=not selected_tiles):
-            _set_draft(filter_draft_by_selection(draft, selected_tiles=selected_tiles))
-            st.rerun()
+        _render_tile_keep_table(draft, revision=snapshot.signature)
+        with st.expander("Technical details · tile keys", expanded=False):
+            components.key_value_strip(
+                [{"label": _tile_choice_label(draft, key), "value": key} for key in keys]
+            )
     else:
         st.warning("The draft does not contain any dashboard tiles.")
-
-    rows = _tile_inventory_rows(draft)
-    st.dataframe(rows, hide_index=True, width="stretch", height=320)
     _render_report_settings_editor(draft)
     with st.expander("Technical details · dashboards.yaml", expanded=False):
         st.caption("Use this for report settings not exposed by the compact review table.")
@@ -5124,6 +5148,47 @@ def _reports_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
             except Exception as exc:
                 _log_ai_operation_failure("Raw dashboard YAML apply", exc)
                 st.error(str(exc))
+
+
+@st.fragment()
+def _render_tile_keep_table(draft: dict[str, Any], *, revision: str) -> None:
+    """Render the tile inventory with in-table Keep checkboxes.
+
+    A fragment so checkbox edits rerun only this table; applying the
+    selection escalates to a full app rerun. The editor input must stay
+    byte-identical across reruns of one draft revision — if it changed,
+    st.data_editor would reset its edit state and swallow every other
+    click — so every row starts checked and the live selection is read
+    back from the editor output only.
+    """
+
+    keys = tile_keys(draft)
+    table_rows = [{"Keep": True, **row} for row in _tile_inventory_rows(draft)]
+    edited_rows = st.data_editor(
+        table_rows,
+        hide_index=True,
+        width="stretch",
+        height=320,
+        key=f"ai_studio_tiles_keep_editor_{revision}",
+        column_config={
+            "Keep": st.column_config.CheckboxColumn(
+                "Keep",
+                width="small",
+                default=True,
+                help=config_help.field_help("ai.keep_tiles"),
+            ),
+        },
+        disabled=["Dashboard", "Page", "Report", "Measure", "Visualization"],
+    )
+    selected_tiles = [
+        key
+        for key, row in zip(keys, edited_rows, strict=True)
+        if isinstance(row, dict) and bool(row.get("Keep"))
+    ]
+    st.session_state["ai_studio_tiles_to_keep"] = selected_tiles
+    if st.button("Update Draft: Tile Selection", type="primary", disabled=not selected_tiles):
+        _set_draft(filter_draft_by_selection(draft, selected_tiles=selected_tiles))
+        st.rerun(scope="app")
 
 
 def _render_report_settings_editor(  # noqa: PLR0912
@@ -5473,13 +5538,33 @@ def _render_pending_draft_review() -> None:  # noqa: PLR0912, PLR0915
     base = st.session_state.get("ai_studio_pending_base_draft") or {}
     kind = st.session_state.get("ai_studio_pending_kind") or "draft"
     patches = draft_patches(base, pending)
-    bundles = draft_patch_bundles(base, pending, validate_draft_catalog)
+    is_deterministic_review = kind == "deterministic draft"
+
+    def validate_pending(candidate: dict[str, Any]) -> tuple[bool, list[str]]:
+        # A deterministic draft is produced locally from the active schema and can
+        # intentionally replace the previously accepted source graph. Comparing it
+        # with that old graph here misclassifies the replacement as a provider
+        # mutation outside the active source. Provider-authored proposals retain the
+        # comparison guard.
+        comparison_base = None if is_deterministic_review else base
+        return _validate_draft_for_active_schema(
+            candidate,
+            baseline_draft=comparison_base,
+        )
+
+    bundles = draft_patch_bundles(base, pending, validate_pending)
     signature = _pending_review_signature(base, pending, kind)
     st.write(f"### Review pending {kind}")
     st.caption(
         "Changes are grouped with their processor, metric, and report dependencies. Removals "
         "start rejected and require an explicit individual selection."
     )
+    if is_deterministic_review and any(bundle.is_removal for bundle in bundles):
+        st.info(
+            "This deterministic draft replaces existing source-dependent configuration. "
+            "Choose Review individually, select Accept this complete deterministic "
+            "replacement, then accept the selected bundle."
+        )
     if not bundles:
         st.info("The AI response does not change the accepted draft.")
     safe_bundle_keys = [
@@ -5499,7 +5584,7 @@ def _render_pending_draft_review() -> None:  # noqa: PLR0912, PLR0915
             pending,
             bundles,
             safe_bundle_keys,
-            validate_draft_catalog,
+            validate_pending,
         )
         if safe_candidate is None:
             st.warning(
@@ -5545,14 +5630,20 @@ def _render_pending_draft_review() -> None:  # noqa: PLR0912, PLR0915
                     "This bundle removes existing configuration. It is excluded from safe "
                     "additions and starts unselected."
                 )
-            elif not bundle.is_valid:
+            if not bundle.is_valid:
                 st.warning("This bundle does not validate independently and cannot be accepted.")
-            else:
+                if bundle.validation_issues:
+                    with st.expander("Why this bundle is blocked", expanded=False):
+                        for issue in bundle.validation_issues:
+                            st.write(f"- {issue}")
+            elif not bundle.is_removal:
                 st.caption(bundle.consequence)
             if individual_review:
                 keep = st.checkbox(
                     (
-                        "Explicitly include this removal"
+                        "Accept this complete deterministic replacement"
+                        if bundle.is_removal and is_deterministic_review
+                        else "Explicitly include this removal"
                         if bundle.is_removal
                         else "Accept this complete bundle"
                     ),
@@ -5565,28 +5656,24 @@ def _render_pending_draft_review() -> None:  # noqa: PLR0912, PLR0915
                     accepted_bundles.append(bundle.key)
             with st.expander("Technical details · included changes", expanded=False):
                 patch_by_key = {patch.key: patch for patch in patches}
-                for patch_key in bundle.patch_keys:
-                    patch = patch_by_key[patch_key]
-                    st.caption(
-                        f"{patch.change.title()} {_draft_patch_label(patch.section)} · "
-                        f"{patch.object_id}"
-                    )
-                    st.code(
-                        yaml.safe_dump(
-                            {"before": patch.before, "after": patch.after},
-                            sort_keys=False,
-                        ),
-                        language="yaml",
-                    )
+                included_patches = [patch_by_key[patch_key] for patch_key in bundle.patch_keys]
+                st.caption("Change summary")
+                st.dataframe(
+                    _pending_change_table_rows(included_patches),
+                    hide_index=True,
+                    width="stretch",
+                )
+                st.caption("YAML before and after")
+                st.code(_pending_change_yaml(included_patches), language="yaml")
 
     reviewed, merge_issues = (None, ())
-    if individual_review:
+    if individual_review and accepted_bundles:
         reviewed, merge_issues = merge_selected_draft_patch_bundles(
             base,
             pending,
             bundles,
             accepted_bundles,
-            validate_draft_catalog,
+            validate_pending,
             allow_removals=True,
         )
     if reviewed is not None and accepted_bundles:
@@ -5663,10 +5750,56 @@ def _pending_review_signature(base: dict[str, Any], pending: dict[str, Any], kin
 
 def _draft_patch_label(section: str) -> str:
     return {
+        "sources": "source naming contract",
         "source_defaults": "source default",
         "source_filters": "source filter",
         "calculated_fields": "calculated field",
+        "processors": "processor",
+        "metrics": "metric",
+        "dashboards": "report layout",
+        "tiles": "report tile",
+        "chat_with_data": "Chat With Data settings",
     }.get(section, section)
+
+
+def _pending_change_table_rows(patches: list[DraftPatch]) -> list[dict[str, str]]:
+    """Describe technical draft patches in user-facing review language."""
+
+    actions = {"added": "Add", "changed": "Update", "removed": "Remove"}
+    outcomes = {
+        "added": "New configuration will be added.",
+        "changed": "Existing configuration will be updated.",
+        "removed": "Existing configuration will be removed.",
+    }
+    return [
+        {
+            "Change": actions.get(patch.change, patch.change.capitalize()),
+            "Configuration": _draft_patch_label(patch.section).capitalize(),
+            "Item": patch.object_id,
+            "Result": outcomes.get(patch.change, "Configuration will change."),
+        }
+        for patch in patches
+    ]
+
+
+def _pending_change_yaml(patches: list[DraftPatch]) -> str:
+    """Return one readable YAML view for all patches in a review bundle."""
+
+    return yaml.safe_dump(
+        {
+            "changes": [
+                {
+                    "action": patch.change,
+                    "configuration": _draft_patch_label(patch.section),
+                    "item": patch.object_id,
+                    "before": patch.before,
+                    "after": patch.after,
+                }
+                for patch in patches
+            ]
+        },
+        sort_keys=False,
+    )
 
 
 def _queue_preprocessing_editor_sync(patches: list[DraftPatch], accepted: list[str]) -> None:
@@ -5680,7 +5813,13 @@ def _queue_preprocessing_editor_sync(patches: list[DraftPatch], accepted: list[s
         for source_id in queued_raw:
             queued[str(source_id)] = {"source_defaults", "calculated_fields"}
     for patch in patches:
-        if patch.key not in accepted_keys or patch.section not in _PREPROCESSING_PATCH_SECTIONS:
+        if patch.key not in accepted_keys:
+            continue
+        if patch.section == "sources":
+            if patch.object_id:
+                queued.setdefault(patch.object_id, set()).update(_PREPROCESSING_PATCH_SECTIONS)
+            continue
+        if patch.section not in _PREPROCESSING_PATCH_SECTIONS:
             continue
         source_id = (
             patch.object_id
@@ -5773,10 +5912,7 @@ def _render_ai_repair_panel(
                     )
                 if queued:
                     st.rerun()
-                st.error(
-                    "The repair still did not satisfy the catalog contract after two "
-                    "bounded repair passes. The accepted revision is unchanged."
-                )
+                _render_candidate_failure(result, operation_label="AI repair")
             except Exception as exc:  # pragma: no cover - Streamlit display path
                 _log_ai_operation_failure("AI repair", exc)
                 _render_ai_operation_error(exc, operation="AI repair")
@@ -5792,14 +5928,24 @@ def _render_copilot_panel(
 ) -> None:
     if not _ai_calls_enabled():
         return
+    with st.container(key="vs_ai_copilot_primary", border=True):
+        _render_copilot_panel_contents(step, working, approved_fields)
+
+
+def _render_copilot_panel_contents(
+    step: str,
+    working: pl.DataFrame,
+    approved_fields: list[str],
+) -> None:
     history = st.session_state.setdefault("ai_studio_copilot_history", [])
     has_pending = st.session_state.get("ai_studio_pending_draft") is not None
     sharing_confirmed = _ai_data_sharing_confirmed(approved_fields)
     queued = st.session_state.get("ai_studio_copilot_queued_message")
-    st.write("## AI Copilot")
+    components.status_badge("Recommended", "ready")
+    st.write(f"### {_copilot_step_heading(step)}")
     st.caption(
-        "Ask about the active step or request a draft change. Every valid change waits "
-        "for explicit patch review."
+        "Describe the outcome you want for this step. Copilot uses the effective schema, "
+        "and every valid change waits for explicit patch review."
     )
     if history:
         with st.container(height=320, border=False):
@@ -5821,10 +5967,6 @@ def _render_copilot_panel(
     )
     if not sharing_confirmed:
         st.caption("Confirm the current sample's AI data-sharing scope before using Copilot.")
-    last_prompt = str(st.session_state.get("ai_studio_copilot_last_prompt") or "")
-    if last_prompt:
-        with st.popover("Last prompt", icon=":material/psychology:"):
-            st.code(last_prompt, language="text")
     prompt_text = ""
     if queued:
         prompt_text = str(
@@ -5834,6 +5976,26 @@ def _render_copilot_panel(
         prompt_text = str(message_text).strip()
     if prompt_text:
         _handle_copilot_message(prompt_text, step, working, approved_fields)
+    last_prompt = str(st.session_state.get("ai_studio_copilot_last_prompt") or "")
+    if last_prompt:
+        with st.popover(
+            "Last prompt",
+            icon=":material/psychology:",
+            key="ai_studio_copilot_last_prompt_popover",
+        ):
+            st.code(last_prompt, language="text")
+
+
+def _copilot_step_heading(step: str) -> str:
+    """Name the active numbered Studio step in the primary Copilot heading."""
+
+    step_label = str(step).strip()
+    match = re.fullmatch(r"(\d+)\.\s*(.+)", step_label)
+    if match is None:
+        return f"Configure {step_label} with AI" if step_label else "Configure this step with AI"
+    step_number, step_name = match.groups()
+    suffix = "" if re.search(r"\bAI\b", step_name, flags=re.IGNORECASE) else " with AI"
+    return f"Configure step {step_number} · {step_name}{suffix}"
 
 
 def _render_copilot_questions() -> None:
@@ -5867,13 +6029,6 @@ def _handle_copilot_message(
 ) -> None:
     pending_draft = st.session_state.get("ai_studio_pending_draft")
     read_only = isinstance(pending_draft, dict)
-    ai_settings = _current_ai_settings()
-    if ai_settings is None:
-        st.info("Configure a LiteLLM model in the sidebar to use the copilot.")
-        return
-    if not _ai_data_sharing_confirmed(approved_fields):
-        st.info("Confirm the current sample's AI data-sharing scope before using the copilot.")
-        return
     history = st.session_state.setdefault("ai_studio_copilot_history", [])
     accepted_draft = st.session_state.get("ai_studio_draft")
     draft = (
@@ -5883,8 +6038,42 @@ def _handle_copilot_message(
         if isinstance(accepted_draft, dict)
         else _build_draft_catalog(working, approved_fields)
     )
+    if not _draft_matches_active_naming_contract(draft):
+        st.session_state[AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY] = True
+        st.session_state["ai_studio_reviewed_signature"] = ""
+        st.session_state["ai_studio_published_signature"] = ""
+        history.extend(
+            [
+                {"role": "user", "content": message},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "The source field-naming setting changed after this revision was "
+                        "created, so I did not call the model or modify the draft. Open AI "
+                        "Draft, generate the updated deterministic draft, and review its "
+                        "change bundles before asking me to edit downstream fields."
+                    ),
+                },
+            ]
+        )
+        _rerun_copilot_fragment()
+        return
+    ai_settings = _current_ai_settings()
+    if ai_settings is None:
+        st.info("Configure a LiteLLM model in the sidebar to use the copilot.")
+        return
+    if not _ai_data_sharing_confirmed(approved_fields):
+        st.info("Confirm the current sample's AI data-sharing scope before using the copilot.")
+        return
     schema_preview = _schema_preview_for_ai(working, approved_fields)
     hidden_fields = sorted(set(working.columns) - set(approved_fields), key=str.casefold)
+    approved_field_name_mapping = {
+        raw: effective
+        for raw, effective in _rename_capitalize_mapping(
+            list(st.session_state.get("ai_studio_raw_schema_columns") or [])
+        ).items()
+        if effective in approved_fields and raw != effective
+    }
     prompt = prompt_for_copilot(
         step=step,
         user_message=message,
@@ -5894,6 +6083,8 @@ def _handle_copilot_message(
         approved_fields=approved_fields,
         hidden_fields=hidden_fields,
         current_draft=draft,
+        rename_capitalize_enabled=_rename_capitalize_enabled(),
+        approved_field_name_mapping=approved_field_name_mapping,
         read_only=read_only,
         pending_summary=(
             "A validated catalog proposal is awaiting explicit dependency-bundle review."
@@ -5902,6 +6093,7 @@ def _handle_copilot_message(
         ),
     )
     st.session_state["ai_studio_copilot_last_prompt"] = prompt
+    status = None
     try:
         with st.status("Running governed draft tools", expanded=False) as status:
             _preflight_ai_operation(
@@ -5918,11 +6110,18 @@ def _handle_copilot_message(
                     iteration_prompt,
                     approved_fields=approved_fields,
                 ),
-                validate=validate_draft_catalog,
+                # Structured Copilot operations are checked against approved fields by
+                # run_copilot_tool_loop itself. Catalog validation here preserves valid
+                # carried-forward objects that may use fields the user kept hidden from AI.
+                validate=_validate_draft_catalog_for_active_source,
                 max_iterations=3,
                 operation_policy=_copilot_operation_policy(step),
                 hidden_fields=hidden_fields,
                 approved_fields=approved_fields,
+                field_contract_source_id=str(st.session_state.get("ai_studio_source_id") or ""),
+                field_contract_source_fields=_active_draft_source_fields(approved_fields),
+                expected_rename_capitalize=_expected_rename_capitalize_contract(),
+                field_name_mapping=approved_field_name_mapping,
                 read_only=read_only,
                 pending_summary=(
                     "A validated catalog proposal is awaiting explicit dependency-bundle review."
@@ -5935,8 +6134,7 @@ def _handle_copilot_message(
                 state="complete" if not result.validation_issues else "error",
             )
     except Exception as exc:  # pragma: no cover - Streamlit display path
-        _log_ai_operation_failure("Copilot request", exc)
-        _render_ai_operation_error(exc, operation="Copilot request")
+        _render_copilot_operation_failure(status, exc)
         return
     history.append({"role": "user", "content": message})
     reply_lines = [result.turn.reply]
@@ -5963,15 +6161,53 @@ def _handle_copilot_message(
     _rerun_copilot_fragment()
 
 
+def _render_copilot_operation_failure(status: Any, exc: Exception) -> None:
+    if status is not None:
+        status.update(label="Copilot request failed", state="error")
+    _log_ai_operation_failure("Copilot request", exc)
+    _render_ai_operation_error(exc, operation="Copilot request")
+
+
 def _copilot_operation_policy(step: str) -> dict[str, str]:
     step_name = step.split(". ", 1)[-1]
-    if step_name != "Filters":
+    allowed = {
+        "Defaults": {"set_source_default", "remove_source_default"},
+        "Filters": {"set_source_filter", "remove_source_filter"},
+        "Calculations": {"set_calculated_field", "remove_calculated_field"},
+    }.get(step_name)
+    if allowed is None:
         return {}
-    message = (
-        "The Filters step edits the source pipeline before processor fan-out. "
-        "Use set_source_filter or remove_source_filter; do not edit a processor."
-    )
-    return {"set_processor": message, "remove_processor": message}
+    message = {
+        "Filters": (
+            "The Filters step edits the source pipeline before processor fan-out. "
+            "Use set_source_filter or remove_source_filter only."
+        ),
+        "Defaults": (
+            "The Defaults step accepts source-default changes only. Use "
+            "set_source_default or remove_source_default."
+        ),
+        "Calculations": (
+            "The Calculations step accepts calculated-field changes only. Use "
+            "set_calculated_field or remove_calculated_field."
+        ),
+    }[step_name]
+    operation_names = {
+        "set_source_default",
+        "remove_source_default",
+        "set_source_filter",
+        "remove_source_filter",
+        "set_calculated_field",
+        "remove_calculated_field",
+        "set_processor",
+        "remove_processor",
+        "set_metric",
+        "remove_metric",
+        "set_tile",
+        "remove_tile",
+        "set_dashboards",
+        "install_recipe",
+    }
+    return dict.fromkeys(operation_names - allowed, message)
 
 
 def _rerun_copilot_fragment() -> None:
@@ -6141,24 +6377,155 @@ def _reconcile_keep_selection(
     return selected
 
 
-def _draft_validation_snapshot(draft: dict[str, Any]) -> DraftValidationSnapshot:
-    """Return cached validation evidence for the exact draft revision."""
+def _active_draft_field_contract(
+    approved_fields: list[str] | None = None,
+) -> list[str] | None:
+    if approved_fields is not None:
+        return sorted({str(field) for field in approved_fields if str(field)}, key=str.casefold)
+    if st.session_state.get("ai_studio_draft_source") == CATALOG_DRAFT_SOURCE:
+        return None
+    if "ai_studio_effective_schema_columns" not in st.session_state:
+        return None
+    return sorted(
+        {
+            str(field)
+            for field in st.session_state.get("ai_studio_approved_fields", [])
+            if str(field)
+        },
+        key=str.casefold,
+    )
+
+
+def _active_draft_field_contract_source_id() -> str | None:
+    if st.session_state.get("ai_studio_draft_source") == CATALOG_DRAFT_SOURCE:
+        return None
+    source_id = str(st.session_state.get("ai_studio_source_id") or "").strip()
+    return source_id or None
+
+
+def _active_draft_source_fields(field_contract: list[str]) -> list[str]:
+    raw_fields = st.session_state.get("ai_studio_effective_schema_columns")
+    if not isinstance(raw_fields, list):
+        return field_contract
+    fields = sorted(
+        {str(field) for field in raw_fields if str(field)},
+        key=str.casefold,
+    )
+    return fields or field_contract
+
+
+def _active_catalog_source_columns() -> dict[str, list[str]]:
+    """Return observed physical columns for transform-aware catalog validation."""
+
+    source_id = str(st.session_state.get("ai_studio_source_id") or "").strip()
+    raw_columns = st.session_state.get("ai_studio_raw_schema_columns")
+    if not source_id or not isinstance(raw_columns, list):
+        return {}
+    columns = [str(column) for column in raw_columns if str(column).strip()]
+    return {source_id: columns} if columns else {}
+
+
+def _validate_draft_catalog_for_active_source(
+    draft: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    return validate_draft_catalog(
+        draft,
+        source_columns_by_id=_active_catalog_source_columns(),
+    )
+
+
+def _expected_rename_capitalize_contract() -> bool | None:
+    """Return the active sample's naming mode when sample-backed state is initialized."""
+
+    if (
+        AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY not in st.session_state
+        and AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY not in st.session_state
+    ):
+        return None
+    return _rename_capitalize_enabled()
+
+
+def _validate_draft_for_active_schema(
+    draft: dict[str, Any],
+    approved_fields: list[str] | None = None,
+    source_id: str | None = None,
+    baseline_draft: dict[str, Any] | None = None,
+) -> tuple[bool, list[str]]:
+    catalog_ok, catalog_issues = _validate_draft_catalog_for_active_source(draft)
+    field_contract = _active_draft_field_contract(approved_fields)
+    if field_contract is None:
+        return catalog_ok, catalog_issues
+    fields_ok, field_issues = validate_draft_field_contract(
+        draft,
+        field_contract,
+        source_id=source_id or _active_draft_field_contract_source_id(),
+        source_fields=_active_draft_source_fields(field_contract),
+        baseline_draft=baseline_draft,
+        expected_rename_capitalize=_expected_rename_capitalize_contract(),
+    )
+    return catalog_ok and fields_ok, list(dict.fromkeys([*catalog_issues, *field_issues]))
+
+
+def _draft_validation_cache_key(
+    signature: str,
+    field_contract: list[str] | None,
+    source_id: str | None,
+) -> str:
+    if field_contract is None:
+        return f"{signature}:catalog"
+    payload = json.dumps(
+        {
+            "approved_fields": field_contract,
+            "effective_schema_signature": str(
+                st.session_state.get("ai_studio_effective_schema_signature") or ""
+            ),
+            "source_id": str(source_id or ""),
+            "rename_capitalize": _expected_rename_capitalize_contract(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    contract_signature = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"{signature}:{contract_signature}"
+
+
+def _draft_validation_snapshot(
+    draft: dict[str, Any],
+    approved_fields: list[str] | None = None,
+) -> DraftValidationSnapshot:
+    """Return cached validation evidence for the draft and active field contract."""
 
     signature = _draft_signature(draft)
+    field_contract = _active_draft_field_contract(approved_fields)
+    source_id = _active_draft_field_contract_source_id()
+    cache_key = _draft_validation_cache_key(signature, field_contract, source_id)
     raw_cache = st.session_state.setdefault("ai_studio_validation_cache", {})
     cache = raw_cache if isinstance(raw_cache, dict) else {}
-    cached = cache.get(signature)
+    cached = cache.get(cache_key)
     if isinstance(cached, dict):
-        return DraftValidationSnapshot(
+        snapshot = DraftValidationSnapshot(
             signature=signature,
             ok=bool(cached.get("ok")),
             issues=tuple(str(issue) for issue in cached.get("issues", [])),
         )
-    ok, issues = validate_draft_catalog(draft)
+        _reconcile_reviewed_signature(snapshot)
+        return snapshot
+    ok, issues = _validate_draft_for_active_schema(draft, field_contract, source_id)
     snapshot = DraftValidationSnapshot(signature, ok, tuple(issues))
-    cache[signature] = {"ok": ok, "issues": list(issues)}
+    cache[cache_key] = {"ok": ok, "issues": list(issues)}
     st.session_state["ai_studio_validation_cache"] = cache
+    _reconcile_reviewed_signature(snapshot)
     return snapshot
+
+
+def _reconcile_reviewed_signature(snapshot: DraftValidationSnapshot) -> None:
+    """Invalidate review evidence when the same revision fails the current contract."""
+
+    if (
+        not snapshot.ok
+        and st.session_state.get("ai_studio_reviewed_signature") == snapshot.signature
+    ):
+        st.session_state["ai_studio_reviewed_signature"] = ""
 
 
 def _render_user_goals_editor(*, height: int = 120) -> str:
@@ -6268,10 +6635,7 @@ def _render_ai_refine_panel(
                     )
                 if queued:
                     st.rerun()
-                st.error(
-                    "The revision did not satisfy validation after two bounded repair passes. "
-                    "The accepted revision is unchanged."
-                )
+                _render_candidate_failure(result, operation_label="AI revision")
             except Exception as exc:  # pragma: no cover - Streamlit display path
                 _log_ai_operation_failure("AI revision", exc)
                 _render_ai_operation_error(exc, operation="AI revision")
@@ -6458,6 +6822,32 @@ def _render_ai_data_sharing_confirmation(approved_fields: list[str]) -> None:
     example_fields = contract["example_fields"]
     likely_identifiers = [field for field in example_fields if _looks_like_id(field)]
     already_confirmed = _ai_data_sharing_confirmed(approved_fields)
+    if already_confirmed:
+        with st.container(border=True):
+            with st.container(key="vs_ai_sharing_consent", gap="xsmall"):
+                components.status_badge("AI access confirmed", "ready")
+                st.caption(
+                    f"Confirmed for {contract['provider']} · "
+                    f"{contract['model'] or 'configured model'} · "
+                    f"{len(contract['approved_fields'])} schema fields. AI generation, Copilot, "
+                    "repair, and report refresh are enabled for this confirmed scope."
+                )
+            with st.expander("Review confirmed sharing scope", expanded=False):
+                _render_ai_sharing_scope_details(
+                    contract,
+                    example_fields,
+                    likely_identifiers,
+                    include_help_expanders=False,
+                )
+                st.button(
+                    "Revoke AI sharing confirmation",
+                    key=f"ai_studio_ai_sharing_revoke_{signature[:16]}",
+                    icon=":material/block:",
+                    on_click=_clear_ai_sharing_confirmation,
+                )
+        return
+    widget_key = f"{AI_SHARING_CONFIRMATION_WIDGET_PREFIX}{signature[:16]}"
+    st.session_state.setdefault(widget_key, False)
     with st.container(border=True):
         st.write("### Review data sent to AI")
         st.caption(
@@ -6466,36 +6856,67 @@ def _render_ai_data_sharing_confirmation(approved_fields: list[str]) -> None:
             "a new confirmation. Prompts also include your business requirements and the "
             "relevant deterministic catalog or current draft settings."
         )
-        components.key_value_strip(
-            [
-                {"label": "Provider", "value": contract["provider"]},
-                {"label": "Model", "value": contract["model"] or "Not configured"},
-                {"label": "Schema fields", "value": len(contract["approved_fields"])},
-                {"label": "Fields with examples", "value": len(example_fields)},
-            ]
+        _render_ai_sharing_scope_details(
+            contract,
+            example_fields,
+            likely_identifiers,
+            include_help_expanders=True,
         )
-        st.caption(f"Destination: **{contract['destination']}**")
-        if example_fields:
-            st.warning("Sample values will be included for: " + ", ".join(example_fields) + ".")
-        else:
-            st.info(
-                "No sample values will be sent. Approved field names, types, null counts, and "
-                "unique counts, plus business requirements and relevant catalog or draft "
-                "settings, are still included."
+        with st.container(key="vs_ai_sharing_consent", gap="xsmall"):
+            components.status_badge("Required for AI editor", "warning")
+            st.caption(
+                "AI generation, Copilot, repair, and report refresh remain disabled "
+                "until this confirmation is checked."
             )
-        if likely_identifiers:
-            st.warning(
-                "Likely identifier fields are selected for sample-value sharing: "
-                + ", ".join(likely_identifiers)
-                + ". Verify that your provider is allowed to receive them."
+            st.checkbox(
+                "Review (changed) sharing scope and confirm it may be sent to the provider and model shown.",
+                key=widget_key,
+                on_change=_on_ai_sharing_confirmation_change,
+                args=(signature, str(contract["provider"]), str(contract["model"])),
             )
+
+
+def _render_ai_sharing_scope_details(
+    contract: dict[str, Any],
+    example_fields: list[str],
+    likely_identifiers: list[str],
+    *,
+    include_help_expanders: bool,
+) -> None:
+    components.key_value_strip(
+        [
+            {"label": "Provider", "value": contract["provider"]},
+            {"label": "Model", "value": contract["model"] or "Not configured"},
+            {"label": "Schema fields", "value": len(contract["approved_fields"])},
+            {"label": "Fields with examples", "value": len(example_fields)},
+        ]
+    )
+    st.caption(f"Destination: **{contract['destination']}**")
+    if example_fields:
+        st.warning("Sample values will be included for: " + ", ".join(example_fields) + ".")
+    else:
+        st.info(
+            "No sample values will be sent. Approved field names, types, null counts, and "
+            "unique counts, plus business requirements and relevant catalog or draft "
+            "settings, are still included."
+        )
+    if likely_identifiers:
+        st.warning(
+            "Likely identifier fields are selected for sample-value sharing: "
+            + ", ".join(likely_identifiers)
+            + ". Verify that your provider is allowed to receive them."
+        )
+    scope_lines = (
+        f"Sample: `{contract['sample_name']}`\n\n"
+        "Approved schema fields: "
+        + (", ".join(contract["approved_fields"]) or "none")
+        + "\n\nFields with sample values: "
+        + (", ".join(example_fields) or "none")
+        + f"\n\nDestination: {contract['destination']}"
+    )
+    if include_help_expanders:
         with st.expander("Sharing scope", expanded=False):
-            st.write(f"Sample: `{contract['sample_name']}`")
-            st.write(
-                "Approved schema fields: " + (", ".join(contract["approved_fields"]) or "none")
-            )
-            st.write("Fields with sample values: " + (", ".join(example_fields) or "none"))
-            st.write(f"Destination: {contract['destination']}")
+            st.markdown(scope_lines)
             st.write("Also included: business requirements and relevant catalog or draft settings")
             st.caption("Provider storage and retention follow your configured provider terms.")
         with st.expander("Why confirmation is required", expanded=False):
@@ -6503,13 +6924,11 @@ def _render_ai_data_sharing_confirmation(approved_fields: list[str]) -> None:
                 "Confirmation applies only to the sample, provider, model, approved schema, "
                 "and example-value scope shown above. Reviewing this help does not change consent."
             )
-        widget_key = f"{AI_SHARING_CONFIRMATION_WIDGET_PREFIX}{signature[:16]}"
-        st.session_state.setdefault(widget_key, already_confirmed)
-        st.checkbox(
-            "I confirm the sharing scope above may be sent to the provider and model shown.",
-            key=widget_key,
-            on_change=_on_ai_sharing_confirmation_change,
-            args=(signature, str(contract["provider"]), str(contract["model"])),
+    else:
+        st.markdown(scope_lines)
+        st.caption(
+            "Also included: business requirements and relevant catalog or draft settings. "
+            "Provider storage and retention follow your configured provider terms."
         )
 
 
@@ -6546,7 +6965,7 @@ def _preflight_ai_operation(
     force_retry = bool(st.session_state.pop("ai_studio_force_preflight_retry", False))
     if cached is True or (isinstance(cached, dict) and cached.get("ok") is True):
         if status is not None:
-            status.write("Provider preflight · cached for these settings")
+            status.write("Provider preflight · passed (cached for these settings)")
         return
     if isinstance(cached, dict) and cached.get("ok") is False:
         expires_at = float(cached.get("expires_at") or 0.0)
@@ -6557,9 +6976,13 @@ def _preflight_ai_operation(
         cache.pop(cache_key, None)
 
     if status is not None:
-        status.write(
-            "Provider preflight · checking model access and chat capability "
-            f"(up to {AI_PREFLIGHT_TIMEOUT_SECONDS}s)"
+        status.update(
+            label=(
+                "Provider preflight · checking model access and chat capability "
+                f"(up to {AI_PREFLIGHT_TIMEOUT_SECONDS}s)"
+            ),
+            state="running",
+            expanded=True,
         )
 
     def call_with_confirmed_scope(
@@ -6582,6 +7005,8 @@ def _preflight_ai_operation(
         raise
     if isinstance(cache, dict):
         cache[cache_key] = {"ok": True}
+    if status is not None:
+        status.write("Provider preflight · passed")
 
 
 def _preflight_failure_cache_entry(exc: Exception) -> dict[str, Any]:
@@ -6659,7 +7084,11 @@ def _run_validated_ai_candidate(
             if model_call_count == 1
             else f"Repair pass {model_call_count - 1}"
         )
-        status.write(f"{stage} · waiting for provider response")
+        status.update(
+            label=f"{stage} · waiting for provider response",
+            state="running",
+            expanded=True,
+        )
         return _call_litellm_for_current_sample(
             settings,
             iteration_prompt,
@@ -6679,6 +7108,12 @@ def _run_validated_ai_candidate(
             call=call_model,
             repair_prompt=repair_prompt_factory,
             max_repairs=2,
+            operation=operation,
+            validate=lambda candidate: _validate_draft_for_active_schema(
+                candidate,
+                approved_fields,
+                baseline_draft=base_draft,
+            ),
         )
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started_at) * 1_000)
@@ -6696,11 +7131,14 @@ def _run_validated_ai_candidate(
             "stage": "provider",
             "issues": [],
             "attempts": model_call_count,
+            "scope_signature": _ai_sharing_signature(approved_fields),
+            "reference": exc.call_id if isinstance(exc, AIProviderCallError) else "",
         }
         raise
     duration_ms = int((time.perf_counter() - started_at) * 1_000)
+    for diagnostic in result.attempt_diagnostics:
+        status.write(_candidate_attempt_status_line(diagnostic))
     if result.ok:
-        status.write("Validation · proposal satisfies the complete catalog contract")
         record_event(
             st.session_state,
             event=AuthoringEvent.VALID_PROPOSAL,
@@ -6774,6 +7212,12 @@ def _queue_pending_candidate(
             "stage": result.failure_stage,
             "issues": list(result.issues),
             "attempts": result.attempts,
+            "reference": result.reference,
+            "scope_signature": _ai_sharing_signature(),
+            "attempt_diagnostics": [
+                _candidate_attempt_diagnostic_receipt(diagnostic)
+                for diagnostic in result.attempt_diagnostics
+            ],
         }
         return False
     st.session_state["ai_studio_pending_draft"] = result.draft
@@ -6800,6 +7244,155 @@ def _draft_review_base(candidate: dict[str, Any]) -> dict[str, Any]:
             "dashboards": [],
         },
     }
+
+
+def _candidate_attempt_diagnostic_receipt(
+    diagnostic: DraftAttemptDiagnostic,
+) -> dict[str, Any]:
+    """Return bounded in-session evidence for one rejected or accepted attempt."""
+
+    return {
+        "attempt": diagnostic.attempt,
+        "role": diagnostic.role,
+        "stage": diagnostic.stage,
+        "issues": list(diagnostic.issues),
+        "issue_count": diagnostic.issue_count,
+        "issue_areas": dict(diagnostic.issue_areas),
+        "sections": list(diagnostic.sections),
+        "response_chars": diagnostic.response_chars,
+        "error_type": diagnostic.error_type,
+        "line": diagnostic.line,
+        "column": diagnostic.column,
+    }
+
+
+def _candidate_attempt_status_line(diagnostic: DraftAttemptDiagnostic) -> str:
+    """Return a terminal, user-facing status line for one model response."""
+
+    role = _candidate_attempt_role_label(diagnostic).casefold()
+    prefix = f"Attempt {diagnostic.attempt} · {role}"
+    if diagnostic.stage == "validated":
+        sections = ", ".join(diagnostic.sections) or "catalog sections"
+        return f"{prefix} · accepted · {sections} passed the complete catalog contract"
+    if diagnostic.stage == "parse":
+        location = ""
+        if diagnostic.line is not None and diagnostic.column is not None:
+            location = f" at line {diagnostic.line}, column {diagnostic.column}"
+        error_type = f" ({diagnostic.error_type})" if diagnostic.error_type else ""
+        return f"{prefix} · rejected · catalog YAML could not be read{location}{error_type}"
+    areas = (
+        ", ".join(area.replace("_", " ") for area, _count in diagnostic.issue_areas) or "catalog"
+    )
+    return f"{prefix} · rejected · {diagnostic.issue_count} catalog contract issue(s) in {areas}"
+
+
+def _candidate_attempt_rows(result: DraftCandidateResult) -> list[dict[str, Any]]:
+    """Return a business-friendly table describing every bounded model attempt."""
+
+    rows: list[dict[str, Any]] = []
+    for diagnostic in result.attempt_diagnostics:
+        if diagnostic.stage == "validated":
+            outcome = "Accepted"
+            explanation = "The returned sections passed the complete catalog contract."
+        elif diagnostic.stage == "parse":
+            outcome = "YAML could not be read"
+            explanation = (
+                diagnostic.issues[0]
+                if diagnostic.issues
+                else ("The response was not valid catalog YAML.")
+            )
+        else:
+            outcome = "Catalog checks failed"
+            examples = " ".join(diagnostic.issues[:2])
+            explanation = f"{diagnostic.issue_count} contract issue(s). {examples}".strip()
+        rows.append(
+            {
+                "Attempt": diagnostic.attempt,
+                "Purpose": _candidate_attempt_role_label(diagnostic),
+                "Outcome": outcome,
+                "Sections Found": ", ".join(diagnostic.sections) or "None",
+                "Issues": diagnostic.issue_count,
+                "What Went Wrong": explanation,
+            }
+        )
+    return rows
+
+
+def _candidate_failure_message(
+    result: DraftCandidateResult,
+    *,
+    operation_label: str,
+) -> str:
+    """Explain why a provider response was rejected without exposing its payload."""
+
+    final = result.attempt_diagnostics[-1] if result.attempt_diagnostics else None
+    if result.failure_stage == "parse":
+        reason = (
+            "the final response could not be read as catalog YAML. Review the attempt "
+            "details, then retry to ask the model for complete YAML sections"
+        )
+    elif result.failure_stage == "validation":
+        issue_count = final.issue_count if final is not None else len(result.issues)
+        reason = (
+            f"the final YAML still failed {issue_count} catalog contract check(s). "
+            "Review the exact checks below; retry sends them through another bounded repair cycle"
+        )
+    else:
+        reason = "none of the returned responses passed the complete catalog contract"
+    return (
+        f"{operation_label} was not created after {_attempt_count_label(result.attempts)}: "
+        f"{reason}. "
+        "The current accepted revision was not changed."
+    )
+
+
+def _render_candidate_failure(
+    result: DraftCandidateResult,
+    *,
+    operation_label: str,
+) -> None:
+    """Render actionable, read-only evidence for a rejected model candidate."""
+
+    st.error(_candidate_failure_message(result, operation_label=operation_label))
+    with st.expander("Why the model response was rejected", expanded=True):
+        final_stage = result.failure_stage.replace("_", " ").title() or "Catalog contract"
+        components.key_value_strip(
+            [
+                {"label": "Diagnostic Reference", "value": result.reference or "Unavailable"},
+                {"label": "Responses Checked", "value": result.attempts},
+                {"label": "Final Failure", "value": final_stage},
+                {"label": "Accepted Revision", "value": "Unchanged"},
+            ]
+        )
+        rows = _candidate_attempt_rows(result)
+        if rows:
+            st.dataframe(rows, hide_index=True, width="stretch")
+        for diagnostic in result.attempt_diagnostics:
+            if not diagnostic.issues:
+                continue
+            role = _candidate_attempt_role_label(diagnostic).casefold()
+            st.markdown(f"**Attempt {diagnostic.attempt} · {role} details**")
+            for issue in diagnostic.issues:
+                st.write(issue)
+            omitted = diagnostic.issue_count - len(diagnostic.issues)
+            if omitted > 0:
+                st.caption(f"{omitted} additional issue(s) were omitted from this receipt.")
+        st.caption(
+            "The prompt and raw model response are intentionally excluded from diagnostics. "
+            "Use the reference above to correlate this receipt with privacy-safe debug logs."
+        )
+
+
+def _candidate_attempt_role_label(diagnostic: DraftAttemptDiagnostic) -> str:
+    if diagnostic.role == "generation":
+        return "Initial generation"
+    if diagnostic.role == "repair":
+        return f"Repair pass {max(diagnostic.attempt - 1, 1)}"
+    return diagnostic.role.replace("_", " ").title()
+
+
+def _attempt_count_label(attempts: int) -> str:
+    return f"{attempts} attempt{'s' if attempts != 1 else ''}"
 
 
 def _ai_operation_error_message(exc: Exception, *, operation: str) -> str:
@@ -6855,8 +7448,8 @@ def _render_ai_operation_error(exc: Exception, *, operation: str) -> None:
 
 
 def _ai_retry_label(kind: str, default: str) -> str:
-    failure = st.session_state.get("ai_studio_last_candidate_failure")
-    if not isinstance(failure, dict):
+    failure = _current_candidate_failure()
+    if failure is None:
         return default
     failure_kind = str(failure.get("kind") or "")
     aliases = {
@@ -6873,6 +7466,18 @@ def _ai_retry_label(kind: str, default: str) -> str:
         "revision": "Retry AI Revision",
         "reports": "Retry Report Refresh",
     }.get(kind, f"Retry {default}")
+
+
+def _current_candidate_failure() -> dict[str, Any] | None:
+    """Return only a failure receipt that belongs to the active AI sharing scope."""
+
+    failure = st.session_state.get("ai_studio_last_candidate_failure")
+    if not isinstance(failure, dict):
+        return None
+    failure_scope = str(failure.get("scope_signature") or "")
+    if failure_scope and failure_scope != _ai_sharing_signature():
+        return None
+    return failure
 
 
 def _log_ai_operation_failure(operation: str, exc: Exception) -> None:
@@ -6922,6 +7527,13 @@ def _set_draft(
 ) -> None:
     stored = yaml.safe_load(yaml.safe_dump(draft, sort_keys=False))
     st.session_state["ai_studio_draft"] = stored
+    if (
+        st.session_state.get("ai_studio_draft_source") != CATALOG_DRAFT_SOURCE
+        and "ai_studio_effective_schema_columns" in st.session_state
+    ):
+        st.session_state[
+            AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY
+        ] = not _draft_matches_active_naming_contract(stored)
     st.session_state["ai_studio_reviewed_signature"] = _draft_signature(stored) if reviewed else ""
     if resume_checkpoint:
         st.session_state.pop(AI_STUDIO_CHECKPOINT_SUPPRESSED_WORKSPACE_KEY, None)
@@ -7007,7 +7619,8 @@ def _tile_inventory_rows(draft: dict[str, Any]) -> list[dict[str, str]]:
             if not isinstance(page, dict):
                 continue
             for tile in page.get("tiles", []) or []:
-                if not isinstance(tile, dict):
+                # Skip id-less tiles so rows stay parallel to tile_keys(draft).
+                if not isinstance(tile, dict) or not tile.get("id"):
                     continue
                 metric_id = str(tile.get("metric", ""))
                 metric = metrics.get(metric_id, {})
@@ -7178,6 +7791,9 @@ def _sync_calculated_fields_editor(source: model.Source) -> None:
 
 def _working_sample(sample: pl.DataFrame) -> tuple[pl.DataFrame, str | None]:
     try:
+        field_name_issues = _stale_preprocessing_field_name_issues()
+        if field_name_issues:
+            raise ValueError(" ".join(field_name_issues))
         frame = sample
         defaults = builder.build_default_values(st.session_state.get("ai_studio_defaults", []))
         for column, value in defaults.items():
@@ -7202,8 +7818,148 @@ def _working_sample(sample: pl.DataFrame) -> tuple[pl.DataFrame, str | None]:
         return sample, str(exc)
 
 
+def _raw_to_effective_field_mapping() -> dict[str, str]:
+    if not _rename_capitalize_enabled():
+        return {}
+    raw_columns = st.session_state.get("ai_studio_raw_schema_columns")
+    if not isinstance(raw_columns, list):
+        return {}
+    return {
+        raw: effective
+        for raw, effective in _rename_capitalize_mapping(
+            [str(item) for item in raw_columns]
+        ).items()
+        if raw != effective
+    }
+
+
+def _expression_stale_raw_fields(value: Any, mapping: dict[str, str]) -> set[str]:
+    stale: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in {"column", "col"} and isinstance(item, str) and item in mapping:
+                stale.add(item)
+            elif key == "polars" and isinstance(item, str):
+                stale.update(_polars_stale_raw_fields(item, mapping))
+            else:
+                stale.update(_expression_stale_raw_fields(item, mapping))
+    elif isinstance(value, list):
+        for item in value:
+            stale.update(_expression_stale_raw_fields(item, mapping))
+    return stale
+
+
+def _polars_stale_raw_fields(expression: str, mapping: dict[str, str]) -> set[str]:
+    return {
+        raw
+        for raw in mapping
+        if re.search(rf"\bpl\.col\(\s*(['\"])({re.escape(raw)})\1\s*\)", expression)
+    }
+
+
+def _stale_preprocessing_field_name_issues(  # noqa: PLR0912
+    section: str | None = None,
+) -> list[str]:
+    """Find raw Pega names used where the effective post-transform schema is required."""
+
+    mapping = _raw_to_effective_field_mapping()
+    if not mapping:
+        return []
+    findings: list[tuple[str, str]] = []
+    if section in {None, "Defaults"}:
+        for row in st.session_state.get("ai_studio_defaults", []) or []:
+            if not isinstance(row, dict) or not builder.editor_row_enabled(row.get("Enabled")):
+                continue
+            field = str(row.get("Field") or "").strip()
+            if field in mapping:
+                findings.append(("Defaults", field))
+    if section in {None, "Filters"}:
+        if st.session_state.get("ai_studio_filter_mode") == "Raw AST":
+            raw_filter = str(st.session_state.get("ai_studio_raw_filter") or "")
+            try:
+                expression = yaml.safe_load(raw_filter) if raw_filter.strip() else None
+            except yaml.YAMLError:
+                expression = None
+            for field in _expression_stale_raw_fields(expression, mapping):
+                findings.append(("Filters", field))
+        else:
+            for row in st.session_state.get("ai_studio_filter_rows", []) or []:
+                if not isinstance(row, dict) or not builder.editor_row_enabled(row.get("Enabled")):
+                    continue
+                field = str(row.get("Field") or "").strip()
+                if field in mapping:
+                    findings.append(("Filters", field))
+    if section in {None, "Calculations"}:
+        for row in st.session_state.get("ai_studio_calculations", []) or []:
+            if not isinstance(row, dict) or not builder.editor_row_enabled(row.get("Enabled")):
+                continue
+            direct_fields = {
+                str(row.get("Name") or "").strip(),
+                str(row.get("Left") or "").strip(),
+            }
+            if str(row.get("Right Kind") or "Field") == "Field":
+                direct_fields.add(str(row.get("Right") or "").strip())
+            mode = str(row.get("Mode") or "AST YAML")
+            expression_text = str(row.get("Expression") or row.get("Expression YAML") or "")
+            if mode == "Polars":
+                direct_fields.update(_polars_stale_raw_fields(expression_text, mapping))
+            elif mode == "AST YAML" and expression_text.strip():
+                try:
+                    expression = yaml.safe_load(expression_text)
+                except yaml.YAMLError:
+                    expression = None
+                direct_fields.update(_expression_stale_raw_fields(expression, mapping))
+            for field in direct_fields:
+                if field in mapping:
+                    findings.append(("Calculations", field))
+    return [
+        f"{area} uses raw field {raw!r}; use effective field {mapping[raw]!r} after "
+        "Rename / Capitalize."
+        for area, raw in sorted(set(findings))
+    ]
+
+
+def _render_stale_preprocessing_field_feedback(section: str) -> None:
+    for issue in _stale_preprocessing_field_name_issues(section):
+        st.error(issue)
+
+
 def _rename_capitalize_enabled() -> bool:
-    return bool(st.session_state.get("ai_studio_rename_capitalize"))
+    _migrate_rename_capitalize_state()
+    return bool(st.session_state.get(AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY))
+
+
+def _migrate_rename_capitalize_state() -> None:
+    """Move pre-fix widget-owned state to the durable authoring key once."""
+
+    if (
+        AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY not in st.session_state
+        and AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY in st.session_state
+    ):
+        st.session_state[AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = bool(
+            st.session_state[AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY]
+        )
+    st.session_state.pop(AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY, None)
+
+
+def _on_rename_capitalize_toggle_change() -> None:
+    """Copy the transient widget value into durable, checkpointed authoring state."""
+
+    st.session_state[AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = bool(
+        st.session_state.get(AI_STUDIO_RENAME_CAPITALIZE_WIDGET_KEY)
+    )
+
+
+def _render_rename_capitalize_toggle() -> None:
+    """Render the source transform control without coupling state to widget lifetime."""
+
+    st.toggle(
+        "Use Rename / Capitalize Transform",
+        value=_rename_capitalize_enabled(),
+        key=AI_STUDIO_RENAME_CAPITALIZE_WIDGET_KEY,
+        help=config_help.field_help("source.rename_capitalize"),
+        on_change=_on_rename_capitalize_toggle_change,
+    )
 
 
 def _rename_capitalize_frame(frame: pl.DataFrame) -> pl.DataFrame:
@@ -7214,9 +7970,59 @@ def _rename_capitalize_mapping(columns: list[str]) -> dict[str, str]:
     return dict(zip(columns, capitalize_fields(columns), strict=False))
 
 
+def _draft_uses_rename_capitalize(draft: object) -> bool | None:
+    """Return the active draft source's naming mode, or ``None`` when it is unavailable."""
+
+    if not isinstance(draft, dict):
+        return None
+    source_id = str(st.session_state.get("ai_studio_source_id") or "").strip()
+    sources = draft.get("pipelines", {}).get("sources", [])
+    if not isinstance(sources, list):
+        return None
+    source = next(
+        (
+            item
+            for item in sources
+            if isinstance(item, dict) and str(item.get("id") or "") == source_id
+        ),
+        None,
+    )
+    if not isinstance(source, dict):
+        return None
+    transforms = source.get("transforms", [])
+    if not isinstance(transforms, list):
+        return False
+    return any(
+        isinstance(transform, dict) and transform.get("kind") == "rename_capitalize"
+        for transform in transforms
+    )
+
+
+def _draft_matches_active_naming_contract(draft: object) -> bool:
+    expected = _expected_rename_capitalize_contract()
+    if expected is None or not str(st.session_state.get("ai_studio_source_id") or "").strip():
+        return True
+    actual = _draft_uses_rename_capitalize(draft)
+    return actual is not None and actual == expected
+
+
 def _sync_ai_rename_capitalize_state(sample: pl.DataFrame) -> None:
+    st.session_state["ai_studio_raw_schema_columns"] = list(sample.columns)
     enabled = _rename_capitalize_enabled()
     applied = bool(st.session_state.get("ai_studio_rename_capitalize_applied", False))
+    accepted_draft = st.session_state.get("ai_studio_draft")
+    stale_draft = isinstance(accepted_draft, dict) and not _draft_matches_active_naming_contract(
+        accepted_draft
+    )
+    was_stale = bool(st.session_state.get(AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY))
+    st.session_state[AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY] = stale_draft
+    if stale_draft:
+        st.session_state["ai_studio_reviewed_signature"] = ""
+        st.session_state["ai_studio_published_signature"] = ""
+        st.session_state["ai_studio_validation_cache"] = {}
+        if not was_stale:
+            _clear_pending_ai_draft()
+            _clear_ai_sharing_confirmation()
     if applied == enabled:
         return
 
@@ -7249,6 +8055,9 @@ def _sync_ai_rename_capitalize_state(sample: pl.DataFrame) -> None:
             "ai_studio_group_by_field_selector",
         ):
             field_remap.remap_state_field_list(key, mapping)
+    _clear_pending_ai_draft()
+    _clear_ai_sharing_confirmation()
+    st.session_state["ai_studio_validation_cache"] = {}
     _clear_schema_widget_state()
     st.session_state["ai_studio_field_approval_initialized"] = False
     st.session_state["ai_studio_rename_capitalize_applied"] = enabled
@@ -7888,10 +8697,14 @@ def _studio_status_bar(
     pending = st.session_state.get("ai_studio_pending_draft")
     snapshot = _draft_validation_snapshot(draft) if isinstance(draft, dict) else None
     reviewed = bool(
-        snapshot and st.session_state.get("ai_studio_reviewed_signature") == snapshot.signature
+        snapshot
+        and snapshot.ok
+        and st.session_state.get("ai_studio_reviewed_signature") == snapshot.signature
     )
     applied = bool(
-        snapshot and st.session_state.get("ai_studio_published_signature") == snapshot.signature
+        snapshot
+        and snapshot.ok
+        and st.session_state.get("ai_studio_published_signature") == snapshot.signature
     )
     with st.container(border=True):
         with st.container(horizontal=True):
@@ -8008,6 +8821,74 @@ def _invalidate_ai_sharing_confirmation_if_scope_changed(
     # Field approval is a fragment. Clear confirmation immediately so the
     # still-rendered Copilot cannot use the prior sharing scope.
     _clear_ai_sharing_confirmation()
+
+
+def _on_field_approval_editor_change(
+    editor_key: str,
+    visible_fields: tuple[str, ...],
+    available_fields: tuple[str, ...],
+    required_fields: tuple[str, ...],
+) -> None:
+    """Commit one data-editor delta before its fragment reruns."""
+
+    editor_state = st.session_state.get(editor_key)
+    if not isinstance(editor_state, Mapping):
+        return
+    edited_rows = editor_state.get("edited_rows")
+    if not isinstance(edited_rows, Mapping):
+        return
+
+    previous_approved_fields = list(st.session_state.get("ai_studio_approved_fields") or [])
+    previous_example_fields = list(st.session_state.get("ai_studio_example_fields") or [])
+    approved_set = set(previous_approved_fields)
+    example_set = set(previous_example_fields)
+    changed_rows: list[dict[str, Any]] = []
+    for raw_index, changes in edited_rows.items():
+        if not isinstance(changes, Mapping):
+            continue
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+        if index < 0 or index >= len(visible_fields):
+            continue
+        field = visible_fields[index]
+        changed_rows.append(
+            {
+                "Column": field,
+                "Approve": changes.get("Approve", field in approved_set),
+                "Send To AI": changes.get(
+                    "Send To AI",
+                    changes.get("Share Sample Values", field in example_set),
+                ),
+            }
+        )
+    if not changed_rows:
+        return
+
+    approved_fields, example_fields = _apply_field_approval_edits(
+        changed_rows,
+        available_fields=list(available_fields),
+        required_fields=list(required_fields),
+        approved_fields=previous_approved_fields,
+        example_fields=previous_example_fields,
+    )
+    approved_fields, example_fields, group_by_fields = _normalize_field_approval_state(
+        available_fields=list(available_fields),
+        required_fields=list(required_fields),
+        approved_fields=approved_fields,
+        example_fields=example_fields,
+        group_by_fields=list(st.session_state.get("ai_studio_group_by_fields") or []),
+    )
+    st.session_state["ai_studio_approved_fields"] = approved_fields
+    st.session_state["ai_studio_example_fields"] = example_fields
+    st.session_state["ai_studio_group_by_fields"] = group_by_fields
+    _invalidate_ai_sharing_confirmation_if_scope_changed(
+        previous_approved_fields=previous_approved_fields,
+        previous_example_fields=previous_example_fields,
+        approved_fields=approved_fields,
+        example_fields=example_fields,
+    )
 
 
 def _field_approval_editor_rows(

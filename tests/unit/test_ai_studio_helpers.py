@@ -34,10 +34,12 @@ from valuestream.ai import (
     section_name_diff,
     tile_keys,
     validate_draft_catalog,
+    validate_draft_field_contract,
     validation_trace_for_repair,
 )
 from valuestream.config import model
 from valuestream.config.loader import load
+from valuestream.readers.discovery import discover
 from valuestream.recipes import (
     instantiate_metric,
     instantiate_tile,
@@ -45,7 +47,7 @@ from valuestream.recipes import (
     processor_with_recipe_states,
     recipe_readiness,
 )
-from valuestream.ui import builder, forms, recipe_library
+from valuestream.ui import builder, dimension_profile, forms, recipe_library
 from valuestream.ui.pages import ai_config_studio as ai_config_studio_page
 from valuestream.ui.pages.ai_config_studio import (
     DETERMINISTIC_STEPS,
@@ -154,10 +156,13 @@ def test_sample_source_plan_matches_preview_and_runtime_format() -> None:
     assert (csv_plan.reader_kind, csv_plan.root, csv_plan.file_pattern) == (
         "csv",
         "data/orders",
-        "orders.csv",
+        "**/*.csv",
     )
     assert csv_plan.production_ready
-    assert parquet_plan.reader_kind == "parquet"
+    assert (parquet_plan.reader_kind, parquet_plan.file_pattern) == (
+        "parquet",
+        "**/*.parquet",
+    )
     assert not parquet_plan.production_ready
     assert generic_json_plan.reader_kind == "pega_ds_export"
     assert generic_json_plan.requires_runtime_confirmation
@@ -169,9 +174,55 @@ def test_sample_source_plan_matches_preview_and_runtime_format() -> None:
     pega_parquet_plan = ai_config_studio_page._sample_source_plan(
         "interactions.parquet",
         ["pyOutcome", "pxOutcomeTime", "pxInteractionID"],
-        workspace_relative="data/Month=08/interactions.parquet",
+        workspace_relative="data/Month=08/Day=2024-08-31/interactions.parquet",
     )
+    assert pega_parquet_plan.root == "data"
+    assert pega_parquet_plan.file_pattern == "**/*.parquet"
     assert pega_parquet_plan.timestamp_format == "%Y%m%dT%H%M%S%.3f %Z"
+
+    uppercase_csv_plan = ai_config_studio_page._sample_source_plan(
+        "Orders.CSV",
+        ["OrderID", "Revenue"],
+    )
+    assert uppercase_csv_plan.file_pattern == "**/*.CSV"
+
+
+@pytest.mark.unit
+def test_partitioned_sample_plan_discovers_sibling_partitions(tmp_path: Path) -> None:
+    relative_files = (
+        Path("data/Month=08/Day=2024-08-30/orders.parquet"),
+        Path("data/Month=08/Day=2024-08-31/orders.parquet"),
+        Path("data/Month=09/Day=2024-09-01/orders.parquet"),
+    )
+    for relative in relative_files:
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"sample")
+    plan = ai_config_studio_page._sample_source_plan(
+        relative_files[1].name,
+        ["OrderID"],
+        workspace_relative=relative_files[1].as_posix(),
+    )
+    source = model.Source.model_validate(
+        {
+            "id": "orders",
+            "reader": {
+                "kind": plan.reader_kind,
+                "root": plan.root,
+                "file_pattern": plan.file_pattern,
+            },
+        }
+    )
+
+    discovered = {
+        path.relative_to(tmp_path).as_posix()
+        for chunk in discover(tmp_path, source)
+        for path in chunk.files
+    }
+
+    assert plan.root == "data"
+    assert plan.file_pattern == "**/*.parquet"
+    assert discovered == {path.as_posix() for path in relative_files}
 
 
 @pytest.mark.unit
@@ -294,6 +345,42 @@ def test_studio_continue_queues_step_before_jump_widget_renders() -> None:
     assert not at.exception
     assert at.session_state["ai_studio_step"] == "Required Fields"
     assert at.selectbox[0].value == "Required Fields"
+
+
+@pytest.mark.unit
+def test_schema_contract_review_queues_navigation_without_mutating_rendered_widget() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        steps = page.STEPS
+        st.session_state[page.AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY] = True
+        queued = page._normalize_studio_step(
+            st.session_state.pop("ai_studio_next_step", None), steps
+        )
+        if queued in steps:
+            st.session_state["ai_studio_step"] = queued
+            st.session_state["ai_studio_jump_step"] = queued
+        current = page._normalize_studio_step(
+            st.session_state.get("ai_studio_step", steps[0]), steps
+        )
+        assert current is not None
+        st.session_state["ai_studio_step"] = current
+        page._render_studio_step_header(current, steps)
+        page._render_schema_contract_notice(steps)
+
+    at = AppTest.from_function(app).run()
+    at = (
+        next(button for button in at.button if button.label == "Review updated draft").click().run()
+    )
+
+    assert not at.exception
+    assert at.session_state["ai_studio_step"] == STEPS[6]
+    assert at.session_state["ai_studio_jump_step"] == STEPS[6]
+    assert at.selectbox[0].value == STEPS[6]
 
 
 @pytest.mark.unit
@@ -556,6 +643,160 @@ def test_generate_validated_candidate_repairs_before_returning(
 
 
 @pytest.mark.unit
+def test_generate_validated_candidate_records_parse_and_success_diagnostics() -> None:
+    malformed_response = "metrics:\n  metrics: [\n    - broken"
+    valid_response = "metrics: {metrics: {CTR: {}}}"
+    responses = iter([malformed_response, valid_response])
+
+    result = ai_studio.generate_validated_candidate(
+        base_draft=_base_draft(),
+        prompt="generate",
+        call=lambda _prompt: next(responses),
+        repair_prompt=lambda _draft, _issues, _trace: "repair",
+        max_repairs=1,
+        validate=lambda _candidate: (True, []),
+        operation="catalog_draft",
+    )
+
+    assert result.ok
+    assert result.attempts == 2
+    assert re.fullmatch(r"[0-9a-f]{12}", result.reference)
+    assert len(result.attempt_diagnostics) == 2
+
+    parse_diagnostic, success_diagnostic = result.attempt_diagnostics
+    assert parse_diagnostic.attempt == 1
+    assert parse_diagnostic.role == "generation"
+    assert parse_diagnostic.stage == "parse"
+    assert parse_diagnostic.issues == (
+        "The model response was not valid catalog YAML. Return complete catalog sections.",
+    )
+    assert parse_diagnostic.issue_count == 1
+    assert parse_diagnostic.issue_areas == (("other", 1),)
+    assert parse_diagnostic.sections == ()
+    assert parse_diagnostic.response_chars == len(malformed_response)
+    assert re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", parse_diagnostic.error_type)
+    assert parse_diagnostic.line == 3
+    assert parse_diagnostic.column == 5
+
+    assert success_diagnostic.attempt == 2
+    assert success_diagnostic.role == "repair"
+    assert success_diagnostic.stage == "validated"
+    assert success_diagnostic.issues == ()
+    assert success_diagnostic.issue_count == 0
+    assert success_diagnostic.issue_areas == ()
+    assert success_diagnostic.sections == ("metrics",)
+    assert success_diagnostic.response_chars == len(valid_response)
+    assert success_diagnostic.error_type == ""
+    assert success_diagnostic.line is None
+    assert success_diagnostic.column is None
+
+
+@pytest.mark.unit
+def test_generate_validated_candidate_bounds_attempt_diagnostic_issues() -> None:
+    long_issue = "miscellaneous: " + ("x" * 700) + "\nPRIVATE-CUSTOMER-42"
+    issues = [
+        "sources[private-source].path: invalid /Users/alice",
+        "processors.processors.0.PRIVATE-ID: invalid",
+        "metrics.metrics.PRIVATE-METRIC: invalid",
+        "dashboards.dashboards.0: invalid",
+        "chat_with_data.agent_prompt: invalid",
+        "processor private references stale raw field 'secret_name'",
+        long_issue,
+        "miscellaneous second issue",
+        "miscellaneous third issue",
+        "miscellaneous fourth issue",
+        "miscellaneous fifth issue",
+    ]
+
+    result = ai_studio.generate_validated_candidate(
+        base_draft=_base_draft(),
+        prompt="generate",
+        call=lambda _prompt: "metrics: {metrics: {CTR: {}}}",
+        repair_prompt=lambda _draft, _issues, _trace: "repair",
+        max_repairs=0,
+        validate=lambda _candidate: (False, issues),
+    )
+
+    assert not result.ok
+    assert re.fullmatch(r"[0-9a-f]{12}", result.reference)
+    assert len(result.attempt_diagnostics) == 1
+    diagnostic = result.attempt_diagnostics[0]
+    assert diagnostic.stage == "validation"
+    assert diagnostic.role == "generation"
+    assert diagnostic.issue_count == len(issues)
+    assert len(diagnostic.issues) == 8
+    assert all(len(issue) <= 512 for issue in diagnostic.issues)
+    assert all("\n" not in issue for issue in diagnostic.issues)
+    assert diagnostic.issues[6].endswith("…")
+    assert diagnostic.issue_areas == (
+        ("source", 1),
+        ("processor", 1),
+        ("metric", 1),
+        ("report", 1),
+        ("chat", 1),
+        ("field_contract", 1),
+        ("other", 5),
+    )
+    assert diagnostic.sections == ("metrics",)
+
+
+@pytest.mark.unit
+def test_generate_validated_candidate_repairs_stale_post_rename_processor_field() -> None:
+    base = _base_draft()
+    source = base["pipelines"]["sources"][0]
+    source["schema"] = {
+        "timestamp_column": "pxOutcomeTime",
+        "natural_key": ["pyCustomerID", "pyChannel"],
+    }
+    source["transforms"] = [{"kind": "rename_capitalize"}]
+    processor_yaml = """
+processors:
+  processors:
+    - id: engagement
+      source: ih
+      kind: binary_outcome
+      dimensions: [{channel}]
+      time: {{column: OutcomeTime, grains: [Day, Summary]}}
+      outcome:
+        column: Outcome
+        positive_values: [Clicked]
+        negative_values: [Impression]
+"""
+    responses = iter(
+        [
+            processor_yaml.format(channel="pyChannel"),
+            processor_yaml.format(channel="Channel"),
+        ]
+    )
+    prompts: list[str] = []
+
+    def validate(candidate: dict) -> tuple[bool, list[str]]:
+        catalog_ok, catalog_issues = validate_draft_catalog(candidate)
+        fields_ok, field_issues = validate_draft_field_contract(
+            candidate,
+            ["Channel", "CustomerID", "Outcome", "OutcomeTime"],
+            source_id="ih",
+        )
+        return catalog_ok and fields_ok, [*catalog_issues, *field_issues]
+
+    result = ai_studio.generate_validated_candidate(
+        base_draft=base,
+        prompt="draft",
+        call=lambda prompt: (prompts.append(prompt), next(responses))[1],
+        repair_prompt=lambda _draft, issues, _trace: f"repair: {issues[0]}",
+        max_repairs=1,
+        validate=validate,
+    )
+
+    assert result.ok
+    assert result.attempts == 2
+    assert result.draft is not None
+    assert result.draft["processors"]["processors"][0]["dimensions"] == ["Channel"]
+    assert "stale raw field" in prompts[1]
+    assert "pyChannel" in prompts[1]
+
+
+@pytest.mark.unit
 def test_generate_validated_candidate_never_returns_invalid_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -602,6 +843,95 @@ def test_generate_validated_candidate_bounds_repairs_to_two() -> None:
     assert result.draft is None
     assert result.attempts == 3
     assert calls == 3
+
+
+@pytest.mark.unit
+def test_validate_draft_catalog_hides_unexpected_exception_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "PRIVATE-CUSTOMER-42 /Users/alice/private.yaml"
+
+    def raise_unexpected(_draft: dict) -> dict:
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(ai_studio, "_catalog_sections_for_validation", raise_unexpected)
+
+    ok, issues = ai_studio.validate_draft_catalog(_base_draft())
+
+    assert not ok
+    assert issues == ["Catalog validation could not complete (RuntimeError)."]
+    assert secret not in str(issues)
+
+
+@pytest.mark.unit
+def test_draft_validation_snapshot_uses_effective_field_contract_and_cache_identity() -> None:
+    st.session_state.clear()
+    draft = _base_draft()
+    source = draft["pipelines"]["sources"][0]
+    source["schema"] = {
+        "timestamp_column": "pxOutcomeTime",
+        "natural_key": ["pyCustomerID", "pyChannel"],
+    }
+    source["transforms"] = [{"kind": "rename_capitalize"}]
+    approved = ["Channel", "CustomerID", "Outcome", "OutcomeTime"]
+    st.session_state["ai_studio_draft_source"] = ""
+    st.session_state["ai_studio_source_id"] = "ih"
+    st.session_state["ai_studio_approved_fields"] = approved
+    st.session_state["ai_studio_effective_schema_columns"] = approved
+    st.session_state["ai_studio_effective_schema_signature"] = "schema-a"
+
+    stale = copy.deepcopy(draft)
+    stale["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    stale_snapshot = ai_config_studio_page._draft_validation_snapshot(stale)
+    valid_snapshot = ai_config_studio_page._draft_validation_snapshot(draft)
+
+    assert not stale_snapshot.ok
+    assert any("stale raw field 'pyChannel'" in issue for issue in stale_snapshot.issues)
+    assert valid_snapshot.ok
+    cache_size = len(st.session_state["ai_studio_validation_cache"])
+
+    st.session_state["ai_studio_approved_fields"] = [
+        "CustomerID",
+        "Outcome",
+        "OutcomeTime",
+    ]
+    st.session_state["ai_studio_effective_schema_signature"] = "schema-b"
+    changed_contract = ai_config_studio_page._draft_validation_snapshot(draft)
+
+    assert not changed_contract.ok
+    assert len(st.session_state["ai_studio_validation_cache"]) == cache_size + 1
+
+
+@pytest.mark.unit
+def test_invalid_schema_snapshot_clears_matching_review_on_cache_miss_and_hit() -> None:
+    st.session_state.clear()
+    draft = _base_draft()
+    source = draft["pipelines"]["sources"][0]
+    source["schema"] = {
+        "timestamp_column": "pxOutcomeTime",
+        "natural_key": ["pyCustomerID", "pyChannel"],
+    }
+    source["transforms"] = [{"kind": "rename_capitalize"}]
+    draft["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    approved = ["Channel", "CustomerID", "Outcome", "OutcomeTime"]
+    signature = ai_config_studio_page._draft_signature(draft)
+    st.session_state["ai_studio_draft_source"] = ""
+    st.session_state["ai_studio_source_id"] = "ih"
+    st.session_state["ai_studio_approved_fields"] = approved
+    st.session_state["ai_studio_effective_schema_columns"] = approved
+    st.session_state["ai_studio_effective_schema_signature"] = "schema-a"
+    st.session_state["ai_studio_reviewed_signature"] = signature
+
+    first = ai_config_studio_page._draft_validation_snapshot(draft)
+
+    assert not first.ok
+    assert st.session_state["ai_studio_reviewed_signature"] == ""
+
+    st.session_state["ai_studio_reviewed_signature"] = signature
+    second = ai_config_studio_page._draft_validation_snapshot(draft)
+
+    assert second == first
+    assert st.session_state["ai_studio_reviewed_signature"] == ""
 
 
 @pytest.mark.unit
@@ -1015,6 +1345,46 @@ def test_default_group_by_fields_use_dimension_profile_rules() -> None:
 
 
 @pytest.mark.unit
+def test_default_group_by_fields_include_explicit_calendar_granularities() -> None:
+    sample = pl.DataFrame(
+        {
+            "Channel": ["Web", "Mobile", "Branch", "Web"],
+            "Day": ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+            "Month": ["2026-01"] * 4,
+            "Quarter": ["2026-Q1"] * 4,
+            "Year": [2026] * 4,
+            "Issue": ["Cards", "Loans", "Savings", "Cards"],
+        }
+    )
+    calendar_fields = ["Day", "Month", "Quarter", "Year"]
+
+    group_by = ai_config_studio_page._default_group_by_fields(
+        sample,
+        list(sample.columns),
+        calendar_fields,
+    )
+    rows = {
+        row.field: row
+        for row in dimension_profile.selection_dimension_profile_rows(
+            sample,
+            selected_fields=[],
+            required_fields=calendar_fields,
+        )
+    }
+
+    assert group_by == ["Channel", "Day", "Month", "Quarter", "Year"]
+    assert {
+        field: (rows[field].recommendation, rows[field].reason) for field in calendar_fields
+    } == dict.fromkeys(
+        calendar_fields,
+        (
+            "Recommended",
+            "Explicit calendar granularity for time-based aggregate breakdowns.",
+        ),
+    )
+
+
+@pytest.mark.unit
 def test_missing_kind_specific_metric_fields_are_repairable_draft_issues() -> None:
     issues = [
         "metrics.metrics.customer_reach.approx_distinct_count.state: Field required",
@@ -1081,6 +1451,13 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
     assert "InternalSecret" not in prompt
     assert "Do not emit legacy TOML-only settings such as metrics.global_filters" in prompt
     assert "Set sketch_build_mode to bulk" in prompt
+    assert (
+        "Create as many distinct valid processors as possible from the approved schema "
+        "and business requirements."
+    ) in prompt
+    assert "Do not stop after a minimal baseline" in prompt
+    assert "Maximize useful processor coverage while keeping the catalog coherent" in prompt
+    assert "Prefer a small useful set over a large speculative catalog" not in prompt
     assert "Every report/dashboard tile metric exists in metrics." in prompt
     assert "Output valid YAML only." in prompt
     assert "Return valid YAML only. Do not wrap the answer in prose or Markdown fences." in prompt
@@ -1146,6 +1523,37 @@ def test_expression_prompt_dictionary_covers_the_closed_dsl() -> None:
         "args": [{"col": "Issue"}, {"col": "Group"}, {"col": "Name"}],
         "sep": "/",
     }
+
+
+@pytest.mark.unit
+def test_chart_prompt_dictionary_matches_tile_validation_contract() -> None:
+    from typing import get_args  # noqa: PLC0415 - test-only introspection
+
+    from valuestream.config.validate import (  # noqa: PLC0415 - contract under test
+        _TILE_REQUIRED_ALTERNATIVES,
+    )
+
+    chart_dictionary = ai_studio.catalog_prompt_dictionaries()["chart_required_fields"]
+    required_by_chart = chart_dictionary["required_fields_by_chart"]
+    chart_kinds = set(get_args(model.Tile.model_fields["chart"].annotation))
+
+    assert set(required_by_chart) == chart_kinds
+    for chart, alternatives in _TILE_REQUIRED_ALTERNATIVES.items():
+        assert required_by_chart[chart] == ["|".join(group) for group in alternatives], chart
+
+    for chart, example in chart_dictionary["tile_examples"].items():
+        example_chart = example["chart"]
+        assert example_chart in chart_kinds, chart
+        for requirement in required_by_chart[example_chart]:
+            assert any(option in example for option in requirement.split("|")), (
+                chart,
+                requirement,
+            )
+
+    state_type_enum = ai_studio.catalog_prompt_dictionaries()["catalog_schema"][
+        "processors.yaml"
+    ]["state_type_enum"]
+    assert set(state_type_enum) == set(get_args(model.StateSpec.model_fields["type"].annotation))
 
 
 @pytest.mark.unit
@@ -1884,6 +2292,10 @@ def test_ai_calls_require_sample_scoped_data_sharing_confirmation(
     assert "private-password" not in json.dumps(at.session_state["sharing_contract"])
     assert "token=secret" not in json.dumps(at.session_state["sharing_contract"])
     assert any("Custom endpoint configured" in caption.value for caption in at.caption)
+    assert any(
+        "AI generation, Copilot, repair, and report refresh remain disabled" in caption.value
+        for caption in at.caption
+    )
     assert next(button for button in at.button if button.label == "Run model").disabled
     assert calls == []
 
@@ -1893,6 +2305,10 @@ def test_ai_calls_require_sample_scoped_data_sharing_confirmation(
         if checkbox.label.startswith("I confirm the sharing scope above")
     )
     consent.check().run()
+    assert any(
+        "report refresh are enabled for this confirmed scope" in caption.value
+        for caption in at.caption
+    )
     run_button = next(button for button in at.button if button.label == "Run model")
     assert not run_button.disabled
     run_button.click().run()
@@ -1900,10 +2316,8 @@ def test_ai_calls_require_sample_scoped_data_sharing_confirmation(
     assert at.session_state["result"] == "ok"
 
     next(
-        checkbox
-        for checkbox in at.checkbox
-        if checkbox.label.startswith("I confirm the sharing scope above")
-    ).uncheck().run()
+        button for button in at.button if button.label == "Revoke AI sharing confirmation"
+    ).click().run()
     assert not at.exception
     assert next(button for button in at.button if button.label == "Run model").disabled
     next(
@@ -1984,6 +2398,61 @@ def test_apply_field_approval_edits_accepts_legacy_share_column() -> None:
 
     assert approved == ["Channel"]
     assert examples == ["Channel"]
+
+
+@pytest.mark.unit
+def test_field_approval_editor_commits_one_checkbox_event_on_first_click() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        editor_key = "test_field_approval_editor"
+        stale_widget_key = f"{page.AI_SHARING_CONFIRMATION_WIDGET_PREFIX}confirmed"
+        if not st.session_state.get("test_field_approval_initialized"):
+            st.session_state["test_field_approval_initialized"] = True
+            st.session_state[editor_key] = {
+                "edited_rows": {
+                    0: {"Send To AI": True},
+                    1: {"Approve": False},
+                }
+            }
+            st.session_state["ai_studio_approved_fields"] = [
+                "Channel",
+                "Sensitive",
+                "SubjectID",
+            ]
+            st.session_state["ai_studio_example_fields"] = []
+            st.session_state["ai_studio_group_by_fields"] = ["Channel", "Sensitive"]
+            st.session_state[page.AI_SHARING_CONFIRMATION_STATE_KEY] = "confirmed-scope"
+            st.session_state[stale_widget_key] = True
+        st.button(
+            "Apply one editor event",
+            on_click=page._on_field_approval_editor_change,
+            args=(
+                editor_key,
+                ("Channel", "Sensitive", "SubjectID"),
+                ("Channel", "Sensitive", "SubjectID"),
+                ("SubjectID",),
+            ),
+        )
+        st.session_state["stale_consent_widget_present"] = stale_widget_key in st.session_state
+
+    rendered = AppTest.from_function(app).run()
+    committed = (
+        next(button for button in rendered.button if button.label == "Apply one editor event")
+        .click()
+        .run()
+    )
+
+    assert not committed.exception
+    assert committed.session_state["ai_studio_approved_fields"] == ["Channel", "SubjectID"]
+    assert committed.session_state["ai_studio_example_fields"] == ["Channel"]
+    assert committed.session_state["ai_studio_group_by_fields"] == ["Channel"]
+    assert committed.session_state[ai_config_studio_page.AI_SHARING_CONFIRMATION_STATE_KEY] == ""
+    assert committed.session_state["stale_consent_widget_present"] is False
 
 
 @pytest.mark.unit
@@ -2217,6 +2686,79 @@ def test_keep_labels_are_human_first_with_stable_identity_context() -> None:
 
 
 @pytest.mark.unit
+def test_tile_inventory_rows_stay_parallel_to_tile_keys() -> None:
+    draft = _base_draft()
+    dashboard = draft["dashboards"]["dashboards"][0]
+    dashboard["pages"][0]["tiles"].append({"title": "No Id", "metric": "CTR", "chart": "line"})
+
+    keys = ai_studio.tile_keys(draft)
+    rows = ai_config_studio_page._tile_inventory_rows(draft)
+
+    assert len(rows) == len(keys)
+    assert all(row["Report"] != "No Id" for row in rows)
+
+
+@pytest.mark.unit
+def test_tile_keep_table_selects_all_tiles_by_default_in_editor_state() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        # A stale selection from an earlier session must not uncheck rows:
+        # the keep table starts fully checked for every draft revision.
+        st.session_state["ai_studio_tiles_to_keep"] = []
+        draft = {
+            "metrics": {"metrics": {"ctr": {"kind": "formula", "source": "engagement"}}},
+            "dashboards": {
+                "dashboards": [
+                    {
+                        "id": "studio",
+                        "title": "Studio Overview",
+                        "pages": [
+                            {
+                                "id": "engagement",
+                                "title": "Engagement",
+                                "tiles": [
+                                    {
+                                        "id": "ctr_trend",
+                                        "title": "CTR Trend",
+                                        "metric": "ctr",
+                                        "chart": "line",
+                                        "x": "Day",
+                                        "y": "ctr",
+                                    },
+                                    {
+                                        "id": "ctr_bar",
+                                        "title": "CTR By Dimension",
+                                        "metric": "ctr",
+                                        "chart": "bar",
+                                        "x": "Channel",
+                                        "y": "ctr",
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+        page._render_tile_keep_table(draft, revision="rev-1")
+
+    at = AppTest.from_function(app).run()
+
+    assert not at.exception
+    assert at.session_state["ai_studio_tiles_to_keep"] == [
+        "studio/engagement/ctr_trend",
+        "studio/engagement/ctr_bar",
+    ]
+    update = next(button for button in at.button if button.label == "Update Draft: Tile Selection")
+    assert not update.disabled
+
+
+@pytest.mark.unit
 def test_catalog_approved_fields_infers_source_processor_and_metric_fields() -> None:
     fields = _catalog_approved_fields(_base_draft())
 
@@ -2262,6 +2804,114 @@ def test_schema_sample_applies_rename_capitalize_before_later_steps() -> None:
     assert {"Name", "OutcomeTime", "Revenue", "Day"} <= set(working.columns)
     assert {"pyName", "pxOutcomeTime", "pyRevenue"}.isdisjoint(working.columns)
     assert working.get_column("Revenue").to_list() == [1.5]
+    assert st.session_state["ai_studio_rename_capitalize_enabled"] is True
+    assert "ai_studio_rename_capitalize" not in st.session_state
+
+
+@pytest.mark.unit
+def test_rename_capitalize_toggle_updates_effective_schema_on_same_rerun() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        from pathlib import Path  # noqa: PLC0415 - isolated AppTest source
+        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+
+        import polars as pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import (  # noqa: PLC0415 - isolated AppTest source
+            ai_config_studio as page,
+        )
+
+        raw = pl.DataFrame({"pyChannel": ["Web"], "pxOutcomeTime": ["2026-01-01"]})
+        page._initialize_state(raw)
+        st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = False
+        schema = page._schema_sample(raw)
+        page._set_effective_schema_state(schema)
+        context = SimpleNamespace(
+            workspace=Path("."),
+            catalog=SimpleNamespace(
+                pipelines=SimpleNamespace(sources=[]),
+                processors=SimpleNamespace(processors=[]),
+            ),
+        )
+        page._sample_step(context, raw, schema)
+
+    rendered = AppTest.from_function(app).run()
+
+    assert not rendered.exception
+    assert rendered.session_state["ai_studio_effective_schema_columns"] == [
+        "pyChannel",
+        "pxOutcomeTime",
+    ]
+    raw_signature = rendered.session_state["ai_studio_effective_schema_signature"]
+
+    enabled = rendered.toggle(key="ai_studio_rename_capitalize_transform").set_value(True).run()
+
+    assert not enabled.exception
+    assert enabled.session_state["ai_studio_rename_capitalize_enabled"] is True
+    assert enabled.session_state["ai_studio_effective_schema_columns"] == [
+        "Channel",
+        "OutcomeTime",
+    ]
+    assert enabled.session_state["ai_studio_effective_schema_signature"] != raw_signature
+
+    disabled = enabled.toggle(key="ai_studio_rename_capitalize_transform").set_value(False).run()
+
+    assert not disabled.exception
+    assert disabled.session_state["ai_studio_rename_capitalize_enabled"] is False
+    assert disabled.session_state["ai_studio_effective_schema_columns"] == [
+        "pyChannel",
+        "pxOutcomeTime",
+    ]
+    assert disabled.session_state["ai_studio_effective_schema_signature"] == raw_signature
+
+
+@pytest.mark.unit
+def test_rename_capitalize_state_survives_when_sample_widget_is_not_rendered() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import polars as pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import (  # noqa: PLC0415 - isolated AppTest source
+            ai_config_studio as page,
+        )
+
+        raw = pl.DataFrame({"pyChannel": ["Web"], "pxOutcomeTime": ["2026-01-01"]})
+        page._initialize_state(raw)
+        screen = st.radio("Screen", ["Sample", "Filters"], key="test_studio_screen")
+        schema = page._schema_sample(raw)
+        page._set_effective_schema_state(schema)
+        if screen == "Sample":
+            page._render_rename_capitalize_toggle()
+        st.write(",".join(schema.columns))
+
+    rendered = AppTest.from_function(app).run()
+    enabled = rendered.toggle(key="ai_studio_rename_capitalize_transform").set_value(True).run()
+
+    assert enabled.session_state["ai_studio_rename_capitalize_enabled"] is True
+    assert enabled.session_state["ai_studio_effective_schema_columns"] == [
+        "Channel",
+        "OutcomeTime",
+    ]
+
+    hidden = enabled.radio(key="test_studio_screen").set_value("Filters").run()
+    hidden = hidden.run()
+
+    assert not hidden.exception
+    assert not hidden.toggle
+    assert hidden.session_state["ai_studio_rename_capitalize_enabled"] is True
+    assert hidden.session_state["ai_studio_effective_schema_columns"] == [
+        "Channel",
+        "OutcomeTime",
+    ]
+
+    restored = hidden.radio(key="test_studio_screen").set_value("Sample").run()
+
+    assert not restored.exception
+    assert restored.toggle(key="ai_studio_rename_capitalize_transform").value is True
 
 
 @pytest.mark.unit
@@ -2344,6 +2994,89 @@ def test_rename_capitalize_sync_remaps_back_to_original_schema() -> None:
     assert st.session_state["ai_studio_filter_rows"][0]["Field"] == "pyName"
     assert "column: pyName" in st.session_state["ai_studio_raw_filter"]
     assert st.session_state["ai_studio_rename_capitalize_applied"] is False
+
+
+@pytest.mark.unit
+def test_rename_capitalize_rejects_raw_names_in_free_form_preprocessing() -> None:
+    st.session_state.clear()
+    st.session_state["ai_studio_rename_capitalize_enabled"] = True
+    st.session_state["ai_studio_raw_schema_columns"] = ["pyChannel", "pxOutcomeTime"]
+    st.session_state["ai_studio_defaults"] = [
+        {"Field": "pyChannel", "Default Value": "Web", "Enabled": True}
+    ]
+    st.session_state["ai_studio_filter_mode"] = "Raw AST"
+    st.session_state["ai_studio_raw_filter"] = "op: eq\ncolumn: pyChannel\nvalue: Web\n"
+    st.session_state["ai_studio_calculations"] = [
+        {
+            "Name": "ChannelCopy",
+            "Mode": "AST YAML",
+            "Expression": "col: pyChannel",
+            "Enabled": True,
+        }
+    ]
+
+    issues = ai_config_studio_page._stale_preprocessing_field_name_issues()
+    _working, error = _working_sample(
+        pl.DataFrame({"Channel": ["Web"], "OutcomeTime": ["2026-01-01"]})
+    )
+
+    assert len(issues) == 3
+    assert all("use effective field 'Channel'" in issue for issue in issues)
+    assert error is not None
+    assert "pyChannel" in error
+
+
+@pytest.mark.unit
+def test_ai_sharing_confirmation_is_not_requested_again_across_unchanged_steps() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state.setdefault("ai_studio_sample_identity", "sample-one")
+        st.session_state.setdefault("ai_studio_sample_name", "sample.parquet")
+        st.session_state.setdefault("ai_studio_ai_model", "openai/gpt-test")
+        st.session_state.setdefault("ai_studio_ai_provider", "openai")
+        steps = page.STEPS[:7]
+        current = st.session_state.get("ai_studio_step", steps[0])
+        queued = page._normalize_studio_step(
+            st.session_state.pop("ai_studio_next_step", None), steps
+        )
+        if queued in steps:
+            current = queued
+            st.session_state["ai_studio_step"] = queued
+            st.session_state["ai_studio_jump_step"] = queued
+        page._render_ai_data_sharing_confirmation(["Channel", "OutcomeTime"])
+        st.session_state["confirmed"] = page._ai_data_sharing_confirmed(["Channel", "OutcomeTime"])
+        page._render_studio_step_navigation(current, steps)
+
+    rendered = AppTest.from_function(app).run()
+    consent = next(
+        item for item in rendered.checkbox if item.label.startswith("I confirm the sharing scope")
+    )
+    confirmed = consent.check().run()
+    signature = confirmed.session_state[ai_config_studio_page.AI_SHARING_CONFIRMATION_STATE_KEY]
+    assert all(
+        not item.label.startswith("I confirm the sharing scope") for item in confirmed.checkbox
+    )
+
+    continued = confirmed
+    for expected_step in ai_config_studio_page.STEPS[1:7]:
+        continued = (
+            next(item for item in continued.button if item.label == "Continue").click().run()
+        )
+        assert not continued.exception
+        assert continued.session_state["ai_studio_step"] == expected_step
+        assert continued.session_state["confirmed"] is True
+        assert (
+            continued.session_state[ai_config_studio_page.AI_SHARING_CONFIRMATION_STATE_KEY]
+            == signature
+        )
+        assert all(
+            not item.label.startswith("I confirm the sharing scope") for item in continued.checkbox
+        )
 
 
 @pytest.mark.unit
@@ -2797,6 +3530,104 @@ def test_deterministic_apply_readiness_is_complete_with_consistent_counts() -> N
         ai_config_studio_page._readiness_area_status(area, readiness) == "Complete"
         for area in ai_config_studio_page.STUDIO_READINESS_AREAS
     )
+
+
+@pytest.mark.unit
+def test_invalid_schema_snapshot_is_not_reported_as_reviewed_or_published() -> None:
+    st.session_state.clear()
+    draft = _base_draft()
+    source = draft["pipelines"]["sources"][0]
+    source["schema"] = {
+        "timestamp_column": "pxOutcomeTime",
+        "natural_key": ["pyCustomerID", "pyChannel"],
+    }
+    source["transforms"] = [{"kind": "rename_capitalize"}]
+    draft["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    approved = ["Channel", "CustomerID", "Outcome", "OutcomeTime"]
+    signature = ai_config_studio_page._draft_signature(draft)
+    st.session_state["ai_studio_draft_source"] = ""
+    st.session_state["ai_studio_source_id"] = "ih"
+    st.session_state["ai_studio_approved_fields"] = approved
+    st.session_state["ai_studio_effective_schema_columns"] = approved
+    st.session_state["ai_studio_effective_schema_signature"] = "schema-a"
+    st.session_state["ai_studio_reviewed_signature"] = signature
+    st.session_state["ai_studio_published_signature"] = signature
+    st.session_state["ai_studio_pending_draft"] = None
+
+    readiness = ai_config_studio_page._studio_apply_readiness(
+        SimpleNamespace(catalog=model.Catalog.model_validate(draft)),
+        draft,
+        approved,
+        None,
+        ai_calls_enabled=False,
+    )
+
+    assert not readiness.apply_ready
+    assert not readiness.export_ready
+    assert readiness.last_changes["Runtime"] == f"Accepted revision {signature[:12]}"
+    assert "already applied" not in readiness.apply_disabled_reason
+    assert st.session_state["ai_studio_reviewed_signature"] == ""
+
+
+@pytest.mark.unit
+def test_status_bar_keeps_invalid_review_and_workspace_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    badges: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        ai_config_studio_page.components,
+        "status_badge",
+        lambda label, status, **_kwargs: badges.append((label, status)),
+    )
+
+    def app(draft: dict) -> None:
+        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+
+        import polars as pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        approved = ["Channel", "CustomerID", "Outcome", "OutcomeTime"]
+        signature = page._draft_signature(draft)
+        st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = False
+        st.session_state["ai_studio_draft"] = draft
+        st.session_state["ai_studio_draft_source"] = ""
+        st.session_state["ai_studio_source_id"] = "ih"
+        st.session_state["ai_studio_approved_fields"] = approved
+        st.session_state["ai_studio_effective_schema_columns"] = approved
+        st.session_state["ai_studio_effective_schema_signature"] = "schema-a"
+        st.session_state["ai_studio_reviewed_signature"] = signature
+        st.session_state["ai_studio_published_signature"] = signature
+        st.session_state["ai_studio_pending_draft"] = None
+        sample = pl.DataFrame(
+            {
+                "Channel": ["Web"],
+                "CustomerID": ["C-1"],
+                "Outcome": ["Clicked"],
+                "OutcomeTime": ["2026-07-01T09:00:00Z"],
+            }
+        )
+        page._studio_status_bar(SimpleNamespace(workspace="."), sample, sample, approved, None)
+
+    draft = _base_draft()
+    source = draft["pipelines"]["sources"][0]
+    source["schema"] = {
+        "timestamp_column": "pxOutcomeTime",
+        "natural_key": ["pyCustomerID", "pyChannel"],
+    }
+    source["transforms"] = [{"kind": "rename_capitalize"}]
+    draft["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+
+    rendered = AppTest.from_function(app, kwargs={"draft": draft}).run()
+
+    assert not rendered.exception
+    assert dict(badges)["Validation"] == "blocked"
+    assert dict(badges)["Review"] == "pending"
+    assert dict(badges)["Workspace"] == "pending"
+    assert rendered.session_state["ai_studio_reviewed_signature"] == ""
 
 
 @pytest.mark.unit

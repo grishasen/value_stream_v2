@@ -35,6 +35,9 @@ _MAPPING_KEYS = (
     "ai_studio_month_column",
     "ai_studio_year_column",
     "ai_studio_quarter_column",
+    "ai_studio_rename_capitalize_enabled",
+    # Accepted for checkpoints created before the durable state key was separated
+    # from the Streamlit widget key.
     "ai_studio_rename_capitalize",
 )
 _PREPROCESSING_KEYS = (

@@ -6,8 +6,41 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from streamlit.testing.v1 import AppTest
 
 from valuestream.ui.pages import data_load
+
+
+@pytest.mark.unit
+def test_render_without_sources_shows_actionable_empty_state() -> None:
+    def app() -> None:
+        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import data_load  # noqa: PLC0415 - isolated AppTest source
+
+        data_load.render(
+            SimpleNamespace(
+                validation=SimpleNamespace(ok=True, issues=[]),
+                catalog=SimpleNamespace(pipelines=SimpleNamespace(sources=[])),
+            )
+        )
+
+    rendered = AppTest.from_function(app).run()
+
+    assert not rendered.exception
+    assert [message.value for message in rendered.info] == [
+        "No data sources are configured for this workspace. Add a source in "
+        "AI Configuration Studio before loading or rebuilding data."
+    ]
+    add_source = next(
+        item
+        for item in rendered.get("link_button")
+        if item.label == "Add source in AI Configuration Studio"
+    )
+    assert add_source.url == "/ai_configuration_studio"
+    assert not rendered.get("tab")
+    assert not rendered.toggle
+    assert not rendered.button
 
 
 @pytest.mark.unit

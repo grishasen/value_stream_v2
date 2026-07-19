@@ -22,7 +22,7 @@ column-existence checks succeed but type-checking on them is permissive.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -114,8 +114,18 @@ class CatalogValidationResult:
 
 
 @timed
-def validate_catalog(catalog: model.Catalog) -> CatalogValidationResult:
-    """Run all cross-reference and per-expression checks on ``catalog``."""
+def validate_catalog(
+    catalog: model.Catalog,
+    *,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+) -> CatalogValidationResult:
+    """Run all cross-reference and per-expression checks on ``catalog``.
+
+    ``source_columns_by_id`` supplies optional physical, pre-transform columns when a
+    caller has inspected the active source. Catalog-only validation remains conservative;
+    sample-backed authoring can additionally evolve the observed schema through the
+    configured transform order, including ``rename_capitalize``.
+    """
     issues: list[CatalogIssue] = []
 
     _validate_unique_ids(catalog, issues)
@@ -130,6 +140,12 @@ def validate_catalog(catalog: model.Catalog) -> CatalogValidationResult:
     for processor in catalog.processors.processors:
         seed_columns_by_source.setdefault(processor.source, set()).update(
             _processor_source_columns(processor)
+        )
+    for source_id, columns in (source_columns_by_id or {}).items():
+        if source_id not in source_ids:
+            continue
+        seed_columns_by_source.setdefault(source_id, set()).update(
+            str(column) for column in columns if str(column).strip()
         )
 
     # Build per-source row schemas and validate source-level expressions.
