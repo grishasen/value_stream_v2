@@ -2608,6 +2608,11 @@ even when it remains inside the two-second safety ceiling.</p>
 An unknown column name cannot be typed into a source-field mapping. Defaults,
 filters, and calculated-field editors start empty; rows appear only after an
 explicit add action.</p>
+<p>The <strong>Suggested Group-By Fields</strong> profile treats approved <code>Day</code>, <code>Month</code>,
+<code>Quarter</code>, and <code>Year</code> fields as explicit recommended calendar granularities,
+even when those fields are required source mappings. The initial selection
+reserves room for every available calendar granularity, then fills its remaining
+capacity with recommended low-cardinality business dimensions.</p>
 <h2 id="describe-the-outcome">Describe the outcome<a class="headerlink" href="#describe-the-outcome" title="Permanent link">&para;</a></h2>
 <p>The Sample and Draft steps include <strong>Business Requirements</strong>. Describe the
 decision or measure in plain language, such as “weekly conversion by channel
@@ -2648,7 +2653,9 @@ schema can include field names, types, null counts, and unique counts, plus the
 business requirements and relevant catalog settings.</p>
 <p>Confirmation is scoped to the sample, provider, model, endpoint, approved
 fields, and example-sharing choices. Changing any part of that contract clears
-the confirmation and prior Copilot context. Hidden field names are redacted
+the confirmation and prior Copilot context; Back, Continue, and step selection
+do not. After confirmation, the full scope collapses to a compact checked
+receipt so the primary Copilot remains near the top of each step. Hidden field names are redacted
 from dynamic prompt material, including derived identifiers, while approved
 fields with overlapping names remain intact.</p>
 <h2 id="provider-preflight-and-bounded-generation">Provider preflight and bounded generation<a class="headerlink" href="#provider-preflight-and-bounded-generation" title="Permanent link">&para;</a></h2>
@@ -2671,9 +2678,24 @@ values, and local paths are not copied into routine UI errors or logs.</p>
 </ol>
 <p>Only a valid candidate can enter pending review. If all three attempts fail,
 the candidate is discarded and the previously accepted revision remains
-unchanged. The status panel names the preflight, generation, repair, and
-validation stages. Retrying is another explicit operation; the Studio does not
-show a cancel control it cannot honor.</p>
+unchanged. The status panel replaces transient waiting text with one terminal
+row per response: initial generation, repair pass 1, and repair pass 2. A
+failure receipt distinguishes unreadable YAML from catalog-contract failures,
+shows the affected catalog areas and bounded validation findings, and includes
+a diagnostic reference that operators can correlate with application logs.
+The current accepted revision is presented separately so a failed proposal is
+never styled as a newly accepted success.</p>
+<p>Debug logs contain only the diagnostic reference, operation, attempt number,
+response size, parsed section names, parse exception class and location, and
+aggregate issue counts by catalog area. Prompts, raw model responses,
+validation text, field names, object IDs, credentials, endpoints, sample
+values, local paths, tracebacks, and content hashes are deliberately excluded.
+Retrying is another explicit operation; the Studio does not show a cancel
+control it cannot honor.</p>
+<p>The first AI draft asks the model to create as many distinct, valid processors
+as the approved schema and business requirements support. It must not stop at
+the deterministic minimal baseline, duplicate equivalent processors, or add an
+object whose required fields and valid state definitions are unavailable.</p>
 <p>The deterministic draft uses the same validation and explicit review boundary
 but never calls a provider. Its first-run baseline contains one aggregate
 processor, four metrics, and a stable three-page/six-tile report set for
@@ -2689,17 +2711,38 @@ metrics. The selected combination is validated again before acceptance.</p>
 To accept a removal, choose <strong>Review individually</strong> and explicitly select that
 removal bundle; it starts rejected. This prevents a broad safe-changes action
 from deleting configuration.
-Before/after YAML remains available under <strong>Technical details</strong>, but human
-labels, summaries, and consequences lead the review.</p>
+When the locally generated deterministic draft replaces an existing source
+graph, review validates that candidate against the active schema without
+applying the provider-only inactive-source mutation guard. The replacement is
+still excluded from <strong>Accept safe additions</strong> and requires the explicit
+<strong>Accept this complete deterministic replacement</strong> selection. Provider-authored
+drafts continue to be checked against the accepted base so they cannot mutate
+configuration outside the active source scope.
+Each bundle's collapsed <strong>Technical details</strong> presents the same included
+changes in two forms: a plain-language table names the action, configuration
+area, item, and result, followed by one combined before/after YAML view. Human
+labels, summaries, and consequences still lead the review.</p>
 <p>Accepting a valid bundle combination records the exact reviewed revision
 signature. Any later manual edit creates a new revision and clears that review
 status. The final step offers <strong>Mark this revision reviewed</strong> when a valid
 manually edited revision still needs explicit business review.</p>
 <h2 id="ask-copilot">Ask Copilot<a class="headerlink" href="#ask-copilot" title="Permanent link">&para;</a></h2>
-<p>Copilot is progressively disclosed under <strong>Ask AI about this step</strong>. It knows
-the active step, approved schema, business requirements, and current revision.
-Structured operations are applied only to a temporary copy, validated, and
-then sent to the same bundle-review boundary.</p>
+<p>Copilot is the primary configuration surface on every AI Studio step. Its
+always-open panel appears directly after the sharing confirmation and before
+the manual controls. The heading names the active numbered step—for example,
+<strong>Configure step 4 · Filters with AI</strong>—so the scope of each request stays
+visible. Steps already named for AI avoid the repeated suffix, for example
+<strong>Configure step 7 · AI Draft</strong>. Copilot knows the effective approved schema,
+business requirements, and current revision. Structured operations are applied
+only to a temporary copy, validated, and then sent to the same bundle-review
+boundary.</p>
+<p>When <code>rename_capitalize</code> is enabled, the effective post-transform names are
+authoritative for every downstream filter, calculation, processor, metric, and
+report. Prompts include the approved raw-to-effective mappings. If an accepted
+revision's naming transform no longer matches the current Sample settings,
+Studio blocks provider calls and Apply until an updated deterministic draft is
+reviewed; it never silently applies downstream operations to an incoherent
+source schema.</p>
 <p>While a proposal is pending, Copilot stays available in read-only mode. You can
 ask what a bundle changes or why it matters, but returned mutation operations
 are ignored and the pending proposal cannot be overwritten. Ambiguous requests

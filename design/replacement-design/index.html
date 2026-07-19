@@ -5200,13 +5200,26 @@ removes the checkpoint.</p>
 <li><strong>Governed Copilot preprocessing</strong> — source defaults, dataset filters, and
   calculated fields can be added, replaced, or removed through closed Copilot
   operations. Dataset filters become source <code>filter</code> transforms before
-  processor fan-out; the Filters-step operation policy rejects processor edits.
+  processor fan-out; each preprocessing step uses an operation allowlist, so a
+  Filters request cannot synthesize a field through Defaults or mutate another
+  catalog area.
   Calculations receive the complete expression-AST operator catalog and exact
   node shapes, including <code>concat</code> with <code>args</code> and optional <code>sep</code>, so model
   capability is bounded by the same closed DSL that validation enforces. Each
   changed field is an independent before/after patch; accepted patches update
   the session draft and are then synchronized into the Defaults and
   Filters/Calculations row editors before those widgets render again.</li>
+<li><strong>Effective field-name contract</strong> — Copilot is always open above the manual
+  controls and receives the authoritative post-transform approved names plus
+  approved raw-to-effective mappings. Provider operations are canonically
+  remapped only in field-reference slots before validation; free-form
+  preprocessing editors reject stale raw names with the effective replacement.
+  Observed physical sample columns seed semantic catalog validation and evolve
+  through the configured transform order. If <code>rename_capitalize</code>, the active source, or its naming schema no
+  longer matches an accepted revision, Studio blocks provider calls, review
+  evidence, and Apply. The accepted revision remains visible; deterministic
+  regeneration emits the complete source definition and changed consumers as
+  one dependency-closed bundle so reconciliation is explicit and atomic.</li>
 <li><strong>Approve fields</strong> — choose which working fields are eligible for draft metric/report generation and which sample values may be shared with a future LLM.</li>
 <li><strong>Draft</strong> — preflight the selected provider capability, then generate, parse,
   merge, validate, and if necessary run up to two bounded repair passes. Only
