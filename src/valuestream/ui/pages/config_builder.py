@@ -93,10 +93,12 @@ BUILDER_STEP_DEFINITIONS = (
     ),
     BuilderStepDefinition("Sources", "Define", "Review how source files become working rows."),
     BuilderStepDefinition(
-        "Processors", "Define", "Define the aggregate states computed for each source."
+        "Dimensions",
+        "Define",
+        "Pick common business dimensions applied to processors as group-by fields.",
     ),
     BuilderStepDefinition(
-        "Dimensions", "Define", "Choose safe dimensions for filtering and breakdowns."
+        "Processors", "Define", "Define the aggregate states computed for each source."
     ),
     BuilderStepDefinition("Metrics", "Model", "Create or maintain decision-ready metrics."),
     BuilderStepDefinition("Reports / Tiles", "Report", "Place metrics into useful report views."),
@@ -121,8 +123,8 @@ BUILDER_STEP_QUERY_VALUES = dict(
         (
             "health",
             "sources",
-            "processors",
             "dimensions",
+            "processors",
             "metrics",
             "reports",
             "chat",
@@ -1430,32 +1432,6 @@ def _render_focused_calculated_expression_editor(  # noqa: PLR0912, PLR0915
             st.session_state[draft_key] = current_expression
         if input_key not in st.session_state:
             st.session_state[input_key] = st.session_state[draft_key]
-        working_expression = st.text_area(
-            f"{mode} expression direct editor",
-            height=260,
-            key=input_key,
-            placeholder=builder.calculated_expression_example(mode),
-            help=config_help.field_help("calculation.expression"),
-            on_change=_capture_calculated_expression_draft,
-            args=(input_key, draft_key),
-        )
-        validation = builder.validate_calculated_expression(mode, working_expression)
-        changed = str(working_expression) != current_expression
-        if changed:
-            st.warning("Working expression is not applied yet. Apply it or cancel explicitly.")
-        if validation.valid:
-            st.success(
-                "Expression is valid and ready to apply."
-                if changed
-                else "The applied expression is valid.",
-                icon=":material/check_circle:",
-            )
-        else:
-            for message in validation.messages:
-                st.error(message)
-            if validation.technical_details:
-                with st.expander("Technical details", expanded=False):
-                    st.code(validation.technical_details, language="text")
 
         if mode == "AST YAML":
             _render_visual_case_builder(
@@ -1464,6 +1440,33 @@ def _render_focused_calculated_expression_editor(  # noqa: PLR0912, PLR0915
                 notice_key=notice_key,
                 field_options=_condition_field_options(field_options, rows, active_row_index),
             )
+        with st.expander("Manual Editor", expanded=False):
+            working_expression = st.text_area(
+                f"{mode} expression direct editor",
+                height=260,
+                key=input_key,
+                placeholder=builder.calculated_expression_example(mode),
+                help=config_help.field_help("calculation.expression"),
+                on_change=_capture_calculated_expression_draft,
+                args=(input_key, draft_key),
+            )
+            validation = builder.validate_calculated_expression(mode, working_expression)
+            changed = str(working_expression) != current_expression
+            if changed:
+                st.warning("Working expression is not applied yet. Apply it or cancel explicitly.")
+            if validation.valid:
+                st.success(
+                    "Expression is valid and ready to apply."
+                    if changed
+                    else "The applied expression is valid.",
+                    icon=":material/check_circle:",
+                )
+            else:
+                for message in validation.messages:
+                    st.error(message)
+                if validation.technical_details:
+                    with st.expander("Technical details", expanded=False):
+                        st.code(validation.technical_details, language="text")
 
         st.caption("Copy-ready example")
         st.code(
@@ -2423,126 +2426,245 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             st.error(str(exc))
 
 
+WORKSPACE_DIMENSIONS_KEY = "builder_dimension_common"
+
+
 @st.fragment()
 def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any) -> None:
+    """Author the workspace-level common business dimensions.
+
+    The step is processor-independent: it edits ``defaults.dimensions`` in
+    ``pipelines.yaml``. New processors start from this list automatically and
+    each processor can extend or trim its own group-by afterwards.
+    """
     _claim_fragment_action_slots(save_slot, draft_slot)
     _begin_source_inspection_scope()
-    with components.bordered_panel(
-        "Dimension Coverage", "Review and update processor group-by fields."
-    ):
-        rows = []
-        for processor in ctx.catalog.processors.processors:
-            rows.append(
-                {
-                    "Processor": processor.id,
-                    "Source": processor.source,
-                    "Kind": processor.kind,
-                    "Group By": ", ".join(processor.group_by),
-                    "Grains": ", ".join(processor.grains),
-                }
-            )
-        st.dataframe(rows, hide_index=True, width="stretch", height=280)
-
-    if not ctx.catalog.processors.processors:
+    sources = ctx.catalog.pipelines.sources
+    if not sources:
+        st.info("No sources configured. Common dimensions are picked from source fields.")
         _render_continue_primary(save_slot)
         return
-    processor = st.selectbox(
-        "Processor To Edit",
-        ctx.catalog.processors.processors,
-        format_func=_processor_choice_label_edit,
-        key="builder_dimension_processor",
-        help=config_help.field_help("dimension.processor"),
+
+    baseline_dimensions = builder.workspace_dimension_defaults(ctx.catalog)
+    if WORKSPACE_DIMENSIONS_KEY not in st.session_state:
+        st.session_state[WORKSPACE_DIMENSIONS_KEY] = list(baseline_dimensions)
+    options_by_source = {source.id: _source_field_options(ctx, source) for source in sources}
+    all_field_options = sorted(
+        builder.dedupe([field for options in options_by_source.values() for field in options]),
+        key=lambda field: (field.casefold(), field),
     )
-    source = next(
-        (source for source in ctx.catalog.pipelines.sources if source.id == processor.source), None
-    )
-    options = _source_field_options(ctx, source) if source else list(processor.group_by)
-    field_mapping = _source_rename_mapping(ctx, source, True) if source else {}
-    group_key = f"builder_dimension_group_by_{processor.id}"
-    if group_key not in st.session_state:
-        st.session_state[group_key] = [
-            field
-            for field in field_remap.remap_field_list(processor.group_by, field_mapping)
-            if field in options
-        ]
-    profile_sample: pl.DataFrame | None = None
-    profile_rows: list[dimension_profile.DimensionProfileRow] = []
-    if source is not None:
-        profile_sample, profile_rows = _dimension_profile_panel(ctx, source, processor)
-        _dimension_pack_panel(processor, options, group_key)
+
+    _dimension_pack_panel(all_field_options, WORKSPACE_DIMENSIONS_KEY)
+    profile_source, profile_sample, profile_rows = _dimension_profile_panel(ctx, sources)
+    if profile_source is not None and profile_rows:
         _dimension_promotion_panel(
-            ctx,
-            source,
-            processor,
-            options,
-            group_key,
+            profile_source,
+            options_by_source.get(profile_source.id, []),
             profile_sample,
             profile_rows,
         )
-    selected = st.multiselect(
-        "Group-By Dimensions",
-        options,
-        accept_new_options=True,
-        key=group_key,
-        help=config_help.field_help("dimension.group_by"),
+
+    with components.bordered_panel(
+        "Common Business Dimensions",
+        "One shared list applied automatically to processors as group-by fields.",
+    ):
+        selected = st.multiselect(
+            "Common Dimensions",
+            builder.dedupe(
+                [
+                    *all_field_options,
+                    *[
+                        str(value)
+                        for value in st.session_state.get(WORKSPACE_DIMENSIONS_KEY, [])
+                        if str(value)
+                    ],
+                ]
+            ),
+            accept_new_options=True,
+            key=WORKSPACE_DIMENSIONS_KEY,
+            help=config_help.field_help("dimension.common"),
+        )
+        st.caption(
+            "New processors start from the dimensions their source actually provides. "
+            "Extend or trim any single processor in the Processors step."
+        )
+    selected = builder.dedupe([str(value).strip() for value in selected if str(value).strip()])
+
+    extend_processors, processor_updates = _dimension_processor_coverage_panel(
+        ctx, options_by_source, selected
     )
-    processor_def = builder.processor_to_dict(processor)
-    processor_def["dimensions"] = selected
-    processor_def.pop("group_by", None)
+    applied_updates = processor_updates if extend_processors else {}
+
+    generated: dict[str, Any] = {"defaults": {"dimensions": selected}}
+    if applied_updates:
+        generated["processors"] = list(applied_updates.values())
     _technical_yaml(
         "Generated dimension YAML",
-        yaml.safe_dump({"processors": [processor_def]}, sort_keys=False),
+        yaml.safe_dump(generated, sort_keys=False),
     )
     draft_status = builder.builder_draft_status(
-        f"dimensions:{processor.id}",
-        builder.processor_to_dict(processor),
-        processor_def,
+        "dimensions:workspace",
+        {"dimensions": baseline_dimensions, "processors": {}},
+        {"dimensions": selected, "processors": applied_updates},
     )
     if _render_editor_primary_action(
         save_slot=save_slot,
         draft_slot=draft_slot,
         status=draft_status,
-        valid=bool(processor.id),
+        valid=True,
         widget_prefixes=("builder_dimension_",),
-        help_text=("Validate and apply the selected dimensions. Data is not run from this action."),
+        help_text=("Validate and apply the common dimensions. Data is not run from this action."),
     ):
         try:
             with builder.validated_catalog_transaction(
                 ctx.workspace, source_columns_by_id=_observed_source_columns()
             ):
-                builder.write_processor_definition(ctx.workspace, processor_def)
+                builder.write_workspace_dimensions(ctx.workspace, selected)
+                for processor_def in applied_updates.values():
+                    builder.write_processor_definition(ctx.workspace, processor_def)
+            message = (
+                "Common dimensions applied and "
+                f"{len(applied_updates)} processor(s) extended. "
+                "Use Data Load to refresh affected aggregates."
+                if applied_updates
+                else "Common dimensions applied. New processors will start from this list."
+            )
             _complete_builder_apply(
                 status=draft_status,
                 scope="dimensions",
-                label=processor.description or humanize_identifier(processor.id),
-                source_ids=[processor.source],
-                message="Dimension draft applied. Use Data Load to refresh affected aggregates.",
+                label="Common dimensions",
+                source_ids=builder.dedupe(
+                    [
+                        str(processor_def.get("source", ""))
+                        for processor_def in applied_updates.values()
+                        if processor_def.get("source")
+                    ]
+                ),
+                message=message,
+                widget_prefixes=("builder_dimension_",),
             )
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
-            logger.exception("Failed to write processor dimensions: processor=%s", processor.id)
+            logger.exception("Failed to write workspace dimensions")
             st.error(str(exc))
+
+
+def _dimension_identity_key(value: str) -> str:
+    """Dimension identity used by catalog validation: casefolded alphanumerics."""
+
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _processor_auto_persisted_columns(processor: model.Processor) -> list[str]:
+    """Columns the processor persists as dimensions without listing in group_by."""
+
+    variant_column = (processor.model_extra or {}).get("variant_column")
+    if isinstance(variant_column, str) and variant_column.strip():
+        return [variant_column.strip()]
+    return []
+
+
+def _dimension_processor_coverage_panel(
+    ctx: ValueStreamContext,
+    options_by_source: dict[str, list[str]],
+    selected: list[str],
+) -> tuple[bool, dict[str, dict[str, Any]]]:
+    """Show how the shared dimensions map onto existing processors.
+
+    Returns the extend-on-apply choice and, per processor that would gain
+    fields, its full updated definition.
+    """
+    processors = ctx.catalog.processors.processors
+    if not processors:
+        st.caption(
+            "No processors exist yet. New processors created in the next step start "
+            "from the common dimensions automatically."
+        )
+        return False, {}
+    sources_by_id = {source.id: source for source in ctx.catalog.pipelines.sources}
+    coverage_rows: list[dict[str, str]] = []
+    updates: dict[str, dict[str, Any]] = {}
+    for processor in processors:
+        options = options_by_source.get(processor.source, [])
+        applicable = dimension_profile.applicable_dimensions(selected, options)
+        source = sources_by_id.get(processor.source)
+        field_mapping = _source_rename_mapping(ctx, source, True) if source else {}
+        covered = {_dimension_identity_key(str(field)) for field in processor.group_by}
+        covered.update(
+            _dimension_identity_key(str(field))
+            for field in field_remap.remap_field_list(processor.group_by, field_mapping)
+        )
+        # The variant column is persisted as a dimension automatically, and
+        # validation rejects repeating it in group_by — count it as covered.
+        covered.update(
+            _dimension_identity_key(column)
+            for column in _processor_auto_persisted_columns(processor)
+        )
+        missing = [field for field in applicable if _dimension_identity_key(field) not in covered]
+        coverage_rows.append(
+            {
+                "Processor": processor.id,
+                "Source": processor.source,
+                "Kind": processor.kind,
+                "Group By": ", ".join(processor.group_by),
+                "Missing Common": ", ".join(missing) if missing else "None",
+            }
+        )
+        if missing:
+            processor_def = builder.processor_to_dict(processor)
+            processor_def["dimensions"] = builder.dedupe(
+                [*[str(field) for field in processor.group_by], *missing]
+            )
+            processor_def.pop("group_by", None)
+            updates[processor.id] = processor_def
+    with components.bordered_panel(
+        "Processor Coverage",
+        "How the shared dimensions map onto existing processors.",
+    ):
+        st.dataframe(coverage_rows, hide_index=True, width="stretch", height=240)
+        extend = st.toggle(
+            "Extend existing processors with their missing common dimensions on apply",
+            key="builder_dimension_extend_processors",
+            disabled=not updates,
+            help=config_help.field_help("dimension.extend_processors"),
+        )
+        if updates and extend:
+            st.caption(
+                f"{len(updates)} processor(s) gain new group-by fields on apply. "
+                "Their sources need a data re-run afterwards."
+            )
+        elif not updates:
+            st.caption("Every existing processor already covers its applicable common dimensions.")
+    return bool(extend and updates), updates
 
 
 def _dimension_profile_panel(
     ctx: ValueStreamContext,
-    source: model.Source,
-    processor: model.Processor,
-) -> tuple[pl.DataFrame | None, list[dimension_profile.DimensionProfileRow]]:
+    sources: list[model.Source],
+) -> tuple[model.Source | None, pl.DataFrame | None, list[dimension_profile.DimensionProfileRow]]:
     with components.bordered_panel(
         "Dimension Profiler",
-        "Profile source fields before promoting them into aggregate dimensions.",
+        "Profile source fields before promoting them into the shared dimension list.",
     ):
+        sources_by_id = {source.id: source for source in sources}
+        source_id = st.selectbox(
+            "Profile Source",
+            list(sources_by_id),
+            format_func=lambda value: _source_choice_label_edit(sources_by_id[value]),
+            key="builder_dimension_profile_source",
+            help=config_help.field_help("dimension.profile_source"),
+        )
+        source = sources_by_id[source_id]
         sample = _source_profile_sample(ctx, source)
         if sample is None or sample.is_empty():
             st.info(
                 "No source sample is available. Add source files or use Data Load before profiling."
             )
-            return None, []
+            return source, None, []
         rows = dimension_profile.source_dimension_profile_rows(ctx, source, sample)
         if not rows:
             st.info("No fields found in the sampled source.")
-            return sample, []
+            return source, sample, []
         profile_frame = dimension_profile.profile_frame(rows).rename(
             {"Current Usage": "Current Processors"}
         )
@@ -2576,27 +2698,33 @@ def _dimension_profile_panel(
         st.dataframe(filtered, hide_index=True, width="stretch", height=360)
         recommended = dimension_profile.recommended_fields(
             rows,
-            existing_fields=processor.group_by,
+            existing_fields=_workspace_dimension_selection(),
         )
         if recommended:
             st.caption(
-                "Recommended fields are low-cardinality, non-identity fields in the transformed sample. "
-                "Select them in Group-By Dimensions below, then apply and re-run the source."
+                "Recommended fields are low-cardinality, non-identity fields in the transformed "
+                "sample. Add them to Common Dimensions below, then apply."
             )
             if st.button(
                 "Add recommended to selection",
                 icon=":material/add:",
-                key=f"builder_dimension_add_recommended_{processor.id}",
+                key=f"builder_dimension_add_recommended_{source.id}",
             ):
-                key = f"builder_dimension_group_by_{processor.id}"
-                current = [
-                    str(value)
-                    for value in st.session_state.get(key, list(processor.group_by))
-                    if str(value)
-                ]
-                st.session_state[key] = builder.dedupe([*current, *recommended])
+                st.session_state[WORKSPACE_DIMENSIONS_KEY] = builder.dedupe(
+                    [*_workspace_dimension_selection(), *recommended]
+                )
                 st.rerun()
-    return sample, rows
+    return source, sample, rows
+
+
+def _workspace_dimension_selection() -> list[str]:
+    """Return the current common-dimension selection from session state."""
+
+    return [
+        str(value)
+        for value in st.session_state.get(WORKSPACE_DIMENSIONS_KEY, [])
+        if str(value).strip()
+    ]
 
 
 def _dimension_pack_summary(
@@ -2645,7 +2773,6 @@ def _dimension_promotion_summary(
 
 
 def _dimension_pack_panel(
-    processor: model.Processor,
     options: list[str],
     group_key: str,
 ) -> None:
@@ -2660,13 +2787,11 @@ def _dimension_pack_panel(
         pack_name = st.selectbox(
             "Dimension Pack",
             pack_names,
-            key=f"builder_dimension_pack_{processor.id}",
+            key="builder_dimension_pack",
             help=config_help.field_help("dimension.pack"),
         )
         pack_fields = dimension_profile.dimension_pack_fields(options, pack_name)
-        current = builder.dedupe(
-            [str(value) for value in st.session_state.get(group_key, processor.group_by)]
-        )
+        current = builder.dedupe([str(value) for value in st.session_state.get(group_key, [])])
         missing = [
             field
             for field in dimension_profile.DIMENSION_PACKS.get(pack_name, ())
@@ -2697,32 +2822,27 @@ def _dimension_pack_panel(
             f"Add {pack_name} dimensions",
             icon=":material/library_add:",
             disabled=not pack_fields,
-            key=f"builder_dimension_apply_pack_{processor.id}",
+            key="builder_dimension_apply_pack",
         ):
             st.session_state[group_key] = builder.dedupe([*current, *pack_fields])
             st.rerun()
 
 
 def _dimension_promotion_panel(
-    ctx: ValueStreamContext,
     source: model.Source,
-    processor: model.Processor,
     options: list[str],
-    group_key: str,
     sample: pl.DataFrame | None,
     rows: list[dimension_profile.DimensionProfileRow],
 ) -> None:
     with components.bordered_panel(
         "One-Click Dimension Promotion",
-        "Add a source field as a filterable dimension, preview aggregate growth, then backfill.",
+        "Add a source field to the shared dimensions, preview aggregate growth, then backfill.",
     ):
-        current = builder.dedupe(
-            [str(value) for value in st.session_state.get(group_key, processor.group_by)]
-        )
+        current = _workspace_dimension_selection()
         profile_by_field = {row.field: row for row in rows}
         candidates = _dimension_promotion_candidates(options, current, rows)
         if not candidates:
-            st.info("Every profiled field is already selected for this processor.")
+            st.info("Every profiled field is already selected as a common dimension.")
             return
         default_index = (
             0
@@ -2734,8 +2854,8 @@ def _dimension_promotion_panel(
             candidates,
             index=default_index,
             placeholder="Choose a reviewed field",
-            format_func=lambda value: f"Add {value} as a filterable dimension",
-            key=f"builder_dimension_promote_field_{processor.id}",
+            format_func=lambda value: f"Add {value} as a common dimension",
+            key=f"builder_dimension_promote_field_{source.id}",
             help=config_help.field_help("dimension.promote_field"),
         )
         if field is None:
@@ -2808,11 +2928,11 @@ def _dimension_promotion_panel(
             )
         next_dimensions = builder.dedupe([*current, field])
         if st.button(
-            f"Add {field} as filterable dimension",
+            f"Add {field} as common dimension",
             icon=":material/add:",
-            key=f"builder_dimension_promote_add_{processor.id}",
+            key=f"builder_dimension_promote_add_{source.id}",
         ):
-            st.session_state[group_key] = next_dimensions
+            st.session_state[WORKSPACE_DIMENSIONS_KEY] = next_dimensions
             st.rerun()
 
 
@@ -3279,13 +3399,15 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             key=f"builder_proc_kind_{processor.id}",
             help=config_help.field_help("processor.kind"),
         )
+        if creating:
+            _seed_kind_description(processor.id, kind)
         description = description_col.text_input(
             "Description",
             value=processor.description,
             key=f"builder_proc_desc_{processor.id}",
             help=config_help.field_help("processor.description"),
         )
-
+        _render_processor_kind_guide(kind)
         group_by = st.multiselect(
             "Group By",
             field_options,
@@ -3298,6 +3420,11 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             key=f"builder_proc_group_{processor.id}",
             help=config_help.field_help("processor.group_by"),
         )
+        if creating and processor.group_by:
+            st.caption(
+                "Pre-filled from the workspace common dimensions (Dimensions step). "
+                "Extend or trim freely for this processor."
+            )
         time_col, grain_col = st.columns(2)
         time_column = time_col.text_input(
             "Time Column",
@@ -3335,8 +3462,12 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             )
 
     state_key = f"builder_proc_states_{processor.id}"
+    states_baseline: model.Processor = processor
+    if creating:
+        states_baseline = _kind_candidate_processor(processor, kind, kind_settings)
+        _reseed_state_rows_for_kind(states_baseline, state_key, processor.id, field_mapping)
     if state_key not in st.session_state:
-        st.session_state[state_key] = _state_rows(processor, field_mapping)
+        st.session_state[state_key] = _state_rows(states_baseline, field_mapping)
     state_frame = builder.editor_frame(
         st.session_state[state_key],
         ["State", "Type", "Source Column", "Derived From", "Enabled"],
@@ -3432,8 +3563,8 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     processor_def.update(kind_settings)
     processor_def.pop("group_by", None)
     processor_def["states"] = _build_state_defs(
-        processor,
-        st.session_state.get(state_key, _state_rows(processor, field_mapping)),
+        states_baseline,
+        st.session_state.get(state_key, _state_rows(states_baseline, field_mapping)),
     )
     if compiled_filter:
         processor_def["filter"] = compiled_filter
@@ -3507,6 +3638,81 @@ def _processor_kind_settings(
         field_options=field_options,
         key_prefix=f"builder_proc_{processor.id}",
     )
+
+
+def _seed_kind_description(processor_id: str, kind: str) -> None:
+    """Auto-fill a new processor's description with the kind definition.
+
+    Text the user typed themselves is never overwritten; only an empty
+    description or a previous kind's auto-generated text is replaced.
+    """
+    guide = forms.processor_kind_guide(kind)
+    if guide is None:
+        return
+    description_key = f"builder_proc_desc_{processor_id}"
+    seeded_kind_key = f"{description_key}_seeded_kind"
+    if st.session_state.get(seeded_kind_key) == kind:
+        return
+    current = str(st.session_state.get(description_key, "") or "").strip()
+    auto_texts = {entry.summary for entry in forms.PROCESSOR_KIND_GUIDE.values()}
+    if current and current not in auto_texts:
+        st.session_state[seeded_kind_key] = kind
+        return
+    st.session_state[description_key] = guide.summary
+    st.session_state[seeded_kind_key] = kind
+
+
+def _render_processor_kind_guide(kind: str) -> None:
+    """Show the kind definition and its typical KPIs below Group By."""
+
+    guide = forms.processor_kind_guide(kind)
+    if guide is None:
+        return
+    st.caption(f"**{humanize_identifier(kind)}** — {guide.summary} {guide.purposes}")
+    st.caption("Example KPIs: " + ", ".join(guide.example_kpis) + ".")
+
+
+def _kind_candidate_processor(
+    processor: model.Processor,
+    kind: str,
+    kind_settings: dict[str, Any],
+) -> model.Processor:
+    """Re-shape the creating template into the currently selected kind."""
+
+    candidate_def = builder.processor_to_dict(processor)
+    for managed_key in forms.PROCESSOR_KIND_MANAGED_FIELDS:
+        candidate_def.pop(managed_key, None)
+    candidate_def.update(kind_settings)
+    candidate_def["kind"] = kind
+    candidate_def.pop("states", None)
+    try:
+        return model.Processors.model_validate({"processors": [candidate_def]}).processors[0]
+    except Exception:  # incomplete kind settings keep the prior shape
+        return processor
+
+
+def _reseed_state_rows_for_kind(
+    states_baseline: model.Processor,
+    state_key: str,
+    processor_id: str,
+    field_mapping: dict[str, str],
+) -> None:
+    """Reset the Auto Outputs grid when the kind's default states change.
+
+    Row edits that leave the kind settings untouched are preserved; changing
+    the kind (or a setting that alters its default states, such as the
+    entity column) replaces the grid with the new kind's outputs.
+    """
+    rows = _state_rows(states_baseline, field_mapping)
+    signature = json.dumps(
+        [[row["State"], row["Type"], row["Source Column"]] for row in rows],
+    )
+    signature_key = f"{state_key}_kind_signature"
+    if st.session_state.get(signature_key) == signature and state_key in st.session_state:
+        return
+    st.session_state[state_key] = rows
+    st.session_state[signature_key] = signature
+    st.session_state.pop(f"builder_proc_state_editor_{processor_id}", None)
 
 
 def _remap_processor_def_fields(
@@ -4204,13 +4410,9 @@ def _render_report_library_browser(
     """Render a purpose-led visual tile picker and return its visible selection."""
 
     st.write("### Report library")
-    configured_chart_types = sorted(
-        {
-            tile.chart
-            for dashboard in catalog.dashboards.dashboards
-            for page in dashboard.pages
-            for tile in page.tiles
-        }
+    selectable_chart_types = sorted(
+        REPORT_LIBRARY_GROUP_BY_CHART,
+        key=lambda chart_type: _report_library_chart_label(chart_type).casefold(),
     )
     filter_columns = st.columns([2, 1, 1], vertical_alignment="bottom")
     with filter_columns[0]:
@@ -4230,7 +4432,7 @@ def _render_report_library_browser(
     with filter_columns[2]:
         chart_filter = st.selectbox(
             "Chart type",
-            ["All", *configured_chart_types],
+            ["All", *selectable_chart_types],
             key="builder_chart_filter",
             format_func=builder.chart_kind_selector_label,
             help=config_help.field_help("report.chart_filter"),
@@ -4247,14 +4449,12 @@ def _render_report_library_browser(
         chart_filter=chart_filter,
     )
     if not filtered_options:
-        st.caption("No existing report tiles match these filters.")
-        return [], NEW_TILE_KEY
+        st.caption(
+            "No existing report tiles match these filters. Every chart type below "
+            "can start a new report."
+        )
 
-    available_groups = [
-        group_id
-        for group_id, group in REPORT_LIBRARY_GROUPS.items()
-        if any(option[3].get("chart") in group.chart_types for option in filtered_options)
-    ]
+    available_groups = list(REPORT_LIBRARY_GROUPS)
     selected_before_grouping = _selected_tile(
         filtered_options,
         st.session_state.get("builder_selected_tile_key"),
@@ -4289,15 +4489,21 @@ def _render_report_library_browser(
     ]
     visible_keys = [_tile_option_key(option) for option in visible_options]
     selected_tile_key = str(st.session_state.get("builder_selected_tile_key", ""))
-    if selected_tile_key not in visible_keys:
-        selected_tile_key = visible_keys[0]
+    if selected_tile_key != NEW_TILE_KEY and selected_tile_key not in visible_keys:
+        selected_tile_key = visible_keys[0] if visible_keys else NEW_TILE_KEY
         st.session_state["builder_selected_tile_key"] = selected_tile_key
 
     visible_chart_types = [
-        chart_type
-        for chart_type in group.chart_types
-        if any(option[3].get("chart") == chart_type for option in visible_options)
+        chart_type for chart_type in group.chart_types if chart_filter in ("All", chart_type)
     ]
+    if search.strip():
+        # A search targets existing tiles, so chart types without matches
+        # stay hidden instead of rendering empty create affordances.
+        visible_chart_types = [
+            chart_type
+            for chart_type in visible_chart_types
+            if any(option[3].get("chart") == chart_type for option in visible_options)
+        ]
     theme_base = str(dashboard_theme().get("base", "light"))
     for chart_type in visible_chart_types:
         chart_options = [
@@ -4308,8 +4514,29 @@ def _render_report_library_browser(
             chart_options,
             selected_tile_key=selected_tile_key,
             theme_base=theme_base,
+            metric_filter=metric_filter,
         )
     return visible_options, selected_tile_key
+
+
+def _create_report_from_library(chart_type: str, metric_filter: str) -> None:
+    """Open a new tile draft pre-seeded with the chosen chart kind."""
+
+    _start_new_tile_editor(st.session_state)
+    seed: dict[str, Any] = {"chart": chart_type}
+    if metric_filter and metric_filter != "All":
+        seed["metric"] = metric_filter
+    st.session_state["builder_tile_seed"] = (None, None, seed)
+    st.session_state["builder_tile_selection_override"] = NEW_TILE_KEY
+
+
+def _library_draft_chart() -> str:
+    """Return the chart kind seeded into the current new-tile draft, if any."""
+
+    seed = st.session_state.get("builder_tile_seed")
+    if isinstance(seed, tuple) and len(seed) == 3 and isinstance(seed[2], dict):
+        return str(seed[2].get("chart", "") or "")
+    return ""
 
 
 def _render_report_library_chart_group(
@@ -4318,8 +4545,13 @@ def _render_report_library_chart_group(
     *,
     selected_tile_key: str,
     theme_base: str,
+    metric_filter: str = "All",
 ) -> None:
-    """Render one compact chart-type preview with selectable report tiles."""
+    """Render one compact chart-type preview with selectable report tiles.
+
+    Chart kinds without configured reports render a create affordance
+    instead of vanishing, so the library doubles as the chart gallery.
+    """
 
     with st.container(border=True):
         preview_column, report_column = st.columns([1, 4], vertical_alignment="top")
@@ -4336,7 +4568,9 @@ def _render_report_library_chart_group(
             with st.container(horizontal=True, vertical_alignment="center", gap="small"):
                 st.markdown(f"**{_report_library_chart_label(chart_type)}**")
                 st.badge(
-                    f"{len(tile_options)} report{'s' if len(tile_options) != 1 else ''}",
+                    f"{len(tile_options)} report{'s' if len(tile_options) != 1 else ''}"
+                    if tile_options
+                    else "No reports yet",
                     color="gray",
                 )
                 st.badge(
@@ -4350,6 +4584,31 @@ def _render_report_library_chart_group(
                     "Use this chart type to present the selected metric.",
                 )
             )
+            if not tile_options:
+                drafting = (
+                    selected_tile_key == NEW_TILE_KEY and _library_draft_chart() == chart_type
+                )
+                if drafting:
+                    st.caption(
+                        ":material/edit_document: A new draft with this chart is open "
+                        "in the **Tile Editor** below — choose a metric there."
+                    )
+                st.button(
+                    (
+                        "Restart draft"
+                        if drafting
+                        else f"Create {_report_library_chart_label(chart_type)} report"
+                    ),
+                    icon=":material/add_2:",
+                    key=f"builder_report_library_create_{chart_type}",
+                    help=(
+                        "Open a new tile draft with this chart kind preselected. "
+                        "Chart availability still depends on the chosen metric."
+                    ),
+                    on_click=_create_report_from_library,
+                    args=(chart_type, metric_filter),
+                )
+                return
             tile_keys = [_tile_option_key(option) for option in tile_options]
             tile_labels = {
                 _tile_option_key(option): _report_library_tile_label(option)
@@ -4789,6 +5048,16 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         seed_chart = seed_tile.get("chart") if seed_tile.get("chart") in chart_choices else None
         if seed_chart is None and chart_choices and not is_new_tile:
             seed_chart = chart_choices[0]
+        chart_state_key = f"builder_tile_chart_{editor_token}"
+        if (
+            seed_chart is not None
+            and chart_state_key in st.session_state
+            and st.session_state[chart_state_key] is None
+        ):
+            # The chart widget already rendered once (before a metric was
+            # chosen), so ``index`` no longer applies; honor the seeded chart
+            # as long as the user has not picked one explicitly.
+            st.session_state[chart_state_key] = seed_chart
         chart_kind = st.selectbox(
             "Chart",
             chart_choices,
@@ -6804,15 +7073,31 @@ def _new_processor_template(
         use_rename_capitalize,
     )
     outcome_column = _first_matching_field(fields, "Outcome")
+    # Workspace common dimensions the source can evidence become the automatic
+    # group-by starting point (Dimensions step). Matching uses the same option
+    # set the creating editor offers — schema and sample evidence, no other
+    # processors' field references — so the seeded list survives the widget.
+    seed_fields = _source_field_options(
+        ctx,
+        source,
+        rename_capitalize=use_rename_capitalize,
+        sample_columns=sample_fields,
+        include_processor_fields=False,
+    )
     data: dict[str, Any] = {
         "id": _next_processor_id(ctx, source.id),
         "source": source.id,
         "kind": "binary_outcome",
         "description": "",
-        "group_by": [],
+        "group_by": dimension_profile.applicable_dimensions(
+            builder.workspace_dimension_defaults(ctx.catalog),
+            seed_fields,
+        ),
         "time": {
             "column": time_column,
-            "grains": ["Day", "Summary"] if time_column else ["Summary"],
+            # Day and Month by default; Quarter, Year, and Summary stay
+            # selectable in the editor and summary queries roll up from Month.
+            "grains": ["Day", "Month"] if time_column else ["Summary"],
         },
         "states": {
             "Count": {"type": "count"},

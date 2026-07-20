@@ -317,6 +317,10 @@ defaults:
   calendar:
     grains: [daily, monthly, quarterly, yearly, summary]
     week_start: monday
+  dimensions: [Channel, Issue, Group]   # optional: common business dimensions
+                                        # seeded into new processors' group_by;
+                                        # authoring metadata, excluded from
+                                        # computation hashes
 
 sources:
   - id: ih

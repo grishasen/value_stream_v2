@@ -172,7 +172,7 @@ def test_discarded_create_draft_continues_on_the_first_click() -> None:
         next(button for button in rendered.button if button.label == "Continue").click().run()
     )
     assert not rendered.exception
-    assert rendered.session_state["builder_step"] == "Dimensions"
+    assert rendered.session_state["builder_step"] == "Metrics"
 
 
 @pytest.mark.unit
@@ -366,6 +366,13 @@ def test_builder_materialization_impact_ignores_prose_and_presentation() -> None
     assert not builder.builder_requires_data_run(
         "metric", {"description": "A"}, {"kind": "formula"}
     )
+    # The common-dimension list itself is authoring metadata; without
+    # extended processors nothing recomputes.
+    assert not builder.builder_requires_data_run(
+        "dimensions",
+        {"dimensions": ["Channel"], "processors": {}},
+        {"dimensions": ["Channel", "Issue"], "processors": {}},
+    )
 
 
 @pytest.mark.unit
@@ -399,6 +406,14 @@ def test_builder_materialization_impact_detects_computation_changes() -> None:
         "workspace_settings",
         settings,
         {**settings, "time_zone": "Europe/Berlin"},
+    )
+    assert builder.builder_requires_data_run(
+        "dimensions",
+        {"dimensions": ["Channel"], "processors": {}},
+        {
+            "dimensions": ["Channel", "Issue"],
+            "processors": {"engagement": {**processor, "dimensions": ["Channel", "Issue"]}},
+        },
     )
 
 
@@ -725,10 +740,8 @@ def test_builder_edit_selectors_lead_with_stable_id_and_keep_human_context(
 
     jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
     rendered = jump.set_value("Dimensions").run()
-    dimension_processor = next(
-        item for item in rendered.selectbox if item.label == "Processor To Edit"
-    )
-    assert dimension_processor.options == ["engagement — Engagement · Binary outcome"]
+    profile_source = next(item for item in rendered.selectbox if item.label == "Profile Source")
+    assert profile_source.options == ["ih — Ih · Parquet"]
 
 
 @pytest.mark.unit
@@ -3307,6 +3320,97 @@ def test_new_report_tile_template_is_clean_until_edited(tmp_path: Path) -> None:
     assert not any("Editing draft" in item.value for item in rendered.markdown)
 
 
+def _render_reports_step(workspace: str) -> None:
+    import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+    from valuestream.ui.context import load_context  # noqa: PLC0415
+    from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+    st.session_state.setdefault("builder_step", "Reports / Tiles")
+    _builder_steps(load_context(workspace))
+
+
+@pytest.mark.unit
+def test_report_library_offers_every_purpose_and_creates_from_empty_kinds(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    rendered = AppTest.from_function(_render_reports_step, kwargs={"workspace": str(tmp_path)}).run(
+        timeout=15
+    )
+    assert not rendered.exception
+
+    # Every purpose tab is offered even though the fixture only has KPI cards.
+    purpose = next(item for item in rendered.segmented_control if item.label == "Purpose")
+    rendered = purpose.set_value("trend").run(timeout=15)
+    assert not rendered.exception
+
+    trend_kinds = config_builder.REPORT_LIBRARY_GROUPS["trend"].chart_types
+    create_keys = {
+        button.key
+        for button in rendered.button
+        if str(button.key or "").startswith("builder_report_library_create_")
+    }
+    assert create_keys == {
+        f"builder_report_library_create_{chart_type}" for chart_type in trend_kinds
+    }
+
+    rendered = (
+        next(
+            button
+            for button in rendered.button
+            if button.key == "builder_report_library_create_line"
+        )
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert rendered.session_state["builder_selected_tile_key"] == config_builder.NEW_TILE_KEY
+    assert rendered.session_state["builder_tile_seed"] == (None, None, {"chart": "line"})
+    # The Tile Editor is below the gallery, so the click announces itself on
+    # the clicked card. (A toast is not used: fragment reruns drop them.)
+    clicked = next(
+        button for button in rendered.button if button.key == "builder_report_library_create_line"
+    )
+    assert clicked.label == "Restart draft"
+    assert any(
+        "A new draft with this chart is open" in str(item.value) for item in rendered.caption
+    )
+
+    metric = [item for item in rendered.selectbox if item.label == "Metric"][-1]
+    rendered = metric.set_value("CTR").run(timeout=15)
+    chart = [item for item in rendered.selectbox if item.label == "Chart"][-1]
+    assert chart.value == "line"
+
+
+@pytest.mark.unit
+def test_report_library_new_keeps_draft_selection_and_search_hides_empty_kinds(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    rendered = AppTest.from_function(_render_reports_step, kwargs={"workspace": str(tmp_path)}).run(
+        timeout=15
+    )
+    rendered = (
+        next(button for button in rendered.button if button.label == "New").click().run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert rendered.session_state["builder_selected_tile_key"] == config_builder.NEW_TILE_KEY
+
+    search = next(item for item in rendered.text_input if item.label == "Search")
+    rendered = search.set_value("CTR").run(timeout=15)
+
+    assert not rendered.exception
+    assert not any(
+        str(button.key or "").startswith("builder_report_library_create_")
+        for button in rendered.button
+    )
+
+
 @pytest.mark.unit
 def test_new_report_tile_apply_reopens_the_written_tile_clean(tmp_path: Path) -> None:
     _write_source_cascade_catalog(tmp_path)
@@ -3399,7 +3503,10 @@ def test_visual_report_library_replaces_inventory_dataframe(tmp_path: Path) -> N
     assert rendered.segmented_control[0].value == "summary"
     assert rendered.pills
     chart_filter = next(item for item in rendered.selectbox if item.label == "Chart type")
-    assert chart_filter.options == ["All chart types", "KPI card"]
+    # Every catalog chart kind is selectable, not only the configured ones.
+    assert chart_filter.options[0] == "All chart types"
+    assert len(chart_filter.options) == 1 + len(config_builder.REPORT_LIBRARY_GROUP_BY_CHART)
+    assert "KPI card" in chart_filter.options
     assert chart_filter.value == "All"
 
 
@@ -3658,7 +3765,7 @@ def test_new_processor_template_uses_selected_source_identity_evidence(
     ctx = SimpleNamespace(
         workspace=Path("."),
         catalog=SimpleNamespace(
-            pipelines=SimpleNamespace(sources=sources),
+            pipelines=SimpleNamespace(sources=sources, defaults=model.WorkspaceDefaults()),
             processors=SimpleNamespace(processors=[]),
         ),
     )
@@ -3691,7 +3798,7 @@ def test_new_processor_template_uses_observed_identity_or_stays_empty(
     ctx = SimpleNamespace(
         workspace=Path("."),
         catalog=SimpleNamespace(
-            pipelines=SimpleNamespace(sources=[source]),
+            pipelines=SimpleNamespace(sources=[source], defaults=model.WorkspaceDefaults()),
             processors=SimpleNamespace(processors=[]),
         ),
     )
@@ -3712,6 +3819,305 @@ def test_new_processor_template_uses_observed_identity_or_stays_empty(
     empty = builder.processor_to_dict(config_builder._new_processor_template(ctx, "events"))
     assert "entities" not in empty
     assert "SubjectID" not in yaml.safe_dump(empty)
+
+
+@pytest.mark.unit
+def test_new_processor_template_seeds_workspace_common_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = model.Source.model_validate(
+        {
+            "id": "events",
+            "reader": {"kind": "parquet", "file_pattern": "events/*.parquet"},
+            "schema": {"natural_key": []},
+        }
+    )
+    ctx = SimpleNamespace(
+        workspace=Path("."),
+        catalog=SimpleNamespace(
+            pipelines=SimpleNamespace(
+                sources=[source],
+                defaults=model.WorkspaceDefaults(
+                    dimensions=["channel", "Issue", "NotInThisSource"]
+                ),
+            ),
+            processors=SimpleNamespace(processors=[]),
+        ),
+    )
+    monkeypatch.setattr(
+        config_builder,
+        "_source_sample_columns",
+        lambda *_args, **_kwargs: ["Channel", "Issue", "Outcome"],
+    )
+
+    template = config_builder._new_processor_template(ctx, "events")
+
+    # Case-insensitive match, spelled as the source provides it; dimensions
+    # the source cannot provide are skipped instead of breaking the template.
+    assert list(template.group_by) == ["Channel", "Issue"]
+
+
+@pytest.mark.unit
+def test_new_processor_template_defaults_to_day_and_month_grains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timed_source = model.Source.model_validate(
+        {
+            "id": "events",
+            "reader": {"kind": "parquet", "file_pattern": "events/*.parquet"},
+            "schema": {"timestamp_column": "OutcomeTime"},
+        }
+    )
+    untimed_source = model.Source.model_validate(
+        {
+            "id": "snapshots",
+            "reader": {"kind": "parquet", "file_pattern": "snapshots/*.parquet"},
+        }
+    )
+    ctx = SimpleNamespace(
+        workspace=Path("."),
+        catalog=SimpleNamespace(
+            pipelines=SimpleNamespace(
+                sources=[timed_source, untimed_source],
+                defaults=model.WorkspaceDefaults(),
+            ),
+            processors=SimpleNamespace(processors=[]),
+        ),
+    )
+    monkeypatch.setattr(
+        config_builder,
+        "_source_sample_columns",
+        lambda *_args, **_kwargs: ["Outcome"],
+    )
+
+    timed = config_builder._new_processor_template(ctx, "events")
+    untimed = config_builder._new_processor_template(ctx, "snapshots")
+
+    assert [builder.display_grain(grain) for grain in timed.grains] == ["Day", "Month"]
+    assert [builder.display_grain(grain) for grain in untimed.grains] == ["Summary"]
+
+
+@pytest.mark.unit
+def test_processor_kind_guide_covers_every_kind() -> None:
+    for kind in forms.PROCESSOR_KIND_OPTIONS:
+        guide = forms.processor_kind_guide(kind)
+        assert guide is not None, f"missing guide for {kind}"
+        assert guide.summary.strip()
+        assert guide.purposes.strip()
+        assert guide.example_kpis
+    assert forms.processor_kind_guide("unknown") is None
+
+
+def _render_processors_create_step(workspace: str) -> None:
+    import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+    from valuestream.ui.context import load_context  # noqa: PLC0415
+    from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+    st.session_state.setdefault("builder_step", "Processors")
+    st.session_state.setdefault("builder_processor_mode", "Create New Processor")
+    _builder_steps(load_context(workspace))
+
+
+@pytest.mark.unit
+def test_kind_switch_reseeds_description_and_auto_outputs(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    rendered = AppTest.from_function(
+        _render_processors_create_step, kwargs={"workspace": str(tmp_path)}
+    ).run()
+    assert not rendered.exception
+
+    description = next(item for item in rendered.text_input if item.label == "Description")
+    assert description.value == forms.PROCESSOR_KIND_GUIDE["binary_outcome"].summary
+    assert any("Example KPIs:" in str(item.value) for item in rendered.caption)
+    # The editor mirrors the engine's default outputs, including the
+    # unique-subject sketch inferred from the natural key.
+    state_rows = rendered.session_state["builder_proc_states_ih_processor"]
+    assert [row["State"] for row in state_rows] == [
+        "Count",
+        "Positives",
+        "Negatives",
+        "UniqueSubjects_cpc",
+    ]
+
+    kind = next(item for item in rendered.selectbox if item.label == "Kind")
+    rendered = kind.set_value("entity_set").run()
+
+    assert not rendered.exception
+    description = next(item for item in rendered.text_input if item.label == "Description")
+    assert description.value == forms.PROCESSOR_KIND_GUIDE["entity_set"].summary
+    state_rows = rendered.session_state["builder_proc_states_ih_processor"]
+    assert [row["State"] for row in state_rows] == ["ActiveUsers_cpc", "ActiveUsers_theta"]
+    assert all(row["Source Column"] == "InteractionID" for row in state_rows)
+    assert any(item.label == "Entity Column" for item in rendered.selectbox)
+
+
+@pytest.mark.unit
+def test_kind_switch_preserves_user_description_and_shows_lifecycle_keys(
+    tmp_path: Path,
+) -> None:
+    _write_builder_catalog(tmp_path)
+
+    rendered = AppTest.from_function(
+        _render_processors_create_step, kwargs={"workspace": str(tmp_path)}
+    ).run()
+    description = next(item for item in rendered.text_input if item.label == "Description")
+    rendered = description.set_value("My custom processor").run()
+
+    kind = next(item for item in rendered.selectbox if item.label == "Kind")
+    rendered = kind.set_value("entity_lifecycle").run()
+
+    assert not rendered.exception
+    description = next(item for item in rendered.text_input if item.label == "Description")
+    assert description.value == "My custom processor"
+    selectbox_labels = {item.label for item in rendered.selectbox}
+    assert {
+        "Customer ID Column",
+        "Order ID Column",
+        "Monetary Column",
+        "Purchase Date Column",
+    } <= selectbox_labels
+
+
+@pytest.mark.unit
+def test_applicable_dimensions_matches_fields_case_insensitively() -> None:
+    assert dimension_profile.applicable_dimensions(
+        ["channel", "ISSUE", "Issue", "Missing"],
+        ["Channel", "Issue", "Outcome"],
+    ) == ["Channel", "Issue"]
+    assert dimension_profile.applicable_dimensions([], ["Channel"]) == []
+
+
+@pytest.mark.unit
+def test_write_workspace_dimensions_round_trip(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    builder.write_workspace_dimensions(tmp_path, ["Channel", " Issue ", "Channel", ""])
+    catalog = load(tmp_path)
+    assert catalog.pipelines.defaults.dimensions == ["Channel", "Issue"]
+    assert builder.workspace_dimension_defaults(catalog) == ["Channel", "Issue"]
+
+    # Clearing the selection removes the key so untouched files stay minimal.
+    builder.write_workspace_dimensions(tmp_path, [])
+    assert load(tmp_path).pipelines.defaults.dimensions == []
+    raw = yaml.safe_load((tmp_path / "catalog" / "pipelines.yaml").read_text(encoding="utf-8"))
+    assert "defaults" not in raw
+
+
+def _render_dimensions_step(workspace: str) -> None:
+    import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+    from valuestream.ui.context import load_context  # noqa: PLC0415
+    from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+    st.session_state.setdefault("builder_step", "Dimensions")
+    _builder_steps(load_context(workspace))
+
+
+@pytest.mark.unit
+def test_dimensions_step_applies_workspace_dimensions_without_data_run(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    rendered = AppTest.from_function(
+        _render_dimensions_step, kwargs={"workspace": str(tmp_path)}
+    ).run()
+    assert not rendered.exception
+    common = next(item for item in rendered.multiselect if item.label == "Common Dimensions")
+    rendered = common.set_value(["Channel"]).run()
+
+    # Channel is already engagement's group-by, so nothing recomputes.
+    extend = next(
+        item for item in rendered.toggle if item.label.startswith("Extend existing processors")
+    )
+    assert extend.disabled
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    catalog = load(tmp_path)
+    assert catalog.pipelines.defaults.dimensions == ["Channel"]
+    engagement = next(p for p in catalog.processors.processors if p.id == "engagement")
+    assert list(engagement.group_by) == ["Channel"]
+    outcome = rendered.session_state[config_builder.BUILDER_LAST_OUTCOME_KEY]
+    assert outcome["label"] == "Common dimensions"
+    assert outcome["action"] != "run_data"
+
+
+@pytest.mark.unit
+def test_dimensions_step_extends_existing_processors_on_apply(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    rendered = AppTest.from_function(
+        _render_dimensions_step, kwargs={"workspace": str(tmp_path)}
+    ).run()
+    common = next(item for item in rendered.multiselect if item.label == "Common Dimensions")
+    rendered = common.set_value(["Channel", "InteractionID"]).run()
+
+    extend = next(
+        item for item in rendered.toggle if item.label.startswith("Extend existing processors")
+    )
+    assert not extend.disabled
+    rendered = extend.set_value(True).run()
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    catalog = load(tmp_path)
+    assert catalog.pipelines.defaults.dimensions == ["Channel", "InteractionID"]
+    engagement = next(p for p in catalog.processors.processors if p.id == "engagement")
+    assert list(engagement.group_by) == ["Channel", "InteractionID"]
+    outcome = rendered.session_state[config_builder.BUILDER_LAST_OUTCOME_KEY]
+    assert outcome["action"] == "run_data"
+    assert list(outcome["source_ids"]) == ["ih"]
+
+
+@pytest.mark.unit
+def test_dimensions_step_counts_variant_column_as_covered(tmp_path: Path) -> None:
+    """A common dimension persisted as variant_column must not be re-added.
+
+    Validation rejects the variant column inside group_by, so the automatic
+    extension counting it as missing produced an apply that always rolled back.
+    """
+    _write_builder_catalog(tmp_path)
+    processors_path = tmp_path / "catalog" / "processors.yaml"
+    processors_def = yaml.safe_load(processors_path.read_text(encoding="utf-8"))
+    processors_def["processors"][0]["variant_column"] = "InteractionID"
+    processors_path.write_text(yaml.safe_dump(processors_def, sort_keys=False), encoding="utf-8")
+
+    rendered = AppTest.from_function(
+        _render_dimensions_step, kwargs={"workspace": str(tmp_path)}
+    ).run()
+    common = next(item for item in rendered.multiselect if item.label == "Common Dimensions")
+    rendered = common.set_value(["Channel", "InteractionID"]).run()
+
+    assert not rendered.exception
+    extend = next(
+        item for item in rendered.toggle if item.label.startswith("Extend existing processors")
+    )
+    assert extend.disabled
+    assert any(
+        "Every existing processor already covers its applicable common dimensions" in item.value
+        for item in rendered.caption
+    )
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert not any("validation failed" in str(item.value) for item in rendered.error)
+    catalog = load(tmp_path)
+    assert catalog.pipelines.defaults.dimensions == ["Channel", "InteractionID"]
+    engagement = next(p for p in catalog.processors.processors if p.id == "engagement")
+    assert list(engagement.group_by) == ["Channel"]
 
 
 @pytest.mark.unit

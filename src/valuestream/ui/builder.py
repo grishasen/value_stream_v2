@@ -335,22 +335,20 @@ def _processor_computation_projection(value: Any) -> Any:
 
 
 def _dimension_computation_projection(value: Any) -> Any:
+    """Project a workspace-dimensions draft onto its computation contract.
+
+    The common-dimension list itself is authoring metadata; only the
+    processors extended with new group-by fields change persisted rows.
+    """
     if not isinstance(value, dict):
         return config_canonical.canonicalize(value)
-    processor = _processor_computation_projection(value.get("processor"))
-    proposals = value.get("proposals")
-    if not isinstance(proposals, dict):
-        proposals = {}
-    projected_proposals: dict[str, Any] = {}
-    for key, proposal in proposals.items():
-        if not isinstance(proposal, dict):
-            projected_proposals[str(key)] = config_canonical.canonicalize(proposal)
-            continue
-        projected_proposals[str(key)] = {
-            "processor": _processor_computation_projection(proposal.get("processor")),
-            "metrics": config_canonical.canonicalize(proposal.get("metrics", {})),
-        }
-    return {"processor": processor, "proposals": projected_proposals}
+    processors = value.get("processors")
+    if not isinstance(processors, dict):
+        processors = {}
+    return {
+        str(processor_id): _processor_computation_projection(processor_def)
+        for processor_id, processor_def in processors.items()
+    }
 
 
 def _workspace_computation_projection(value: Any) -> Any:
@@ -2706,6 +2704,42 @@ def write_pipelines_definition(
     _write_yaml(_catalog_file(workspace, "pipelines.yaml"), pipelines_def)
 
 
+def workspace_dimension_defaults(catalog: model.Catalog) -> list[str]:
+    """Return the workspace-level common business dimensions."""
+
+    return dedupe(
+        [
+            str(field).strip()
+            for field in catalog.pipelines.defaults.dimensions
+            if str(field).strip()
+        ]
+    )
+
+
+def write_workspace_dimensions(
+    workspace: str | Path,
+    dimensions: list[str],
+) -> None:
+    """Update the workspace-level common dimensions in ``pipelines.yaml``.
+
+    An empty selection removes the key so untouched workspaces keep their
+    exact prior file contents.
+    """
+    path = _catalog_file(workspace, "pipelines.yaml")
+    data = _read_yaml(path)
+    defaults = data.setdefault("defaults", {})
+    if not isinstance(defaults, dict):
+        raise ValueError("pipelines.yaml must contain a mapping at `defaults`")
+    cleaned = dedupe([str(field).strip() for field in dimensions if str(field).strip()])
+    if cleaned:
+        defaults["dimensions"] = cleaned
+    elif "dimensions" in defaults:
+        del defaults["dimensions"]
+    if not defaults:
+        data.pop("defaults", None)
+    _write_yaml(path, data)
+
+
 def write_processors_definition(
     workspace: str | Path,
     processors_def: dict[str, Any],
@@ -3452,6 +3486,7 @@ __all__ = [
     "validate_calculated_expression",
     "validate_workspace",
     "widget_key_fragment",
+    "workspace_dimension_defaults",
     "write_dashboards_definition",
     "write_metric_definition",
     "write_metrics_definition",
@@ -3461,5 +3496,6 @@ __all__ = [
     "write_processors_definition",
     "write_source_definition",
     "write_tile_definition",
+    "write_workspace_dimensions",
     "write_workspace_settings",
 ]

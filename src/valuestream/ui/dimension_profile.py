@@ -45,6 +45,10 @@ CALENDAR_GRANULARITY_REASON = "Explicit calendar granularity for time-based aggr
 PEGA_CDH_CORE_PACK = "Pega/CDH Core"
 DIMENSION_PACKS: dict[str, tuple[str, ...]] = {
     PEGA_CDH_CORE_PACK: (
+        "Day",
+        "Month",
+        "Quarter",
+        "Year",
         "Channel",
         "Issue",
         "Group",
@@ -64,7 +68,7 @@ DIMENSION_PACKS: dict[str, tuple[str, ...]] = {
         "CustomerSubsegment",
         "ModelControlGroup",
         "Journey",
-        "ModelClass"
+        "ModelClass",
     )
 }
 
@@ -279,6 +283,26 @@ def default_group_by_fields(
     business = [field for field in recommended if field not in CALENDAR_GRANULARITY_FIELDS]
     business_limit = max(0, limit - len(calendar))
     return [*business[:business_limit], *calendar][:limit]
+
+
+def applicable_dimensions(
+    dimensions: Iterable[str],
+    available_fields: Iterable[str],
+) -> list[str]:
+    """Return declared dimensions present in the available fields.
+
+    Matching is case-insensitive and the returned spelling comes from
+    ``available_fields`` so seeded group-by entries always reference real
+    (post-transform) source fields.
+    """
+    available = {str(field).casefold(): str(field) for field in available_fields if str(field)}
+    return _dedupe(
+        [
+            available[str(dimension).casefold()]
+            for dimension in dimensions
+            if str(dimension).casefold() in available
+        ]
+    )
 
 
 def dimension_pack_names() -> list[str]:

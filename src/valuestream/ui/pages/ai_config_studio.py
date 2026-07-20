@@ -8208,8 +8208,14 @@ def _primary_time_field(working: pl.DataFrame) -> str:
 
 
 def _processor_grains(working: pl.DataFrame) -> list[str]:
-    grains = [grain for grain in ("Day", "Month", "Quarter", "Year") if grain in working.columns]
-    return [*grains, "Summary"] if grains else ["Summary"]
+    """Default stored grains: Day and Month only; coarser grains stay opt-in.
+
+    Quarter, Year, and Summary remain selectable in the processor editors, and
+    summary queries are still answered from the stored Month rows via the
+    default aggregation levels.
+    """
+    grains: list[str] = [grain for grain in ("Day", "Month") if grain in working.columns]
+    return grains if grains else ["Summary"]
 
 
 def _primary_chart_x(working: pl.DataFrame, group_by: list[str]) -> str:

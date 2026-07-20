@@ -127,19 +127,24 @@ class TestFatWorkspace:
 
     def test_business_report_pages_are_present(self) -> None:
         catalog = load(FAT_WS)
-        dashboard = catalog.dashboards.dashboards[0]
 
-        assert [page.id for page in dashboard.pages] == [
-            "executive_overview",
-            "engagement",
-            "reach_and_frequency",
-            "conversion_and_revenue",
-            "outcome_funnel",
-            "model_quality",
-            "experiments",
-            "distributions",
-            "customer_lifecycle",
-        ]
+        pages_by_dashboard = {
+            dashboard.id: [page.id for page in dashboard.pages]
+            for dashboard in catalog.dashboards.dashboards
+        }
+
+        assert pages_by_dashboard == {
+            "fat_business_value": [
+                "executive_overview",
+                "engagement",
+                "reach_and_frequency",
+                "conversion_and_revenue",
+                "outcome_funnel",
+            ],
+            "fat_model_quality": ["model_quality", "distributions"],
+            "fat_experiments": ["experiments", "distributions"],
+            "fat_clv": ["customer_lifecycle"],
+        }
 
     def test_enables_bulk_sketch_build_only_for_quantile_processors(self) -> None:
         catalog = load(FAT_WS)

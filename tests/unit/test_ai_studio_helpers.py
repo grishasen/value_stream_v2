@@ -101,6 +101,19 @@ def test_workspace_sample_files_lists_supported_data_files_only(tmp_path: Path) 
 
 
 @pytest.mark.unit
+def test_generated_processor_grains_default_to_day_and_month() -> None:
+    full_calendar = pl.DataFrame(
+        {"Day": ["2026-01-01"], "Month": ["2026-01"], "Quarter": ["Q1"], "Year": ["2026"]}
+    )
+    month_only = pl.DataFrame({"Month": ["2026-01"], "Outcome": ["Clicked"]})
+    no_calendar = pl.DataFrame({"Outcome": ["Clicked"]})
+
+    assert ai_config_studio_page._processor_grains(full_calendar) == ["Day", "Month"]
+    assert ai_config_studio_page._processor_grains(month_only) == ["Month"]
+    assert ai_config_studio_page._processor_grains(no_calendar) == ["Summary"]
+
+
+@pytest.mark.unit
 def test_sample_capability_registry_drives_upload_and_workspace_contract(tmp_path: Path) -> None:
     advertised = ai_config_studio_page._sample_upload_extensions()
     registered = {

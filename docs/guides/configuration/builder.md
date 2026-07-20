@@ -12,7 +12,9 @@ The Builder presents one current task at a time. Its compact header shows
 guided order, or **Jump to step** when you already know where to work.
 
 1. Start in **Workspace Health** and resolve catalog validation errors.
-2. Review or edit **Sources**, **Processors**, and **Dimensions**.
+2. Review or edit **Sources**, **Dimensions**, and **Processors**. Dimensions
+   comes before Processors because it defines the workspace's common business
+   dimensions that new processors start from.
 3. In **Metrics**, create a metric from the recipe library or from scratch, or
    maintain an existing metric.
 4. In **Reports / Tiles**, edit a tile and its page settings as one change.
@@ -145,6 +147,25 @@ deletes the file. **Discard checkpoint** deletes it immediately; operators may
 also delete `meta/config_builder_checkpoint.json` while Builder is not running.
 Deleting a checkpoint never changes the applied YAML catalog.
 
+## Dimensions
+
+The Dimensions step is processor-independent. It edits one workspace-level
+list of common business dimensions, persisted as `defaults.dimensions` in
+`pipelines.yaml`. Every processor created afterwards starts from the common
+dimensions its source can actually provide (matched case-insensitively
+against the source's fields) as its Group By, and each processor may extend
+or trim that list in the Processors step.
+
+The **Processor Coverage** panel shows how the shared list maps onto existing
+processors and which applicable common dimensions each one is missing. An
+explicit toggle extends every existing processor with its missing applicable
+dimensions inside the same Apply transaction. A processor's variant column
+counts as covered: the processor already persists it as a dimension, and
+validation rejects repeating it in group-by. Applying only the common list
+never requires a data run; extending processors changes their aggregate
+computation contract, so the Apply outcome then names the affected sources
+and offers **Run data**.
+
 Dimension recommendations are ranked as **Recommended**, **Review**, or
 **Avoid**. Recommended and Review candidates may be selected for the draft by
 default. Avoid candidates are never preselected; adding one must be an explicit
@@ -154,6 +175,24 @@ Dimension Packs present available, selected, and missing source fields as
 responsive chips. One-Click Promotion leads with recommendation, group-by
 safety, cardinality, null percentage, and the review reason. Exact profile and
 pack values remain available as collapsed JSON technical detail.
+
+## Processors
+
+Selecting a **Kind** while creating a processor auto-fills the Description
+with that kind's definition; text you typed yourself is never overwritten. A
+short guide under Group By explains what the kind is for and lists example
+KPIs (for `entity_set`: unique counts, audience overlap, Top-N frequent
+values).
+
+**Auto Outputs** always mirrors the selected kind's engine-default states —
+switching kind while creating replaces the grid (binary outcome: counts plus
+a unique-subject sketch; entity set: CPC and theta sketches over the entity
+column; derived kinds show their computed states). Add further sketch states
+(Top-K, CPC, theta, digests) as rows when the kind supports them.
+
+Kind-specific settings cover every engine-read property: `entity_set` exposes
+the sketched **Entity Column**, and `entity_lifecycle` exposes its customer,
+order, monetary, and purchase-date key columns.
 
 ## Metrics
 
@@ -182,6 +221,14 @@ tiles by purpose and chart type and keeps large groups behind a compact
 selector. Its chart labels and purposes are shared with both chart selectors;
 the persisted chart kind remains visible only as secondary technical detail and
 continues to round-trip unchanged.
+
+The library always shows every purpose group and every chart kind of the
+active group, whether or not the workspace uses it yet. Kinds with configured
+reports list them as selectable pills; kinds without any offer **Create … 
+report**, which opens a new tile draft with that chart preselected (and the
+metric filter's metric, when one is chosen). Chart availability inside the
+draft still follows the chosen metric's compatibility. A search hides chart
+kinds without matching tiles, since searching targets existing reports.
 
 ## Removing catalog definitions
 

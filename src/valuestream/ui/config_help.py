@@ -201,6 +201,22 @@ FIELD_HELP: dict[str, str] = {
         "Field that identifies the business entity counted or followed by the processor.",
         "SubjectID",
     ),
+    "processor.entity_column": _tip(
+        "Field whose unique values the set sketches (CPC, theta, Top-K) track.",
+        "CustomerID",
+    ),
+    "processor.lifecycle_customer_id": _tip(
+        "Field identifying the customer each transaction belongs to.", "CustomerID"
+    ),
+    "processor.lifecycle_order_id": _tip(
+        "Field identifying one order or holding per transaction row.", "HoldingID"
+    ),
+    "processor.lifecycle_monetary": _tip(
+        "Numeric field with the transaction's monetary value.", "OneTimeCost"
+    ),
+    "processor.lifecycle_purchase_date": _tip(
+        "Timestamp field with the purchase or transaction date.", "PurchasedDateTime"
+    ),
     "processor.outcome_column": _tip(
         "Categorical field mapped to positive and negative business outcomes.",
         "Outcome",
@@ -235,7 +251,7 @@ FIELD_HELP: dict[str, str] = {
     ),
     "processor.stages": _tip(
         "Comma-separated funnel stage names in business order; each stage also needs a when expression.",
-        "Presented, Clicked, Converted",
+        "Impression,Clicked,Conversion",
     ),
     "processor.snapshot_kind": _tip(
         "Periodic snapshots describe each interval; accumulating snapshots track progress toward completion.",
@@ -256,10 +272,15 @@ FIELD_HELP: dict[str, str] = {
         "Processor setting that generated this state; shown for provenance.", "score_properties"
     ),
     # Dimensions and exploration.
-    "dimension.processor": _tip("Processor whose persisted grouping dimensions you want to edit."),
-    "dimension.group_by": _tip(
-        "Complete set of dimensions retained in this processor's aggregates.",
+    "dimension.common": _tip(
+        "Workspace-level business dimensions applied automatically to processors as group-by.",
         "Channel, Direction, Issue",
+    ),
+    "dimension.profile_source": _tip(
+        "Source whose sampled fields are profiled for dimension suitability.", "ih"
+    ),
+    "dimension.extend_processors": _tip(
+        "Also add the missing applicable common dimensions to every existing processor on apply."
     ),
     "dimension.profile_filter": _tip(
         "Limit field profiling to all, recommended, or currently selected dimensions."
@@ -268,7 +289,7 @@ FIELD_HELP: dict[str, str] = {
         "Reusable business-oriented group of dimensions to add together.", "Engagement context"
     ),
     "dimension.promote_field": _tip(
-        "Source field to add to the processor's permanent aggregate grain.", "Treatment"
+        "Source field to add to the workspace's common dimensions.", "Treatment"
     ),
     "dimension.topk_enabled": _tip("Add a Top-K sketch for approximate frequent-value analysis."),
     "dimension.topk_field": _tip(
@@ -390,7 +411,9 @@ FIELD_HELP: dict[str, str] = {
         "Group report tiles by the business question their chart is designed to answer."
     ),
     "report.metric_filter": _tip("Show only tiles that use the selected metric."),
-    "report.chart_filter": _tip("Show only tiles rendered with the selected chart kind."),
+    "report.chart_filter": _tip(
+        "Focus the library on one chart kind; kinds without reports offer a create action."
+    ),
     "report.open_tile": _tip("Choose an existing tile to edit or start a new tile draft."),
     "report.metric": _tip("Catalog metric queried by this tile.", "VS_Click_Through_Rate"),
     "report.chart": _tip("Chart recipe used to render the metric result.", "kpi_card"),
@@ -410,7 +433,7 @@ FIELD_HELP: dict[str, str] = {
     "report.field": _tip("Metric result column assigned to this chart role.", "Month"),
     "report.stages": _tip(
         "Comma-separated funnel stage columns rendered in business order.",
-        "Presented, Clicked, Converted",
+        "Impression,Clicked,Conversion",
     ),
     "report.description": _tip(
         "Plain-language context displayed with the report tile.", "Monthly engagement efficiency."

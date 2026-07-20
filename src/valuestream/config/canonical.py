@@ -131,7 +131,7 @@ def processor_computation_config(
         )
     return {
         "computation_schema_version": COMPUTATION_SCHEMA_VERSION,
-        "workspace_defaults": catalog.pipelines.defaults,
+        "workspace_defaults": _workspace_computation_defaults(catalog.pipelines.defaults),
         "source": _source_computation_fields(source),
         "processor": _processor_computation_fields(processor),
     }
@@ -161,10 +161,21 @@ def source_computation_config(catalog: model.Catalog, source_id: str) -> dict[st
     )
     return {
         "computation_schema_version": COMPUTATION_SCHEMA_VERSION,
-        "workspace_defaults": catalog.pipelines.defaults,
+        "workspace_defaults": _workspace_computation_defaults(catalog.pipelines.defaults),
         "source": _source_computation_fields(source),
         "processors": processors,
     }
+
+
+def _workspace_computation_defaults(defaults: model.WorkspaceDefaults) -> dict[str, Any]:
+    """Return only the workspace defaults that affect computed aggregate rows.
+
+    ``dimensions`` seeds Builder group-by selections and never reaches the
+    engine, so declaring or editing it must not invalidate computation hashes.
+    """
+    payload = defaults.model_dump(by_alias=True, exclude_none=True)
+    payload.pop("dimensions", None)
+    return payload
 
 
 def _source_computation_fields(source: model.Source) -> dict[str, Any]:

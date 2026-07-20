@@ -27,6 +27,120 @@ PROCESSOR_KIND_OPTIONS = (
     "funnel",
     "snapshot",
 )
+
+
+@dataclass(frozen=True)
+class ProcessorKindGuide:
+    """Business definition of one processor kind for the editors.
+
+    ``summary`` doubles as the auto-generated processor description; the
+    purposes and example KPIs render as guidance near the kind selector.
+    """
+
+    summary: str
+    purposes: str
+    example_kpis: tuple[str, ...]
+
+
+# Grounded in docs/reference/processors.md ("Purpose" sections).
+PROCESSOR_KIND_GUIDE: dict[str, ProcessorKindGuide] = {
+    "binary_outcome": ProcessorKindGuide(
+        summary=(
+            "Counts positive, negative, and total outcomes per group-by tuple, "
+            "with optional value sums and unique-subject sketches."
+        ),
+        purposes="Use for engagement, conversion, and experiment readouts.",
+        example_kpis=(
+            "Click-Through Rate",
+            "Conversion Rate",
+            "Positive Outcomes",
+            "Unique Subjects",
+            "Experiment Lift (z / chi2 / G)",
+        ),
+    ),
+    "numeric_distribution": ProcessorKindGuide(
+        summary=(
+            "Per-group descriptive statistics for numeric fields: count, sum, mean, "
+            "variance, min, max, plus digest sketches for arbitrary quantiles."
+        ),
+        purposes="Use for response-time, value, and other numeric distribution monitoring.",
+        example_kpis=("Mean", "Median (P50)", "P90 / P99", "Min / Max", "Std Dev"),
+    ),
+    "score_distribution": ProcessorKindGuide(
+        summary=(
+            "Evaluates ML model scores per group: outcome-ranked score digests plus "
+            "personalization and novelty states."
+        ),
+        purposes="Use for model quality and score health tracking.",
+        example_kpis=(
+            "ROC AUC",
+            "Calibration",
+            "Score Quantiles",
+            "Personalization",
+            "Novelty",
+        ),
+    ),
+    "entity_lifecycle": ProcessorKindGuide(
+        summary=(
+            "Per-customer lifetime aggregates from transaction-like sources, keyed by "
+            "customer, order, monetary value, and purchase date."
+        ),
+        purposes="Use for RFM segmentation and customer lifetime value inputs.",
+        example_kpis=(
+            "RFM Segment",
+            "Lifetime Value",
+            "Purchase Frequency",
+            "Recency",
+            "Monetary Value",
+        ),
+    ),
+    "entity_set": ProcessorKindGuide(
+        summary=(
+            "Approximate-set sketches of unique entities per group for unique counts, "
+            "frequent values, and set algebra."
+        ),
+        purposes=(
+            "Use for DAU/MAU, unique reach, audience overlap, retention cohorts, "
+            "and top frequent values."
+        ),
+        example_kpis=(
+            "Unique Count (CPC/HLL)",
+            "Audience Overlap (theta set ops)",
+            "Top-N Frequent Values (Top-K)",
+            "DAU / MAU",
+            "Retention Cohorts",
+        ),
+    ),
+    "funnel": ProcessorKindGuide(
+        summary=(
+            "Per-stage counts with implied drop-off across ordered stages defined by "
+            "row conditions."
+        ),
+        purposes="Use for journey and funnel conversion analysis.",
+        example_kpis=("Stage Counts", "Drop-Off Rate", "Stage Conversion Rate"),
+    ),
+    "snapshot": ProcessorKindGuide(
+        summary=(
+            "Point-in-time state KPIs that do not sum over time: periodic snapshots "
+            "or accumulating milestone rows."
+        ),
+        purposes="Use for open subscriptions, current MRR, backlog, and milestone durations.",
+        example_kpis=(
+            "Open Subscriptions",
+            "Current MRR",
+            "Open Tickets",
+            "Milestone Duration",
+        ),
+    ),
+}
+
+
+def processor_kind_guide(kind: str) -> ProcessorKindGuide | None:
+    """Return the business guide for a processor kind, if defined."""
+
+    return PROCESSOR_KIND_GUIDE.get(str(kind))
+
+
 PROCESSOR_GRAIN_OPTIONS = ("Day", "Month", "Quarter", "Year", "Summary")
 QUANTILE_ENGINE_OPTIONS = ("tdigest", "kll")
 SKETCH_BUILD_MODE_OPTIONS = ("bulk", "legacy")
@@ -56,6 +170,8 @@ OUTCOME_PREFERRED_FIELDS = ["Outcome", "pyOutcome", "outcome"]
 PROCESSOR_KIND_MANAGED_FIELDS = frozenset(
     {
         "entities",
+        "entity",
+        "keys",
         "outcome",
         "outcome_column",
         "positive_values",
@@ -176,15 +292,10 @@ def processor_kind_fields(  # noqa: PLR0911 — dispatch table over the processo
         return _score_distribution_fields(processor_def, field_options, numeric_options, key_prefix)
     if kind == "numeric_distribution":
         return _numeric_distribution_fields(processor_def, numeric_options, key_prefix)
-    if kind in {"entity_lifecycle", "entity_set"}:
-        st.write("### Entity Settings")
-        settings: dict[str, Any] = {}
-        subject_col, _ = st.columns(2, gap="small")
-        with subject_col:
-            subject = _subject_field(processor_def, field_options, key_prefix)
-        if subject:
-            settings["entities"] = {"subject": subject}
-        return settings
+    if kind == "entity_set":
+        return _entity_set_fields(processor_def, field_options, key_prefix)
+    if kind == "entity_lifecycle":
+        return _entity_lifecycle_fields(processor_def, field_options, key_prefix)
     if kind == "funnel":
         return _funnel_fields(processor_def, key_prefix)
     if kind == "snapshot":
@@ -209,6 +320,72 @@ def _subject_field(
         key=f"{key_prefix}_entity_subject",
         help_key="processor.subject_field",
     ).strip()
+
+
+def _entity_set_fields(
+    processor_def: dict[str, Any],
+    field_options: list[str],
+    key_prefix: str,
+) -> dict[str, Any]:
+    st.write("### Entity Settings")
+    settings: dict[str, Any] = {}
+    subject_col, entity_col = st.columns(2, gap="small")
+    with subject_col:
+        subject = _subject_field(processor_def, field_options, key_prefix)
+    if subject:
+        settings["entities"] = {"subject": subject}
+    with entity_col:
+        entity = select_or_text(
+            "Entity Column",
+            field_options,
+            str(processor_def.get("entity", "") or "") or subject,
+            key=f"{key_prefix}_entity_column",
+            help_key="processor.entity_column",
+        ).strip()
+    if entity:
+        settings["entity"] = entity
+    return settings
+
+
+def _entity_lifecycle_fields(
+    processor_def: dict[str, Any],
+    field_options: list[str],
+    key_prefix: str,
+) -> dict[str, Any]:
+    st.write("### Entity Settings")
+    settings: dict[str, Any] = {}
+    subject_col, _spacer = st.columns(2, gap="small")
+    with subject_col:
+        subject = _subject_field(processor_def, field_options, key_prefix)
+    if subject:
+        settings["entities"] = {"subject": subject}
+    raw_keys = processor_def.get("keys")
+    keys: dict[str, Any] = raw_keys if isinstance(raw_keys, dict) else {}
+    key_specs = (
+        ("customer_id", "Customer ID Column", "CustomerID", "processor.lifecycle_customer_id"),
+        ("order_id", "Order ID Column", "OrderID", "processor.lifecycle_order_id"),
+        ("monetary", "Monetary Column", "Monetary", "processor.lifecycle_monetary"),
+        (
+            "purchase_date",
+            "Purchase Date Column",
+            "PurchaseDate",
+            "processor.lifecycle_purchase_date",
+        ),
+    )
+    columns = st.columns(len(key_specs), gap="small")
+    edited_keys: dict[str, str] = {}
+    for column, (key_name, label, default, help_key) in zip(columns, key_specs, strict=True):
+        with column:
+            value = select_or_text(
+                label,
+                field_options,
+                str(keys.get(key_name, "") or "") or default,
+                key=f"{key_prefix}_lifecycle_{key_name}",
+                help_key=help_key,
+            ).strip()
+        edited_keys[key_name] = value or default
+    settings["keys"] = edited_keys
+    return settings
 
 
 def _outcome_fields(
@@ -1027,6 +1204,7 @@ __all__ = [
     "METRIC_BASE_FIELDS",
     "OUTCOME_PREFERRED_FIELDS",
     "PROCESSOR_GRAIN_OPTIONS",
+    "PROCESSOR_KIND_GUIDE",
     "PROCESSOR_KIND_MANAGED_FIELDS",
     "PROCESSOR_KIND_OPTIONS",
     "QUANTILE_ENGINE_OPTIONS",
@@ -1037,11 +1215,13 @@ __all__ = [
     "SUBJECT_PREFERRED_FIELDS",
     "TOPK_ERROR_TYPE_OPTIONS",
     "MetricFormContext",
+    "ProcessorKindGuide",
     "csv_list_field",
     "first_preferred_field",
     "is_simple_formula",
     "metric_kind_fields",
     "processor_kind_fields",
+    "processor_kind_guide",
     "select_or_text",
     "stage_names_from_definition",
     "with_current",

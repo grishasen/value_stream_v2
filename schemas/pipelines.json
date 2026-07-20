@@ -3922,6 +3922,13 @@
         "calendar": {
           "$ref": "#/$defs/Calendar"
         },
+        "dimensions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dimensions",
+          "type": "array"
+        },
         "time_zone": {
           "default": "UTC",
           "title": "Time Zone",

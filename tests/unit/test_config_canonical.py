@@ -167,6 +167,23 @@ class TestCatalogHash:
         assert source_computation_hash(changed, changed_descriptive.source) == source_before
         assert catalog_config_hash(changed) != catalog_before
 
+    def test_computation_hash_excludes_workspace_common_dimensions(self) -> None:
+        catalog = load(DEMO_WS)
+        engagement = next(p for p in catalog.processors.processors if p.id == "ih_engagement")
+        processor_before = processor_computation_hash(catalog, engagement)
+        source_before = source_computation_hash(catalog, "ih")
+        catalog_before = catalog_config_hash(catalog)
+
+        changed = catalog.model_copy(deep=True)
+        changed.pipelines.defaults.dimensions = ["Channel", "Issue"]
+        changed_engagement = next(
+            p for p in changed.processors.processors if p.id == "ih_engagement"
+        )
+
+        assert processor_computation_hash(changed, changed_engagement) == processor_before
+        assert source_computation_hash(changed, "ih") == source_before
+        assert catalog_config_hash(changed) != catalog_before
+
     def test_bounded_ml_order_revision_is_scoped_to_score_processors(self) -> None:
         catalog = load(DEMO_WS)
         score = next(

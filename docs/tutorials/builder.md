@@ -37,8 +37,16 @@ This step does not edit configuration, so its top-right primary action is
 
 ## 2. Review the aggregate model
 
-Continue through **Sources**, **Processors**, and **Dimensions**. These steps
+Continue through **Sources**, **Dimensions**, and **Processors**. These steps
 define how source rows become persisted aggregates.
+
+On **Dimensions**, pick the workspace's common business dimensions once —
+from a dimension pack, the profiler's recommendations, or the source fields
+directly. The list is saved as `defaults.dimensions` in `pipelines.yaml`. Each
+new processor starts from the common dimensions its source provides as its
+Group By, and the Processor Coverage panel can extend existing processors with
+their missing applicable dimensions in the same Apply. You can still extend or
+trim any single processor's Group By on the **Processors** step.
 
 Make a harmless editor change and notice the draft status. The change remains
 session-local and receives a new revision; it is not yet in the catalog. You

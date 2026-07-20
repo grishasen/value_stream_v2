@@ -71,6 +71,10 @@ class Calendar(_StrictModel):
 class WorkspaceDefaults(_StrictModel):
     time_zone: str = "UTC"
     calendar: Calendar = Field(default_factory=Calendar)
+    # Common business dimensions. Authoring metadata only: seeds processor
+    # group-by selections and never reaches the engine, so it is excluded
+    # from computation hashes (see canonical._workspace_computation_defaults).
+    dimensions: list[str] = Field(default_factory=list)
 
 
 class SourceSchema(_StrictModel):
