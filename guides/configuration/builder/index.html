@@ -1042,6 +1042,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#dimensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dimensions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#processors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Processors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#metrics" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2348,6 +2370,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#dimensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dimensions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#processors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Processors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#metrics" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2430,7 +2474,9 @@ checklist.</p>
 guided order, or <strong>Jump to step</strong> when you already know where to work.</p>
 <ol>
 <li>Start in <strong>Workspace Health</strong> and resolve catalog validation errors.</li>
-<li>Review or edit <strong>Sources</strong>, <strong>Processors</strong>, and <strong>Dimensions</strong>.</li>
+<li>Review or edit <strong>Sources</strong>, <strong>Dimensions</strong>, and <strong>Processors</strong>. Dimensions
+   comes before Processors because it defines the workspace's common business
+   dimensions that new processors start from.</li>
 <li>In <strong>Metrics</strong>, create a metric from the recipe library or from scratch, or
    maintain an existing metric.</li>
 <li>In <strong>Reports / Tiles</strong>, edit a tile and its page settings as one change.</li>
@@ -2542,6 +2588,22 @@ the next Builder visit. Applying or discarding the last recoverable draft also
 deletes the file. <strong>Discard checkpoint</strong> deletes it immediately; operators may
 also delete <code>meta/config_builder_checkpoint.json</code> while Builder is not running.
 Deleting a checkpoint never changes the applied YAML catalog.</p>
+<h2 id="dimensions">Dimensions<a class="headerlink" href="#dimensions" title="Permanent link">&para;</a></h2>
+<p>The Dimensions step is processor-independent. It edits one workspace-level
+list of common business dimensions, persisted as <code>defaults.dimensions</code> in
+<code>pipelines.yaml</code>. Every processor created afterwards starts from the common
+dimensions its source can actually provide (matched case-insensitively
+against the source's fields) as its Group By, and each processor may extend
+or trim that list in the Processors step.</p>
+<p>The <strong>Processor Coverage</strong> panel shows how the shared list maps onto existing
+processors and which applicable common dimensions each one is missing. An
+explicit toggle extends every existing processor with its missing applicable
+dimensions inside the same Apply transaction. A processor's variant column
+counts as covered: the processor already persists it as a dimension, and
+validation rejects repeating it in group-by. Applying only the common list
+never requires a data run; extending processors changes their aggregate
+computation contract, so the Apply outcome then names the affected sources
+and offers <strong>Run data</strong>.</p>
 <p>Dimension recommendations are ranked as <strong>Recommended</strong>, <strong>Review</strong>, or
 <strong>Avoid</strong>. Recommended and Review candidates may be selected for the draft by
 default. Avoid candidates are never preselected; adding one must be an explicit
@@ -2550,6 +2612,20 @@ choice.</p>
 responsive chips. One-Click Promotion leads with recommendation, group-by
 safety, cardinality, null percentage, and the review reason. Exact profile and
 pack values remain available as collapsed JSON technical detail.</p>
+<h2 id="processors">Processors<a class="headerlink" href="#processors" title="Permanent link">&para;</a></h2>
+<p>Selecting a <strong>Kind</strong> while creating a processor auto-fills the Description
+with that kind's definition; text you typed yourself is never overwritten. A
+short guide under Group By explains what the kind is for and lists example
+KPIs (for <code>entity_set</code>: unique counts, audience overlap, Top-N frequent
+values).</p>
+<p><strong>Auto Outputs</strong> always mirrors the selected kind's engine-default states —
+switching kind while creating replaces the grid (binary outcome: counts plus
+a unique-subject sketch; entity set: CPC and theta sketches over the entity
+column; derived kinds show their computed states). Add further sketch states
+(Top-K, CPC, theta, digests) as rows when the kind supports them.</p>
+<p>Kind-specific settings cover every engine-read property: <code>entity_set</code> exposes
+the sketched <strong>Entity Column</strong>, and <code>entity_lifecycle</code> exposes its customer,
+order, monetary, and purchase-date key columns.</p>
 <h2 id="metrics">Metrics<a class="headerlink" href="#metrics" title="Permanent link">&para;</a></h2>
 <p>Choose <strong>Create Metric</strong>, then <strong>From Recipe Library</strong> for a reviewed business
 definition or <strong>From Scratch</strong> for the direct editor. The recipe path asks you
@@ -2572,6 +2648,13 @@ tiles by purpose and chart type and keeps large groups behind a compact
 selector. Its chart labels and purposes are shared with both chart selectors;
 the persisted chart kind remains visible only as secondary technical detail and
 continues to round-trip unchanged.</p>
+<p>The library always shows every purpose group and every chart kind of the
+active group, whether or not the workspace uses it yet. Kinds with configured
+reports list them as selectable pills; kinds without any offer <strong>Create … 
+report</strong>, which opens a new tile draft with that chart preselected (and the
+metric filter's metric, when one is chosen). Chart availability inside the
+draft still follows the chosen metric's compatibility. A search hides chart
+kinds without matching tiles, since searching targets existing reports.</p>
 <h2 id="removing-catalog-definitions">Removing catalog definitions<a class="headerlink" href="#removing-catalog-definitions" title="Permanent link">&para;</a></h2>
 <p>Deletion always starts from the explicitly selected object and shows exact
 <code>dashboard/page/tile</code> paths before it can change the workspace.</p>

@@ -2396,8 +2396,15 @@ attention. Resolve validation errors before authoring dependent objects.</p>
 <p>This step does not edit configuration, so its top-right primary action is
 <strong>Continue</strong>.</p>
 <h2 id="2-review-the-aggregate-model">2. Review the aggregate model<a class="headerlink" href="#2-review-the-aggregate-model" title="Permanent link">&para;</a></h2>
-<p>Continue through <strong>Sources</strong>, <strong>Processors</strong>, and <strong>Dimensions</strong>. These steps
+<p>Continue through <strong>Sources</strong>, <strong>Dimensions</strong>, and <strong>Processors</strong>. These steps
 define how source rows become persisted aggregates.</p>
+<p>On <strong>Dimensions</strong>, pick the workspace's common business dimensions once —
+from a dimension pack, the profiler's recommendations, or the source fields
+directly. The list is saved as <code>defaults.dimensions</code> in <code>pipelines.yaml</code>. Each
+new processor starts from the common dimensions its source provides as its
+Group By, and the Processor Coverage panel can extend existing processors with
+their missing applicable dimensions in the same Apply. You can still extend or
+trim any single processor's Group By on the <strong>Processors</strong> step.</p>
 <p>Make a harmless editor change and notice the draft status. The change remains
 session-local and receives a new revision; it is not yet in the catalog. You
 can move to another step and return without losing it. Choose <strong>Discard draft</strong>

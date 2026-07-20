@@ -4317,6 +4317,10 @@
 <span class="w">  </span><span class="nt">calendar</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">daily</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">monthly</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">quarterly</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">yearly</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">summary</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">week_start</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">monday</span>
+<span class="w">  </span><span class="nt">dimensions</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># optional: common business dimensions</span>
+<span class="w">                                        </span><span class="c1"># seeded into new processors&#39; group_by;</span>
+<span class="w">                                        </span><span class="c1"># authoring metadata, excluded from</span>
+<span class="w">                                        </span><span class="c1"># computation hashes</span>
 
 <span class="nt">sources</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
