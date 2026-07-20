@@ -405,6 +405,26 @@ def frame_records(frame: pl.DataFrame) -> list[dict[str, Any]]:
     return frame.to_dicts() if not frame.is_empty() else []
 
 
+def pinned_editor_input(editor_key: str, frame: Any) -> Any:
+    """Return a rerun-stable input for one keyed ``st.data_editor``.
+
+    ``st.data_editor`` drops its pending edit state whenever its input data
+    changes, so feeding the previous run's edited rows back in swallows the
+    click that follows every committed edit. The input is therefore pinned
+    until the editor's own widget state is cleared — the first render, or a
+    programmatic row reset that pops ``editor_key``.
+
+    The pin deliberately lives outside the ``builder_*`` and ``ai_studio_*``
+    key namespaces: draft-registry snapshots and JSON checkpoints capture
+    those prefixed session keys, and a pinned frame is neither restorable
+    widget state nor JSON-safe.
+    """
+    pin_key = f"vs_pinned_editor_input_{editor_key}"
+    if editor_key not in st.session_state or pin_key not in st.session_state:
+        st.session_state[pin_key] = frame
+    return st.session_state[pin_key]
+
+
 def sync_text_area(key: str, text: str) -> None:
     """Reset a text widget's session value whenever its source text changes."""
     signature_key = f"{key}_signature"

@@ -1130,7 +1130,7 @@ def test_apply_draft_rolls_back_catalog_and_ai_config_on_post_write_failure(
     original_ai = "ai:\n  llm:\n    model: ollama/test\n"
     ai_path.write_text(original_ai, encoding="utf-8")
 
-    def fail_validation(_workspace: object) -> None:
+    def fail_validation(_workspace: object, **_kwargs: object) -> None:
         raise ValueError("post-write validation failed")
 
     monkeypatch.setattr(builder, "require_valid_workspace", fail_validation)
@@ -1550,9 +1550,9 @@ def test_chart_prompt_dictionary_matches_tile_validation_contract() -> None:
                 requirement,
             )
 
-    state_type_enum = ai_studio.catalog_prompt_dictionaries()["catalog_schema"][
-        "processors.yaml"
-    ]["state_type_enum"]
+    state_type_enum = ai_studio.catalog_prompt_dictionaries()["catalog_schema"]["processors.yaml"][
+        "state_type_enum"
+    ]
     assert set(state_type_enum) == set(get_args(model.StateSpec.model_fields["type"].annotation))
 
 
@@ -2302,7 +2302,7 @@ def test_ai_calls_require_sample_scoped_data_sharing_confirmation(
     consent = next(
         checkbox
         for checkbox in at.checkbox
-        if checkbox.label.startswith("I confirm the sharing scope above")
+        if checkbox.label.startswith("Review (changed) sharing scope")
     )
     consent.check().run()
     assert any(
@@ -2323,7 +2323,7 @@ def test_ai_calls_require_sample_scoped_data_sharing_confirmation(
     next(
         checkbox
         for checkbox in at.checkbox
-        if checkbox.label.startswith("I confirm the sharing scope above")
+        if checkbox.label.startswith("Review (changed) sharing scope")
     ).check().run()
 
     next(button for button in at.button if button.label == "Seed Copilot history").click().run()
@@ -3054,12 +3054,14 @@ def test_ai_sharing_confirmation_is_not_requested_again_across_unchanged_steps()
 
     rendered = AppTest.from_function(app).run()
     consent = next(
-        item for item in rendered.checkbox if item.label.startswith("I confirm the sharing scope")
+        item
+        for item in rendered.checkbox
+        if item.label.startswith("Review (changed) sharing scope")
     )
     confirmed = consent.check().run()
     signature = confirmed.session_state[ai_config_studio_page.AI_SHARING_CONFIRMATION_STATE_KEY]
     assert all(
-        not item.label.startswith("I confirm the sharing scope") for item in confirmed.checkbox
+        not item.label.startswith("Review (changed) sharing scope") for item in confirmed.checkbox
     )
 
     continued = confirmed
@@ -3075,7 +3077,8 @@ def test_ai_sharing_confirmation_is_not_requested_again_across_unchanged_steps()
             == signature
         )
         assert all(
-            not item.label.startswith("I confirm the sharing scope") for item in continued.checkbox
+            not item.label.startswith("Review (changed) sharing scope")
+            for item in continued.checkbox
         )
 
 

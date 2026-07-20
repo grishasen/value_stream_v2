@@ -18,7 +18,6 @@ from streamlit.testing.v1 import AppTest
 
 from valuestream.config import model
 from valuestream.config.loader import load
-from valuestream.expr.translator import translate
 from valuestream.query import executor
 from valuestream.states import kll, topk
 from valuestream.ui import builder, dimension_profile, forms
@@ -2852,10 +2851,9 @@ def test_dimension_profile_classifies_group_by_candidates() -> None:
     assert rows["Issue"].safe_for_group_by == "Review"
     assert rows["CustomerID"].safe_for_group_by == "No"
     assert "Safe For Group-By" in dimension_profile.profile_frame(list(rows.values())).columns
-    assert dimension_profile.dimension_pack_fields(sample.columns)[:3] == [
+    assert dimension_profile.dimension_pack_fields(sample.columns) == [
         "Channel",
         "Issue",
-        "CustomerType",
     ]
     assert dimension_profile.sketch_recommendations(list(rows.values()))[0]["Sketch"] == "CPC"
 
@@ -3032,24 +3030,6 @@ def test_exploration_processor_helpers_generate_valid_yaml_shapes() -> None:
             },
         }
     )
-    sample = pl.DataFrame(
-        {
-            "Day": ["2026-06-01", "2026-06-02"],
-            "Channel": ["Web", "Mobile"],
-            "Issue": ["Cards", "Loans"],
-            "Campaign": ["Retention", "CrossSell"],
-            "CustomerID": ["c1", "c2"],
-        }
-    )
-
-    temporary = config_builder._temporary_processor_def(
-        processor,
-        source,
-        ["Channel", "Issue"],
-        ttl_days=7,
-        window_days=30,
-        sample=sample,
-    )
     sketch, metrics = config_builder._sketch_processor_and_metrics(
         source,
         base_processor=processor,
@@ -3060,14 +3040,8 @@ def test_exploration_processor_helpers_generate_valid_yaml_shapes() -> None:
         include_theta=True,
     )
 
-    assert temporary["dimensions"] == ["Channel", "Issue"]
-    assert temporary["exploration"]["temporary"] is True
-    assert temporary["exploration"]["ttl_days"] == 7
-    assert temporary["filter"]["polars"].startswith("pl.col('Day').cast(pl.String) >=")
-    parsed_temporary = model.BinaryOutcomeProcessor.model_validate(temporary)
-    assert parsed_temporary.filter is not None
-    assert translate(parsed_temporary.filter) is not None
     assert sketch["kind"] == "entity_set"
+    assert sketch["exploration"]["temporary"] is True
     assert {state["type"] for state in sketch["states"].values()} == {"topk", "cpc", "theta"}
     assert {metric["kind"] for metric in metrics.values()} == {
         "topk_items",
@@ -3936,6 +3910,38 @@ def test_write_definitions_bootstrap_nonexistent_workspace(tmp_path: Path) -> No
 
 
 @pytest.mark.unit
+def test_validate_workspace_accepts_observed_data_only_columns(tmp_path: Path) -> None:
+    workspace = tmp_path / "observed_columns_workspace"
+    builder.write_source_definition(
+        workspace,
+        {
+            "id": "ih",
+            "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+            "schema": {
+                "timestamp_column": "OutcomeTime",
+                "natural_key": ["CustomerID"],
+            },
+            "transforms": [
+                {
+                    "kind": "filter",
+                    "expression": {"op": "eq", "column": "ActionContext", "value": "Web"},
+                }
+            ],
+        },
+    )
+
+    ok, issues = builder.validate_workspace(workspace)
+    assert not ok
+    assert any("'ActionContext' not found in schema" in issue for issue in issues)
+
+    ok, issues = builder.validate_workspace(
+        workspace,
+        source_columns_by_id={"ih": ["ActionContext", "CustomerID", "OutcomeTime"]},
+    )
+    assert ok, issues
+
+
+@pytest.mark.unit
 def test_write_processor_definition_replaces_in_place_without_reordering(
     tmp_path: Path,
 ) -> None:
@@ -4299,6 +4305,120 @@ def test_compile_filter_rows_builds_expression_ast() -> None:
 
 
 @pytest.mark.unit
+def test_compile_condition_rows_supports_any_combinator() -> None:
+    rows = [
+        {"Field": "Channel", "Operator": "==", "Value": "Web", "Enabled": True},
+        {"Field": "Channel", "Operator": "==", "Value": "Mobile", "Enabled": True},
+    ]
+
+    assert builder.compile_condition_rows(rows, combine="any") == {
+        "op": "or",
+        "args": [
+            {"op": "eq", "column": "Channel", "value": "Web"},
+            {"op": "eq", "column": "Channel", "value": "Mobile"},
+        ],
+    }
+    assert builder.compile_condition_rows(rows[:1], combine="any") == {
+        "op": "eq",
+        "column": "Channel",
+        "value": "Web",
+    }
+    assert builder.compile_condition_rows([], combine="any") is None
+
+
+@pytest.mark.unit
+def test_compile_case_expression_builds_validated_case_ast() -> None:
+    expression = builder.compile_case_expression(
+        [
+            {
+                "conditions": [
+                    {"Field": "Revenue", "Operator": ">", "Value": "100", "Enabled": True},
+                    {"Field": "Channel", "Operator": "==", "Value": "Web", "Enabled": True},
+                ],
+                "combine": "all",
+                "then_kind": "Literal",
+                "then_value": "High",
+            },
+            {
+                "conditions": [
+                    {"Field": "Revenue", "Operator": ">", "Value": "10", "Enabled": True},
+                ],
+                "combine": "any",
+                "then_kind": "Field",
+                "then_value": "Segment",
+            },
+        ],
+        else_kind="Literal",
+        else_value="Standard",
+    )
+
+    assert expression == {
+        "op": "case",
+        "when": [
+            {
+                "cond": {
+                    "op": "and",
+                    "args": [
+                        {"op": "gt", "column": "Revenue", "value": 100},
+                        {"op": "eq", "column": "Channel", "value": "Web"},
+                    ],
+                },
+                "then": {"lit": "High"},
+            },
+            {
+                "cond": {"op": "gt", "column": "Revenue", "value": 10},
+                "then": {"col": "Segment"},
+            },
+        ],
+        "else": {"lit": "Standard"},
+    }
+    validation = builder.validate_calculated_expression(
+        "AST YAML", builder.expression_yaml(expression)
+    )
+    assert validation.valid
+
+
+@pytest.mark.unit
+def test_compile_case_expression_reports_branch_level_problems() -> None:
+    complete_row = {"Field": "Revenue", "Operator": ">", "Value": "1", "Enabled": True}
+
+    with pytest.raises(ValueError, match="branch 1 needs at least one complete condition row"):
+        builder.compile_case_expression(
+            [{"conditions": [], "combine": "all", "then_kind": "Literal", "then_value": "x"}],
+            else_kind="Literal",
+            else_value="",
+        )
+    with pytest.raises(ValueError, match="branch 1: a field name is required"):
+        builder.compile_case_expression(
+            [
+                {
+                    "conditions": [complete_row],
+                    "combine": "all",
+                    "then_kind": "Field",
+                    "then_value": "",
+                }
+            ],
+            else_kind="Literal",
+            else_value="",
+        )
+    with pytest.raises(ValueError, match="else value: a field name is required"):
+        builder.compile_case_expression(
+            [
+                {
+                    "conditions": [complete_row],
+                    "combine": "all",
+                    "then_kind": "Literal",
+                    "then_value": "x",
+                }
+            ],
+            else_kind="Field",
+            else_value="",
+        )
+    with pytest.raises(ValueError, match="add at least one branch"):
+        builder.compile_case_expression([], else_kind="Literal", else_value="")
+
+
+@pytest.mark.unit
 def test_build_derive_column_transforms_validates_expression_yaml() -> None:
     transforms = builder.build_derive_column_transforms(
         [
@@ -4510,16 +4630,17 @@ def test_calculated_expression_editor_requires_explicit_apply_and_cancel() -> No
             ["Name", "Enabled", "Mode", "Expression", "Left", "Right Kind", "Right"],
             builder.blank_calculated_row,
         )
-        page._render_calculated_rows_editor(calc_key, editor_key, frame)
+        page._render_calculated_rows_editor(calc_key, editor_key, frame, ["Revenue", "Cost"])
 
     rendered = AppTest.from_function(app).run()
 
     assert not rendered.exception
-    assert rendered.text_area[0].label == "AST YAML expression"
+    assert rendered.text_area[0].label == "AST YAML expression direct editor"
     assert rendered.text_area[0].value == "col: Revenue"
     assert {button.label for button in rendered.button} == {
         "Cancel changes",
         "Apply expression",
+        "Generate expression",
     }
 
     invalid = (
@@ -4619,6 +4740,80 @@ def test_pending_expression_blocks_source_apply_until_explicit_expression_apply(
     )
     assert not workspace_apply.disabled
     assert rendered.session_state["builder_source_calcs_ih"][0]["Expression"] == "col: Cost"
+
+
+@pytest.mark.unit
+def test_visual_case_builder_generates_yaml_into_focused_editor(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    visual_base = "builder_source_calcs_editor_ih_expression_draft_0_visual"
+
+    def app(workspace: str, base: str) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        if "qa_visual_seeded" not in st.session_state:
+            st.session_state["qa_visual_seeded"] = True
+            st.session_state["builder_source_calcs_ih"] = [
+                {
+                    "Name": "RevenueBand",
+                    "Mode": "AST YAML",
+                    "Left": "",
+                    "Right Kind": "Field",
+                    "Right": "",
+                    "Expression": "col: Revenue",
+                    "Enabled": True,
+                }
+            ]
+            st.session_state[f"{base}_b0_rows"] = [
+                {"Field": "Revenue", "Operator": ">", "Value": "100", "Enabled": True}
+            ]
+            st.session_state[f"{base}_b0_then_value"] = "High"
+            st.session_state[f"{base}_else_value"] = "Standard"
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(
+        app, kwargs={"workspace": str(tmp_path), "base": visual_base}
+    ).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Sources").run()
+
+    assert not rendered.exception
+    generate = next(button for button in rendered.button if button.label == "Generate expression")
+    rendered = generate.click().run()
+
+    assert not rendered.exception
+    expected = builder.expression_yaml(
+        builder.compile_case_expression(
+            [
+                {
+                    "conditions": [
+                        {"Field": "Revenue", "Operator": ">", "Value": "100", "Enabled": True}
+                    ],
+                    "combine": "all",
+                    "then_kind": "Literal",
+                    "then_value": "High",
+                }
+            ],
+            else_kind="Literal",
+            else_value="Standard",
+        )
+    )
+    editor = next(
+        item for item in rendered.text_area if item.label == "AST YAML expression direct editor"
+    )
+    assert editor.value == expected
+    assert any("Generated expression inserted" in item.value for item in rendered.success)
+
+    expression_apply = next(
+        button for button in rendered.button if button.label == "Apply expression"
+    )
+    assert not expression_apply.disabled
+    rendered = expression_apply.click().run()
+
+    assert not rendered.exception
+    assert rendered.session_state["builder_source_calcs_ih"][0]["Expression"] == expected
 
 
 @pytest.mark.unit

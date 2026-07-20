@@ -216,7 +216,7 @@ def test_dark_theme_uses_accessible_surface_ladder() -> None:
         "backgroundColor": "#0B1017",
         "secondaryBackgroundColor": "#18212C",
         "textColor": "#F3F7FB",
-        "borderColor": "#304052",
+        "borderColor": "#5D7186",
         "dataframeHeaderBackgroundColor": "#18212C",
         "blueColor": "#6EA8FE",
         "violetColor": "#AD87ED",
@@ -236,8 +236,10 @@ def test_dark_theme_uses_accessible_surface_ladder() -> None:
         '"card": "#121a24"',
         '"soft": "#18212c"',
         '"border": "#304052"',
+        '"input-border": "#5d7186"',
         '"action": "#6ea8fe"',
         '"verified": "#4fd1c5"',
+        '"danger": "#f28b82"',
         '"muted": "#a9b5c2"',
     ):
         assert token in theme_source
@@ -291,12 +293,27 @@ def test_authoring_theme_tokens_meet_wcag_aa_contrast() -> None:
         ("#17202A", "#F7F9FC"),
         ("#52606D", "#F7F9FC"),
         ("#FFFFFF", "#275DAD"),
+        ("#8C1D18", "#FFFFFF"),
         ("#F3F7FB", "#0B1017"),
         ("#A9B5C2", "#0B1017"),
         ("#08101C", "#6EA8FE"),
+        ("#F28B82", "#121A24"),
     )
     assert all(
         _contrast_ratio(foreground, background) >= 4.5 for foreground, background in required_pairs
+    )
+
+    # WCAG 1.4.11 non-text contrast: the field boundary against both the
+    # input fill (secondaryBackgroundColor) and the card behind it.
+    component_boundary_pairs = (
+        ("#7C8CA0", "#EEF3F8"),
+        ("#7C8CA0", "#FFFFFF"),
+        ("#5D7186", "#18212C"),
+        ("#5D7186", "#121A24"),
+    )
+    assert all(
+        _contrast_ratio(foreground, background) >= 3.0
+        for foreground, background in component_boundary_pairs
     )
 
 

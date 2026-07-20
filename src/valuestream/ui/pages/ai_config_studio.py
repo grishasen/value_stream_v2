@@ -2370,7 +2370,7 @@ def _render_defaults_editor(sample: pl.DataFrame) -> None:
             builder.blank_default_row,
         )
         edited = st.data_editor(
-            default_frame,
+            components.pinned_editor_input(editor_key, default_frame),
             num_rows="dynamic",
             hide_index=True,
             width="stretch",
@@ -2425,12 +2425,13 @@ def _render_filters_editor(sample: pl.DataFrame, filter_frame: pl.DataFrame) -> 
             help=config_help.field_help("source.filter_mode"),
         )
         if st.session_state["ai_studio_filter_mode"] == "Rules":
+            filter_editor_key = _schema_widget_key("ai_studio_filter_editor")
             edited = st.data_editor(
-                filter_frame,
+                components.pinned_editor_input(filter_editor_key, filter_frame),
                 num_rows="dynamic",
                 hide_index=True,
                 width="stretch",
-                key=_schema_widget_key("ai_studio_filter_editor"),
+                key=filter_editor_key,
                 column_config={
                     "Field": st.column_config.SelectboxColumn(
                         "Field",
@@ -2453,16 +2454,9 @@ def _render_filters_editor(sample: pl.DataFrame, filter_frame: pl.DataFrame) -> 
             )
             st.session_state["ai_studio_filter_rows"] = builder.normalize_editor_rows(edited)
             compiled = builder.compile_filter_rows(st.session_state["ai_studio_filter_rows"])
-            with st.expander("Technical details · compiled filter AST", expanded=False):
-                st.code(builder.expression_yaml(compiled) or "{}", language="yaml")
         else:
-            st.session_state["ai_studio_raw_filter"] = st.text_area(
-                "Filter AST YAML",
-                value=st.session_state["ai_studio_raw_filter"],
-                height=220,
-                placeholder="op: in\ncolumn: Outcome\nvalues: [Impression, Clicked, Pending, Conversion]",
-                help=config_help.field_help("source.filter_ast"),
-            )
+            compiled = builder.compile_filter_rows(st.session_state["ai_studio_filter_rows"])
+            st.code(builder.expression_yaml(compiled) or "{}", language="yaml")
         _render_stale_preprocessing_field_feedback("Filters")
     _persist_ai_studio_checkpoint()
 
@@ -2494,12 +2488,13 @@ def _render_calculations_editor(
                 'pl.col("Revenue") - pl.col("Cost")',
                 language="python",
             )
+        calculation_editor_key = _schema_widget_key("ai_studio_calculation_editor")
         edited = st.data_editor(
-            calculation_frame,
+            components.pinned_editor_input(calculation_editor_key, calculation_frame),
             num_rows="dynamic",
             hide_index=True,
             width="stretch",
-            key=_schema_widget_key("ai_studio_calculation_editor"),
+            key=calculation_editor_key,
             column_config={
                 "Name": st.column_config.TextColumn(
                     "Name", width="small", help=config_help.field_help("calculation.name")
@@ -3514,7 +3509,10 @@ def _render_workspace_save_bar(
             _apply_draft(ctx, draft)
             _mark_draft_published(draft)
             _discard_ai_studio_checkpoint()
-            workspace_ok, workspace_issues = builder.validate_workspace(ctx.workspace)
+            workspace_ok, workspace_issues = builder.validate_workspace(
+                ctx.workspace,
+                source_columns_by_id=_active_catalog_source_columns(),
+            )
             st.session_state["ai_studio_workspace_save_feedback"] = {
                 "ok": workspace_ok,
                 "issues": workspace_issues,
@@ -8582,7 +8580,10 @@ def _apply_draft(ctx: ValueStreamContext, draft: dict[str, Any]) -> None:
                     for key, value in dict(chat_settings.get("metric_descriptions") or {}).items()
                 },
             )
-        builder.require_valid_workspace(ctx.workspace)
+        builder.require_valid_workspace(
+            ctx.workspace,
+            source_columns_by_id=_active_catalog_source_columns(),
+        )
 
 
 def _draft_requires_data_run(ctx: ValueStreamContext, draft: dict[str, Any]) -> bool:

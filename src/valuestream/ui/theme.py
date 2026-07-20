@@ -15,10 +15,17 @@ _CHROME_TOKENS: dict[str, dict[str, str]] = {
         "ink": "#17202a",
         "muted": "#52606d",
         "border": "#d5dee8",
+        # Field boundary: 3.08:1 on the #eef3f8 input fill, 3.43:1 on card
+        # white (WCAG 1.4.11). Mirrors borderColor in .streamlit/config.toml.
+        "input-border": "#7c8ca0",
         "action": "#275dad",
+        "action-hover": "#1e4a8f",
         "attention": "#b45309",
         "attention-soft": "#fff7ed",
         "verified": "#0f766e",
+        "danger": "#b3261e",
+        "danger-soft": "#fceeee",
+        "danger-ink": "#8c1d18",
         "sage": "#e7eef8",
         "soft": "#eef3f8",
         "color-scheme": "light",
@@ -32,10 +39,16 @@ _CHROME_TOKENS: dict[str, dict[str, str]] = {
         "ink": "#f3f7fb",
         "muted": "#a9b5c2",
         "border": "#304052",
+        # 3.23:1 on the #18212c input fill, 3.48:1 on card.
+        "input-border": "#5d7186",
         "action": "#6ea8fe",
+        "action-hover": "#8ebafe",
         "attention": "#fbbf24",
         "attention-soft": "rgba(245, 158, 11, 0.12)",
         "verified": "#4fd1c5",
+        "danger": "#f28b82",
+        "danger-soft": "#3a1512",
+        "danger-ink": "#f28b82",
         "sage": "#18263a",
         "soft": "#18212c",
         "color-scheme": "dark",
@@ -178,6 +191,19 @@ __VS_ACTIVE_CSS_VARS__
             color: var(--vs-muted);
         }
 
+        /* Field labels read as ink, one clear step above muted captions. */
+        .block-container [data-testid="stWidgetLabel"] p,
+        section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+        div[data-testid="stDialog"] [data-testid="stWidgetLabel"] p {
+            color: var(--vs-ink);
+            font-weight: 600;
+        }
+
+        .block-container [data-testid="stCheckbox"] [data-testid="stMarkdownContainer"] p,
+        .block-container [data-testid="stToggle"] [data-testid="stMarkdownContainer"] p {
+            color: var(--vs-ink);
+        }
+
         .block-container [data-testid="stCaptionContainer"],
         section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
             opacity: 1 !important;
@@ -279,6 +305,42 @@ __VS_ACTIVE_CSS_VARS__
             color: var(--vs-ink) !important;
         }
 
+        button[kind="primary"]:hover:not(:disabled),
+        button[kind="primary"]:active:not(:disabled) {
+            background-color: var(--vs-action-hover) !important;
+            border-color: var(--vs-action-hover) !important;
+        }
+
+        /*
+         * Destructive actions share the builder_delete_ key prefix; cancel
+         * buttons inside the same dialogs carry _cancel_ and stay neutral.
+         * Triggers are secondary (danger outline); the cascade confirm is
+         * primary (danger fill) and must not fall back to the blue hover.
+         */
+        div[class*="st-key-builder_delete_"]:not([class*="_cancel_"]) button[kind="secondary"],
+        div[class*="st-key-builder_delete_"]:not([class*="_cancel_"]) button[kind="secondary"] p,
+        div[class*="st-key-builder_delete_"]:not([class*="_cancel_"]) button[kind="secondary"] [data-testid="stIconMaterial"] {
+            border-color: var(--vs-danger) !important;
+            color: var(--vs-danger-ink) !important;
+        }
+
+        div[class*="st-key-builder_delete_"] button[kind="primary"]:not(:disabled),
+        div[class*="st-key-builder_delete_"] button[kind="primary"]:hover:not(:disabled),
+        div[class*="st-key-builder_delete_"] button[kind="primary"]:active:not(:disabled) {
+            background-color: var(--vs-danger) !important;
+            border-color: var(--vs-danger) !important;
+        }
+
+        div[class*="st-key-vs_source_picker"] div[data-testid="stLinkButton"] a,
+        div[class*="st-key-vs_source_picker"] div[data-testid="stLinkButton"] a p,
+        div[class*="st-key-vs_source_picker"] div[data-testid="stLinkButton"] a [data-testid="stIconMaterial"],
+        div[class*="st-key-vs_processor_picker"] div[data-testid="stLinkButton"] a,
+        div[class*="st-key-vs_processor_picker"] div[data-testid="stLinkButton"] a p,
+        div[class*="st-key-vs_processor_picker"] div[data-testid="stLinkButton"] a [data-testid="stIconMaterial"] {
+            border-color: var(--vs-action) !important;
+            color: var(--vs-action) !important;
+        }
+
         div[data-testid="stSegmentedControl"] button[aria-checked="false"],
         div[data-testid="stButtonGroup"] button[aria-checked="false"] {
             background: var(--vs-card) !important;
@@ -288,9 +350,16 @@ __VS_ACTIVE_CSS_VARS__
 
         div[data-testid="stSegmentedControl"] button[aria-checked="true"],
         div[data-testid="stButtonGroup"] button[aria-checked="true"] {
-            background: var(--vs-sage) !important;
+            background: var(--vs-action) !important;
             border-color: var(--vs-action) !important;
-            color: var(--vs-ink) !important;
+            color: var(--vs-primary-fg) !important;
+        }
+
+        div[data-testid="stSegmentedControl"] button[aria-checked="true"] p,
+        div[data-testid="stButtonGroup"] button[aria-checked="true"] p,
+        div[data-testid="stSegmentedControl"] button[aria-checked="true"] [data-testid="stIconMaterial"],
+        div[data-testid="stButtonGroup"] button[aria-checked="true"] [data-testid="stIconMaterial"] {
+            color: var(--vs-primary-fg) !important;
         }
 
         div[class*="st-key-vs_ai_copilot_primary"] {
@@ -333,6 +402,36 @@ __VS_ACTIVE_CSS_VARS__
 
         div[class*="st-key-vs_ai_sharing_consent"] [data-testid="stCaptionContainer"] p {
             color: var(--vs-ink) !important;
+        }
+
+        div[class*="st-key-vs_processor_picker"] {
+            background: var(--vs-sage);
+            border: 1px solid var(--vs-action);
+            border-left-width: 0.35rem;
+            border-radius: 0.8rem;
+            box-shadow: 0 1px 2px var(--vs-shadow);
+            margin: 0.35rem 0 0.75rem;
+            padding: 0.65rem 0.85rem 0.85rem;
+        }
+
+        div[class*="st-key-vs_processor_picker"] [data-testid="stWidgetLabel"] p {
+            color: var(--vs-ink) !important;
+            font-weight: 650;
+        }
+
+        div[class*="st-key-vs_source_picker"] {
+            background: var(--vs-sage);
+            border: 1px solid var(--vs-action);
+            border-left-width: 0.35rem;
+            border-radius: 0.8rem;
+            box-shadow: 0 1px 2px var(--vs-shadow);
+            margin: 0.35rem 0 0.75rem;
+            padding: 0.65rem 0.85rem 0.85rem;
+        }
+
+        div[class*="st-key-vs_source_picker"] [data-testid="stWidgetLabel"] p {
+            color: var(--vs-ink) !important;
+            font-weight: 650;
         }
 
         button:focus-visible,
@@ -405,7 +504,7 @@ __VS_ACTIVE_CSS_VARS__
         div[data-testid="stTable"] th,
         div[data-testid="stTable"] td {
             background: var(--vs-card) !important;
-            border-color: var(--vs-border) !important;
+            border-color: var(--vs-input-border) !important;
             color: var(--vs-ink) !important;
         }
 

@@ -136,7 +136,6 @@ BUILDER_STEP_BY_QUERY_VALUE = {
     query_value: step for step, query_value in BUILDER_STEP_QUERY_VALUES.items()
 }
 BUILDER_LAST_OUTCOME_KEY = "builder_last_apply_outcome"
-BUILDER_DIMENSION_PROPOSALS_KEY = "builder_dimension_pending_proposals"
 BUILDER_PENDING_TILE_DELETE_KEY = "builder_tile_delete_draft"
 BUILDER_POST_APPLY_CLEANUP_KEY = "builder_post_apply_cleanup"
 BUILDER_SOURCE_INSPECTION_SCOPE_KEY = "builder_source_inspection_scope"
@@ -578,9 +577,7 @@ def _builder_steps(ctx: ValueStreamContext) -> None:
             on_click=_set_builder_step,
             args=(steps[max(index - 1, 0)],),
         )
-        task_nav_col.caption(
-            "Jump when you know where to go; the primary Continue action keeps the guided order."
-        )
+        task_nav_col.caption("Go back or press Continue to follow the guided order.")
     draft_slot = st.empty()
     # Claim the cross-fragment draft region on the full app run. Some editor
     # modes return before rendering a draft, then populate it on a fragment
@@ -1024,25 +1021,6 @@ def _render_outcome_handoff() -> None:
     )
 
 
-def _dimension_pending_proposals() -> dict[str, dict[str, Any]]:
-    raw = st.session_state.get(BUILDER_DIMENSION_PROPOSALS_KEY)
-    return dict(raw) if isinstance(raw, dict) else {}
-
-
-def _stage_dimension_proposal(
-    key: str,
-    processor_def: dict[str, Any],
-    *,
-    metric_defs: Mapping[str, dict[str, Any]] | None = None,
-) -> None:
-    proposals = _dimension_pending_proposals()
-    proposals[key] = {
-        "processor": processor_def,
-        "metrics": dict(metric_defs or {}),
-    }
-    st.session_state[BUILDER_DIMENSION_PROPOSALS_KEY] = proposals
-
-
 def _report_inventory_tab(catalog: model.Catalog) -> None:
     rows = _report_inventory_rows(catalog)
     if not rows:
@@ -1193,7 +1171,7 @@ def _render_default_values_editor(
     if default_frame.is_empty():
         st.info("No default values yet — choose a field above or add a row below.")
     edited_defaults = st.data_editor(
-        default_frame,
+        components.pinned_editor_input(editor_key, default_frame),
         num_rows="dynamic",
         hide_index=True,
         width="stretch",
@@ -1229,7 +1207,7 @@ def _render_filter_rows_editor(
     if getattr(filter_frame, "is_empty", lambda: False)():
         st.info("No filters yet — add a row below when the source needs one.")
     edited_filters = st.data_editor(
-        filter_frame,
+        components.pinned_editor_input(editor_key, filter_frame),
         num_rows="dynamic",
         hide_index=True,
         width="stretch",
@@ -1262,8 +1240,7 @@ def _render_filter_rows_editor(
     )
     st.session_state[rows_key] = builder.normalize_editor_rows(edited_filters)
     try:
-        compiled_filter = builder.compile_filter_rows(st.session_state[rows_key])
-        _technical_yaml("Compiled filter AST", builder.expression_yaml(compiled_filter) or "{}")
+        builder.compile_filter_rows(st.session_state[rows_key])
     except Exception as exc:
         logger.exception("Failed to compile filter rows: editor_key=%s", editor_key)
         st.error(str(exc))
@@ -1273,11 +1250,12 @@ def _render_calculated_rows_editor(
     calc_key: str,
     editor_key: str,
     calculation_frame: Any,
+    field_options: list[str],
 ) -> bool:
     if getattr(calculation_frame, "is_empty", lambda: False)():
         st.info("No calculated fields yet — add a row below when you need one.")
     edited_calcs = st.data_editor(
-        calculation_frame,
+        components.pinned_editor_input(editor_key, calculation_frame),
         num_rows="dynamic",
         hide_index=True,
         width="stretch",
@@ -1336,6 +1314,7 @@ def _render_calculated_rows_editor(
         editor_key,
         rows,
         validations,
+        field_options,
     )
     st.session_state[f"{calc_key}_expression_pending"] = any(
         _calculated_expression_has_pending_draft(editor_key, index, row)
@@ -1377,11 +1356,12 @@ def _calculated_expression_validations(
     }
 
 
-def _render_focused_calculated_expression_editor(  # noqa: PLR0912
+def _render_focused_calculated_expression_editor(  # noqa: PLR0912, PLR0915
     calc_key: str,
     editor_key: str,
     rows: list[dict[str, Any]],
     validations: Mapping[int, builder.CalculatedExpressionValidation],
+    field_options: list[str],
 ) -> int | None:
     """Render a multiline, explicit-commit editor for custom expressions."""
 
@@ -1421,7 +1401,7 @@ def _render_focused_calculated_expression_editor(  # noqa: PLR0912
     with st.container(border=True):
         st.write("#### Focused expression editor")
         st.caption(
-            "The grid keeps a read-only preview. Work here is preserved across reruns and "
+            "Work here is preserved across reruns and "
             "changes the calculated row only when you choose Apply expression."
         )
         if pending_count:
@@ -1438,9 +1418,12 @@ def _render_focused_calculated_expression_editor(  # noqa: PLR0912
             key=selection_key,
             help="Choose the row whose AST YAML or Polars expression you want to edit.",
         )
-        row = rows[int(active_index)]
+        if active_index is None:
+            return None
+        active_row_index = int(active_index)
+        row = rows[active_row_index]
         mode = str(row.get("Mode", "") or "AST YAML")
-        draft_key = _calculated_expression_draft_key(editor_key, int(active_index))
+        draft_key = _calculated_expression_draft_key(editor_key, active_row_index)
         input_key = f"{draft_key}_input"
         current_expression = str(row.get("Expression", "") or "")
         if draft_key not in st.session_state:
@@ -1448,7 +1431,7 @@ def _render_focused_calculated_expression_editor(  # noqa: PLR0912
         if input_key not in st.session_state:
             st.session_state[input_key] = st.session_state[draft_key]
         working_expression = st.text_area(
-            f"{mode} expression",
+            f"{mode} expression direct editor",
             height=260,
             key=input_key,
             placeholder=builder.calculated_expression_example(mode),
@@ -1473,6 +1456,14 @@ def _render_focused_calculated_expression_editor(  # noqa: PLR0912
             if validation.technical_details:
                 with st.expander("Technical details", expanded=False):
                     st.code(validation.technical_details, language="text")
+
+        if mode == "AST YAML":
+            _render_visual_case_builder(
+                draft_key=draft_key,
+                input_key=input_key,
+                notice_key=notice_key,
+                field_options=_condition_field_options(field_options, rows, active_row_index),
+            )
 
         st.caption("Copy-ready example")
         st.code(
@@ -1500,13 +1491,13 @@ def _render_focused_calculated_expression_editor(  # noqa: PLR0912
             args=(
                 calc_key,
                 editor_key,
-                int(active_index),
+                active_row_index,
                 draft_key,
                 input_key,
                 notice_key,
             ),
         )
-    return int(active_index)
+    return active_row_index
 
 
 def _calculated_expression_row_label(index: int, row: Mapping[str, Any]) -> str:
@@ -1580,13 +1571,239 @@ def _apply_calculated_expression_draft(
     st.session_state[notice_key] = ("success", "Expression applied to the calculated row.")
 
 
+_VISUAL_SHAPE_CASE = "Case / when value"
+_VISUAL_SHAPE_CONDITION = "Boolean condition (true/false)"
+_VISUAL_COMBINE_ALL = "All condition rows (AND)"
+_VISUAL_COMBINE_ANY = "Any condition row (OR)"
+_VISUAL_VALUE_KINDS = ["Literal", "Field"]
+
+
+def _condition_field_options(
+    field_options: list[str],
+    rows: list[dict[str, Any]],
+    active_index: int,
+) -> list[str]:
+    """Source fields plus the other calculated-field names, for condition rows."""
+
+    calculated_names = [
+        str(row.get("Name", "")).strip()
+        for index, row in enumerate(rows)
+        if index != active_index and str(row.get("Name", "")).strip()
+    ]
+    return builder.dedupe([*field_options, *calculated_names])
+
+
+def _render_visual_case_builder(
+    *,
+    draft_key: str,
+    input_key: str,
+    notice_key: str,
+    field_options: list[str],
+) -> None:
+    """Structured case/when and condition-chain authoring for AST YAML rows."""
+
+    base = f"{draft_key}_visual"
+    with st.expander("Visual builder · conditions and case/when", expanded=True):
+        st.caption(
+            "Compose the expression from condition rows and result values — no YAML typing. "
+            "Generate expression fills the editor above; review the YAML and choose "
+            "Apply expression to commit it."
+        )
+        shape = st.selectbox(
+            "Build",
+            [_VISUAL_SHAPE_CASE, _VISUAL_SHAPE_CONDITION],
+            key=f"{base}_shape",
+            help=config_help.field_help("calculation.visual_shape"),
+        )
+        boolean_only = shape == _VISUAL_SHAPE_CONDITION
+        if boolean_only:
+            branch_count = 1
+        else:
+            branch_count = int(
+                st.number_input(
+                    "Branches",
+                    min_value=1,
+                    max_value=8,
+                    value=1,
+                    key=f"{base}_branches",
+                    help=config_help.field_help("calculation.visual_branches"),
+                )
+            )
+        for index in range(branch_count):
+            _render_visual_case_branch(
+                base,
+                index,
+                field_options=field_options,
+                boolean_only=boolean_only,
+            )
+        if not boolean_only:
+            st.write("**Else**")
+            kind_col, value_col = st.columns([0.3, 0.7], vertical_alignment="bottom")
+            kind_col.selectbox(
+                "Else kind",
+                _VISUAL_VALUE_KINDS,
+                key=f"{base}_else_kind",
+                help=config_help.field_help("calculation.visual_value_kind"),
+            )
+            value_col.text_input(
+                "Else value",
+                key=f"{base}_else_value",
+                help=config_help.field_help("calculation.visual_else_value"),
+            )
+        st.button(
+            "Generate expression",
+            icon=":material/magic_button:",
+            key=f"{base}_generate",
+            on_click=_generate_visual_case_expression,
+            args=(base, branch_count, boolean_only, draft_key, input_key, notice_key),
+        )
+
+
+def _render_visual_case_branch(
+    base: str,
+    index: int,
+    *,
+    field_options: list[str],
+    boolean_only: bool,
+) -> None:
+    rows_key = f"{base}_b{index}_rows"
+    if rows_key not in st.session_state:
+        st.session_state[rows_key] = [builder.blank_filter_row()]
+    st.write("**Condition**" if boolean_only else f"**Branch {index + 1}**")
+    condition_frame = builder.editor_frame(
+        st.session_state[rows_key],
+        ["Field", "Operator", "Value", "Enabled"],
+        builder.blank_filter_row,
+    )
+    edited = st.data_editor(
+        components.pinned_editor_input(f"{base}_b{index}_editor", condition_frame),
+        num_rows="dynamic",
+        hide_index=True,
+        width="stretch",
+        key=f"{base}_b{index}_editor",
+        column_config={
+            "Field": st.column_config.SelectboxColumn(
+                "Field",
+                options=field_options,
+                required=False,
+                width="medium",
+                help=config_help.field_help("filter.field"),
+            ),
+            "Operator": st.column_config.SelectboxColumn(
+                "Operator",
+                options=builder.FILTER_OPERATORS,
+                required=False,
+                width="small",
+                help=config_help.field_help("filter.operator"),
+            ),
+            "Value": st.column_config.TextColumn(
+                "Value", width="large", help=config_help.field_help("filter.value")
+            ),
+            "Enabled": st.column_config.CheckboxColumn(
+                "Enabled",
+                width="small",
+                default=True,
+                help=config_help.field_help("row.enabled"),
+            ),
+        },
+    )
+    st.session_state[rows_key] = builder.normalize_editor_rows(edited)
+    if boolean_only:
+        st.selectbox(
+            "Combine condition rows",
+            [_VISUAL_COMBINE_ALL, _VISUAL_COMBINE_ANY],
+            key=f"{base}_b{index}_combine",
+            help=config_help.field_help("calculation.visual_combine"),
+        )
+        return
+    combine_col, kind_col, value_col = st.columns([0.4, 0.25, 0.35], vertical_alignment="bottom")
+    combine_col.selectbox(
+        "Combine condition rows",
+        [_VISUAL_COMBINE_ALL, _VISUAL_COMBINE_ANY],
+        key=f"{base}_b{index}_combine",
+        help=config_help.field_help("calculation.visual_combine"),
+    )
+    kind_col.selectbox(
+        "Then kind",
+        _VISUAL_VALUE_KINDS,
+        key=f"{base}_b{index}_then_kind",
+        help=config_help.field_help("calculation.visual_value_kind"),
+    )
+    value_col.text_input(
+        "Then value",
+        key=f"{base}_b{index}_then_value",
+        help=config_help.field_help("calculation.visual_value"),
+    )
+
+
+def _visual_branch_combine(base: str, index: int) -> str:
+    label = str(st.session_state.get(f"{base}_b{index}_combine", "") or "")
+    return "any" if label == _VISUAL_COMBINE_ANY else "all"
+
+
+def _compile_visual_builder_state(
+    base: str,
+    branch_count: int,
+    boolean_only: bool,
+) -> dict[str, Any]:
+    if boolean_only:
+        condition = builder.compile_condition_rows(
+            builder.normalize_editor_rows(st.session_state.get(f"{base}_b0_rows", [])),
+            combine=_visual_branch_combine(base, 0),
+        )
+        if condition is None:
+            raise ValueError("add at least one complete condition row (field and operator)")
+        return condition
+    branches = [
+        {
+            "conditions": builder.normalize_editor_rows(
+                st.session_state.get(f"{base}_b{index}_rows", [])
+            ),
+            "combine": _visual_branch_combine(base, index),
+            "then_kind": str(st.session_state.get(f"{base}_b{index}_then_kind", "") or "Literal"),
+            "then_value": st.session_state.get(f"{base}_b{index}_then_value", ""),
+        }
+        for index in range(branch_count)
+    ]
+    return builder.compile_case_expression(
+        branches,
+        else_kind=str(st.session_state.get(f"{base}_else_kind", "") or "Literal"),
+        else_value=st.session_state.get(f"{base}_else_value", ""),
+    )
+
+
+def _generate_visual_case_expression(
+    base: str,
+    branch_count: int,
+    boolean_only: bool,
+    draft_key: str,
+    input_key: str,
+    notice_key: str,
+) -> None:
+    """Compile the visual-builder state into AST YAML for the focused editor."""
+
+    try:
+        expression = _compile_visual_builder_state(base, branch_count, boolean_only)
+    except ValueError as exc:
+        st.session_state[notice_key] = ("error", f"Visual builder: {exc}")
+        return
+    text = builder.expression_yaml(expression)
+    st.session_state[draft_key] = text
+    st.session_state[input_key] = text
+    st.session_state[notice_key] = (
+        "success",
+        "Generated expression inserted into the working editor. Review the YAML and "
+        "choose Apply expression to commit it.",
+    )
+
+
 def _render_state_rows_editor(
     state_key: str,
     editor_key: str,
     state_frame: Any,
 ) -> None:
     edited_states = st.data_editor(
-        state_frame,
+        components.pinned_editor_input(editor_key, state_frame),
         num_rows="dynamic",
         hide_index=True,
         width="stretch",
@@ -1890,34 +2107,35 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         _render_continue_primary(save_slot)
         return
 
-    source_col, add_col, delete_col = st.columns([6, 2, 2], vertical_alignment="bottom")
-    with source_col:
-        source = st.selectbox(
-            "Source",
-            ctx.catalog.pipelines.sources,
-            format_func=_source_choice_label_edit,
-            key="builder_source_select",
-            help=config_help.field_help("source.selector"),
+    with st.container(key="vs_source_picker"):
+        source_col, add_col, delete_col = st.columns([6, 2, 2], vertical_alignment="bottom")
+        with source_col:
+            source = st.selectbox(
+                "Source",
+                ctx.catalog.pipelines.sources,
+                format_func=_source_choice_label_edit,
+                key="builder_source_select",
+                help=config_help.field_help("source.selector"),
+            )
+        add_col.link_button(
+            "Add source",
+            BUILDER_ADD_SOURCE_URL,
+            icon=":material/add_circle:",
+            width="stretch",
+            help=(
+                "Open the deterministic, sample-first Studio for this active workspace. "
+                "The Studio provides a direct return here after apply or cancel."
+            ),
         )
-    add_col.link_button(
-        "Add source",
-        BUILDER_ADD_SOURCE_URL,
-        icon=":material/add_circle:",
-        width="stretch",
-        help=(
-            "Open the deterministic, sample-first Studio for this active workspace. "
-            "The Studio provides a direct return here after apply or cancel."
-        ),
-    )
-    if delete_col.button(
-        "Delete source",
-        icon=":material/delete_forever:",
-        width="stretch",
-        key="builder_delete_source",
-        help="Preview and remove this Source together with its dependent catalog definitions.",
-    ):
-        st.session_state[f"builder_delete_source_confirm_{source.id}"] = False
-        _delete_source_dialog(ctx, source.id)
+        if delete_col.button(
+            "Delete source",
+            icon=":material/delete_forever:",
+            width="stretch",
+            key="builder_delete_source",
+            help="Preview and remove this Source together with its dependent catalog definitions.",
+        ):
+            st.session_state[f"builder_delete_source_confirm_{source.id}"] = False
+            _delete_source_dialog(ctx, source.id)
     rename_key = f"builder_source_rename_capitalize_{source.id}"
     if rename_key not in st.session_state:
         st.session_state[rename_key] = _source_has_transform(
@@ -2099,19 +2317,11 @@ def _source_builder(  # noqa: PLR0912, PLR0915
                 logger.exception("Failed to compile source filter rows: source=%s", source.id)
                 compiled_filter = None
         else:
-            raw_key = f"builder_source_raw_filter_{source.id}"
             raw_default = builder.expression_yaml(filter_expression)
-            raw_filter = st.text_area(
-                "Filter AST YAML",
-                value=st.session_state.setdefault(raw_key, raw_default),
-                height=220,
-                key=f"{raw_key}_editor",
-                help=config_help.field_help("source.filter_ast"),
-            )
-            st.session_state[raw_key] = raw_filter
             compiled_filter = (
-                builder.parse_expression_yaml(raw_filter) if raw_filter.strip() else None
+                builder.parse_expression_yaml(raw_default) if raw_default.strip() else None
             )
+            st.code(builder.expression_yaml(compiled_filter) or "{}", language="yaml")
 
     with components.bordered_panel(
         "Calculated Fields",
@@ -2148,6 +2358,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             calc_key,
             f"builder_source_calcs_editor_{source.id}",
             calculation_frame,
+            field_options,
         )
         calculated_expression_pending = bool(
             st.session_state.get(f"{calc_key}_expression_pending", False)
@@ -2175,13 +2386,6 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         "Generated configuration",
     ):
         _technical_yaml(
-            "Generated source transforms",
-            yaml.safe_dump(
-                {"transforms": source_def.get("transforms", [])},
-                sort_keys=False,
-            ),
-        )
-        _technical_yaml(
             "Generated source YAML",
             yaml.safe_dump({"sources": [source_def]}, sort_keys=False),
         )
@@ -2201,7 +2405,9 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         help_text=f"Validate and apply source {source.id!r} to the active workspace.",
     ):
         try:
-            with builder.validated_catalog_transaction(ctx.workspace):
+            with builder.validated_catalog_transaction(
+                ctx.workspace, source_columns_by_id=_observed_source_columns()
+            ):
                 builder.write_source_definition(ctx.workspace, source_def)
             _complete_builder_apply(
                 status=draft_status,
@@ -2218,9 +2424,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
 
 
 @st.fragment()
-def _dimensions_builder(  # noqa: PLR0912, PLR0915
-    ctx: ValueStreamContext, save_slot: Any, draft_slot: Any
-) -> None:
+def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any) -> None:
     _claim_fragment_action_slots(save_slot, draft_slot)
     _begin_source_inspection_scope()
     with components.bordered_panel(
@@ -2285,82 +2489,39 @@ def _dimensions_builder(  # noqa: PLR0912, PLR0915
     processor_def = builder.processor_to_dict(processor)
     processor_def["dimensions"] = selected
     processor_def.pop("group_by", None)
-    pending_proposals = _dimension_pending_proposals()
-    if pending_proposals:
-        st.info(
-            f"{len(pending_proposals)} additional exploration proposal"
-            f"{'s are' if len(pending_proposals) != 1 else ' is'} included in this draft."
-        )
     _technical_yaml(
         "Generated dimension YAML",
         yaml.safe_dump({"processors": [processor_def]}, sort_keys=False),
     )
     draft_status = builder.builder_draft_status(
         f"dimensions:{processor.id}",
-        {"processor": builder.processor_to_dict(processor), "proposals": {}},
-        {"processor": processor_def, "proposals": pending_proposals},
+        builder.processor_to_dict(processor),
+        processor_def,
     )
     if _render_editor_primary_action(
         save_slot=save_slot,
         draft_slot=draft_slot,
         status=draft_status,
         valid=bool(processor.id),
-        widget_prefixes=("builder_dimension_", "builder_exploration_", "builder_sketch_"),
-        help_text=(
-            "Validate and apply the selected dimensions and staged exploration definitions. "
-            "Data is not run from this action."
-        ),
+        widget_prefixes=("builder_dimension_",),
+        help_text=("Validate and apply the selected dimensions. Data is not run from this action."),
     ):
         try:
-            with builder.validated_catalog_transaction(ctx.workspace):
+            with builder.validated_catalog_transaction(
+                ctx.workspace, source_columns_by_id=_observed_source_columns()
+            ):
                 builder.write_processor_definition(ctx.workspace, processor_def)
-                for proposal in pending_proposals.values():
-                    staged_processor = proposal.get("processor")
-                    if isinstance(staged_processor, dict):
-                        builder.write_processor_definition(ctx.workspace, staged_processor)
-                    staged_metrics = proposal.get("metrics")
-                    if isinstance(staged_metrics, Mapping):
-                        for metric_name, metric_def in staged_metrics.items():
-                            if isinstance(metric_def, dict):
-                                builder.write_metric_definition(
-                                    ctx.workspace, str(metric_name), metric_def
-                                )
-            source_ids = [processor.source]
-            source_ids.extend(
-                str(proposal.get("processor", {}).get("source", ""))
-                for proposal in pending_proposals.values()
-                if isinstance(proposal.get("processor"), Mapping)
-            )
-            st.session_state.pop(BUILDER_DIMENSION_PROPOSALS_KEY, None)
             _complete_builder_apply(
                 status=draft_status,
                 scope="dimensions",
                 label=processor.description or humanize_identifier(processor.id),
-                source_ids=source_ids,
+                source_ids=[processor.source],
                 message="Dimension draft applied. Use Data Load to refresh affected aggregates.",
             )
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
             logger.exception("Failed to write processor dimensions: processor=%s", processor.id)
             st.error(str(exc))
-    if source is not None:
-        _temporary_exploration_panel(
-            ctx,
-            source,
-            processor,
-            options,
-            selected,
-            profile_sample,
-            profile_rows,
-        )
-        _sketch_exploration_panel(
-            ctx,
-            source,
-            processor,
-            options,
-            selected,
-            profile_rows,
-        )
 
 
 def _dimension_profile_panel(
@@ -2678,98 +2839,12 @@ def _dimension_promotion_candidates(
     )
 
 
-def _temporary_exploration_panel(
-    ctx: ValueStreamContext,
-    source: model.Source,
-    processor: model.Processor,
-    options: list[str],
-    selected_dimensions: list[str],
-    sample: pl.DataFrame | None,
-    rows: list[dimension_profile.DimensionProfileRow],
-) -> None:
-    with components.bordered_panel(
-        "Temporary Exploration Aggregates",
-        "Create time-limited processors for exploratory breakdowns before promoting them.",
-    ):
-        dim_key = f"builder_exploration_dims_{processor.id}"
-        if dim_key not in st.session_state:
-            defaults = (
-                dimension_profile.dimension_pack_fields(options)[:3] or selected_dimensions[:3]
-            )
-            st.session_state[dim_key] = [field for field in defaults if field in options]
-        explore_dims = st.multiselect(
-            "Exploration Dimensions",
-            options,
-            accept_new_options=True,
-            key=dim_key,
-            help=config_help.field_help("dimension.exploration_dimensions"),
-        )
-        window_days = st.number_input(
-            "Source Window Days",
-            min_value=1,
-            max_value=730,
-            value=30,
-            step=1,
-            key=f"builder_exploration_window_{processor.id}",
-            help=config_help.field_help("dimension.window_days"),
-        )
-        ttl_days = st.number_input(
-            "Expire After Days",
-            min_value=1,
-            max_value=90,
-            value=14,
-            step=1,
-            key=f"builder_exploration_ttl_{processor.id}",
-            help=config_help.field_help("dimension.ttl_days"),
-        )
-        if sample is not None and not sample.is_empty() and explore_dims:
-            preview = dimension_profile.aggregate_size_preview(sample, [], explore_dims)
-            components.key_value_strip(
-                [
-                    {"label": "Exploration groups", "value": preview.projected_rows},
-                    {"label": "Sample rows", "value": preview.sample_rows},
-                    {"label": "Dimensions", "value": len(explore_dims)},
-                ]
-            )
-        if rows:
-            unsafe = [
-                row.field
-                for row in rows
-                if row.field in explore_dims and row.safe_for_group_by == "No"
-            ]
-            if unsafe:
-                st.warning("High-risk exploration dimensions: " + ", ".join(unsafe))
-        processor_def = _temporary_processor_def(
-            processor,
-            source,
-            explore_dims,
-            ttl_days=int(ttl_days),
-            window_days=int(window_days),
-            sample=sample,
-        )
-        _technical_yaml(
-            "Exploration processor YAML",
-            yaml.safe_dump({"processors": [processor_def]}, sort_keys=False),
-        )
-        if st.button(
-            "Add exploration to draft",
-            icon=":material/add:",
-            disabled=not explore_dims,
-            key=f"builder_exploration_create_{processor.id}",
-        ):
-            _stage_dimension_proposal(str(processor_def["id"]), processor_def)
-            st.toast("Exploration added to this step's draft.", icon=":material/draft:")
-            st.rerun()
-        _exploration_lifecycle_controls(ctx, source.id)
-
-
 def _sketch_exploration_panel(
     ctx: ValueStreamContext,
     source: model.Source,
     processor: model.Processor,
     options: list[str],
     selected_dimensions: list[str],
-    rows: list[dimension_profile.DimensionProfileRow],
 ) -> None:
     with components.bordered_panel(
         "Top-K And Sketch Exploration",
@@ -2778,6 +2853,12 @@ def _sketch_exploration_panel(
         if not options:
             st.info("No source fields are available for sketch exploration.")
             return
+        sample = _source_profile_sample(ctx, source)
+        rows = (
+            dimension_profile.source_dimension_profile_rows(ctx, source, sample)
+            if sample is not None and not sample.is_empty()
+            else []
+        )
         recommendations = dimension_profile.sketch_recommendations(rows)
         if recommendations:
             st.dataframe(recommendations, hide_index=True, width="stretch", height=180)
@@ -2865,58 +2946,37 @@ def _sketch_exploration_panel(
             ),
         )
         if st.button(
-            "Add sketch exploration to draft",
+            "Create sketch exploration",
             icon=":material/add:",
             disabled=not processor_def.get("states"),
             key=f"builder_sketch_create_{processor.id}",
         ):
-            _stage_dimension_proposal(
-                str(processor_def["id"]),
-                processor_def,
-                metric_defs=metric_defs,
-            )
-            st.toast("Sketch exploration added to this step's draft.", icon=":material/draft:")
-            st.rerun()
-
-
-def _processor_def_with_dimensions(
-    processor: model.Processor,
-    dimensions: list[str],
-) -> dict[str, Any]:
-    processor_def = builder.processor_to_dict(processor)
-    processor_def["dimensions"] = builder.dedupe(dimensions)
-    processor_def.pop("group_by", None)
-    return processor_def
-
-
-def _temporary_processor_def(
-    processor: model.Processor,
-    source: model.Source,
-    dimensions: list[str],
-    *,
-    ttl_days: int,
-    window_days: int,
-    sample: pl.DataFrame | None,
-) -> dict[str, Any]:
-    now = _utc_now()
-    processor_def = _processor_def_with_dimensions(processor, dimensions)
-    processor_def["id"] = _exploration_id("explore", processor.id, dimensions)
-    processor_def["description"] = (
-        f"Temporary exploration aggregate for {processor.id}: {', '.join(dimensions)}"
-    )
-    processor_def["exploration"] = {
-        "temporary": True,
-        "base_processor": processor.id,
-        "created_at": now.isoformat(),
-        "expires_at": (now + dt.timedelta(days=ttl_days)).isoformat(),
-        "ttl_days": ttl_days,
-        "time_window_days": window_days,
-        "promoted": False,
-    }
-    time_filter = _time_window_filter(source, sample, window_days)
-    if time_filter is not None:
-        processor_def["filter"] = _combine_filters(processor_def.get("filter"), time_filter)
-    return processor_def
+            try:
+                with builder.validated_catalog_transaction(
+                    ctx.workspace, source_columns_by_id=_observed_source_columns()
+                ):
+                    builder.write_processor_definition(ctx.workspace, processor_def)
+                    for metric_name, metric_def in metric_defs.items():
+                        builder.write_metric_definition(ctx.workspace, str(metric_name), metric_def)
+            except Exception as exc:  # pragma: no cover - Streamlit display path
+                _record_builder_apply_failed(exc)
+                logger.exception(
+                    "Failed to write sketch exploration: processor=%s", processor_def.get("id")
+                )
+                st.error(str(exc))
+            else:
+                apply_outcome = builder.builder_apply_outcome(
+                    humanize_identifier(str(processor_def["id"])),
+                    source_ids=[source.id],
+                    requires_data_run=True,
+                )
+                _store_builder_apply_outcome(apply_outcome)
+                _record_builder_applied(apply_outcome)
+                st.session_state["builder_apply_notice"] = (
+                    "Sketch exploration processor written. Use Data Load to materialize it."
+                )
+                st.rerun(scope="app")
+        _exploration_lifecycle_controls(ctx, source.id)
 
 
 def _sketch_processor_and_metrics(
@@ -3011,7 +3071,7 @@ def _exploration_lifecycle_controls(ctx: ValueStreamContext, source_id: str) -> 
         help=config_help.field_help("dimension.exploration_selector"),
     )
     if st.button(
-        "Add promotion to draft",
+        "Promote to permanent",
         icon=":material/publish:",
         key=f"builder_exploration_promote_{source_id}",
     ):
@@ -3022,9 +3082,20 @@ def _exploration_lifecycle_controls(ctx: ValueStreamContext, source_id: str) -> 
         metadata["promoted_at"] = _utc_now().isoformat()
         metadata.pop("expires_at", None)
         processor_def["exploration"] = metadata
-        _stage_dimension_proposal(f"promote:{selected.id}", processor_def)
-        st.toast("Promotion added to this step's draft.", icon=":material/draft:")
-        st.rerun()
+        try:
+            with builder.validated_catalog_transaction(
+                ctx.workspace, source_columns_by_id=_observed_source_columns()
+            ):
+                builder.write_processor_definition(ctx.workspace, processor_def)
+        except Exception as exc:  # pragma: no cover - Streamlit display path
+            _record_builder_apply_failed(exc)
+            logger.exception("Failed to promote exploration: processor=%s", selected.id)
+            st.error(str(exc))
+        else:
+            st.session_state["builder_apply_notice"] = (
+                f"Exploration `{selected.id}` promoted to a permanent processor."
+            )
+            st.rerun(scope="app")
 
 
 def _exploration_meta(processor: model.Processor) -> dict[str, Any]:
@@ -3041,48 +3112,6 @@ def _exploration_status(processor: model.Processor) -> str:
     if expires_at is not None and expires_at < _utc_now():
         return "Expired"
     return "Temporary"
-
-
-def _time_window_filter(
-    source: model.Source,
-    sample: pl.DataFrame | None,
-    window_days: int,
-) -> dict[str, Any] | None:
-    column = _time_window_column(source, sample)
-    if not column:
-        return None
-    cutoff = (_utc_now().date() - dt.timedelta(days=window_days)).isoformat()
-    return {
-        "polars": f"pl.col({column!r}).cast(pl.String) >= pl.lit({cutoff!r})",
-    }
-
-
-def _time_window_column(source: model.Source, sample: pl.DataFrame | None) -> str:
-    columns = list(sample.columns) if sample is not None else []
-    candidates = [
-        source.schema_.timestamp_column,
-        "Day",
-        "Date",
-        "DecisionTime",
-        "OutcomeTime",
-        "Timestamp",
-    ]
-    for column in candidates:
-        if column and column in columns:
-            return str(column)
-    for column in columns:
-        if dimension_profile.looks_like_measure_or_time_field(column):
-            return column
-    return ""
-
-
-def _combine_filters(
-    existing: Any,
-    added: dict[str, Any],
-) -> dict[str, Any]:
-    if isinstance(existing, dict) and existing:
-        return {"op": "and", "args": [existing, added]}
-    return added
 
 
 def _default_entity_field(options: list[str], source: model.Source) -> str:
@@ -3175,26 +3204,27 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     if creating:
         processor = _new_processor_template(ctx, _selected_new_processor_source_id(ctx))
     else:
-        processor_col, delete_col = st.columns([8, 2], vertical_alignment="bottom")
-        processor = processor_col.selectbox(
-            "Processor",
-            processors,
-            format_func=_processor_choice_label_edit,
-            key="builder_processor_select",
-            help=config_help.field_help("processor.selector"),
-        )
-        if delete_col.button(
-            "Delete processor",
-            icon=":material/delete_forever:",
-            width="stretch",
-            key="builder_delete_processor",
-            help=(
-                "Preview and remove only this processor together with its dependent metrics "
-                "and report definitions."
-            ),
-        ):
-            st.session_state[f"builder_delete_processor_confirm_{processor.id}"] = False
-            _delete_processor_dialog(ctx, processor.id)
+        with st.container(key="vs_processor_picker"):
+            processor_col, delete_col = st.columns([8, 2], vertical_alignment="bottom")
+            processor = processor_col.selectbox(
+                "Processor",
+                processors,
+                format_func=_processor_choice_label_edit,
+                key="builder_processor_select",
+                help=config_help.field_help("processor.selector"),
+            )
+            if delete_col.button(
+                "Delete processor",
+                icon=":material/delete_forever:",
+                width="stretch",
+                key="builder_delete_processor",
+                help=(
+                    "Preview and remove only this processor together with its dependent "
+                    "metrics and report definitions."
+                ),
+            ):
+                st.session_state[f"builder_delete_processor_confirm_{processor.id}"] = False
+                _delete_processor_dialog(ctx, processor.id)
     source = next(
         (
             candidate
@@ -3313,7 +3343,9 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         _blank_state_row,
     )
     with components.bordered_panel(
-        "Derived Outputs", "Edit aggregate states written by this processor."
+        "Auto Outputs",
+        "Edit automatically created aggregate states written by this processor. You "
+        "can add more as metrics later.",
     ):
         _render_state_rows_editor(
             state_key,
@@ -3374,6 +3406,9 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             compiled_filter = (
                 builder.parse_expression_yaml(raw_filter) if raw_filter.strip() else None
             )
+
+    if source is not None and not creating and kind == "entity_set":
+        _sketch_exploration_panel(ctx, source, processor, field_options, list(group_by))
 
     time_def = dict(processor_def.get("time", {}))
     time_def.update(
@@ -3436,7 +3471,9 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         ),
     ):
         try:
-            with builder.validated_catalog_transaction(ctx.workspace):
+            with builder.validated_catalog_transaction(
+                ctx.workspace, source_columns_by_id=_observed_source_columns()
+            ):
                 builder.write_processor_definition(ctx.workspace, processor_def)
             message = "Processor created." if creating else "Processor written."
             _complete_builder_apply(
@@ -3581,7 +3618,9 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
         _record_builder_valid_proposal()
         _record_builder_reviewed()
         try:
-            with builder.validated_catalog_transaction(workspace):
+            with builder.validated_catalog_transaction(
+                workspace, source_columns_by_id=_observed_source_columns()
+            ):
                 if recipe_request.processor_def:
                     builder.write_processor_definition(
                         workspace,
@@ -3898,7 +3937,9 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 if not editing and metric_name.strip() in catalog.metrics.metrics:
                     st.error(f"Metric {metric_name.strip()!r} already exists.")
                     return
-                with builder.validated_catalog_transaction(workspace):
+                with builder.validated_catalog_transaction(
+                    workspace, source_columns_by_id=_observed_source_columns()
+                ):
                     builder.write_metric_definition(workspace, metric_name.strip(), metric_def)
                 apply_outcome = builder.builder_apply_outcome(metric_display_name)
                 _store_builder_apply_outcome(apply_outcome)
@@ -4673,7 +4714,9 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                 help_text=f"Validate and remove tile {tile_label!r} from the active workspace.",
             ):
                 try:
-                    with builder.validated_catalog_transaction(workspace):
+                    with builder.validated_catalog_transaction(
+                        workspace, source_columns_by_id=_observed_source_columns()
+                    ):
                         deleted = builder.delete_tile_definition(
                             workspace,
                             dashboard_id=selected_seed[0],
@@ -5009,7 +5052,9 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             ),
         ):
             try:
-                with builder.validated_catalog_transaction(workspace):
+                with builder.validated_catalog_transaction(
+                    workspace, source_columns_by_id=_observed_source_columns()
+                ):
                     builder.write_tile_definition(
                         workspace,
                         dashboard_id=dashboard_id.strip(),
@@ -5980,7 +6025,9 @@ def _settings_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any) 
         ),
     ):
         try:
-            with builder.validated_catalog_transaction(ctx.workspace):
+            with builder.validated_catalog_transaction(
+                ctx.workspace, source_columns_by_id=_observed_source_columns()
+            ):
                 builder.write_workspace_settings(
                     ctx.workspace,
                     workspace_name=workspace_name,
@@ -6417,6 +6464,37 @@ def _source_inspection_scope() -> dict[str, Any]:
     return st.session_state[BUILDER_SOURCE_INSPECTION_SCOPE_KEY]
 
 
+# Observed physical columns live outside the builder_* namespace so draft
+# registry snapshots and JSON checkpoints never capture them.
+VS_OBSERVED_SOURCE_COLUMNS_KEY = "vs_observed_source_columns"
+
+
+def _record_observed_source_columns(source_id: str, result: SourceInspectionResult) -> None:
+    """Remember one source's raw pre-transform columns for apply validation."""
+
+    if result.error_kind or not result.raw_schema:
+        return
+    stored = st.session_state.setdefault(VS_OBSERVED_SOURCE_COLUMNS_KEY, {})
+    stored[source_id] = [name for name, _dtype in result.raw_schema]
+
+
+def _observed_source_columns() -> dict[str, list[str]]:
+    """Return observed physical columns for transform-aware apply validation.
+
+    Only sources inspected in this session contribute; validation stays
+    catalog-only conservative for sources without a bounded sample.
+    """
+
+    raw = st.session_state.get(VS_OBSERVED_SOURCE_COLUMNS_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(source_id): [str(column) for column in columns]
+        for source_id, columns in raw.items()
+        if isinstance(columns, list)
+    }
+
+
 def _source_inspection(
     ctx: ValueStreamContext,
     source: model.Source,
@@ -6432,6 +6510,7 @@ def _source_inspection(
     if isinstance(memoized_key, SourceInspectionKey):
         memoized = _cached_source_inspection(memoized_key)
         if memoized is not None:
+            _record_observed_source_columns(source.id, memoized)
             _render_source_inspection_failure_once(source, memoized, scope)
             return memoized
 
@@ -6444,6 +6523,7 @@ def _source_inspection(
     cached = _cached_source_inspection(key)
     if cached is not None:
         cleanup_temporaries()
+        _record_observed_source_columns(source.id, cached)
         _render_source_inspection_failure_once(source, cached, scope)
         return cached
 
@@ -6469,6 +6549,7 @@ def _source_inspection(
                 state="complete",
             )
     _cache_source_inspection(result)
+    _record_observed_source_columns(source.id, result)
     _render_source_inspection_failure_once(source, result, scope)
     return result
 

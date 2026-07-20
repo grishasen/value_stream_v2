@@ -114,6 +114,30 @@ FIELD_HELP: dict[str, str] = {
         "Full AST YAML or Polars expression for modes that need a custom expression.",
         'pl.col("Revenue") - pl.col("Cost")',
     ),
+    "calculation.visual_shape": _tip(
+        "Build a case/when value with branches, or a single true/false condition.",
+        "Case / when value",
+    ),
+    "calculation.visual_branches": _tip(
+        "Number of case branches. Branches are evaluated in order; the first match wins.",
+        "2",
+    ),
+    "calculation.visual_combine": _tip(
+        "Combine this branch's condition rows: every row must match, or any row may match.",
+        "All condition rows (AND)",
+    ),
+    "calculation.visual_value_kind": _tip(
+        "Interpret the result as a literal value or a reference to another column.",
+        "Literal",
+    ),
+    "calculation.visual_value": _tip(
+        "Result produced when this branch matches. Literals accept text, numbers, and true/false.",
+        "High",
+    ),
+    "calculation.visual_else_value": _tip(
+        "Fallback result when no branch matches.",
+        "Standard",
+    ),
     "mapping.subject": _tip(
         "Source field mapped to the canonical SubjectID entity identifier.",
         "CustomerID",
@@ -245,16 +269,6 @@ FIELD_HELP: dict[str, str] = {
     ),
     "dimension.promote_field": _tip(
         "Source field to add to the processor's permanent aggregate grain.", "Treatment"
-    ),
-    "dimension.exploration_dimensions": _tip(
-        "Temporary grouping fields materialized for a bounded exploration window.",
-        "Issue, Group",
-    ),
-    "dimension.window_days": _tip(
-        "How many recent source days the temporary exploration reads.", "30"
-    ),
-    "dimension.ttl_days": _tip(
-        "Days before the exploration definition is considered expired.", "14"
     ),
     "dimension.topk_enabled": _tip("Add a Top-K sketch for approximate frequent-value analysis."),
     "dimension.topk_field": _tip(

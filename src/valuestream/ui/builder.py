@@ -9,7 +9,7 @@ import os
 import re
 import secrets
 import tempfile
-from collections.abc import Callable, Iterable, Iterator, MutableMapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -827,13 +827,77 @@ def filter_rows_from_expression(expression: dict[str, Any] | None) -> list[dict[
 
 def compile_filter_rows(filter_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Compile rule rows into the Value Stream expression AST dictionary."""
-    expressions = [_compile_filter_row(row) for row in filter_rows]
+    return compile_condition_rows(filter_rows, combine="all")
+
+
+def compile_condition_rows(
+    condition_rows: list[dict[str, Any]],
+    *,
+    combine: str = "all",
+) -> dict[str, Any] | None:
+    """Compile predicate rows into one boolean AST joined with and/or.
+
+    ``combine="all"`` joins rows with ``and``; ``combine="any"`` joins with
+    ``or``. Rows without a field or operator, and disabled rows, are skipped.
+    Returns ``None`` when no complete row remains.
+    """
+    expressions = [_compile_filter_row(row) for row in condition_rows]
     expressions = [expression for expression in expressions if expression is not None]
     if not expressions:
         return None
     if len(expressions) == 1:
         return expressions[0]
-    return {"op": "and", "args": expressions}
+    return {"op": "or" if combine == "any" else "and", "args": expressions}
+
+
+def case_value_expression(kind: str, value: Any) -> dict[str, Any]:
+    """Build a case then/else value atom from visual-builder inputs."""
+    if str(kind).strip().casefold() == "field":
+        field = str(value or "").strip()
+        if not field:
+            raise ValueError("a field name is required when the value kind is Field")
+        return {"col": field}
+    return {"lit": _safe_literal(value)}
+
+
+def compile_case_expression(
+    branches: list[dict[str, Any]],
+    *,
+    else_kind: str,
+    else_value: Any,
+) -> dict[str, Any]:
+    """Compile visual-builder branches into one ``case`` expression AST.
+
+    Each branch is ``{"conditions": rows, "combine": "all"|"any",
+    "then_kind": "Literal"|"Field", "then_value": scalar}``. Branches are
+    evaluated in order and the first matching condition wins; the ``else``
+    value is required because the expression grammar requires it.
+    """
+    when: list[dict[str, Any]] = []
+    for number, branch in enumerate(branches, start=1):
+        condition = compile_condition_rows(
+            list(branch.get("conditions", [])),
+            combine=str(branch.get("combine", "all")),
+        )
+        if condition is None:
+            raise ValueError(
+                f"branch {number} needs at least one complete condition row (field and operator)"
+            )
+        try:
+            then_value = case_value_expression(
+                str(branch.get("then_kind", "Literal")),
+                branch.get("then_value", ""),
+            )
+        except ValueError as exc:
+            raise ValueError(f"branch {number}: {exc}") from exc
+        when.append({"cond": condition, "then": then_value})
+    if not when:
+        raise ValueError("add at least one branch")
+    try:
+        else_expression = case_value_expression(str(else_kind), else_value)
+    except ValueError as exc:
+        raise ValueError(f"else value: {exc}") from exc
+    return {"op": "case", "when": when, "else": else_expression}
 
 
 def parse_expression_yaml(text: str) -> dict[str, Any]:
@@ -2530,12 +2594,20 @@ def catalog_transaction(workspace: str | Path) -> Iterator[None]:
 
 
 @contextmanager
-def validated_catalog_transaction(workspace: str | Path) -> Iterator[None]:
-    """Commit Builder catalog writes only when the resulting workspace is valid."""
+def validated_catalog_transaction(
+    workspace: str | Path,
+    *,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+) -> Iterator[None]:
+    """Commit Builder catalog writes only when the resulting workspace is valid.
+
+    ``source_columns_by_id`` supplies observed physical source columns so
+    expression validation accepts data-only fields the editors offered.
+    """
 
     with catalog_transaction(workspace):
         yield
-        require_valid_workspace(workspace)
+        require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
 
 
 @contextmanager
@@ -2789,21 +2861,29 @@ def delete_tile_definition(
     return False
 
 
-def validate_workspace(workspace: str | Path) -> tuple[bool, list[str]]:
+def validate_workspace(
+    workspace: str | Path,
+    *,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+) -> tuple[bool, list[str]]:
     """Load and validate a workspace after a builder change."""
     ensure_minimum_workspace(workspace)
     try:
         catalog = load(workspace)
     except CatalogLoadError as exc:
         return False, [str(exc)]
-    result = validate_catalog(catalog)
+    result = validate_catalog(catalog, source_columns_by_id=source_columns_by_id)
     return result.ok, [f"{issue.location}: {issue.message}" for issue in result.issues]
 
 
-def require_valid_workspace(workspace: str | Path) -> None:
+def require_valid_workspace(
+    workspace: str | Path,
+    *,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+) -> None:
     """Raise with validation details so an enclosing authoring transaction rolls back."""
 
-    ok, issues = validate_workspace(workspace)
+    ok, issues = validate_workspace(workspace, source_columns_by_id=source_columns_by_id)
     if ok:
         return
     details = "\n".join(f"- {issue}" for issue in issues)
@@ -3303,6 +3383,7 @@ __all__ = [
     "calculated_expression_example",
     "calculated_rows_for_editor",
     "calculated_rows_from_source",
+    "case_value_expression",
     "catalog_id_is_safe",
     "chart_choices_for_metric",
     "chart_field_controls",
@@ -3311,6 +3392,8 @@ __all__ = [
     "chart_kind_purpose",
     "chart_kind_selector_label",
     "chart_recipe_summary",
+    "compile_case_expression",
+    "compile_condition_rows",
     "compile_filter_rows",
     "csv_text_to_list",
     "dedupe",
