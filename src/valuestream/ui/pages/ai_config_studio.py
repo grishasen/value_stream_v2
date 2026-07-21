@@ -2453,9 +2453,16 @@ def _render_filters_editor(sample: pl.DataFrame, filter_frame: pl.DataFrame) -> 
                 },
             )
             st.session_state["ai_studio_filter_rows"] = builder.normalize_editor_rows(edited)
-            compiled = builder.compile_filter_rows(st.session_state["ai_studio_filter_rows"])
+            try:
+                builder.compile_filter_rows(st.session_state["ai_studio_filter_rows"])
+            except ValueError as exc:
+                st.error(f"Filters: {exc}")
         else:
-            compiled = builder.compile_filter_rows(st.session_state["ai_studio_filter_rows"])
+            try:
+                compiled = builder.compile_filter_rows(st.session_state["ai_studio_filter_rows"])
+            except ValueError as exc:
+                compiled = None
+                st.error(f"Filters: {exc}")
             st.code(builder.expression_yaml(compiled) or "{}", language="yaml")
         _render_stale_preprocessing_field_feedback("Filters")
     _persist_ai_studio_checkpoint()

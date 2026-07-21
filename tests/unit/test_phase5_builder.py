@@ -18,6 +18,7 @@ from streamlit.testing.v1 import AppTest
 
 from valuestream.config import model
 from valuestream.config.loader import load
+from valuestream.expr import parser as expr_parser
 from valuestream.query import executor
 from valuestream.states import kll, topk
 from valuestream.ui import builder, dimension_profile, forms
@@ -2337,7 +2338,10 @@ def test_source_row_add_edit_delete_operations_all_dirty_the_outer_draft() -> No
         }
     )
     edited_calculations = copy.deepcopy(calculated_rows)
-    edited_calculations[0]["Expression"] = "col: Cost"
+    # The loader now recognizes sub(Revenue, Cost) as a Subtract-mode row, so a
+    # meaningful edit changes its operands rather than the unused Expression.
+    assert edited_calculations[0]["Mode"] == "Subtract"
+    edited_calculations[0]["Right"] = "Discount"
     changes.extend(
         [
             (default_rows, filter_rows, added_calculations),
@@ -4078,9 +4082,13 @@ def test_dimensions_step_applies_workspace_dimensions_without_data_run(tmp_path:
     ).run()
     assert not rendered.exception
     common = next(item for item in rendered.multiselect if item.label == "Common Dimensions")
-    rendered = common.set_value(["Channel"]).run()
+    # Without explicit defaults the list is restored from the processors'
+    # shared group-by, so the step opens pre-populated and clean.
+    assert common.value == ["Channel"]
+    rendered = common.set_value(["Channel", "Region"]).run()
 
-    # Channel is already engagement's group-by, so nothing recomputes.
+    # Region is not an ih column and Channel is already engagement's
+    # group-by, so nothing recomputes.
     extend = next(
         item for item in rendered.toggle if item.label.startswith("Extend existing processors")
     )
@@ -4093,7 +4101,7 @@ def test_dimensions_step_applies_workspace_dimensions_without_data_run(tmp_path:
 
     assert not rendered.exception
     catalog = load(tmp_path)
-    assert catalog.pipelines.defaults.dimensions == ["Channel"]
+    assert catalog.pipelines.defaults.dimensions == ["Channel", "Region"]
     engagement = next(p for p in catalog.processors.processors if p.id == "engagement")
     assert list(engagement.group_by) == ["Channel"]
     outcome = rendered.session_state[config_builder.BUILDER_LAST_OUTCOME_KEY]
@@ -5901,3 +5909,707 @@ def test_builder_continue_escalates_to_full_app_rerun() -> None:
         if isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant)
     ]
     assert "builder_step_jump" not in assigned_keys
+
+
+# ---------------------------------------------------------------------------
+# AST reverse mapping: visual case state, simple-mode recognition, between.
+# ---------------------------------------------------------------------------
+
+_EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "examples"
+
+_CUSTOMER_TYPE_YAML = """
+op: when_then
+cond:
+  op: starts_with
+  column: CustomerID
+  value: C
+then:
+  lit: Customers known
+else:
+  lit: Device/Anonymous
+"""
+
+
+@pytest.mark.unit
+def test_visual_case_state_decompiles_when_then_as_single_branch_case() -> None:
+    assert builder.visual_case_state_from_expression(_CUSTOMER_TYPE_YAML) == {
+        "shape": "case",
+        "branches": [
+            {
+                "rows": [
+                    {
+                        "Field": "CustomerID",
+                        "Operator": "starts with",
+                        "Value": "C",
+                        "Enabled": True,
+                    }
+                ],
+                "combine": "all",
+                "then_kind": "Literal",
+                "then_value": "Customers known",
+            }
+        ],
+        "else_kind": "Literal",
+        "else_value": "Device/Anonymous",
+    }
+
+
+@pytest.mark.unit
+def test_visual_case_state_round_trips_multi_branch_case() -> None:
+    expression = {
+        "op": "case",
+        "when": [
+            {
+                "cond": {"op": "ne", "column": "PlacementType", "value": ""},
+                "then": {"col": "PlacementType"},
+            },
+            {
+                "cond": {
+                    "op": "or",
+                    "args": [
+                        {"op": "starts_with", "column": "Name", "value": "CR"},
+                        {"op": "between", "column": "Rank", "low": 1, "high": 3},
+                    ],
+                },
+                "then": {"lit": "Flex"},
+            },
+        ],
+        "else": {"lit": "Hero"},
+    }
+
+    state = builder.visual_case_state_from_expression(builder.expression_yaml(expression))
+
+    assert state is not None
+    assert state["shape"] == "case"
+    assert [branch["combine"] for branch in state["branches"]] == ["all", "any"]
+    regenerated = builder.compile_case_expression(
+        [
+            {
+                "conditions": branch["rows"],
+                "combine": branch["combine"],
+                "then_kind": branch["then_kind"],
+                "then_value": branch["then_value"],
+            }
+            for branch in state["branches"]
+        ],
+        else_kind=state["else_kind"],
+        else_value=state["else_value"],
+    )
+    assert regenerated == expression
+
+
+@pytest.mark.unit
+def test_visual_case_state_decompiles_boolean_condition_shape() -> None:
+    state = builder.visual_case_state_from_expression(
+        "op: or\nargs:\n- {op: eq, column: A, value: 1}\n- {op: is_null, column: B}"
+    )
+
+    assert state is not None
+    assert state["shape"] == "condition"
+    assert state["branches"][0]["combine"] == "any"
+    assert [row["Operator"] for row in state["branches"][0]["rows"]] == ["==", "is null"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("label", "text"),
+    [
+        ("empty", ""),
+        ("invalid yaml", "op: [unclosed"),
+        ("non-conditional", "op: date_diff\nunit: seconds\nend: {col: A}\nstart: {col: B}"),
+        ("column copy", "col: Treatment"),
+        (
+            "nested logic",
+            "op: and\nargs:\n- op: or\n  args:\n  - {op: eq, column: A, value: 1}\n"
+            "  - {op: eq, column: B, value: 2}\n- {op: eq, column: C, value: 3}",
+        ),
+        ("args-form comparison", "op: eq\nargs:\n- {col: A}\n- {col: B}"),
+        (
+            "computed then value",
+            "op: when_then\ncond: {op: eq, column: A, value: 1}\n"
+            "then: {op: add, args: [{col: B}, {lit: 1}]}\nelse: {lit: 0}",
+        ),
+        (
+            "param result",
+            "op: when_then\ncond: {op: eq, column: A, value: 1}\nthen: {param: p}\nelse: {lit: 0}",
+        ),
+        (
+            "lossy literal",
+            "op: when_then\ncond: {op: eq, column: A, value: 1}\n"
+            "then: {lit: '3.5'}\nelse: {lit: x}",
+        ),
+    ],
+)
+def test_visual_case_state_rejects_expressions_beyond_the_builder(label: str, text: str) -> None:
+    assert builder.visual_case_state_from_expression(text) is None, label
+
+
+@pytest.mark.unit
+def test_visual_case_state_rejects_more_branches_than_the_builder_offers() -> None:
+    expression = {
+        "op": "case",
+        "when": [
+            {"cond": {"op": "eq", "column": "A", "value": index}, "then": {"lit": index}}
+            for index in range(builder.VISUAL_CASE_MAX_BRANCHES + 1)
+        ],
+        "else": {"lit": 0},
+    }
+
+    assert builder.visual_case_state_from_expression(builder.expression_yaml(expression)) is None
+
+
+@pytest.mark.unit
+def test_between_operator_compiles_and_reverses() -> None:
+    row = {"Field": "Score", "Operator": "between", "Value": "5, 10", "Enabled": True}
+
+    compiled = builder.compile_filter_rows([row])
+
+    assert compiled == {"op": "between", "column": "Score", "low": 5, "high": 10}
+    assert builder.filter_rows_from_expression(compiled) == [row]
+    assert builder.validate_calculated_expression(
+        "AST YAML", builder.expression_yaml(compiled)
+    ).valid
+
+
+@pytest.mark.unit
+def test_between_operator_requires_two_values() -> None:
+    with pytest.raises(ValueError, match="between on 'Score' needs exactly two"):
+        builder.compile_filter_rows(
+            [{"Field": "Score", "Operator": "between", "Value": "5", "Enabled": True}]
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("mode", "right_kind", "right"),
+    [
+        ("Copy Field", "Field", ""),
+        ("Absolute Value", "Field", ""),
+        ("Round", "Field", ""),
+        ("Round", "Literal", "2"),
+        ("Add", "Field", "Cost"),
+        ("Subtract", "Literal", "1.5"),
+        ("Multiply", "Field", "Cost"),
+        ("Divide", "Literal", "100"),
+        ("Safe Divide", "Field", "Cost"),
+        ("Concat", "Field", "Cost"),
+        ("Coalesce", "Literal", "fallback"),
+        ("Date Diff Seconds", "Field", "Start"),
+        ("Date Diff Days", "Field", "Start"),
+        ("Date Part Year", "Field", ""),
+        ("Date Part Weekday", "Field", ""),
+    ],
+)
+def test_calculation_mode_recognition_round_trips(mode: str, right_kind: str, right: str) -> None:
+    row = {
+        "Name": "Derived",
+        "Mode": mode,
+        "Left": "Revenue",
+        "Right Kind": right_kind,
+        "Right": right,
+        "Expression": "",
+        "Enabled": True,
+    }
+
+    transforms = builder.build_derive_column_transforms([row])
+
+    assert len(transforms) == 1
+    expression = transforms[0]["expression"]
+    expr_parser.parse(expression)
+    assert builder.calculation_mode_from_expression(expression) == {
+        "Mode": mode,
+        "Left": "Revenue",
+        "Right Kind": right_kind,
+        "Right": right,
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("label", "expression"),
+    [
+        ("three args", {"op": "add", "args": [{"col": "A"}, {"col": "B"}, {"col": "C"}]}),
+        (
+            "nested operand",
+            {"op": "add", "args": [{"op": "abs", "arg": {"col": "A"}}, {"col": "B"}]},
+        ),
+        (
+            "custom concat separator",
+            {"op": "concat", "args": [{"col": "A"}, {"col": "B"}], "sep": "-"},
+        ),
+        ("concat without separator", {"op": "concat", "args": [{"col": "A"}, {"col": "B"}]}),
+        ("lossy literal", {"op": "add", "args": [{"col": "A"}, {"lit": "3.5"}]}),
+        ("blank literal", {"op": "concat", "args": [{"col": "A"}, {"lit": ""}], "sep": ""}),
+        ("explicit null ndigits", {"op": "round", "arg": {"col": "A"}, "ndigits": None}),
+        ("boolean ndigits", {"op": "round", "arg": {"col": "A"}, "ndigits": True}),
+        ("unary not", {"op": "not", "arg": {"col": "A"}}),
+        ("polars", {"polars": "pl.col('A')"}),
+    ],
+)
+def test_calculation_mode_recognition_rejects_inexact_shapes(label: str, expression: dict) -> None:
+    assert builder.calculation_mode_from_expression(expression) is None, label
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("workspace", ["demo", "fat", "new", "test_config_editor"])
+def test_example_catalog_calculated_rows_round_trip_identically(workspace: str) -> None:
+    catalog = load(_EXAMPLES_DIR / workspace)
+
+    for source in catalog.pipelines.sources:
+        expected = [
+            {
+                "kind": "derive_column",
+                "output": transform.output,
+                "expression": expr_parser.to_dict(transform.expression),
+            }
+            for transform in source.transforms
+            if isinstance(transform, model.DeriveColumn)
+        ]
+        rows = builder.calculated_rows_from_source(source)
+        assert builder.build_derive_column_transforms(rows) == expected
+
+
+@pytest.mark.unit
+def test_fat_example_catalog_rows_surface_recognized_modes() -> None:
+    catalog = load(_EXAMPLES_DIR / "fat")
+    rows = {
+        row["Name"]: row
+        for source in catalog.pipelines.sources
+        for row in builder.calculated_rows_from_source(source)
+    }
+
+    assert rows["ConversionEventID"]["Mode"] == "Copy Field"
+    assert rows["ConversionEventID"]["Left"] == "Treatment"
+    assert rows["ResponseTime"]["Mode"] == "Date Diff Seconds"
+    assert rows["ResponseTime"]["Left"] == "OutcomeTime"
+    assert rows["ResponseTime"]["Right"] == "DecisionTime"
+    for name in ("CustomerType", "Placement", "Revenue"):
+        assert rows[name]["Mode"] == "AST YAML"
+        assert builder.visual_case_state_from_expression(rows[name]["Expression"]) is not None
+
+
+@pytest.mark.unit
+def test_visual_builder_seeds_widgets_from_draft_expression() -> None:
+    app = AppTest.from_string(
+        '''
+import streamlit as st
+from valuestream.ui.pages import config_builder
+
+st.session_state.setdefault(
+    "draft",
+    """op: when_then
+cond:
+  op: starts_with
+  column: CustomerID
+  value: C
+then:
+  lit: Customers known
+else:
+  lit: Device/Anonymous""",
+)
+config_builder._render_visual_case_builder(
+    draft_key="draft",
+    input_key="draft_input",
+    notice_key="notice",
+    field_options=["CustomerID"],
+)
+'''
+    )
+
+    rendered = app.run(timeout=15)
+
+    assert not rendered.exception
+    assert rendered.session_state["draft_visual_b0_rows"] == [
+        {"Field": "CustomerID", "Operator": "starts with", "Value": "C", "Enabled": True}
+    ]
+    assert rendered.session_state["draft_visual_branches"] == 1
+    assert rendered.session_state["draft_visual_b0_then_kind"] == "Literal"
+    assert rendered.session_state["draft_visual_b0_then_value"] == "Customers known"
+    assert rendered.session_state["draft_visual_else_kind"] == "Literal"
+    assert rendered.session_state["draft_visual_else_value"] == "Device/Anonymous"
+    assert not rendered.info
+
+
+@pytest.mark.unit
+def test_visual_builder_flags_expression_beyond_the_builder() -> None:
+    app = AppTest.from_string(
+        '''
+import streamlit as st
+from valuestream.ui.pages import config_builder
+
+st.session_state.setdefault(
+    "draft",
+    """op: date_diff
+unit: seconds
+end:
+  col: OutcomeTime
+start:
+  col: DecisionTime""",
+)
+config_builder._render_visual_case_builder(
+    draft_key="draft",
+    input_key="draft_input",
+    notice_key="notice",
+    field_options=["OutcomeTime"],
+)
+'''
+    )
+
+    rendered = app.run(timeout=15)
+
+    assert not rendered.exception
+    assert rendered.info
+    assert "beyond this builder" in rendered.info[0].value
+
+
+# ---------------------------------------------------------------------------
+# Filter logic formulas: E-references with AND / OR / NOT.
+# ---------------------------------------------------------------------------
+
+_FORMULA_ROWS = [
+    {"Field": "Channel", "Operator": "==", "Value": "Web", "Enabled": True},
+    {"Field": "Region", "Operator": "in", "Value": "EU, US", "Enabled": True},
+    {"Field": "Score", "Operator": ">", "Value": "5", "Enabled": True},
+]
+
+
+@pytest.mark.unit
+def test_condition_formula_compiles_not_and_or_nesting() -> None:
+    compiled = builder.compile_condition_formula(_FORMULA_ROWS, "(NOT(E1) AND E2) OR E3")
+
+    assert compiled == {
+        "op": "or",
+        "args": [
+            {
+                "op": "and",
+                "args": [
+                    {"op": "not", "arg": {"op": "eq", "column": "Channel", "value": "Web"}},
+                    {"op": "in", "column": "Region", "values": ["EU", "US"]},
+                ],
+            },
+            {"op": "gt", "column": "Score", "value": 5},
+        ],
+    }
+    expr_parser.parse(compiled)
+
+
+@pytest.mark.unit
+def test_condition_formula_keywords_and_refs_are_case_insensitive() -> None:
+    strict = builder.compile_condition_formula(_FORMULA_ROWS, "NOT E1 AND E2")
+    relaxed = builder.compile_condition_formula(_FORMULA_ROWS, "not e1 and e2")
+
+    assert strict == relaxed
+
+
+@pytest.mark.unit
+def test_condition_state_round_trips_advanced_shapes() -> None:
+    for formula in ["(NOT E1 AND E2) OR E3", "NOT (E1 OR E2)", "(E1 AND E2) AND E3", "NOT NOT E1"]:
+        compiled = builder.compile_condition_formula(_FORMULA_ROWS, formula)
+        state = builder.condition_state_from_expression(compiled)
+        assert state is not None
+        assert state["mode"] == "Advanced"
+        recompiled = builder.compile_condition_formula(state["rows"], state["formula"])
+        assert recompiled == compiled, formula
+
+
+@pytest.mark.unit
+def test_condition_state_classifies_flat_shapes_as_basic() -> None:
+    assert builder.condition_state_from_expression(None) == {
+        "rows": [],
+        "mode": "Basic",
+        "combine": "AND",
+        "formula": "",
+    }
+
+    single = builder.compile_condition_rows(_FORMULA_ROWS[:1], combine="all")
+    single_state = builder.condition_state_from_expression(single)
+    assert single_state is not None
+    assert (single_state["mode"], single_state["combine"]) == ("Basic", "AND")
+
+    for combine, expected in (("all", "AND"), ("any", "OR")):
+        flat = builder.compile_condition_rows(_FORMULA_ROWS, combine=combine)
+        state = builder.condition_state_from_expression(flat)
+        assert state is not None
+        assert (state["mode"], state["combine"]) == ("Basic", expected)
+        assert [row["Ref"] for row in state["rows"]] == ["E1", "E2", "E3"]
+        # The prefill formula matches the basic combine semantics.
+        assert builder.compile_condition_formula(state["rows"], state["formula"]) == flat
+
+
+@pytest.mark.unit
+def test_condition_state_rejects_unmappable_leaves() -> None:
+    assert (
+        builder.condition_state_from_expression({"op": "eq", "args": [{"col": "A"}, {"col": "B"}]})
+        is None
+    )
+    assert (
+        builder.condition_state_from_expression(
+            {"op": "not", "arg": {"op": "add", "args": [{"col": "A"}, {"lit": 1}]}}
+        )
+        is None
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("formula", "rows", "match"),
+    [
+        ("E1 AND E9", _FORMULA_ROWS, "E9 does not exist"),
+        ("E1 AND", _FORMULA_ROWS, "not valid"),
+        ("E1 XOR E2", _FORMULA_ROWS, "not valid"),
+        ("E1 if E2 else E1", _FORMULA_ROWS, "support only condition references"),
+        ("Channel AND E1", _FORMULA_ROWS, "unknown token 'Channel'"),
+        ("", _FORMULA_ROWS, "enter a logic formula"),
+        (
+            "E1 AND E2",
+            [_FORMULA_ROWS[0], {**_FORMULA_ROWS[1], "Enabled": False}],
+            "E2 is disabled",
+        ),
+        (
+            "E1 AND E2",
+            [_FORMULA_ROWS[0], {"Field": "", "Operator": "==", "Value": "", "Enabled": True}],
+            "E2 is incomplete",
+        ),
+    ],
+)
+def test_condition_formula_reports_actionable_errors(
+    formula: str, rows: list[dict], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        builder.compile_condition_formula(rows, formula)
+
+
+@pytest.mark.unit
+def test_label_condition_rows_renumbers_in_order() -> None:
+    rows = [dict(row, Ref="stale") for row in _FORMULA_ROWS]
+
+    labeled = builder.label_condition_rows(rows)
+
+    assert [row["Ref"] for row in labeled] == ["E1", "E2", "E3"]
+    assert [row["Field"] for row in labeled] == ["Channel", "Region", "Score"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("workspace", ["demo", "fat", "new", "test_config_editor"])
+def test_example_catalog_filters_stay_editable_and_round_trip(workspace: str) -> None:
+    """Every example filter must decompile to rules and recompile identically.
+
+    The example workspaces are live app data, so the mode is not pinned:
+    flat conjunctions come back Basic while formula-authored filters come
+    back Advanced — both must round-trip byte-for-byte.
+    """
+    catalog = load(_EXAMPLES_DIR / workspace)
+
+    subjects = [*catalog.pipelines.sources, *catalog.processors.processors]
+    for subject in subjects:
+        expression = builder.first_filter_expression(subject)
+        if expression is None:
+            continue
+        state = builder.condition_state_from_expression(expression)
+        assert state is not None, f"{workspace}: filter should stay editable as rules"
+        if state["mode"] == "Basic":
+            combine = "any" if state["combine"] == "OR" else "all"
+            recompiled = builder.compile_condition_rows(state["rows"], combine=combine)
+        else:
+            recompiled = builder.compile_condition_formula(state["rows"], state["formula"])
+        assert recompiled == expression
+
+
+@pytest.mark.unit
+def test_filter_editor_seeds_advanced_state_and_compiles_formula() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import builder
+from valuestream.ui.pages import config_builder
+
+state = builder.condition_state_from_expression(
+    {
+        "op": "or",
+        "args": [
+            {
+                "op": "and",
+                "args": [
+                    {"op": "not", "arg": {"op": "eq", "column": "Channel", "value": "Web"}},
+                    {"op": "eq", "column": "Region", "value": "EU"},
+                ],
+            },
+            {"op": "gt", "column": "Score", "value": 5},
+        ],
+    }
+)
+rows_key = "test_filter_rows"
+config_builder._seed_filter_editor_state(rows_key, state)
+filter_frame = builder.editor_frame(
+    st.session_state[rows_key],
+    ["Ref", "Field", "Operator", "Value", "Enabled"],
+    builder.blank_filter_row,
+)
+config_builder._render_filter_rows_editor(
+    rows_key,
+    "test_filter_editor",
+    filter_frame,
+    ["Channel", "Region", "Score"],
+)
+st.session_state["compiled_out"] = config_builder._compiled_filter_expression(rows_key)
+"""
+    )
+
+    rendered = app.run(timeout=15)
+
+    assert not rendered.exception
+    assert rendered.session_state["test_filter_rows_logic_mode"] == "Advanced"
+    assert rendered.session_state["test_filter_rows_formula"] == "(NOT E1 AND E2) OR E3"
+    assert [row["Ref"] for row in rendered.session_state["test_filter_rows"]] == [
+        "E1",
+        "E2",
+        "E3",
+    ]
+    assert rendered.session_state["compiled_out"] == {
+        "op": "or",
+        "args": [
+            {
+                "op": "and",
+                "args": [
+                    {"op": "not", "arg": {"op": "eq", "column": "Channel", "value": "Web"}},
+                    {"op": "eq", "column": "Region", "value": "EU"},
+                ],
+            },
+            {"op": "gt", "column": "Score", "value": 5},
+        ],
+    }
+
+
+@pytest.mark.unit
+def test_filter_editor_reports_formula_errors_inline() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import builder
+from valuestream.ui.pages import config_builder
+
+rows_key = "test_filter_rows"
+st.session_state[rows_key] = [
+    {"Ref": "E1", "Field": "Channel", "Operator": "==", "Value": "Web", "Enabled": True}
+]
+st.session_state[f"{rows_key}_logic_mode"] = "Advanced"
+st.session_state[f"{rows_key}_combine"] = "AND"
+st.session_state[f"{rows_key}_formula"] = "E1 AND E7"
+filter_frame = builder.editor_frame(
+    st.session_state[rows_key],
+    ["Ref", "Field", "Operator", "Value", "Enabled"],
+    builder.blank_filter_row,
+)
+config_builder._render_filter_rows_editor(
+    rows_key,
+    "test_filter_editor",
+    filter_frame,
+    ["Channel"],
+)
+"""
+    )
+
+    rendered = app.run(timeout=15)
+
+    assert not rendered.exception
+    assert rendered.error
+    assert "E7 does not exist" in rendered.error[0].value
+
+
+# ---------------------------------------------------------------------------
+# Common dimensions restored from processors.
+# ---------------------------------------------------------------------------
+
+
+def _dimension_catalog(processor_dimensions: list[list[str]]) -> model.Catalog:
+    processors = [
+        {
+            "id": f"p{index}",
+            "source": "ih",
+            "kind": "binary_outcome",
+            "dimensions": dimensions,
+            "states": {"Count": {"type": "count"}},
+        }
+        for index, dimensions in enumerate(processor_dimensions)
+    ]
+    return model.Catalog.model_validate(
+        {
+            "pipelines": {
+                "version": 1,
+                "workspace": "dims",
+                "sources": [
+                    {
+                        "id": "ih",
+                        "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+                        "schema": {"natural_key": ["InteractionID"]},
+                    }
+                ],
+            },
+            "processors": {"processors": processors},
+            "metrics": {"metrics": {}},
+            "dashboards": {"dashboards": []},
+        }
+    )
+
+
+@pytest.mark.unit
+def test_workspace_dimensions_fall_back_to_shared_processor_group_by() -> None:
+    catalog = _dimension_catalog(
+        [
+            ["Channel", "CustomerType", "Placement", "Outcome"],
+            ["Channel", "Placement", "AppliedModel", "CustomerType"],
+            ["channel", "CustomerType", "Placement", "Issue"],
+        ]
+    )
+
+    # Intersection in first-processor order; matching is case-insensitive and
+    # the first processor's spelling wins.
+    assert builder.workspace_dimension_defaults(catalog) == [
+        "Channel",
+        "CustomerType",
+        "Placement",
+    ]
+
+
+@pytest.mark.unit
+def test_workspace_dimensions_fallback_skips_processors_without_group_by() -> None:
+    catalog = _dimension_catalog([["Channel", "Issue"], [], ["Issue", "Channel"]])
+
+    assert builder.workspace_dimension_defaults(catalog) == ["Channel", "Issue"]
+
+
+@pytest.mark.unit
+def test_workspace_dimensions_fallback_handles_disjoint_and_missing() -> None:
+    assert builder.workspace_dimension_defaults(_dimension_catalog([["Channel"], ["Issue"]])) == []
+    assert builder.workspace_dimension_defaults(_dimension_catalog([])) == []
+
+
+@pytest.mark.unit
+def test_workspace_dimensions_explicit_defaults_override_fallback() -> None:
+    catalog = _dimension_catalog([["Channel", "Issue"], ["Channel", "Issue"]])
+    explicit = catalog.model_copy(
+        update={
+            "pipelines": catalog.pipelines.model_copy(
+                update={
+                    "defaults": catalog.pipelines.defaults.model_copy(
+                        update={"dimensions": ["Region"]}
+                    )
+                }
+            )
+        }
+    )
+
+    assert builder.workspace_dimension_defaults(explicit) == ["Region"]
+
+
+@pytest.mark.unit
+def test_fat_example_workspace_restores_common_dimensions_from_processors() -> None:
+    catalog = load(_EXAMPLES_DIR / "fat")
+
+    assert builder.workspace_dimension_defaults(catalog) == [
+        "Channel",
+        "CustomerType",
+        "Placement",
+        "Issue",
+        "Group",
+    ]

@@ -2960,8 +2960,10 @@ def test_accepting_preprocessing_patches_syncs_all_source_editors() -> None:
     ]
     calculation = at.session_state["ai_studio_calculations"][0]
     assert calculation["Name"] == "ChannelCopy"
-    assert calculation["Mode"] == "AST YAML"
-    assert "col: Channel" in calculation["Expression"]
+    # A bare column copy now loads as the recognized Copy Field mode.
+    assert calculation["Mode"] == "Copy Field"
+    assert calculation["Left"] == "Channel"
+    assert calculation["Expression"] == ""
 
 
 @pytest.mark.unit

@@ -33,6 +33,7 @@ FILTER_OPERATORS = [
     ">=",
     "<",
     "<=",
+    "between",
     "contains",
     "starts with",
     "ends with",
@@ -42,22 +43,33 @@ FILTER_OPERATORS = [
     "is not null",
 ]
 
+_DATE_DIFF_MODE_UNITS = {
+    f"Date Diff {unit.title()}": unit
+    for unit in ("seconds", "minutes", "hours", "days", "months", "years")
+}
+_DATE_PART_MODE_UNITS = {
+    f"Date Part {unit.title()}": unit
+    for unit in ("year", "month", "quarter", "day", "hour", "weekday")
+}
+
 CALCULATION_MODES = [
     "AST YAML",
     "Polars",
+    "Copy Field",
     "Add",
     "Subtract",
     "Multiply",
     "Divide",
     "Safe Divide",
+    "Absolute Value",
+    "Round",
     "Concat",
     "Coalesce",
-    "Date Diff Seconds",
-    "Date Part Year",
-    "Date Part Month",
-    "Date Part Quarter",
-    "Date Part Day",
+    *_DATE_DIFF_MODE_UNITS,
+    *_DATE_PART_MODE_UNITS,
 ]
+
+VISUAL_CASE_MAX_BRANCHES = 8
 
 STATE_TYPES = [
     "count",
@@ -848,6 +860,166 @@ def compile_condition_rows(
     return {"op": "or" if combine == "any" else "and", "args": expressions}
 
 
+_CONDITION_REF_PATTERN = re.compile(r"^[Ee]([1-9]\d*)$")
+_FORMULA_KEYWORD_PATTERN = re.compile(r"\b(AND|OR|NOT)\b", re.IGNORECASE)
+
+
+def label_condition_rows(condition_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return condition rows with ``Ref`` set to E1..En in visible order."""
+    labeled = []
+    for index, row in enumerate(condition_rows):
+        updated = dict(row)
+        updated["Ref"] = f"E{index + 1}"
+        labeled.append(updated)
+    return labeled
+
+
+def compile_condition_formula(
+    condition_rows: list[dict[str, Any]],
+    formula: str,
+) -> dict[str, Any]:
+    """Compile condition rows joined by a boolean formula into one AST.
+
+    The formula references rows as ``E1``..``En`` and combines them with
+    ``AND`` / ``OR`` / ``NOT`` (any case) and parentheses, e.g.
+    ``(NOT E1 AND E2) OR E3``. Unlike the basic combine modes, every
+    referenced row must exist, be enabled, and be complete — silent skipping
+    would change the formula's meaning. Raises ``ValueError`` with
+    remediation text on any problem.
+    """
+    text = str(formula or "").strip()
+    if not text:
+        raise ValueError("enter a logic formula, for example (E1 AND E2) OR NOT E3")
+    normalized = _FORMULA_KEYWORD_PATTERN.sub(lambda match: match.group(1).lower(), text)
+    try:
+        parsed = py_ast.parse(normalized, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"the logic formula is not valid: {exc.msg}") from exc
+    return _compile_formula_node(parsed.body, condition_rows)
+
+
+def _compile_formula_node(
+    node: py_ast.AST,
+    condition_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if isinstance(node, py_ast.BoolOp):
+        op = "and" if isinstance(node.op, py_ast.And) else "or"
+        return {
+            "op": op,
+            "args": [_compile_formula_node(value, condition_rows) for value in node.values],
+        }
+    if isinstance(node, py_ast.UnaryOp) and isinstance(node.op, py_ast.Not):
+        return {"op": "not", "arg": _compile_formula_node(node.operand, condition_rows)}
+    if isinstance(node, py_ast.Name):
+        return _compile_formula_ref(node.id, condition_rows)
+    raise ValueError(
+        "logic formulas support only condition references (E1, E2, ...), "
+        "AND, OR, NOT, and parentheses"
+    )
+
+
+def _compile_formula_ref(name: str, condition_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    match = _CONDITION_REF_PATTERN.match(name)
+    if match is None:
+        raise ValueError(f"unknown token {name!r}: condition references look like E1, E2, ...")
+    index = int(match.group(1))
+    if index > len(condition_rows):
+        raise ValueError(
+            f"E{index} does not exist: the table has {len(condition_rows)} condition row(s)"
+        )
+    row = condition_rows[index - 1]
+    if not editor_row_enabled(row.get("Enabled")):
+        raise ValueError(f"E{index} is disabled: enable the row or remove it from the formula")
+    predicate = _compile_filter_row(row)
+    if predicate is None:
+        raise ValueError(f"E{index} is incomplete: choose a field and an operator")
+    return predicate
+
+
+def condition_state_from_expression(expression: Any) -> dict[str, Any] | None:
+    """Decompile a filter AST into rows plus Basic/Advanced logic state.
+
+    Returns ``{"rows", "mode", "combine", "formula"}`` where flat
+    conjunctions stay ``Basic`` (with ``combine`` AND/OR) and anything with
+    ``not`` or mixed nesting becomes ``Advanced`` with a canonical formula
+    string. ``formula`` is always rendered so a Basic seed can prefill the
+    Advanced input. Returns ``None`` when any leaf predicate cannot map to a
+    condition row (callers fall back to the raw-AST editor).
+    """
+    if expression in (None, {}):
+        return {"rows": [], "mode": "Basic", "combine": "AND", "formula": ""}
+    rows: list[dict[str, Any]] = []
+    skeleton = _condition_skeleton(expression, rows)
+    if skeleton is None:
+        return None
+    formula = _render_condition_formula(skeleton)
+    combine = _basic_combine_for_skeleton(skeleton)
+    return {
+        "rows": label_condition_rows(rows),
+        "mode": "Basic" if combine is not None else "Advanced",
+        "combine": combine or "AND",
+        "formula": formula,
+    }
+
+
+def _condition_skeleton(  # noqa: PLR0911
+    expression: Any,
+    rows: list[dict[str, Any]],
+) -> tuple[str, Any] | None:
+    """Collect leaf rows and return the boolean structure over their indexes."""
+    if not isinstance(expression, dict):
+        return None
+    op = expression.get("op")
+    if op in {"and", "or"} and isinstance(expression.get("args"), list):
+        children = []
+        for arg in expression["args"]:
+            child = _condition_skeleton(arg, rows)
+            if child is None:
+                return None
+            children.append(child)
+        if len(children) < 2:
+            return None
+        return (str(op), children)
+    if op == "not":
+        child = _condition_skeleton(expression.get("arg"), rows)
+        return None if child is None else ("not", child)
+    row = _filter_row_from_expression(expression)
+    if row is None:
+        return None
+    rows.append(row)
+    return ("ref", len(rows))
+
+
+def _basic_combine_for_skeleton(skeleton: tuple[str, Any]) -> str | None:
+    """Return AND/OR when the skeleton is one flat conjunction, else None."""
+    kind = skeleton[0]
+    if kind == "ref":
+        return "AND"
+    if kind in {"and", "or"} and all(child[0] == "ref" for child in skeleton[1]):
+        return "AND" if kind == "and" else "OR"
+    return None
+
+
+def _render_condition_formula(skeleton: tuple[str, Any]) -> str:
+    """Render a skeleton as canonical formula text that reparses identically.
+
+    Any nested and/or child is parenthesized — even under the same operator —
+    so ``(E1 AND E2) AND E3`` survives the round trip instead of flattening.
+    """
+    kind = skeleton[0]
+    if kind == "ref":
+        return f"E{skeleton[1]}"
+    if kind == "not":
+        child = skeleton[1]
+        rendered = _render_condition_formula(child)
+        return f"NOT ({rendered})" if child[0] in {"and", "or"} else f"NOT {rendered}"
+    parts = []
+    for child in skeleton[1]:
+        rendered = _render_condition_formula(child)
+        parts.append(f"({rendered})" if child[0] in {"and", "or"} else rendered)
+    return (" AND " if kind == "and" else " OR ").join(parts)
+
+
 def case_value_expression(kind: str, value: Any) -> dict[str, Any]:
     """Build a case then/else value atom from visual-builder inputs."""
     if str(kind).strip().casefold() == "field":
@@ -896,6 +1068,128 @@ def compile_case_expression(
     except ValueError as exc:
         raise ValueError(f"else value: {exc}") from exc
     return {"op": "case", "when": when, "else": else_expression}
+
+
+def _literal_editor_text(value: Any) -> str | None:
+    """Format a ``lit`` scalar as editor text that survives ``_safe_literal``.
+
+    Returns ``None`` when no text round-trips to ``value`` — e.g. the string
+    ``"3.5"`` would re-parse as a float — so callers can refuse a lossy
+    conversion and keep the raw AST instead.
+    """
+    if value is None:
+        text = "null"
+    elif isinstance(value, bool):
+        text = "true" if value else "false"
+    else:
+        text = str(value)
+    return text if _safe_literal(text) == value else None
+
+
+def case_value_from_expression(expression: Any) -> tuple[str, str] | None:
+    """Reverse of :func:`case_value_expression`: atom to ``(kind, editor text)``."""
+    if not isinstance(expression, dict):
+        return None
+    if set(expression) == {"col"}:
+        column = str(expression["col"]).strip()
+        return None if not column else ("Field", column)
+    if set(expression) == {"lit"}:
+        text = _literal_editor_text(expression["lit"])
+        return None if text is None else ("Literal", text)
+    return None
+
+
+def condition_rows_from_expression(
+    expression: Any,
+) -> tuple[list[dict[str, Any]], str] | None:
+    """Reverse of :func:`compile_condition_rows`: flat and/or to ``(rows, combine)``.
+
+    Only one level of ``and``/``or`` over row-mappable predicates is
+    representable; anything nested or beyond the row operators returns
+    ``None``.
+    """
+    if not isinstance(expression, dict):
+        return None
+    op = expression.get("op")
+    if op in {"and", "or"} and isinstance(expression.get("args"), list):
+        rows: list[dict[str, Any]] = []
+        for arg in expression["args"]:
+            row = _filter_row_from_expression(arg) if isinstance(arg, dict) else None
+            if row is None:
+                return None
+            rows.append(row)
+        return rows, ("any" if op == "or" else "all")
+    row = _filter_row_from_expression(expression)
+    return None if row is None else ([row], "all")
+
+
+def visual_case_state_from_expression(text: str) -> dict[str, Any] | None:  # noqa: PLR0911
+    """Decompile AST YAML into visual case-builder state.
+
+    Returns ``{"shape": "case" | "condition", "branches": [...], "else_kind",
+    "else_value"}`` where each branch is ``{"rows", "combine", "then_kind",
+    "then_value"}`` — the exact inputs :func:`compile_case_expression` and
+    :func:`compile_condition_rows` consume. ``when_then`` normalizes to a
+    one-branch case. Returns ``None`` for empty or invalid text and for
+    expressions beyond the builder (nested logic, computed values, more than
+    ``VISUAL_CASE_MAX_BRANCHES`` branches).
+    """
+    stripped = str(text or "").strip()
+    if not stripped:
+        return None
+    try:
+        expression = parse_expression_yaml(stripped)
+    except (yaml.YAMLError, ValueError):
+        return None
+    op = expression.get("op")
+    if op == "when_then":
+        branch = _case_branch_state(expression.get("cond"), expression.get("then"))
+        return _case_state([branch], expression.get("else"))
+    if op == "case":
+        when = expression.get("when")
+        if not isinstance(when, list) or not 1 <= len(when) <= VISUAL_CASE_MAX_BRANCHES:
+            return None
+        branches = [
+            _case_branch_state(item.get("cond"), item.get("then"))
+            if isinstance(item, dict)
+            else None
+            for item in when
+        ]
+        return _case_state(branches, expression.get("else"))
+    condition = condition_rows_from_expression(expression)
+    if condition is None:
+        return None
+    rows, combine = condition
+    return {
+        "shape": "condition",
+        "branches": [{"rows": rows, "combine": combine, "then_kind": "Literal", "then_value": ""}],
+        "else_kind": "Literal",
+        "else_value": "",
+    }
+
+
+def _case_branch_state(cond: Any, then: Any) -> dict[str, Any] | None:
+    condition = condition_rows_from_expression(cond)
+    value = case_value_from_expression(then)
+    if condition is None or value is None:
+        return None
+    rows, combine = condition
+    return {"rows": rows, "combine": combine, "then_kind": value[0], "then_value": value[1]}
+
+
+def _case_state(
+    branches: list[dict[str, Any] | None],
+    else_expression: Any,
+) -> dict[str, Any] | None:
+    else_value = case_value_from_expression(else_expression)
+    if else_value is None or any(branch is None for branch in branches):
+        return None
+    return {
+        "shape": "case",
+        "branches": branches,
+        "else_kind": else_value[0],
+        "else_value": else_value[1],
+    }
 
 
 def parse_expression_yaml(text: str) -> dict[str, Any]:
@@ -1060,6 +1354,10 @@ def calculated_rows_from_source(source: model.Source) -> list[dict[str, Any]]:
         if not isinstance(transform, model.DeriveColumn):
             continue
         expression = expr_parser.to_dict(transform.expression)
+        recognized = calculation_mode_from_expression(expression)
+        if recognized is not None:
+            rows.append({"Name": transform.output, **recognized, "Expression": "", "Enabled": True})
+            continue
         mode = "Polars" if set(expression) == {"polars"} else "AST YAML"
         rows.append(
             {
@@ -1128,19 +1426,29 @@ def _calculated_expression(row: dict[str, Any]) -> dict[str, Any] | None:
     return _builder_calculation_expression(mode, row)
 
 
-def _builder_calculation_expression(mode: str, row: dict[str, Any]) -> dict[str, Any] | None:  # noqa: PLR0911
+def _builder_calculation_expression(  # noqa: PLR0911, PLR0912
+    mode: str,
+    row: dict[str, Any],
+) -> dict[str, Any] | None:
     left = str(row.get("Left", "")).strip()
     right = str(row.get("Right", "")).strip()
     right_kind = str(row.get("Right Kind", "Field")).strip()
     if not left:
         return None
     left_expr = {"col": left}
-    if mode in {"Date Part Year", "Date Part Month", "Date Part Quarter", "Date Part Day"}:
-        return {
-            "op": "date_part",
-            "unit": mode.removeprefix("Date Part ").casefold(),
-            "arg": left_expr,
-        }
+    if mode == "Copy Field":
+        return left_expr
+    if mode == "Absolute Value":
+        return {"op": "abs", "arg": left_expr}
+    if mode in _DATE_PART_MODE_UNITS:
+        return {"op": "date_part", "unit": _DATE_PART_MODE_UNITS[mode], "arg": left_expr}
+    if mode == "Round":
+        if not right:
+            return {"op": "round", "arg": left_expr}
+        ndigits = _safe_literal(right)
+        if isinstance(ndigits, bool) or not isinstance(ndigits, int):
+            return None
+        return {"op": "round", "arg": left_expr, "ndigits": ndigits}
     if not right:
         return None
     right_expr = {"lit": _safe_literal(right)} if right_kind == "Literal" else {"col": right}
@@ -1158,9 +1466,107 @@ def _builder_calculation_expression(mode: str, row: dict[str, Any]) -> dict[str,
         return {"op": "concat", "args": [left_expr, right_expr], "sep": ""}
     if mode == "Coalesce":
         return {"op": "coalesce", "args": [left_expr, right_expr]}
-    if mode == "Date Diff Seconds":
-        return {"op": "date_diff", "unit": "seconds", "end": left_expr, "start": right_expr}
+    if mode in _DATE_DIFF_MODE_UNITS:
+        return {
+            "op": "date_diff",
+            "unit": _DATE_DIFF_MODE_UNITS[mode],
+            "end": left_expr,
+            "start": right_expr,
+        }
     return None
+
+
+_ARITHMETIC_OP_MODES = {"add": "Add", "sub": "Subtract", "mul": "Multiply", "div": "Divide"}
+_DATE_DIFF_UNIT_MODES = {unit: mode for mode, unit in _DATE_DIFF_MODE_UNITS.items()}
+_DATE_PART_UNIT_MODES = {unit: mode for mode, unit in _DATE_PART_MODE_UNITS.items()}
+
+
+def _column_operand(expression: Any) -> str | None:
+    """Return the column name when ``expression`` is a bare ``{col: ...}`` atom."""
+    if isinstance(expression, dict) and set(expression) == {"col"}:
+        column = str(expression["col"])
+        if column and column == column.strip():
+            return column
+    return None
+
+
+def _right_operand(expression: Any) -> tuple[str, str] | None:
+    """Map an operand atom to grid ``(Right Kind, Right)``; None when not exact.
+
+    A blank right text is rejected because the grid treats an empty Right as
+    an incomplete row, so it could never compile back to ``expression``.
+    """
+    operand = case_value_from_expression(expression)
+    if operand is None or not operand[1]:
+        return None
+    return operand
+
+
+def calculation_mode_from_expression(  # noqa: PLR0911, PLR0912
+    expression: Any,
+) -> dict[str, str] | None:
+    """Recognize the simple-mode row whose compile is exactly ``expression``.
+
+    Returns ``{"Mode", "Left", "Right Kind", "Right"}`` when one of the
+    Left/Right grid modes reproduces ``expression`` verbatim, so catalog loads
+    can show the friendly mode instead of raw AST YAML. Extra keys, nested
+    operands, and literals that would not survive the editor-text round trip
+    return ``None`` and stay AST YAML.
+    """
+    if not isinstance(expression, dict):
+        return None
+    left = _column_operand(expression)
+    if left is not None:
+        return _mode_row("Copy Field", left)
+    keys = set(expression)
+    op = expression.get("op")
+    left = _column_operand(expression.get("arg"))
+    if op == "abs" and keys == {"op", "arg"} and left is not None:
+        return _mode_row("Absolute Value", left)
+    if op == "round" and keys in ({"op", "arg"}, {"op", "arg", "ndigits"}) and left is not None:
+        ndigits = expression.get("ndigits")
+        if "ndigits" not in expression:
+            return _mode_row("Round", left)
+        if isinstance(ndigits, int) and not isinstance(ndigits, bool):
+            return _mode_row("Round", left, right=str(ndigits), right_kind="Literal")
+        return None
+    if op == "date_part" and keys == {"op", "unit", "arg"} and left is not None:
+        mode = _DATE_PART_UNIT_MODES.get(str(expression.get("unit")))
+        return None if mode is None else _mode_row(mode, left)
+    if op in _ARITHMETIC_OP_MODES and keys == {"op", "args"}:
+        return _binary_mode_row(_ARITHMETIC_OP_MODES[str(op)], expression.get("args"))
+    if op == "coalesce" and keys == {"op", "args"}:
+        return _binary_mode_row("Coalesce", expression.get("args"))
+    if op == "concat" and keys == {"op", "args", "sep"} and expression.get("sep") == "":
+        return _binary_mode_row("Concat", expression.get("args"))
+    if op == "safe_div" and keys == {"op", "num", "den"}:
+        return _binary_mode_row("Safe Divide", [expression.get("num"), expression.get("den")])
+    if op == "date_diff" and keys == {"op", "unit", "end", "start"}:
+        mode = _DATE_DIFF_UNIT_MODES.get(str(expression.get("unit")))
+        if mode is None:
+            return None
+        return _binary_mode_row(mode, [expression.get("end"), expression.get("start")])
+    return None
+
+
+def _binary_mode_row(mode: str, args: Any) -> dict[str, str] | None:
+    if not isinstance(args, list) or len(args) != 2:
+        return None
+    left = _column_operand(args[0])
+    right = _right_operand(args[1])
+    if left is None or right is None:
+        return None
+    return _mode_row(mode, left, right=right[1], right_kind=right[0])
+
+
+def _mode_row(
+    mode: str,
+    left: str,
+    *,
+    right: str = "",
+    right_kind: str = "Field",
+) -> dict[str, str]:
+    return {"Mode": mode, "Left": left, "Right Kind": right_kind, "Right": right}
 
 
 def expression_yaml(expression: Any) -> str:
@@ -2731,15 +3137,47 @@ def write_pipelines_definition(
 
 
 def workspace_dimension_defaults(catalog: model.Catalog) -> list[str]:
-    """Return the workspace-level common business dimensions."""
+    """Return the workspace-level common business dimensions.
 
-    return dedupe(
+    When ``defaults.dimensions`` is not set in ``pipelines.yaml``, the list is
+    restored from the processors instead: the dimensions every processor with
+    a group-by shares, in the first processor's order. Existing workspaces
+    therefore surface their de-facto common list rather than an empty
+    selector; the derived list is only persisted when the user applies it.
+    """
+
+    explicit = dedupe(
         [
             str(field).strip()
             for field in catalog.pipelines.defaults.dimensions
             if str(field).strip()
         ]
     )
+    if explicit:
+        return explicit
+    return _shared_processor_dimensions(catalog)
+
+
+def _shared_processor_dimensions(catalog: model.Catalog) -> list[str]:
+    """Dimensions common to every processor group-by, in first-seen order.
+
+    Processors without any group-by are skipped — they have nothing to share
+    and would otherwise erase the common list.
+    """
+
+    shared: list[str] | None = None
+    for processor in catalog.processors.processors:
+        fields = dedupe([str(field).strip() for field in processor.group_by if str(field).strip()])
+        if not fields:
+            continue
+        if shared is None:
+            shared = fields
+            continue
+        keys = {field.casefold() for field in fields}
+        shared = [field for field in shared if field.casefold() in keys]
+        if not shared:
+            return []
+    return shared or []
 
 
 def write_workspace_dimensions(
@@ -3115,6 +3553,13 @@ def _compile_filter_row(row: dict[str, Any]) -> dict[str, Any] | None:  # noqa: 
         return {"op": "in", "column": field, "values": _split_values(raw_value)}
     if operator == "not in":
         return {"op": "not_in", "column": field, "values": _split_values(raw_value)}
+    if operator == "between":
+        bounds = _split_values(raw_value)
+        if len(bounds) != 2:
+            raise ValueError(
+                f"between on {field!r} needs exactly two comma-separated values: low, high"
+            )
+        return {"op": "between", "column": field, "low": bounds[0], "high": bounds[1]}
     if operator == "contains":
         return {"op": "matches", "column": field, "pattern": str(raw_value)}
     if operator == "starts with":
@@ -3156,6 +3601,13 @@ def _filter_row_from_expression(expression: dict[str, Any]) -> dict[str, Any] | 
             "Field": expression.get("column", ""),
             "Operator": "not in",
             "Value": ", ".join(map(str, expression.get("values", []))),
+            "Enabled": True,
+        }
+    if op == "between":
+        return {
+            "Field": expression.get("column", ""),
+            "Operator": "between",
+            "Value": f"{expression.get('low', '')}, {expression.get('high', '')}",
             "Enabled": True,
         }
     if op == "is_null":
@@ -3415,6 +3867,7 @@ __all__ = [
     "METRIC_KIND_LABELS",
     "SCALAR_STATE_TYPES",
     "STATE_TYPES",
+    "VISUAL_CASE_MAX_BRANCHES",
     "BuilderApplyOutcome",
     "BuilderDraftStatus",
     "CalculatedExpressionValidation",
@@ -3443,7 +3896,9 @@ __all__ = [
     "calculated_expression_example",
     "calculated_rows_for_editor",
     "calculated_rows_from_source",
+    "calculation_mode_from_expression",
     "case_value_expression",
+    "case_value_from_expression",
     "catalog_id_is_safe",
     "chart_choices_for_metric",
     "chart_field_controls",
@@ -3453,8 +3908,11 @@ __all__ = [
     "chart_kind_selector_label",
     "chart_recipe_summary",
     "compile_case_expression",
+    "compile_condition_formula",
     "compile_condition_rows",
     "compile_filter_rows",
+    "condition_rows_from_expression",
+    "condition_state_from_expression",
     "csv_text_to_list",
     "dedupe",
     "default_curve_digest_states",
@@ -3481,6 +3939,7 @@ __all__ = [
     "float_in_range",
     "funnel_stage_names",
     "generated_catalog_id",
+    "label_condition_rows",
     "merge_stage_definitions",
     "metric_kind_help",
     "metric_kind_label",
@@ -3512,6 +3971,7 @@ __all__ = [
     "update_builder_draft_registry",
     "validate_calculated_expression",
     "validate_workspace",
+    "visual_case_state_from_expression",
     "widget_key_fragment",
     "workspace_dimension_defaults",
     "write_dashboards_definition",

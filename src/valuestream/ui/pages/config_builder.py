@@ -1198,6 +1198,89 @@ def _render_default_values_editor(
     st.session_state[rows_key] = builder.normalize_editor_rows(edited_defaults)
 
 
+_FILTER_LOGIC_MODES = ["Basic", "Advanced"]
+_FILTER_COMBINE_OPTIONS = ["AND", "OR"]
+
+
+def _filter_logic_mode(rows_key: str) -> str:
+    mode = str(st.session_state.get(f"{rows_key}_logic_mode") or "Basic")
+    return mode if mode in _FILTER_LOGIC_MODES else "Basic"
+
+
+def _seed_filter_editor_state(rows_key: str, state: dict[str, Any] | None) -> None:
+    """Seed rows and logic keys once per editor from decompiled catalog state."""
+
+    if rows_key in st.session_state:
+        return
+    resolved = state or {"rows": [], "mode": "Basic", "combine": "AND", "formula": ""}
+    st.session_state[rows_key] = list(resolved["rows"])
+    st.session_state[f"{rows_key}_logic_mode"] = resolved["mode"]
+    st.session_state[f"{rows_key}_combine"] = resolved["combine"]
+    st.session_state[f"{rows_key}_formula"] = resolved["formula"]
+
+
+def _compiled_filter_expression(rows_key: str) -> dict[str, Any] | None:
+    """Compile the filter editor's rows honoring its Basic/Advanced logic."""
+
+    rows = builder.normalize_editor_rows(st.session_state.get(rows_key, []))
+    if _filter_logic_mode(rows_key) == "Advanced":
+        formula = str(st.session_state.get(f"{rows_key}_formula", "") or "")
+        if not formula.strip() and builder.compile_condition_rows(rows, combine="all") is None:
+            return None
+        return builder.compile_condition_formula(rows, formula)
+    combine = "any" if str(st.session_state.get(f"{rows_key}_combine", "AND")) == "OR" else "all"
+    return builder.compile_condition_rows(rows, combine=combine)
+
+
+def _render_filter_logic_controls(rows_key: str) -> None:
+    """Render the Basic/Advanced switch plus its combine or formula input."""
+
+    mode_key = f"{rows_key}_logic_mode"
+    mode_widget = f"{mode_key}_control"
+    mode_kwargs: dict[str, Any] = {"key": mode_widget}
+    if mode_widget not in st.session_state:
+        mode_kwargs["default"] = _filter_logic_mode(rows_key)
+    mode = st.segmented_control(
+        "Condition logic",
+        _FILTER_LOGIC_MODES,
+        help=config_help.field_help("filter.logic_mode"),
+        **mode_kwargs,
+    ) or _filter_logic_mode(rows_key)
+    st.session_state[mode_key] = mode
+    combine_key = f"{rows_key}_combine"
+    if mode == "Basic":
+        combine_widget = f"{combine_key}_control"
+        combine_kwargs: dict[str, Any] = {"key": combine_widget}
+        if combine_widget not in st.session_state:
+            combine_kwargs["index"] = builder.option_index(
+                _FILTER_COMBINE_OPTIONS, st.session_state.get(combine_key, "AND")
+            )
+        combine = st.selectbox(
+            "Combine condition rows",
+            _FILTER_COMBINE_OPTIONS,
+            help=config_help.field_help("filter.combine"),
+            **combine_kwargs,
+        )
+        st.session_state[combine_key] = combine
+        return
+    formula_key = f"{rows_key}_formula"
+    if not str(st.session_state.get(formula_key, "") or "").strip():
+        rows = builder.normalize_editor_rows(st.session_state.get(rows_key, []))
+        joiner = " OR " if str(st.session_state.get(combine_key, "AND")) == "OR" else " AND "
+        st.session_state[formula_key] = joiner.join(f"E{index + 1}" for index in range(len(rows)))
+        st.session_state.pop(f"{formula_key}_input", None)
+    formula_widget = f"{formula_key}_input"
+    formula_kwargs: dict[str, Any] = {"key": formula_widget}
+    if formula_widget not in st.session_state:
+        formula_kwargs["value"] = str(st.session_state.get(formula_key, "") or "")
+    formula = st.text_input(
+        "Logic formula",
+        help=config_help.field_help("filter.formula"),
+        **formula_kwargs,
+    )
+    st.session_state[formula_key] = formula
+
+
 def _render_filter_rows_editor(
     rows_key: str,
     editor_key: str,
@@ -1215,6 +1298,12 @@ def _render_filter_rows_editor(
         width="stretch",
         key=editor_key,
         column_config={
+            "Ref": st.column_config.TextColumn(
+                "Ref",
+                width="small",
+                disabled=True,
+                help=config_help.field_help("filter.ref"),
+            ),
             "Field": st.column_config.SelectboxColumn(
                 "Field",
                 options=field_options,
@@ -1240,12 +1329,20 @@ def _render_filter_rows_editor(
             ),
         },
     )
-    st.session_state[rows_key] = builder.normalize_editor_rows(edited_filters)
+    rows = builder.normalize_editor_rows(edited_filters)
+    displayed_refs = [str(row.get("Ref", "") or "") for row in rows]
+    rows = builder.label_condition_rows(rows)
+    st.session_state[rows_key] = rows
+    if displayed_refs != [row["Ref"] for row in rows]:
+        # A row was added or removed, so rebuild the pinned frame — visible
+        # E-labels must keep matching the formula's row references.
+        components.clear_pinned_editor(editor_key)
+        st.rerun()
+    _render_filter_logic_controls(rows_key)
     try:
-        builder.compile_filter_rows(st.session_state[rows_key])
-    except Exception as exc:
-        logger.exception("Failed to compile filter rows: editor_key=%s", editor_key)
-        st.error(str(exc))
+        _compiled_filter_expression(rows_key)
+    except ValueError as exc:
+        st.error(f"Filter logic: {exc}")
 
 
 def _render_calculated_rows_editor(
@@ -1596,6 +1693,66 @@ def _condition_field_options(
     return builder.dedupe([*field_options, *calculated_names])
 
 
+def _sync_visual_builder_with_draft(base: str, draft_key: str) -> bool:
+    """Mirror the working draft expression into the visual-builder widgets.
+
+    Runs whenever the draft text changes from outside the builder (first
+    render, row apply/cancel, manual-editor edits) and seeds every visual
+    widget from the decompiled AST. YAML the builder itself generated is
+    skipped so Generate does not renormalize in-progress rows. Returns
+    ``False`` when a non-empty draft cannot be represented, so the caller can
+    say the builder does not reflect the working expression.
+    """
+
+    text = str(st.session_state.get(draft_key, "") or "")
+    signature_key = f"{base}_signature"
+    mirrors_key = f"{base}_mirrors_draft"
+    # Widget-bound values (shape, branches, kinds) are cleaned up whenever the
+    # row is not rendered for one rerun, so a matching signature alone is not
+    # enough — the shape key doubles as the widgets-still-alive sentinel.
+    widgets_alive = f"{base}_shape" in st.session_state
+    if st.session_state.get(signature_key) == text and widgets_alive:
+        return bool(st.session_state.get(mirrors_key, True))
+    freshly_generated = widgets_alive and text == st.session_state.get(
+        f"{base}_generated_signature"
+    )
+    st.session_state[signature_key] = text
+    mirrors = True
+    if text.strip() and not freshly_generated:
+        state = builder.visual_case_state_from_expression(text)
+        if state is None:
+            mirrors = False
+        else:
+            _apply_visual_builder_state(base, state)
+    st.session_state[mirrors_key] = mirrors
+    return mirrors
+
+
+def _apply_visual_builder_state(base: str, state: dict[str, Any]) -> None:
+    """Replace every visual-builder widget value with decompiled state."""
+
+    branches = list(state.get("branches", []))
+    st.session_state[f"{base}_shape"] = (
+        _VISUAL_SHAPE_CONDITION if state.get("shape") == "condition" else _VISUAL_SHAPE_CASE
+    )
+    st.session_state[f"{base}_branches"] = max(1, len(branches))
+    for index in range(builder.VISUAL_CASE_MAX_BRANCHES):
+        components.clear_pinned_editor(f"{base}_b{index}_editor")
+        if index >= len(branches):
+            for suffix in ("rows", "combine", "then_kind", "then_value"):
+                st.session_state.pop(f"{base}_b{index}_{suffix}", None)
+            continue
+        branch = branches[index]
+        st.session_state[f"{base}_b{index}_rows"] = [dict(row) for row in branch.get("rows", [])]
+        st.session_state[f"{base}_b{index}_combine"] = (
+            _VISUAL_COMBINE_ANY if branch.get("combine") == "any" else _VISUAL_COMBINE_ALL
+        )
+        st.session_state[f"{base}_b{index}_then_kind"] = str(branch.get("then_kind") or "Literal")
+        st.session_state[f"{base}_b{index}_then_value"] = str(branch.get("then_value") or "")
+    st.session_state[f"{base}_else_kind"] = str(state.get("else_kind") or "Literal")
+    st.session_state[f"{base}_else_value"] = str(state.get("else_value") or "")
+
+
 def _render_visual_case_builder(
     *,
     draft_key: str,
@@ -1606,12 +1763,22 @@ def _render_visual_case_builder(
     """Structured case/when and condition-chain authoring for AST YAML rows."""
 
     base = f"{draft_key}_visual"
+    mirrors_draft = _sync_visual_builder_with_draft(base, draft_key)
     with st.expander("Visual builder · conditions and case/when", expanded=True):
         st.caption(
             "Compose the expression from condition rows and result values — no YAML typing. "
             "Generate expression fills the editor above; review the YAML and choose "
             "Apply expression to commit it."
         )
+        if not mirrors_draft:
+            st.info(
+                "The working expression uses features beyond this builder (nested "
+                "logic, computed values, or unsupported operations), so it is not "
+                "mirrored here. Generate expression replaces it after review.",
+                icon=":material/info:",
+            )
+        if f"{base}_branches" not in st.session_state:
+            st.session_state[f"{base}_branches"] = 1
         shape = st.selectbox(
             "Build",
             [_VISUAL_SHAPE_CASE, _VISUAL_SHAPE_CONDITION],
@@ -1626,8 +1793,7 @@ def _render_visual_case_builder(
                 st.number_input(
                     "Branches",
                     min_value=1,
-                    max_value=8,
-                    value=1,
+                    max_value=builder.VISUAL_CASE_MAX_BRANCHES,
                     key=f"{base}_branches",
                     help=config_help.field_help("calculation.visual_branches"),
                 )
@@ -1793,6 +1959,7 @@ def _generate_visual_case_expression(
     text = builder.expression_yaml(expression)
     st.session_state[draft_key] = text
     st.session_state[input_key] = text
+    st.session_state[f"{base}_generated_signature"] = text
     st.session_state[notice_key] = (
         "success",
         "Generated expression inserted into the working editor. Review the YAML and "
@@ -2284,10 +2451,10 @@ def _source_builder(  # noqa: PLR0912, PLR0915
     filter_expression = builder.first_filter_expression(source)
     if filter_expression and field_mapping:
         filter_expression = field_remap.remap_expression_fields(filter_expression, field_mapping)
-    filter_rows = builder.filter_rows_from_expression(filter_expression)
+    filter_state = builder.condition_state_from_expression(filter_expression)
     filter_mode_key = f"builder_source_filter_mode_{source.id}"
     if filter_mode_key not in st.session_state:
-        st.session_state[filter_mode_key] = "Rules" if filter_rows is not None else "Raw AST"
+        st.session_state[filter_mode_key] = "Rules" if filter_state is not None else "Raw AST"
     with components.bordered_panel(
         "Source Filter", "Define dataset-level filters with rule rows or raw AST YAML."
     ):
@@ -2301,11 +2468,10 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         st.session_state[filter_mode_key] = mode
         if mode == "Rules":
             rows_key = f"builder_source_filter_rows_{source.id}"
-            if rows_key not in st.session_state:
-                st.session_state[rows_key] = filter_rows or []
+            _seed_filter_editor_state(rows_key, filter_state)
             filter_frame = builder.editor_frame(
                 st.session_state[rows_key],
-                ["Field", "Operator", "Value", "Enabled"],
+                ["Ref", "Field", "Operator", "Value", "Enabled"],
                 builder.blank_filter_row,
             )
             _render_filter_rows_editor(
@@ -2315,8 +2481,8 @@ def _source_builder(  # noqa: PLR0912, PLR0915
                 field_options,
             )
             try:
-                compiled_filter = builder.compile_filter_rows(st.session_state[rows_key])
-            except Exception:
+                compiled_filter = _compiled_filter_expression(rows_key)
+            except ValueError:
                 logger.exception("Failed to compile source filter rows: source=%s", source.id)
                 compiled_filter = None
         else:
@@ -3485,10 +3651,10 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         )
 
     filter_expression = builder.first_filter_expression(processor)
-    filter_rows = builder.filter_rows_from_expression(filter_expression)
+    filter_state = builder.condition_state_from_expression(filter_expression)
     filter_mode_key = f"builder_proc_filter_mode_{processor.id}"
     if filter_mode_key not in st.session_state:
-        st.session_state[filter_mode_key] = "Rules" if filter_rows is not None else "Raw AST"
+        st.session_state[filter_mode_key] = "Rules" if filter_state is not None else "Raw AST"
     with components.bordered_panel(
         "Processor Filter", "Optional pre-aggregation filter for this processor."
     ):
@@ -3502,11 +3668,10 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         st.session_state[filter_mode_key] = mode
         if mode == "Rules":
             rows_key = f"builder_proc_filter_rows_{processor.id}"
-            if rows_key not in st.session_state:
-                st.session_state[rows_key] = filter_rows or []
+            _seed_filter_editor_state(rows_key, filter_state)
             filter_frame = builder.editor_frame(
                 st.session_state[rows_key],
-                ["Field", "Operator", "Value", "Enabled"],
+                ["Ref", "Field", "Operator", "Value", "Enabled"],
                 builder.blank_filter_row,
             )
             _render_filter_rows_editor(
@@ -3517,8 +3682,8 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
                 value_width="medium",
             )
             try:
-                compiled_filter = builder.compile_filter_rows(st.session_state[rows_key])
-            except Exception:
+                compiled_filter = _compiled_filter_expression(rows_key)
+            except ValueError:
                 logger.exception(
                     "Failed to compile processor filter rows: processor=%s", processor.id
                 )

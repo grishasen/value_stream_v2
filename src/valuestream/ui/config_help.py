@@ -96,8 +96,27 @@ FIELD_HELP: dict[str, str] = {
     "filter.field": _tip("Column evaluated by this filter rule.", "Channel"),
     "filter.operator": _tip("Comparison applied between the field and configured value.", "in"),
     "filter.value": _tip(
-        "Comparison value. Comma-separated values are accepted by list operators.",
+        "Comparison value. List operators accept comma-separated values; "
+        "between expects exactly two: low, high.",
         "Web, Mobile",
+    ),
+    "filter.ref": _tip(
+        "Automatic row label referenced by the advanced logic formula.",
+        "E2",
+    ),
+    "filter.logic_mode": _tip(
+        "Basic joins every condition row with one operator; Advanced combines "
+        "rows with a boolean formula over their labels.",
+        "Advanced",
+    ),
+    "filter.combine": _tip(
+        "Logical operator applied between all condition rows.",
+        "AND",
+    ),
+    "filter.formula": _tip(
+        "Boolean formula over row labels using AND, OR, NOT, and parentheses. "
+        "Referenced rows must be enabled and complete.",
+        "(NOT E1 AND E2) OR E3",
     ),
     "calculation.name": _tip("Name of the derived column created by this transform.", "Margin"),
     "calculation.mode": _tip(

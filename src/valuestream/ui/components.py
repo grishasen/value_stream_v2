@@ -419,10 +419,20 @@ def pinned_editor_input(editor_key: str, frame: Any) -> Any:
     those prefixed session keys, and a pinned frame is neither restorable
     widget state nor JSON-safe.
     """
-    pin_key = f"vs_pinned_editor_input_{editor_key}"
+    pin_key = _pinned_editor_key(editor_key)
     if editor_key not in st.session_state or pin_key not in st.session_state:
         st.session_state[pin_key] = frame
     return st.session_state[pin_key]
+
+
+def _pinned_editor_key(editor_key: str) -> str:
+    return f"vs_pinned_editor_input_{editor_key}"
+
+
+def clear_pinned_editor(editor_key: str) -> None:
+    """Drop one editor's widget state and pinned frame so new input is honored."""
+    st.session_state.pop(editor_key, None)
+    st.session_state.pop(_pinned_editor_key(editor_key), None)
 
 
 def sync_text_area(key: str, text: str) -> None:
