@@ -67,3 +67,4 @@ site/
 /artifacts/
 /.agents/
 /examples/fat/
+/.codegraph/

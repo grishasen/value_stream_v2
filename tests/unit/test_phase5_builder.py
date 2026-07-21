@@ -1356,6 +1356,60 @@ def test_merge_stage_definitions_drops_removed_stages_and_dedupes() -> None:
 
 
 @pytest.mark.unit
+def test_stage_condition_rows_maps_and_joined_expressions() -> None:
+    clicked = {"op": "eq", "column": "Outcome", "value": "Clicked"}
+
+    assert builder.stage_condition_rows(None) == ([], "all", True)
+    assert builder.stage_condition_rows(clicked) == (
+        [{"Field": "Outcome", "Operator": "==", "Value": "Clicked", "Enabled": True}],
+        "all",
+        True,
+    )
+
+    both = {"op": "and", "args": [clicked, {"op": "gt", "column": "Revenue", "value": 5}]}
+    rows, combine, representable = builder.stage_condition_rows(both)
+    assert (combine, representable) == ("all", True)
+    assert builder.compile_condition_rows(rows, combine=combine) == both
+
+
+@pytest.mark.unit
+def test_stage_condition_rows_maps_or_joined_expressions() -> None:
+    either = {
+        "op": "or",
+        "args": [
+            {"op": "eq", "column": "Outcome", "value": "Clicked"},
+            {"op": "eq", "column": "Outcome", "value": "Accepted"},
+        ],
+    }
+
+    rows, combine, representable = builder.stage_condition_rows(either)
+
+    assert (combine, representable) == ("any", True)
+    assert builder.compile_condition_rows(rows, combine=combine) == either
+
+
+@pytest.mark.unit
+def test_stage_condition_rows_flags_unrepresentable_expressions() -> None:
+    nested = {
+        "op": "or",
+        "args": [
+            {
+                "op": "and",
+                "args": [
+                    {"op": "eq", "column": "Outcome", "value": "Clicked"},
+                    {"op": "eq", "column": "Channel", "value": "Web"},
+                ],
+            },
+            {"op": "eq", "column": "Outcome", "value": "Accepted"},
+        ],
+    }
+
+    assert builder.stage_condition_rows(nested) == ([], "all", False)
+    assert builder.stage_condition_rows({"op": "case"}) == ([], "all", False)
+    assert builder.stage_condition_rows("Outcome == 'Clicked'") == ([], "all", False)
+
+
+@pytest.mark.unit
 def test_formula_simplicity_detection_guards_compound_expressions() -> None:
     assert forms.is_simple_formula(None)
     assert forms.is_simple_formula({"col": "Count"})

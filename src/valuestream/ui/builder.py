@@ -1551,6 +1551,32 @@ def stage_names_missing_when(stages: Any) -> list[str]:
     return _dedupe(missing)
 
 
+def stage_condition_rows(when: Any) -> tuple[list[dict[str, Any]], str, bool]:
+    """Best-effort conversion from a stage ``when`` AST to editable rule rows.
+
+    Returns ``(rows, combine, representable)`` where ``combine`` is ``"all"``
+    for ``and``-joined (or single) conditions and ``"any"`` for ``or``-joined
+    single conditions. Expressions the rules form cannot represent return
+    ``([], "all", False)`` so callers can fall back to the raw-AST editor.
+    """
+    if when in (None, {}):
+        return [], "all", True
+    if not isinstance(when, dict):
+        return [], "all", False
+    rows = filter_rows_from_expression(when)
+    if rows is not None:
+        return rows, "all", True
+    if when.get("op") == "or" and isinstance(when.get("args"), list):
+        or_rows: list[dict[str, Any]] = []
+        for arg in when["args"]:
+            parsed = _filter_row_from_expression(arg) if isinstance(arg, dict) else None
+            if parsed is None:
+                return [], "all", False
+            or_rows.append(parsed)
+        return or_rows, "any", True
+    return [], "all", False
+
+
 def processor_for_metric(catalog: model.Catalog, metric_name: str) -> model.Processor | None:
     """Resolve the processor that backs a metric."""
     metric = catalog.metrics.metrics.get(metric_name)
@@ -3475,6 +3501,7 @@ __all__ = [
     "source_defaults",
     "source_to_dict",
     "stable_catalog_id",
+    "stage_condition_rows",
     "stage_names_missing_when",
     "state_columns",
     "state_columns_by_type",

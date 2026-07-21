@@ -297,7 +297,7 @@ def processor_kind_fields(  # noqa: PLR0911 — dispatch table over the processo
     if kind == "entity_lifecycle":
         return _entity_lifecycle_fields(processor_def, field_options, key_prefix)
     if kind == "funnel":
-        return _funnel_fields(processor_def, key_prefix)
+        return _funnel_fields(processor_def, field_options, key_prefix)
     if kind == "snapshot":
         return _snapshot_fields(processor_def, key_prefix)
     return {}
@@ -608,7 +608,16 @@ def _numeric_distribution_fields(
     return settings
 
 
-def _funnel_fields(processor_def: dict[str, Any], key_prefix: str) -> dict[str, Any]:
+_STAGE_WHEN_MODES = ["Rules", "Expression YAML"]
+_STAGE_COMBINE_ALL = "All condition rows (AND)"
+_STAGE_COMBINE_ANY = "Any condition row (OR)"
+
+
+def _funnel_fields(
+    processor_def: dict[str, Any],
+    field_options: list[str],
+    key_prefix: str,
+) -> dict[str, Any]:
     st.write("### Funnel Processor Settings")
     stage_names = stage_names_from_definition(processor_def.get("stages"))
     stages_col, _ = st.columns(2, gap="xsmall")
@@ -622,14 +631,163 @@ def _funnel_fields(processor_def: dict[str, Any], key_prefix: str) -> dict[str, 
         processor_def.get("stages"),
         builder.csv_text_to_list(raw),
     )
-    missing_when = builder.stage_names_missing_when(merged_stages)
+    stages: list[dict[str, Any]] = []
+    used_fragments: set[str] = set()
+    for stage in merged_stages:
+        # Widget state is keyed by stage name so unsaved condition edits
+        # survive reordering; names that collapse to the same key fragment
+        # get a positional suffix to keep every widget key unique.
+        fragment = builder.widget_key_fragment(str(stage["name"]))
+        if fragment in used_fragments:
+            fragment = f"{fragment}_{len(stages)}"
+        used_fragments.add(fragment)
+        stages.append(
+            _stage_definition_with_when(
+                stage,
+                field_options,
+                f"{key_prefix}_stage_{fragment}",
+            )
+        )
+    missing_when = builder.stage_names_missing_when(stages)
     if missing_when:
         st.warning(
-            "Stage(s) without a `when` expression: "
-            f"{', '.join(missing_when)}. The funnel cannot run until each stage "
-            "has a Boolean `when` expression (edit the stage YAML directly)."
+            "Stage(s) without a condition: "
+            f"{', '.join(missing_when)}. Define each stage's membership "
+            "condition below; the processor cannot be saved until every stage "
+            "has one."
         )
-    return {"stages": merged_stages}
+    return {"stages": stages}
+
+
+def _stage_definition_with_when(
+    stage: dict[str, Any],
+    field_options: list[str],
+    base: str,
+) -> dict[str, Any]:
+    seed_when = stage.get("when")
+    seed_rows, seed_combine, representable = builder.stage_condition_rows(seed_when)
+    mode_key = f"{base}_when_mode"
+    if mode_key not in st.session_state:
+        st.session_state[mode_key] = _STAGE_WHEN_MODES[0] if representable else _STAGE_WHEN_MODES[1]
+    with st.expander(f"Stage condition · {stage['name']}", expanded=not seed_when):
+        mode = st.segmented_control(
+            "Condition Mode",
+            _STAGE_WHEN_MODES,
+            default=st.session_state[mode_key],
+            key=f"{mode_key}_control",
+            help=config_help.field_help("processor.stage_when_mode"),
+        )
+        st.session_state[mode_key] = mode or st.session_state[mode_key]
+        if st.session_state[mode_key] == "Rules":
+            when = _stage_when_from_rows(
+                base,
+                seed_rows,
+                seed_combine,
+                representable,
+                field_options,
+            )
+        else:
+            when = _stage_when_from_yaml(base, seed_when)
+    definition = dict(stage)
+    if when is None:
+        definition.pop("when", None)
+    else:
+        definition["when"] = when
+    return definition
+
+
+def _stage_when_from_rows(
+    base: str,
+    seed_rows: list[dict[str, Any]],
+    seed_combine: str,
+    representable: bool,
+    field_options: list[str],
+) -> dict[str, Any] | None:
+    if not representable:
+        st.warning(
+            "This stage uses a condition the rules form cannot represent. "
+            "Use Expression YAML mode to keep it; applying in Rules mode "
+            "replaces the condition."
+        )
+    rows_key = f"{base}_when_rows"
+    if rows_key not in st.session_state:
+        st.session_state[rows_key] = seed_rows or [builder.blank_filter_row()]
+    condition_frame = builder.editor_frame(
+        st.session_state[rows_key],
+        ["Field", "Operator", "Value", "Enabled"],
+        builder.blank_filter_row,
+    )
+    editor_key = f"{base}_when_editor"
+    edited = st.data_editor(
+        components.pinned_editor_input(editor_key, condition_frame),
+        num_rows="dynamic",
+        hide_index=True,
+        width="stretch",
+        key=editor_key,
+        column_config={
+            "Field": st.column_config.SelectboxColumn(
+                "Field",
+                options=field_options,
+                required=False,
+                width="medium",
+                help=config_help.field_help("filter.field"),
+            ),
+            "Operator": st.column_config.SelectboxColumn(
+                "Operator",
+                options=builder.FILTER_OPERATORS,
+                required=False,
+                width="small",
+                help=config_help.field_help("filter.operator"),
+            ),
+            "Value": st.column_config.TextColumn(
+                "Value", width="large", help=config_help.field_help("filter.value")
+            ),
+            "Enabled": st.column_config.CheckboxColumn(
+                "Enabled",
+                width="small",
+                default=True,
+                help=config_help.field_help("row.enabled"),
+            ),
+        },
+    )
+    st.session_state[rows_key] = builder.normalize_editor_rows(edited)
+    combine_key = f"{base}_when_combine"
+    if combine_key not in st.session_state:
+        st.session_state[combine_key] = (
+            _STAGE_COMBINE_ANY if seed_combine == "any" else _STAGE_COMBINE_ALL
+        )
+    combine_label = st.selectbox(
+        "Combine condition rows",
+        [_STAGE_COMBINE_ALL, _STAGE_COMBINE_ANY],
+        key=combine_key,
+        help=config_help.field_help("processor.stage_when_combine"),
+    )
+    try:
+        return builder.compile_condition_rows(
+            st.session_state[rows_key],
+            combine="any" if combine_label == _STAGE_COMBINE_ANY else "all",
+        )
+    except ValueError as exc:
+        st.warning(f"Stage condition rows could not be compiled: {exc}")
+        return None
+
+
+def _stage_when_from_yaml(base: str, seed_when: Any) -> dict[str, Any] | None:
+    raw_key = f"{base}_when_yaml"
+    components.sync_text_area(raw_key, builder.expression_yaml(seed_when))
+    raw = st.text_area(
+        "Condition AST YAML",
+        key=raw_key,
+        height=160,
+        help=config_help.field_help("processor.stage_when_ast"),
+    )
+    if not raw.strip():
+        return None
+    try:
+        return builder.parse_expression_yaml(raw)
+    except (ValueError, yaml.YAMLError) as exc:
+        st.warning(f"Stage condition YAML could not be parsed: {exc}")
+        return None
 
 
 def _snapshot_fields(processor_def: dict[str, Any], key_prefix: str) -> dict[str, Any]:

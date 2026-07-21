@@ -250,8 +250,23 @@ FIELD_HELP: dict[str, str] = {
         "bulk",
     ),
     "processor.stages": _tip(
-        "Comma-separated funnel stage names in business order; each stage also needs a when expression.",
+        "Comma-separated funnel stage names in business order; define each stage's "
+        "membership condition in the stage editors below.",
         "Impression,Clicked,Conversion",
+    ),
+    "processor.stage_when_mode": _tip(
+        "Rules builds the stage condition from field/operator/value rows; "
+        "Expression YAML accepts the full expression grammar.",
+        "Rules",
+    ),
+    "processor.stage_when_combine": _tip(
+        "Whether every condition row must match (AND) or any single row is enough (OR) "
+        "for a row of data to count toward this stage.",
+        "All condition rows (AND)",
+    ),
+    "processor.stage_when_ast": _tip(
+        "Boolean expression AST deciding whether a source row belongs to this stage.",
+        "{op: eq, column: Outcome, value: Impression}",
     ),
     "processor.snapshot_kind": _tip(
         "Periodic snapshots describe each interval; accumulating snapshots track progress toward completion.",

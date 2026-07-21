@@ -4615,17 +4615,18 @@ def _render_report_library_chart_group(
                 for option in tile_options
             }
             default = selected_tile_key if selected_tile_key in tile_keys else None
+            # The widget key includes the current selection so a selection
+            # change remounts the widget in the right state. Deleting the
+            # session value of a live widget instead desyncs the frontend,
+            # whose stale echo then fires on_change on the next unrelated
+            # interaction and silently replaces an open new-tile draft.
+            selection_token = builder.widget_key_fragment(default or "none", fallback="none")
             if len(tile_keys) > REPORT_LIBRARY_PILLS_MAX:
-                widget_key = f"builder_report_library_select_{chart_type}"
-                if widget_key in st.session_state and st.session_state[widget_key] != default:
-                    del st.session_state[widget_key]
-                widget_has_state = widget_key in st.session_state
+                widget_key = f"builder_report_library_select_{chart_type}_{selection_token}"
                 st.selectbox(
                     f"Open {_report_library_chart_label(chart_type)} report",
                     tile_keys,
-                    index=(
-                        None if widget_has_state or default is None else tile_keys.index(default)
-                    ),
+                    index=None if default is None else tile_keys.index(default),
                     key=widget_key,
                     format_func=lambda tile_key: tile_labels[tile_key],
                     placeholder=f"Choose from {len(tile_keys)} reports",
@@ -4634,15 +4635,12 @@ def _render_report_library_chart_group(
                     args=(widget_key,),
                 )
             else:
-                widget_key = f"builder_report_library_pills_{chart_type}"
-                if widget_key in st.session_state and st.session_state[widget_key] != default:
-                    del st.session_state[widget_key]
-                widget_has_state = widget_key in st.session_state
+                widget_key = f"builder_report_library_pills_{chart_type}_{selection_token}"
                 st.pills(
                     f"Open {_report_library_chart_label(chart_type)} report",
                     tile_keys,
                     key=widget_key,
-                    default=None if widget_has_state else default,
+                    default=default,
                     format_func=lambda tile_key: tile_labels[tile_key],
                     label_visibility="collapsed",
                     width="stretch",
