@@ -453,11 +453,16 @@ def _load_current_aggregate(
                 continue
         return visible, stored_grain
     if found_stale or found_unpublished:
+        reason = (
+            "existing aggregates do not match the current processor configuration "
+            "— the processor changed since the last data run"
+            if found_stale
+            else "aggregate rows exist but have not been published yet"
+        )
         raise AggregateNotReadyError(
             f"metric {metric_name!r} is configured, but aggregate data for "
-            f"{processor.source_id}/{processor.id}/{grain} has not been published for the "
-            "current processor configuration; run ingestion for a new workspace or "
-            "backfill/reprocess existing data"
+            f"{processor.source_id}/{processor.id}/{grain} is not ready: {reason}; "
+            "run ingestion for a new workspace or backfill/reprocess existing data"
         )
     if not found_aggregate:
         raise FileNotFoundError(
@@ -929,8 +934,7 @@ def _cardinality_estimator(
     if state_type == "theta":
         return theta.estimate
     raise ValueError(
-        f"approx_distinct_count state {state!r} must be configured as a CPC, HLL, or "
-        "Theta state"
+        f"approx_distinct_count state {state!r} must be configured as a CPC, HLL, or Theta state"
     )
 
 

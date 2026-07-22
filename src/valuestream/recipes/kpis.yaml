@@ -202,6 +202,42 @@ recipes:
       caveat: Confirm whether higher or lower is favorable for the selected business value.
     report: { chart: kpi_card, placement: kpi_strip }
 
+  - id: distribution.boxplot
+    version: 1
+    title: Distribution boxplot
+    domain: Distribution
+    summary: Median, quartiles, and tails of a persisted numeric distribution as a boxplot.
+    business_questions:
+      - How is the value distributed beyond a single summary number?
+      - Do the median and tails shift across segments or time?
+    tags: [ distribution, boxplot, quartiles, spread, tdigest, kll ]
+    maturity: reviewed
+    processor_kinds: [ numeric_distribution, score_distribution ]
+    inputs:
+      - role: digest_state
+        label: Value field
+        source: state
+        state_types: [ tdigest, kll ]
+        absent_state_attributes: [ outcome ]
+        selection: field_algorithm
+    default_metric_id: VS_Distribution
+    metric:
+      source: ${processor_id}
+      kind: tdigest_quantile
+      description: Distribution metric exposing the median and the full quantile suite from a persisted mergeable sketch.
+      display:
+        label: Distribution
+        unit: value
+        value_format: number
+        direction: neutral
+      state: ${digest_state}
+    method:
+      calculation: quantile suite (min, p05-p95, max)
+      accuracy: approximate
+      algorithm: Quantile-suite queries over a t-digest or KLL state rendered as a boxplot.
+      caveat: Approximation error depends on sketch configuration and the observed distribution.
+    report: { chart: boxplot, placement: content, property_from: digest_state }
+
   - id: model_quality.roc_auc
     version: 1
     title: ROC AUC

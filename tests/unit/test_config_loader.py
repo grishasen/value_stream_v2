@@ -1047,3 +1047,83 @@ class TestSchemaParity:
             "schemas/*.json out of sync with valuestream.config.model — "
             "regenerate with: uv run python -m valuestream.config._schema_gen"
         )
+
+
+@pytest.mark.unit
+def test_validator_accepts_boxplot_without_y_for_distribution_metrics() -> None:
+    """The digest metric implies the boxplot property; y stays required elsewhere."""
+    catalog = model.Catalog.model_validate(
+        {
+            "pipelines": {
+                "workspace": "charts",
+                "sources": [
+                    {
+                        "id": "events",
+                        "reader": {"kind": "parquet", "file_pattern": "*.parquet"},
+                    }
+                ],
+            },
+            "processors": {
+                "processors": [
+                    {
+                        "id": "descriptive",
+                        "source": "events",
+                        "kind": "numeric_distribution",
+                        "properties": ["Propensity"],
+                    }
+                ]
+            },
+            "metrics": {
+                "metrics": {
+                    "PropensityDistribution": {
+                        "source": "descriptive",
+                        "kind": "tdigest_quantile",
+                        "state": "Propensity_tdigest",
+                    },
+                    "PropensityCount": {
+                        "source": "descriptive",
+                        "kind": "formula",
+                        "expression": {"col": "Propensity_Count"},
+                    },
+                }
+            },
+            "dashboards": {
+                "dashboards": [
+                    {
+                        "id": "overview",
+                        "title": "Overview",
+                        "pages": [
+                            {
+                                "id": "main",
+                                "title": "Main",
+                                "tiles": [
+                                    {
+                                        "id": "distribution_box",
+                                        "title": "Distribution",
+                                        "metric": "PropensityDistribution",
+                                        "chart": "boxplot",
+                                        "x": "Year",
+                                    },
+                                    {
+                                        "id": "scalar_box",
+                                        "title": "Scalar box",
+                                        "metric": "PropensityCount",
+                                        "chart": "boxplot",
+                                        "x": "Year",
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+    )
+
+    result = validate_catalog(catalog)
+
+    assert not any("distribution_box" in issue.location for issue in result.issues)
+    assert any(
+        "scalar_box" in issue.location and "requires 'y' or 'property'" in issue.message
+        for issue in result.issues
+    )

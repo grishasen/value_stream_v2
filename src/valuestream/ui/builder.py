@@ -375,7 +375,7 @@ METRIC_KIND_LABELS = {
     "formula": "Formula / state passthrough",
     "approx_distinct_count": "Approx distinct count",
     "topk_items": "Top-K frequent items",
-    "tdigest_quantile": "Digest quantile",
+    "tdigest_quantile": "Digest quantile / distribution",
     "variant_compare": "Variant comparison",
     "curve_from_digests": "ROC / average precision",
     "calibration_from_digests": "Calibration curve",
@@ -390,7 +390,10 @@ METRIC_KIND_HELP = {
     "formula": "Use scalar states such as Count, Positives, Mean, or MRR.",
     "approx_distinct_count": "Estimate the cardinality of a CPC, HLL, or Theta state.",
     "topk_items": "Return frequent values from a Top-K sketch state.",
-    "tdigest_quantile": "Read a percentile from a t-digest or KLL state.",
+    "tdigest_quantile": (
+        "Read a percentile from a t-digest or KLL state, or omit the quantile "
+        "for a distribution metric that feeds boxplots."
+    ),
     "variant_compare": "Compare test and control outcome rates by a variant column.",
     "curve_from_digests": "Compute ROC AUC or average precision from positive and negative score digests.",
     "calibration_from_digests": "Build calibration bins from one score property's positive and negative digests.",
@@ -487,7 +490,7 @@ CHART_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "sankey": ("source", "target", "value"),
     "gauge": ("value",),
     "funnel": ("stages", "color"),
-    "boxplot": ("x", "y"),
+    "boxplot": ("x",),
     "histogram": ("property",),
     "calibration_curve": (),
     "roc_curve": (),
@@ -2008,6 +2011,10 @@ def chart_choices_for_metric(catalog: model.Catalog, metric_name: str) -> list[s
     curve_charts = {"roc_curve", "precision_recall_curve", "gain_curve", "lift_curve"}
     if metric.kind != "curve_from_digests":
         choices = [name for name in choices if name not in curve_charts]
+    # Quantile boxes read the digest behind a tdigest_quantile metric; other
+    # metric kinds have no distribution to draw.
+    if metric.kind != "tdigest_quantile":
+        choices = [name for name in choices if name != "boxplot"]
     return sorted(choices)
 
 

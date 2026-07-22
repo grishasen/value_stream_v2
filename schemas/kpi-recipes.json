@@ -4042,6 +4042,18 @@
           ],
           "title": "Placement",
           "type": "string"
+        },
+        "property_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Property From"
         }
       },
       "title": "RecipeReport",
@@ -4180,6 +4192,7 @@
     },
     "TdigestQuantileMetric": {
       "additionalProperties": true,
+      "description": "Quantile read over a digest state.\n\n``quantile`` is optional: omitting it defines a distribution metric that\nreads the median by default while exposing the full quantile suite to\ndistribution charts such as boxplots.",
       "properties": {
         "depends_on": {
           "items": {
@@ -4210,6 +4223,9 @@
           "type": "string"
         },
         "quantile": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
           "title": "Quantile",
           "type": "number"
         },
@@ -4225,8 +4241,7 @@
       "required": [
         "source",
         "kind",
-        "state",
-        "quantile"
+        "state"
       ],
       "title": "TdigestQuantileMetric",
       "type": "object"

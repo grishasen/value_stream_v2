@@ -197,6 +197,7 @@ def validate_catalog(
     _validate_metric_dependencies(catalog.metrics.metrics, issues)
 
     # 3. tile.metric must resolve to a Metric.
+    metric_kinds = {name: metric.kind for name, metric in catalog.metrics.metrics.items()}
     for dashboard in catalog.dashboards.dashboards:
         for page in dashboard.pages:
             for tile in page.tiles:
@@ -210,7 +211,7 @@ def validate_catalog(
                             message=f"unknown metric {tile.metric!r}",
                         )
                     )
-                _validate_tile_config(dashboard.id, page.id, tile, issues)
+                _validate_tile_config(dashboard.id, page.id, tile, issues, metric_kinds)
             _validate_page_filters(
                 dashboard.id,
                 page,
@@ -317,9 +318,17 @@ def _validate_tile_config(
     page_id: str,
     tile: model.Tile,
     issues: list[CatalogIssue],
+    metric_kinds: Mapping[str, str] | None = None,
 ) -> None:
     values = tile.model_dump(by_alias=True, exclude_none=True)
+    # A boxplot over a digest metric draws that metric's quantile suite; the
+    # property is implied by the metric, so neither y nor property is needed.
+    digest_boxplot = (
+        tile.chart == "boxplot" and (metric_kinds or {}).get(tile.metric) == "tdigest_quantile"
+    )
     for alternatives in _TILE_REQUIRED_ALTERNATIVES.get(tile.chart, ()):
+        if digest_boxplot and set(alternatives) == {"y", "property"}:
+            continue
         if any(_configured_tile_value(values.get(field)) for field in alternatives):
             continue
         choices = " or ".join(repr(field) for field in alternatives)

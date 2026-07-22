@@ -719,9 +719,16 @@ class TopKItemsMetric(_MetricBase):
 
 
 class TdigestQuantileMetric(_MetricBase):
+    """Quantile read over a digest state.
+
+    ``quantile`` is optional: omitting it defines a distribution metric that
+    reads the median by default while exposing the full quantile suite to
+    distribution charts such as boxplots.
+    """
+
     kind: Literal["tdigest_quantile"]
     state: str
-    quantile: float
+    quantile: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class VariantCompareMetric(_MetricBase):

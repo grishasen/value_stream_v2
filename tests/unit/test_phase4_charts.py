@@ -12,6 +12,7 @@ import pytest
 from plotly.graph_objects import Figure  # type: ignore[import-untyped]
 
 from valuestream.charts import render_chart
+from valuestream.charts.factory import _infer_quantile_property
 from valuestream.states import tdigest
 
 SUPPORTED_CHART_CASES = [
@@ -1533,3 +1534,72 @@ def _experiment_frame() -> pl.DataFrame:
             "chi2_odds_ratio_ci_high": [1.4, 0.95, 1.3],
         }
     )
+
+
+@pytest.mark.unit
+def test_boxplot_without_property_infers_quantile_suite_columns() -> None:
+    """A boxplot tile authored without ``property`` still gets quantile boxes.
+
+    Boxing the scalar metric column instead collapses every statistic to the
+    per-group median, which renders as flat single-value boxes.
+    """
+    rows = pl.DataFrame(
+        {
+            "Year": [2022, 2022, 2023, 2023],
+            "Issue": ["Acquisition", "Activation", "Acquisition", "Activation"],
+            "dist_metric": [0.2, 0.3, 0.4, 0.5],
+            "FinalPropensity_p25": [0.1, 0.2, 0.3, 0.4],
+            "FinalPropensity_Median": [0.2, 0.3, 0.4, 0.5],
+            "FinalPropensity_p75": [0.3, 0.4, 0.5, 0.6],
+            "FinalPropensity_Min": [0.0, 0.1, 0.2, 0.3],
+            "FinalPropensity_Max": [0.4, 0.5, 0.6, 0.7],
+        }
+    )
+    figure = render_chart(
+        rows,
+        {
+            "id": "dist_box",
+            "metric": "dist_metric",
+            "chart": "boxplot",
+            "title": "Distribution",
+            "x": "Year",
+            "y": "dist_metric",
+            "color": "Issue",
+        },
+    )
+
+    boxes = [trace for trace in figure.data if trace.type == "box"]
+    assert boxes
+    first = boxes[0]
+    # Quantile-suite path: explicit q1/median/q3 pulled from the suite columns.
+    assert first.median is not None
+    assert first.q1 is not None
+    assert first.q3 is not None
+    assert float(first.q1[0]) != float(first.q3[0])
+
+
+@pytest.mark.unit
+def test_boxplot_property_inference_requires_unambiguous_suite() -> None:
+    single = pl.DataFrame(
+        {
+            "FinalPropensity_Median": [0.2],
+            "FinalPropensity_p25": [0.1],
+            "FinalPropensity_p75": [0.3],
+        }
+    )
+    assert _infer_quantile_property(single) == "FinalPropensity"
+
+    ambiguous = pl.DataFrame(
+        {
+            "A_Median": [0.2],
+            "A_p25": [0.1],
+            "A_p75": [0.3],
+            "B_Median": [0.2],
+            "B_p25": [0.1],
+            "B_p75": [0.3],
+        }
+    )
+    assert _infer_quantile_property(ambiguous) is None
+
+    no_suite = pl.DataFrame({"metric": [0.5]})
+    assert _infer_quantile_property(no_suite) is None

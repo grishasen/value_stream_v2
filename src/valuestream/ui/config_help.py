@@ -394,6 +394,12 @@ FIELD_HELP: dict[str, str] = {
         "Error guarantee used when reading the Top-K sketch.", "NO_FALSE_POSITIVES"
     ),
     "metric.quantile": _tip("Requested percentile as a fraction from 0 to 1.", "0.95"),
+    "metric.distribution_only": _tip(
+        "Store no single quantile: the metric reads the median by default and "
+        "backs distribution charts such as boxplots with the full quantile "
+        "suite.",
+        "checked for boxplot metrics",
+    ),
     "metric.digest_property": _tip(
         "Matched positive/negative digest pair for one score property.", "Propensity"
     ),

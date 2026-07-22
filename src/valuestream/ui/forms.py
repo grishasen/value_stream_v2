@@ -1091,18 +1091,35 @@ def _quantile_fields(
         f"{key_prefix}_quantile_state",
         help_key="metric.state",
     )
-    quantile = st.number_input(
-        "Quantile",
-        min_value=0.0,
-        max_value=1.0,
-        value=builder.float_in_range(seed.get("quantile"), default=0.5, minimum=0.0, maximum=1.0),
-        step=0.05,
-        key=f"{key_prefix}_quantile_value",
-        help=config_help.field_help("metric.quantile"),
+    distribution_only = st.checkbox(
+        "Distribution metric (no single quantile)",
+        value=bool(seed) and "quantile" not in seed,
+        key=f"{key_prefix}_quantile_distribution",
+        help=config_help.field_help("metric.distribution_only"),
     )
+    if distribution_only:
+        st.caption(
+            "Reads the median by default and exposes the full quantile suite "
+            "(min, p05 to p95, max) to distribution charts such as boxplots."
+        )
+        quantile = None
+    else:
+        quantile = st.number_input(
+            "Quantile",
+            min_value=0.0,
+            max_value=1.0,
+            value=builder.float_in_range(
+                seed.get("quantile"), default=0.5, minimum=0.0, maximum=1.0
+            ),
+            step=0.05,
+            key=f"{key_prefix}_quantile_value",
+            help=config_help.field_help("metric.quantile"),
+        )
     if not state:
         st.warning("Digest quantiles require a t-digest or KLL state.")
         return None
+    if quantile is None:
+        return {"state": state}
     return {"state": state, "quantile": float(quantile)}
 
 

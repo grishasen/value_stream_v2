@@ -61,7 +61,9 @@ RECIPES: dict[str, ChartRecipe] = {
     "corr": ChartRecipe("corr", ("entity_lifecycle",), "frequency", "monetary_value"),
     "model": ChartRecipe("model", ("entity_lifecycle",)),
     "descriptive_line": ChartRecipe("descriptive_line", ("numeric_distribution",)),
-    "descriptive_boxplot": ChartRecipe("descriptive_boxplot", ("numeric_distribution",)),
+    # descriptive_boxplot is retired from authoring: the plain boxplot derives
+    # its property from the tile's tdigest_quantile metric. Existing tiles keep
+    # rendering via the chart factory and stay editable through their seed.
     "descriptive_histogram": ChartRecipe("descriptive_histogram", ("numeric_distribution",)),
     "descriptive_heatmap": ChartRecipe("descriptive_heatmap", ("numeric_distribution",)),
     "descriptive_funnel": ChartRecipe("descriptive_funnel", ("numeric_distribution",)),

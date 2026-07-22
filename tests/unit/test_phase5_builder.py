@@ -16,6 +16,7 @@ import streamlit as st
 import yaml
 from streamlit.testing.v1 import AppTest
 
+from valuestream.charts.recipes import RECIPES
 from valuestream.config import model
 from valuestream.config.loader import load
 from valuestream.expr import parser as expr_parser
@@ -3626,12 +3627,24 @@ def test_large_report_type_group_uses_compact_selector() -> None:
     ]
 
     def app(options: list[tuple[str, str, str, dict]]) -> None:
+        from valuestream.config import model as config_model  # noqa: PLC0415
         from valuestream.ui.pages.config_builder import (  # noqa: PLC0415
             _render_report_library_chart_group,
             _tile_option_key,
         )
 
+        catalog = config_model.Catalog.model_validate(
+            {
+                "pipelines": {"version": 1, "workspace": "labels", "sources": []},
+                "processors": {"processors": []},
+                "metrics": {"metrics": {}},
+                "dashboards": {
+                    "dashboards": [{"id": "overview", "title": "Overview", "pages": []}]
+                },
+            }
+        )
         _render_report_library_chart_group(
+            catalog,
             "kpi_card",
             options,
             selected_tile_key=_tile_option_key(options[0]),
@@ -6599,16 +6612,27 @@ def test_workspace_dimensions_explicit_defaults_override_fallback() -> None:
 
 
 @pytest.mark.unit
-def test_fat_example_workspace_restores_common_dimensions_from_processors() -> None:
+def test_fat_example_workspace_resolves_common_dimensions() -> None:
+    """The live fat workspace always resolves a non-empty common list.
+
+    The workspace is user-editable app data, so the exact list is not pinned:
+    explicit ``defaults.dimensions`` win verbatim, and without them the list
+    falls back to the dimensions shared by every processor group-by.
+    """
     catalog = load(_EXAMPLES_DIR / "fat")
 
-    assert builder.workspace_dimension_defaults(catalog) == [
-        "Channel",
-        "CustomerType",
-        "Placement",
-        "Issue",
-        "Group",
-    ]
+    resolved = builder.workspace_dimension_defaults(catalog)
+    assert resolved
+    explicit = [str(field).strip() for field in catalog.pipelines.defaults.dimensions]
+    explicit = [field for field in explicit if field]
+    if explicit:
+        assert resolved == builder.dedupe(explicit)
+    else:
+        shared = {field.casefold() for field in resolved}
+        for processor in catalog.processors.processors:
+            group_by = {str(field).casefold() for field in processor.group_by}
+            if group_by:
+                assert shared <= group_by
 
 
 _RETAINED_SET_APP = """
@@ -6864,3 +6888,208 @@ def test_processor_mode_seeded_by_post_apply_renders_without_policy_warning(
     assert mode_labels == {"Create New Processor", "Edit Existing Processor"}
     assert rendered.session_state["builder_processor_mode"] == "Edit Existing Processor"
     assert not capture.default_clash_messages
+
+
+# ---------------------------------------------------------------------------
+# Distribution metrics: digest quantile without a stored quantile.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_tdigest_quantile_model_defaults_to_median_and_bounds_quantile() -> None:
+    parsed = model.Metrics.model_validate(
+        {
+            "metrics": {
+                "dist": {
+                    "source": "descriptive",
+                    "kind": "tdigest_quantile",
+                    "state": "Propensity_tdigest",
+                }
+            }
+        }
+    ).metrics["dist"]
+    assert parsed.quantile == 0.5
+
+    with pytest.raises(ValueError, match="quantile"):
+        model.Metrics.model_validate(
+            {
+                "metrics": {
+                    "bad": {
+                        "source": "descriptive",
+                        "kind": "tdigest_quantile",
+                        "state": "Propensity_tdigest",
+                        "quantile": 1.5,
+                    }
+                }
+            }
+        )
+
+
+@pytest.mark.unit
+def test_quantile_metric_form_supports_distribution_without_quantile() -> None:
+    """A digest metric seeded without a quantile edits as a distribution metric."""
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import forms
+
+ctx = forms.MetricFormContext(state_options=lambda _types: ["Propensity_tdigest"])
+st.session_state["result"] = forms.metric_kind_fields(
+    "tdigest_quantile",
+    {"source": "descriptive", "kind": "tdigest_quantile", "state": "Propensity_tdigest"},
+    ctx,
+    key_prefix="dist_quantile",
+)
+"""
+    ).run()
+
+    assert not app.exception
+    checkbox = next(
+        item for item in app.checkbox if item.key == "dist_quantile_quantile_distribution"
+    )
+    assert checkbox.value is True
+    assert app.session_state["result"] == {"state": "Propensity_tdigest"}
+
+    rendered = checkbox.uncheck().run()
+    assert rendered.session_state["result"] == {
+        "state": "Propensity_tdigest",
+        "quantile": 0.5,
+    }
+
+
+@pytest.mark.unit
+def test_quantile_metric_form_defaults_to_single_quantile_for_new_metrics() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import forms
+
+ctx = forms.MetricFormContext(state_options=lambda _types: ["Propensity_tdigest"])
+st.session_state["result"] = forms.metric_kind_fields(
+    "tdigest_quantile", {}, ctx, key_prefix="new_quantile"
+)
+"""
+    ).run()
+
+    assert not app.exception
+    checkbox = next(
+        item for item in app.checkbox if item.key == "new_quantile_quantile_distribution"
+    )
+    assert checkbox.value is False
+    # No state chosen yet: the form stays invalid instead of guessing.
+    assert app.session_state["result"] is None
+
+    state_select = next(item for item in app.selectbox if item.key == "new_quantile_quantile_state")
+    rendered = state_select.set_value("Propensity_tdigest").run()
+    assert rendered.session_state["result"] == {
+        "state": "Propensity_tdigest",
+        "quantile": 0.5,
+    }
+
+    checkbox = next(
+        item for item in rendered.checkbox if item.key == "new_quantile_quantile_distribution"
+    )
+    rendered = checkbox.check().run()
+    assert rendered.session_state["result"] == {"state": "Propensity_tdigest"}
+
+
+@pytest.mark.unit
+def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
+    """The metric's digest defines the boxplot; scalar metrics get no box."""
+    catalog = model.Catalog.model_validate(
+        {
+            "pipelines": {
+                "version": 1,
+                "workspace": "box",
+                "sources": [
+                    {
+                        "id": "ih",
+                        "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+                        "schema": {"natural_key": ["CustomerID"]},
+                    }
+                ],
+            },
+            "processors": {
+                "processors": [
+                    {
+                        "id": "descriptive",
+                        "source": "ih",
+                        "kind": "numeric_distribution",
+                        "properties": ["Propensity"],
+                    }
+                ]
+            },
+            "metrics": {
+                "metrics": {
+                    "PropensityDistribution": {
+                        "source": "descriptive",
+                        "kind": "tdigest_quantile",
+                        "state": "Propensity_tdigest",
+                    },
+                    "PropensityCount": {
+                        "source": "descriptive",
+                        "kind": "formula",
+                        "expression": {"col": "Propensity_Count"},
+                    },
+                }
+            },
+            "dashboards": {"dashboards": []},
+        }
+    )
+
+    assert "boxplot" in builder.chart_choices_for_metric(catalog, "PropensityDistribution")
+    assert "boxplot" not in builder.chart_choices_for_metric(catalog, "PropensityCount")
+    # The editor asks only for the axis; the digest property comes from the metric.
+    assert builder.chart_field_controls("boxplot") == ("x", "color", "facet_row", "facet_col")
+
+
+@pytest.mark.unit
+def test_descriptive_boxplot_is_retired_from_chart_offering() -> None:
+    assert "descriptive_boxplot" not in RECIPES
+    assert "boxplot" in RECIPES
+    # Existing tiles keep their labels and field controls for editing.
+    assert "descriptive_boxplot" in builder.CHART_DISPLAY_LABELS
+    assert builder.chart_field_controls("descriptive_boxplot")[0] == "x"
+
+
+def _tile_option(dashboard_id: str, page_id: str, tile_id: str, title: str):
+    return (dashboard_id, page_id, tile_id, {"id": tile_id, "title": title})
+
+
+@pytest.mark.unit
+def test_report_library_labels_disambiguate_duplicate_pages() -> None:
+    catalog = model.Catalog.model_validate(
+        {
+            "pipelines": {
+                "version": 1,
+                "workspace": "labels",
+                "sources": [
+                    {"id": "ih", "reader": {"kind": "parquet", "file_pattern": "*.parquet"}}
+                ],
+            },
+            "processors": {"processors": []},
+            "metrics": {"metrics": {}},
+            "dashboards": {
+                "dashboards": [
+                    {"id": "model_quality", "title": "Model quality", "pages": []},
+                    {"id": "experiments", "title": "Experiments", "pages": []},
+                ]
+            },
+        }
+    )
+    colliding = [
+        _tile_option("model_quality", "distributions", "response_time_boxplot", "Response time"),
+        _tile_option("experiments", "distributions", "response_time_boxplot", "Response time"),
+        _tile_option("model_quality", "distributions", "response_histogram", "Histogram"),
+    ]
+
+    labels = config_builder._report_library_tile_labels(catalog, colliding)
+
+    assert labels["model_quality/distributions/response_time_boxplot"] == (
+        "Response time · Distributions · Model quality"
+    )
+    assert labels["experiments/distributions/response_time_boxplot"] == (
+        "Response time · Distributions · Experiments"
+    )
+    # Unique labels stay short.
+    assert labels["model_quality/distributions/response_histogram"] == "Histogram · Distributions"

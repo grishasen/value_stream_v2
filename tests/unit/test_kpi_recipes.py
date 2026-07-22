@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 
 from valuestream.config import model
 from valuestream.recipes import (
+    digest_state_property,
     instantiate_metric,
     instantiate_tile,
     load_builtin_kpi_recipes,
@@ -35,7 +36,7 @@ def test_builtin_recipe_library_is_versioned_and_unique() -> None:
     Draft202012Validator(generate_schema()).validate(payload)
 
     assert library.schema_version == 1
-    assert len(library.recipes) == 10
+    assert len(library.recipes) == 11
     assert len({recipe.id for recipe in library.recipes}) == len(library.recipes)
     assert {recipe.domain for recipe in library.recipes} >= {
         "Audience",
@@ -145,9 +146,7 @@ def test_sketch_binding_options_propose_every_grouping_field_and_algorithm() -> 
         ("SubjectID", "theta"),
     }
     channel_cpc = next(
-        option
-        for option in options
-        if option.field == "Channel" and option.state_type == "cpc"
+        option for option in options if option.field == "Channel" and option.state_type == "cpc"
     )
     assert not channel_cpc.configured
     assert channel_cpc.state_definition == {
@@ -278,9 +277,7 @@ def test_recipe_binding_ui_uses_field_and_algorithm_not_state_id() -> None:
         from valuestream.ui.recipe_library import _render_recipe_bindings  # noqa: PLC0415
 
         recipe = next(
-            item
-            for item in load_recipes().recipes
-            if item.id == "audience.unique_entities"
+            item for item in load_recipes().recipes if item.id == "audience.unique_entities"
         )
         processor = config_model.BinaryOutcomeProcessor.model_validate(
             {
@@ -406,9 +403,7 @@ def test_recipe_library_requires_preview_before_returning_install_request() -> N
 
     assert not at.exception
     assert any(code.language == "yaml" for code in at.code)
-    confirm = next(
-        button for button in at.button if button.label == "Add recipe to catalog"
-    )
+    confirm = next(button for button in at.button if button.label == "Add recipe to catalog")
     confirm.click().run()
 
     assert not at.exception
@@ -482,9 +477,7 @@ def test_install_preview_contains_exact_yaml_patch_and_materialization_plan() ->
                     {
                         "id": "overview",
                         "title": "Overview",
-                        "pages": [
-                            {"id": "audience", "title": "Audience", "tiles": []}
-                        ],
+                        "pages": [{"id": "audience", "title": "Audience", "tiles": []}],
                     }
                 ]
             },
@@ -800,9 +793,7 @@ def test_recipe_json_schema_matches_checked_in_artifact() -> None:
 
 
 def _recipe(recipe_id: str):
-    return next(
-        recipe for recipe in load_builtin_kpi_recipes().recipes if recipe.id == recipe_id
-    )
+    return next(recipe for recipe in load_builtin_kpi_recipes().recipes if recipe.id == recipe_id)
 
 
 def _binary_processor(states: dict[str, dict[str, object]]) -> model.BinaryOutcomeProcessor:
@@ -814,3 +805,39 @@ def _binary_processor(states: dict[str, dict[str, object]]) -> model.BinaryOutco
             "states": states,
         }
     )
+
+
+@pytest.mark.unit
+def test_distribution_boxplot_recipe_materializes_quantile_free_metric_and_tile() -> None:
+    recipe = _recipe("distribution.boxplot")
+    processor = model.NumericDistributionProcessor.model_validate(
+        {
+            "id": "descriptive",
+            "source": "ih",
+            "kind": "numeric_distribution",
+            "properties": ["Propensity"],
+        }
+    )
+
+    metric_def = instantiate_metric(
+        recipe, processor, "PropensityDistribution", {"digest_state": "Propensity_tdigest"}
+    )
+    assert metric_def["kind"] == "tdigest_quantile"
+    # A distribution metric stores no single quantile; the model reads the
+    # median by default and boxplot tiles pull the full quantile suite.
+    assert "quantile" not in metric_def
+    parsed = model.Metrics.model_validate(
+        {"metrics": {"PropensityDistribution": metric_def}}
+    ).metrics["PropensityDistribution"]
+    assert parsed.quantile == 0.5
+
+    tile_def = instantiate_tile(
+        recipe, "PropensityDistribution", "tile_dist", {"digest_state": "Propensity_tdigest"}
+    )
+    assert tile_def["chart"] == "boxplot"
+    assert tile_def["metric"] == "PropensityDistribution"
+    assert tile_def["property"] == "Propensity"
+
+    assert digest_state_property("Latency_kll") == "Latency"
+    with pytest.raises(ValueError, match="digest_state"):
+        instantiate_tile(recipe, "PropensityDistribution", "tile_dist", {})

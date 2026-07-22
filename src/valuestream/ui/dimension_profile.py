@@ -45,10 +45,6 @@ CALENDAR_GRANULARITY_REASON = "Explicit calendar granularity for time-based aggr
 PEGA_CDH_CORE_PACK = "Pega/CDH Core"
 DIMENSION_PACKS: dict[str, tuple[str, ...]] = {
     PEGA_CDH_CORE_PACK: (
-        "Day",
-        "Month",
-        "Quarter",
-        "Year",
         "Channel",
         "Issue",
         "Group",

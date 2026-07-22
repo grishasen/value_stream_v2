@@ -296,7 +296,7 @@ def build_recipe_install_request(
     metric_def = instantiate_metric(recipe, configured_processor, metric_id, bindings)
     processor_def = _processor_yaml_definition(configured_processor) if state_additions else None
     tile_def = (
-        instantiate_tile(recipe, metric_id, tile_id)
+        instantiate_tile(recipe, metric_id, tile_id, bindings)
         if report_target is not None and tile_id
         else None
     )

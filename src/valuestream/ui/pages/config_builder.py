@@ -2667,16 +2667,8 @@ def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any
         key=lambda field: (field.casefold(), field),
     )
 
-    _dimension_pack_panel(all_field_options, WORKSPACE_DIMENSIONS_KEY)
-    profile_source, profile_sample, profile_rows = _dimension_profile_panel(ctx, sources)
-    if profile_source is not None and profile_rows:
-        _dimension_promotion_panel(
-            profile_source,
-            options_by_source.get(profile_source.id, []),
-            profile_sample,
-            profile_rows,
-        )
-
+    # The shared list leads the step so it is clear which dimensions already
+    # exist; the pack and promotion panels below extend it via callbacks.
     with components.bordered_panel(
         "Common Business Dimensions",
         "One shared list applied automatically to processors as group-by fields.",
@@ -2702,6 +2694,16 @@ def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any
             "Extend or trim any single processor in the Processors step."
         )
     selected = builder.dedupe([str(value).strip() for value in selected if str(value).strip()])
+
+    _dimension_pack_panel(all_field_options, WORKSPACE_DIMENSIONS_KEY)
+    profile_source, profile_sample, profile_rows = _dimension_profile_panel(ctx, sources)
+    if profile_source is not None and profile_rows:
+        _dimension_promotion_panel(
+            profile_source,
+            options_by_source.get(profile_source.id, []),
+            profile_sample,
+            profile_rows,
+        )
 
     extend_processors, processor_updates = _dimension_processor_coverage_panel(
         ctx, options_by_source, selected
@@ -2985,6 +2987,17 @@ def _dimension_promotion_summary(
     }
 
 
+def _set_workspace_dimensions(dimensions: list[str]) -> None:
+    """Apply a new common-dimension list from a button callback.
+
+    The list binds the Common Dimensions multiselect, which now renders above
+    the pack and promotion panels — widget state may only be written from a
+    callback once the widget has been instantiated in the run.
+    """
+
+    st.session_state[WORKSPACE_DIMENSIONS_KEY] = list(dimensions)
+
+
 def _dimension_pack_panel(
     options: list[str],
     group_key: str,
@@ -3031,14 +3044,14 @@ def _dimension_pack_panel(
                 json.dumps({"pack": pack_name, **summary}, indent=2),
                 language="json",
             )
-        if st.button(
+        st.button(
             f"Add {pack_name} dimensions",
             icon=":material/library_add:",
             disabled=not pack_fields,
             key="builder_dimension_apply_pack",
-        ):
-            st.session_state[group_key] = builder.dedupe([*current, *pack_fields])
-            st.rerun()
+            on_click=_set_workspace_dimensions,
+            args=(builder.dedupe([*current, *pack_fields]),),
+        )
 
 
 def _dimension_promotion_panel(
@@ -3140,13 +3153,13 @@ def _dimension_promotion_panel(
                 ]
             )
         next_dimensions = builder.dedupe([*current, field])
-        if st.button(
+        st.button(
             f"Add {field} as common dimension",
             icon=":material/add:",
             key=f"builder_dimension_promote_add_{source.id}",
-        ):
-            st.session_state[WORKSPACE_DIMENSIONS_KEY] = next_dimensions
-            st.rerun()
+            on_click=_set_workspace_dimensions,
+            args=(next_dimensions,),
+        )
 
 
 def _dimension_promotion_candidates(
@@ -4544,6 +4557,39 @@ def _report_library_tile_label(option: TileOption) -> str:
     return f"{title} · {humanize_identifier(option[1])}"
 
 
+def _report_library_tile_labels(
+    catalog: model.Catalog,
+    tile_options: list[TileOption],
+) -> dict[str, str]:
+    """Label tile options, adding the dashboard when title/page pairs collide.
+
+    The same page (and even identical tile ids) can exist on more than one
+    dashboard; without the dashboard suffix such pills are indistinguishable.
+    """
+
+    base = {_tile_option_key(option): _report_library_tile_label(option) for option in tile_options}
+    counts: dict[str, int] = {}
+    for label in base.values():
+        counts[label] = counts.get(label, 0) + 1
+    if all(count == 1 for count in counts.values()):
+        return base
+    dashboard_titles = {
+        dashboard.id: dashboard.title or humanize_identifier(dashboard.id)
+        for dashboard in catalog.dashboards.dashboards
+    }
+    return {
+        _tile_option_key(option): (
+            base[_tile_option_key(option)]
+            if counts[base[_tile_option_key(option)]] == 1
+            else (
+                f"{base[_tile_option_key(option)]} · "
+                f"{dashboard_titles.get(option[0], humanize_identifier(option[0]))}"
+            )
+        )
+        for option in tile_options
+    }
+
+
 def _tile_delete_button_label(option: TileOption | None) -> str:
     """Name the exact configured tile targeted by the library delete action."""
 
@@ -4586,6 +4632,7 @@ def _render_report_library_browser(
         metric_filter = st.selectbox(
             "Metric",
             ["All", *metric_names],
+            format_func=lambda name: name if name == "All" else _metric_choice_label(catalog, name),
             key="builder_metric_filter",
             help=config_help.field_help("report.metric_filter"),
         )
@@ -4670,6 +4717,7 @@ def _render_report_library_browser(
             option for option in visible_options if option[3].get("chart") == chart_type
         ]
         _render_report_library_chart_group(
+            catalog,
             chart_type,
             chart_options,
             selected_tile_key=selected_tile_key,
@@ -4700,6 +4748,7 @@ def _library_draft_chart() -> str:
 
 
 def _render_report_library_chart_group(
+    catalog: model.Catalog,
     chart_type: str,
     tile_options: list[TileOption],
     *,
@@ -4770,10 +4819,7 @@ def _render_report_library_chart_group(
                 )
                 return
             tile_keys = [_tile_option_key(option) for option in tile_options]
-            tile_labels = {
-                _tile_option_key(option): _report_library_tile_label(option)
-                for option in tile_options
-            }
+            tile_labels = _report_library_tile_labels(catalog, tile_options)
             default = selected_tile_key if selected_tile_key in tile_keys else None
             # The widget key includes the current selection so a selection
             # change remounts the widget in the right state. Deleting the
@@ -5197,12 +5243,24 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             metric_names,
             index=metric_names.index(seed_metric) if seed_metric is not None else None,
             placeholder="Select metric",
+            format_func=lambda name: _metric_choice_label(catalog, name),
             key=f"builder_tile_metric_{editor_token}",
             help=config_help.field_help("report.metric"),
         )
         chart_choices = (
             builder.chart_choices_for_metric(catalog, metric_name) if metric_name else []
         )
+        # Retired chart kinds stay selectable on the tiles that already use
+        # them, so opening an old tile never silently rewrites its chart.
+        seed_chart_value = str(seed_tile.get("chart", "") or "")
+        if (
+            not is_new_tile
+            and seed_chart_value
+            and chart_choices
+            and seed_chart_value not in chart_choices
+            and seed_chart_value in builder.CHART_DISPLAY_LABELS
+        ):
+            chart_choices = [*chart_choices, seed_chart_value]
         seed_chart = seed_tile.get("chart") if seed_tile.get("chart") in chart_choices else None
         if seed_chart is None and chart_choices and not is_new_tile:
             seed_chart = chart_choices[0]

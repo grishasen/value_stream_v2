@@ -95,6 +95,10 @@ class RecipeReport(_RecipeModel):
     chart: str = "kpi_card"
     placement: Literal["content", "kpi_strip"] = "kpi_strip"
     kpi: model.KpiSpec | None = None
+    # Input role whose bound digest state names the tile's ``property``
+    # (with the _tdigest/_kll suffix stripped) — distribution charts such as
+    # boxplots read their quantile-suite columns through it.
+    property_from: str | None = None
 
 
 class KpiRecipe(_RecipeModel):
@@ -299,7 +303,12 @@ def instantiate_metric(
     )
 
 
-def instantiate_tile(recipe: KpiRecipe, metric_id: str, tile_id: str) -> dict[str, Any]:
+def instantiate_tile(
+    recipe: KpiRecipe,
+    metric_id: str,
+    tile_id: str,
+    bindings: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Materialize and validate a recommended report tile for a recipe metric."""
 
     value_format = recipe.metric.display.value_format if recipe.metric.display else None
@@ -316,9 +325,26 @@ def instantiate_tile(recipe: KpiRecipe, metric_id: str, tile_id: str) -> dict[st
         raw["value_format"] = value_format
     if recipe.report.kpi:
         raw["kpi"] = recipe.report.kpi
+    if recipe.report.property_from:
+        bound_state = (bindings or {}).get(recipe.report.property_from, "")
+        if not bound_state:
+            raise ValueError(
+                f"recipe {recipe.id!r} tile needs the {recipe.report.property_from!r} "
+                "input binding to derive its property"
+            )
+        raw["property"] = digest_state_property(bound_state)
     return model.Tile.model_validate(raw).model_dump(
         mode="json", exclude_none=True, exclude_defaults=True
     )
+
+
+def digest_state_property(state: str) -> str:
+    """Return the property name a digest state persists quantiles under."""
+
+    for suffix in ("_tdigest", "_kll"):
+        if state.endswith(suffix):
+            return state.removesuffix(suffix)
+    return state
 
 
 def unique_artifact_id(preferred: str, existing: set[str]) -> str:

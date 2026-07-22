@@ -749,9 +749,7 @@ def _expand_topk_table_rows(frame: pl.DataFrame) -> pl.DataFrame:
     """Expand one Top-K list column into ranked rows with uncertainty columns."""
 
     topk_columns = [
-        column
-        for column in frame.columns
-        if _is_topk_table_column(frame[column].to_list())
+        column for column in frame.columns if _is_topk_table_column(frame[column].to_list())
     ]
     if len(topk_columns) != 1:
         return frame
@@ -1251,7 +1249,7 @@ def _categorical_funnel_rows(
 def _boxplot(
     rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, Any] | None = None
 ) -> go.Figure:
-    prop = tile.get("property")
+    prop = tile.get("property") or _infer_quantile_property(rows)
     if prop is not None and f"{prop}_Median" in rows.columns:
         return _quantile_box(rows, str(prop), tile, theme)
     fig = px.box(
@@ -1265,6 +1263,27 @@ def _boxplot(
     )
     fig.update_layout(boxmode="group")
     return fig
+
+
+def _infer_quantile_property(rows: pl.DataFrame) -> str | None:
+    """Return the sole quantile-suite property present in the frame, if any.
+
+    Boxplot tiles authored without ``property`` would otherwise box the scalar
+    metric value — one number per group — instead of the digest's quantile
+    suite that the query layer already delivered alongside it.
+    """
+
+    candidates = {
+        column.removesuffix("_Median") for column in rows.columns if column.endswith("_Median")
+    }
+    candidates = {
+        candidate
+        for candidate in candidates
+        if f"{candidate}_p25" in rows.columns and f"{candidate}_p75" in rows.columns
+    }
+    if len(candidates) == 1:
+        return next(iter(candidates))
+    return None
 
 
 def _histogram(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
