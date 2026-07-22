@@ -675,10 +675,11 @@ def test_new_processor_template_is_clean_and_apply_reopens_clean_object(tmp_path
     rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
     jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
     rendered = jump.set_value("Processors").run()
-    processor_mode = next(
-        item for item in rendered.segmented_control if item.label == "Processor Mode"
+    rendered = (
+        next(button for button in rendered.button if button.label == "Create New Processor")
+        .click()
+        .run()
     )
-    rendered = processor_mode.set_value("Create New Processor").run()
 
     assert not rendered.exception
     assert any(button.label == "Continue" for button in rendered.button)
@@ -699,10 +700,7 @@ def test_new_processor_template_is_clean_and_apply_reopens_clean_object(tmp_path
     assert any(button.label == "Continue" for button in rendered.button)
     assert not any(button.label == "Apply to workspace" for button in rendered.button)
     assert rendered.session_state[builder.BUILDER_DRAFTS_KEY] == {}
-    assert (
-        next(item for item in rendered.segmented_control if item.label == "Processor Mode").value
-        == "Edit Existing Processor"
-    )
+    assert rendered.session_state["builder_processor_mode"] == "Edit Existing Processor"
     assert (
         rendered.session_state[config_builder.BUILDER_LAST_OUTCOME_KEY]["label"] == "QA processor"
     )
@@ -823,10 +821,11 @@ def test_metric_delete_dialog_requires_explicit_tile_choice_and_cancel_is_read_o
     rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
     jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
     rendered = jump.set_value("Metrics").run(timeout=15)
-    metric_action = next(
-        item for item in rendered.segmented_control if item.label == "Metric action"
+    rendered = (
+        next(button for button in rendered.button if button.label == "Edit Existing Metric")
+        .click()
+        .run(timeout=15)
     )
-    rendered = metric_action.set_value("Edit Existing Metric").run(timeout=15)
     rendered = (
         next(button for button in rendered.button if button.label == "Delete metric")
         .click()
@@ -873,10 +872,11 @@ def test_new_processor_empty_entity_fallback_is_explicit(tmp_path: Path) -> None
     rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
     jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
     rendered = jump.set_value("Processors").run()
-    processor_mode = next(
-        item for item in rendered.segmented_control if item.label == "Processor Mode"
+    rendered = (
+        next(button for button in rendered.button if button.label == "Create New Processor")
+        .click()
+        .run()
     )
-    rendered = processor_mode.set_value("Create New Processor").run()
 
     assert not rendered.exception
     warning_text = "\n".join(item.value for item in rendered.warning)
@@ -907,10 +907,11 @@ def test_builder_metric_mode_switch_can_fill_claimed_fragment_slots(tmp_path: Pa
     rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
     jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
     rendered = jump.set_value("Metrics").run()
-    metric_action = next(
-        item for item in rendered.segmented_control if item.label == "Metric action"
+    rendered = (
+        next(button for button in rendered.button if button.label == "Edit Existing Metric")
+        .click()
+        .run()
     )
-    rendered = metric_action.set_value("Edit Existing Metric").run()
 
     assert not rendered.exception
     assert any(button.label == "Continue" for button in rendered.button)
@@ -959,10 +960,7 @@ def test_metric_from_scratch_template_and_post_apply_editor_are_clean(tmp_path: 
     assert any(button.label == "Continue" for button in rendered.button)
     assert not any(button.label == "Apply to workspace" for button in rendered.button)
     assert not any("Editing draft" in item.value for item in rendered.markdown)
-    assert (
-        next(item for item in rendered.segmented_control if item.label == "Metric action").value
-        == "Edit Existing Metric"
-    )
+    assert rendered.session_state["builder_metric_mode"] == "Edit Existing Metric"
     metrics = load(tmp_path).metrics.metrics
     assert len(metrics) == 2
     assert "engagement_metric_qa_rate" in metrics
@@ -2126,7 +2124,13 @@ st.session_state["result"] = forms.metric_kind_fields(
 
 
 @pytest.mark.unit
-def test_set_op_metric_keeps_time_window_operands_read_only() -> None:
+def test_set_op_editor_flags_unsupported_window_shapes() -> None:
+    """Legacy start/end windows are engine-invalid; the editor demands fixes.
+
+    The engine only accepts ``last`` and two-value ``between`` windows, so a
+    metric carrying another shape surfaces blank Between offsets plus
+    warnings instead of silently passing the broken window through.
+    """
     app = AppTest.from_string(
         """
 import streamlit as st
@@ -2151,20 +2155,8 @@ st.session_state["result"] = forms.metric_kind_fields(
     ).run()
 
     assert not app.exception
-    assert app.session_state["result"] == {
-        "op": "intersection",
-        "operands": [
-            {
-                "state": "Active_theta",
-                "time_window": {"start": "-30d", "end": "-1d"},
-            },
-            {
-                "state": "Active_theta",
-                "time_window": {"start": "-1d", "end": "now"},
-            },
-        ],
-    }
-    assert app.info
+    assert app.session_state["result"] is None
+    assert any("anchor-relative offset" in item.value for item in app.warning)
 
 
 @pytest.mark.unit
@@ -3077,49 +3069,53 @@ def test_dimension_profile_estimates_aggregate_size_expansion() -> None:
 
 
 @pytest.mark.unit
-def test_exploration_processor_helpers_generate_valid_yaml_shapes() -> None:
-    source = model.Source.model_validate(
-        {
-            "id": "ih",
-            "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
-            "schema": {
-                "timestamp_column": "Day",
-                "natural_key": ["CustomerID"],
-            },
-        }
-    )
-    processor = model.BinaryOutcomeProcessor.model_validate(
-        {
-            "id": "engagement",
-            "source": "ih",
-            "kind": "binary_outcome",
-            "dimensions": ["Channel"],
-            "outcome": {
-                "column": "Outcome",
-                "positive_values": ["Clicked"],
-                "negative_values": ["Impression"],
-            },
-        }
-    )
-    sketch, metrics = config_builder._sketch_processor_and_metrics(
-        source,
-        base_processor=processor,
-        dimensions=["Channel"],
+def test_sketch_state_rows_build_processor_sketch_grid_entries() -> None:
+    rows = config_builder._sketch_state_rows(
         topk_field="Campaign",
         entity_field="CustomerID",
         include_cpc=True,
         include_theta=True,
     )
 
-    assert sketch["kind"] == "entity_set"
-    assert sketch["exploration"]["temporary"] is True
-    assert {state["type"] for state in sketch["states"].values()} == {"topk", "cpc", "theta"}
-    assert {metric["kind"] for metric in metrics.values()} == {
-        "topk_items",
-        "approx_distinct_count",
+    assert [(row["State"], row["Type"], row["Source Column"]) for row in rows] == [
+        ("TopCampaign_topk", "topk", "Campaign"),
+        ("UniqueCustomerid_cpc", "cpc", "CustomerID"),
+        ("AudienceCustomerid_theta", "theta", "CustomerID"),
+    ]
+    assert all(row["Enabled"] for row in rows)
+    # The rows compile into valid state definitions on the target processor.
+    processor = model.EntitySetProcessor.model_validate(
+        {"id": "audience", "source": "ih", "kind": "entity_set"}
+    )
+    defs = config_builder._build_state_defs(processor, rows)
+    assert {name: spec["type"] for name, spec in defs.items()} == {
+        "TopCampaign_topk": "topk",
+        "UniqueCustomerid_cpc": "cpc",
+        "AudienceCustomerid_theta": "theta",
     }
-    model.EntitySetProcessor.model_validate(sketch)
-    model.Metrics.model_validate({"metrics": metrics})
+    model.EntitySetProcessor.model_validate(
+        {"id": "audience", "source": "ih", "kind": "entity_set", "states": defs}
+    )
+
+
+@pytest.mark.unit
+def test_sketch_state_rows_respect_disabled_helpers() -> None:
+    assert (
+        config_builder._sketch_state_rows(
+            topk_field="",
+            entity_field="CustomerID",
+            include_cpc=False,
+            include_theta=False,
+        )
+        == []
+    )
+    only_theta = config_builder._sketch_state_rows(
+        topk_field="",
+        entity_field="CustomerID",
+        include_cpc=False,
+        include_theta=True,
+    )
+    assert [row["State"] for row in only_theta] == ["AudienceCustomerid_theta"]
 
 
 @pytest.mark.unit
@@ -4008,7 +4004,7 @@ def test_kind_switch_reseeds_description_and_auto_outputs(tmp_path: Path) -> Non
     state_rows = rendered.session_state["builder_proc_states_ih_processor"]
     assert [row["State"] for row in state_rows] == ["ActiveUsers_cpc", "ActiveUsers_theta"]
     assert all(row["Source Column"] == "InteractionID" for row in state_rows)
-    assert any(item.label == "Entity Column" for item in rendered.selectbox)
+    assert any(item.label == "Primary Entity Column" for item in rendered.selectbox)
 
 
 @pytest.mark.unit
@@ -4559,12 +4555,12 @@ def test_tile_deletion_is_staged_behind_the_step_apply_action() -> None:
 
 
 @pytest.mark.unit
-def test_sketch_exploration_does_not_preselect_topk_or_avoid_fields() -> None:
+def test_sketch_helper_does_not_preselect_topk_or_avoid_fields() -> None:
     tree = ast.parse(Path(config_builder.__file__).read_text(encoding="utf-8"))
     sketch_panel = next(
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_sketch_exploration_panel"
+        if isinstance(node, ast.FunctionDef) and node.name == "_sketch_states_panel"
     )
     calls = [node for node in ast.walk(sketch_panel) if isinstance(node, ast.Call)]
     topk_checkbox = next(
@@ -6613,3 +6609,258 @@ def test_fat_example_workspace_restores_common_dimensions_from_processors() -> N
         "Issue",
         "Group",
     ]
+
+
+_RETAINED_SET_APP = """
+import streamlit as st
+from valuestream.ui import forms
+
+seed = {
+    "source": "audience",
+    "kind": "set_op",
+    "op": "intersection",
+    "output": "count",
+    "operands": [
+        {"state": "Customers_theta", "time_window": {"last": "1d"}},
+        {"state": "Customers_theta", "time_window": {"between": ["-30d", "-1d"]}},
+    ],
+}
+ctx = forms.MetricFormContext(state_options=lambda _types: ["Customers_theta"])
+st.session_state["result"] = forms.metric_kind_fields(
+    "set_op", seed, ctx, key_prefix="retained_set"
+)
+"""
+
+
+@pytest.mark.unit
+def test_windowed_set_op_is_editable_with_one_theta_state() -> None:
+    """Retention-style metrics intersect one state with itself across windows.
+
+    The editor must render editable operand rows seeded from the metric and
+    round-trip the definition unchanged — not the misleading "requires at
+    least two theta states" warning, which only applies to state-vs-state
+    authoring.
+    """
+    rendered = AppTest.from_string(_RETAINED_SET_APP).run()
+
+    assert not rendered.exception
+    assert not rendered.warning
+    assert rendered.session_state["result"] == {
+        "op": "intersection",
+        "operands": [
+            {"state": "Customers_theta", "time_window": {"last": "1d"}},
+            {"state": "Customers_theta", "time_window": {"between": ["-30d", "-1d"]}},
+        ],
+        "output": "count",
+    }
+    assert rendered.session_state["retained_set_set_operand_0_last"] == "1d"
+    assert rendered.session_state["retained_set_set_operand_1_from"] == "-30d"
+    assert rendered.session_state["retained_set_set_operand_1_to"] == "-1d"
+
+
+@pytest.mark.unit
+def test_windowed_set_op_edits_write_back_and_validate() -> None:
+    rendered = AppTest.from_string(_RETAINED_SET_APP).run()
+    last_input = next(
+        item for item in rendered.text_input if item.key == "retained_set_set_operand_0_last"
+    )
+    rendered = last_input.set_value("7d").run()
+
+    assert not rendered.exception
+    assert rendered.session_state["result"]["operands"][0] == {
+        "state": "Customers_theta",
+        "time_window": {"last": "7d"},
+    }
+
+    bad = next(
+        item for item in rendered.text_input if item.key == "retained_set_set_operand_0_last"
+    )
+    rendered = bad.set_value("-3d").run()
+
+    assert rendered.session_state["result"] is None
+    assert any("positive duration" in item.value for item in rendered.warning)
+
+
+def _write_entity_set_catalog(workspace: Path) -> None:
+    catalog = workspace / "catalog"
+    catalog.mkdir(parents=True)
+    (catalog / "pipelines.yaml").write_text(
+        """
+version: 1
+workspace: sketch_test
+sources:
+  - id: ih
+    reader:
+      kind: parquet
+      file_pattern: "data/*.parquet"
+    schema:
+      timestamp_column: OutcomeTime
+      natural_key: [CustomerID]
+""",
+        encoding="utf-8",
+    )
+    (catalog / "processors.yaml").write_text(
+        """
+processors:
+  - id: audience
+    source: ih
+    kind: entity_set
+    description: Audience sets.
+    entity: CustomerID
+    dimensions: [Channel]
+""",
+        encoding="utf-8",
+    )
+    (catalog / "metrics.yaml").write_text("metrics: {}\n", encoding="utf-8")
+    (catalog / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_sketch_helper_appends_states_to_processor_sketches_grid(tmp_path: Path) -> None:
+    _write_entity_set_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Processors").run()
+
+    assert not rendered.exception
+    rendered_titles = " ".join(item.value for item in rendered.markdown)
+    assert "Processor Sketches" in rendered_titles
+    assert "Sketch Helper" in rendered_titles
+    assert "Top-K And Sketch Exploration" not in rendered_titles
+
+    before = rendered.session_state["builder_proc_states_audience"]
+    before_names = {row["State"] for row in before}
+    assert {"ActiveUsers_cpc", "ActiveUsers_theta"} <= before_names
+
+    add = next(button for button in rendered.button if button.label == "Add to Processor Sketches")
+    rendered = add.click().run(timeout=15)
+
+    assert not rendered.exception
+    after = rendered.session_state["builder_proc_states_audience"]
+    after_names = [row["State"] for row in after]
+    assert after_names[: len(before)] == [row["State"] for row in before]
+    assert "UniqueCustomerid_cpc" in after_names
+    assert "AudienceCustomerid_theta" in after_names
+    added = {row["State"]: row for row in after if row["State"] not in before_names}
+    assert added["UniqueCustomerid_cpc"]["Type"] == "cpc"
+    assert added["UniqueCustomerid_cpc"]["Source Column"] == "CustomerID"
+    assert added["AudienceCustomerid_theta"]["Type"] == "theta"
+
+
+@pytest.mark.unit
+def test_set_op_picker_offers_minus_instead_of_diff_alias() -> None:
+    assert "diff" not in forms.SET_OP_OPTIONS
+    assert set(forms.SET_OP_LABELS) == set(forms.SET_OP_OPTIONS)
+    assert forms.SET_OP_LABELS["a_not_b"].startswith("Minus")
+
+
+@pytest.mark.unit
+def test_set_op_diff_seed_edits_as_minus_and_saves_canonically() -> None:
+    """`diff` is an engine alias of `a_not_b`; editing normalizes it."""
+    app = AppTest.from_string(
+        """
+import streamlit as st
+from valuestream.ui import forms
+
+seed = {
+    "source": "audience",
+    "kind": "set_op",
+    "op": "diff",
+    "states": ["A_theta", "B_theta"],
+}
+ctx = forms.MetricFormContext(state_options=lambda _types: ["A_theta", "B_theta"])
+st.session_state["result"] = forms.metric_kind_fields(
+    "set_op", seed, ctx, key_prefix="diff_set"
+)
+"""
+    ).run()
+
+    assert not app.exception
+    assert app.session_state["result"] == {"op": "a_not_b", "states": ["A_theta", "B_theta"]}
+
+
+class _PolicyWarningCapture(logging.Handler):
+    """Capture Streamlit widget-policy warnings at their source logger.
+
+    Streamlit sets ``propagate = False`` on its loggers, so ``caplog`` (which
+    listens on the root logger) sees the records only in some import orders.
+    Attaching directly to the emitting logger is deterministic.
+    """
+
+    LOGGER_NAME = "streamlit.elements.lib.policies"
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+    def __enter__(self) -> _PolicyWarningCapture:
+        from streamlit.elements.lib import policies  # noqa: PLC0415 - test-only reset
+
+        # Streamlit emits this warning once per process; reset the flag so the
+        # capture observes it regardless of which tests ran earlier.
+        policies._shown_default_value_warning = False
+        logging.getLogger(self.LOGGER_NAME).addHandler(self)
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        logging.getLogger(self.LOGGER_NAME).removeHandler(self)
+
+    @property
+    def default_clash_messages(self) -> list[str]:
+        return [message for message in self.messages if "created with a default value" in message]
+
+
+@pytest.mark.unit
+def test_streamlit_default_plus_session_state_warning_is_capturable() -> None:
+    """Meta-check: the policy warning must be observable, or the test below is vacuous."""
+    app_code = """
+import streamlit as st
+
+st.session_state.setdefault("clash_key", "B")
+st.segmented_control("Clash", ["A", "B"], default="A", key="clash_key")
+"""
+    with _PolicyWarningCapture() as capture:
+        AppTest.from_string(app_code).run()
+
+    assert capture.default_clash_messages
+
+
+@pytest.mark.unit
+def test_processor_mode_seeded_by_post_apply_renders_without_policy_warning(
+    tmp_path: Path,
+) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        st.session_state.setdefault("builder_step", "Processors")
+        # What _consume_builder_post_apply_cleanup does after a processor apply.
+        st.session_state.setdefault("builder_processor_mode", "Edit Existing Processor")
+        _builder_steps(load_context(workspace))
+
+    with _PolicyWarningCapture() as capture:
+        rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+
+    assert not rendered.exception
+    mode_labels = {
+        button.label
+        for button in rendered.button
+        if button.label in ("Create New Processor", "Edit Existing Processor")
+    }
+    assert mode_labels == {"Create New Processor", "Edit Existing Processor"}
+    assert rendered.session_state["builder_processor_mode"] == "Edit Existing Processor"
+    assert not capture.default_clash_messages

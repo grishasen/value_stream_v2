@@ -221,7 +221,9 @@ FIELD_HELP: dict[str, str] = {
         "SubjectID",
     ),
     "processor.entity_column": _tip(
-        "Field whose unique values the set sketches (CPC, theta, Top-K) track.",
+        "Primary identity for this processor: the default Source Column for "
+        "sketch states and the seed for auto-created outputs. Add state rows "
+        "to sketch additional identities.",
         "CustomerID",
     ),
     "processor.lifecycle_customer_id": _tip(
@@ -336,10 +338,6 @@ FIELD_HELP: dict[str, str] = {
     "dimension.entity_field": _tip(
         "Entity identifier supplied to the selected cardinality sketches.", "SubjectID"
     ),
-    "dimension.sketch_group_by": _tip(
-        "Dimensions at which sketch states are persisted and can later be compared.",
-        "Channel, Direction",
-    ),
     "dimension.exploration_selector": _tip(
         "Choose a temporary exploration definition to promote into the permanent catalog."
     ),
@@ -426,10 +424,41 @@ FIELD_HELP: dict[str, str] = {
         "frequency, monetary_value, rfm_segment",
     ),
     "metric.set_operation": _tip(
-        "Theta set operation applied across the selected states.", "intersection"
+        "How the operand entity sets combine. Intersection counts entities "
+        "present in every set (e.g. active in both periods). Union counts "
+        "entities present in any set (combined reach). Minus counts entities "
+        "in the first set but not the second (A - B, e.g. churned or new "
+        "entities; stored as a_not_b in YAML).",
+        "Minus — entities in the first set only (A - B)",
     ),
     "metric.theta_states": _tip(
         "Theta states used as ordered set operands.", "Customers_A_theta, Customers_B_theta"
+    ),
+    "metric.set_operand_mode": _tip(
+        "Combine different theta states, or the same state across relative "
+        "time windows (for retention and churn-style metrics).",
+        "Time windows",
+    ),
+    "metric.set_operand_count": _tip(
+        "Number of windowed operands combined by the operation.",
+        "2",
+    ),
+    "metric.set_operand_state": _tip(
+        "Theta state providing this operand's entity set.",
+        "Customers_theta",
+    ),
+    "metric.set_window_kind": _tip(
+        "Restrict this operand to a relative period: the last N days/weeks, "
+        "a between range of anchor offsets, or all time.",
+        "Last",
+    ),
+    "metric.set_window_last": _tip(
+        "Positive duration ending at the anchor date. Days or weeks.",
+        "7d",
+    ),
+    "metric.set_window_offset": _tip(
+        "Anchor-relative day/week offset; negative values look back.",
+        "-30d",
     ),
     "metric.from_stage": _tip(
         "Earlier funnel stage used as the drop-off denominator.", "Presented"

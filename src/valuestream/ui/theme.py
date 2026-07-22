@@ -331,6 +331,39 @@ __VS_ACTIVE_CSS_VARS__
             border-color: var(--vs-danger) !important;
         }
 
+        /*
+         * Create/edit mode selectors for processors and metrics are paired
+         * full-width buttons at standard button height. The active mode is
+         * the filled (primary) button. Create is green (verified), edit is
+         * blue (action); key slugs carry _mode_button_create_ / _mode_button_edit_.
+         */
+        div[class*="_mode_button_create_"] button[kind="secondary"]:not(:disabled),
+        div[class*="_mode_button_create_"] button[kind="secondary"]:not(:disabled) p,
+        div[class*="_mode_button_create_"] button[kind="secondary"]:not(:disabled) [data-testid="stIconMaterial"] {
+            border-color: var(--vs-verified) !important;
+            color: var(--vs-verified) !important;
+        }
+        div[class*="_mode_button_create_"] button[kind="primary"]:not(:disabled),
+        div[class*="_mode_button_create_"] button[kind="primary"]:hover:not(:disabled),
+        div[class*="_mode_button_create_"] button[kind="primary"]:active:not(:disabled) {
+            background-color: var(--vs-verified) !important;
+            border-color: var(--vs-verified) !important;
+            color: var(--vs-primary-fg) !important;
+        }
+        div[class*="_mode_button_edit_"] button[kind="secondary"]:not(:disabled),
+        div[class*="_mode_button_edit_"] button[kind="secondary"]:not(:disabled) p,
+        div[class*="_mode_button_edit_"] button[kind="secondary"]:not(:disabled) [data-testid="stIconMaterial"] {
+            border-color: var(--vs-action) !important;
+            color: var(--vs-action) !important;
+        }
+        div[class*="_mode_button_edit_"] button[kind="primary"]:not(:disabled),
+        div[class*="_mode_button_edit_"] button[kind="primary"]:hover:not(:disabled),
+        div[class*="_mode_button_edit_"] button[kind="primary"]:active:not(:disabled) {
+            background-color: var(--vs-action) !important;
+            border-color: var(--vs-action) !important;
+            color: var(--vs-primary-fg) !important;
+        }
+
         div[class*="st-key-vs_source_picker"] div[data-testid="stLinkButton"] a,
         div[class*="st-key-vs_source_picker"] div[data-testid="stLinkButton"] a p,
         div[class*="st-key-vs_source_picker"] div[data-testid="stLinkButton"] a [data-testid="stIconMaterial"],

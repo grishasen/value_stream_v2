@@ -66,6 +66,53 @@ ENTITY_SUBJECT_PROCESSOR_KINDS = frozenset(
 )
 METRIC_ACTION_CREATE = "Create Metric"
 METRIC_ACTION_EDIT = "Edit Existing Metric"
+
+_MODE_BUTTON_ICONS = {
+    "Create New Processor": ":material/add_circle:",
+    "Edit Existing Processor": ":material/edit:",
+    METRIC_ACTION_CREATE: ":material/add_circle:",
+    METRIC_ACTION_EDIT: ":material/edit:",
+}
+
+
+def _set_builder_mode(state_key: str, option: str) -> None:
+    st.session_state[state_key] = option
+
+
+def _mode_button_selector(
+    state_key: str,
+    options: list[str],
+    *,
+    default: str,
+    help_key: str,
+) -> str:
+    """Render create/edit modes as large paired buttons; return the active one.
+
+    The mode value lives in plain session state under ``state_key`` — the same
+    key and tokens the segmented control previously bound — so post-apply
+    state updates, checkpoints, and tests seeding the key keep working. The
+    active option renders as the primary (filled) button; theme.py sizes and
+    colors the pair via their ``_mode_button_`` key slugs.
+    """
+
+    if st.session_state.get(state_key) not in options:
+        st.session_state[state_key] = default
+    active = str(st.session_state[state_key])
+    columns = st.columns(len(options), gap="small")
+    for option, column in zip(options, columns, strict=True):
+        column.button(
+            option,
+            icon=_MODE_BUTTON_ICONS.get(option),
+            type="primary" if option == active else "secondary",
+            width="stretch",
+            key=f"{state_key}_button_{_slug_token(option)}",
+            help=config_help.field_help(help_key),
+            on_click=_set_builder_mode,
+            args=(state_key, option),
+        )
+    return active
+
+
 METRIC_CREATE_LIBRARY = "From Recipe Library"
 METRIC_CREATE_SCRATCH = "From Scratch"
 BUILDER_ADD_SOURCE_URL = (
@@ -2464,7 +2511,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             default=st.session_state[filter_mode_key],
             key=f"{filter_mode_key}_control",
             help=config_help.field_help("source.filter_mode"),
-        )
+        ) or str(st.session_state[filter_mode_key])
         st.session_state[filter_mode_key] = mode
         if mode == "Rules":
             rows_key = f"builder_source_filter_rows_{source.id}"
@@ -3125,19 +3172,27 @@ def _dimension_promotion_candidates(
     )
 
 
-def _sketch_exploration_panel(
+def _sketch_states_panel(
     ctx: ValueStreamContext,
     source: model.Source,
     processor: model.Processor,
     options: list[str],
-    selected_dimensions: list[str],
+    state_key: str,
 ) -> None:
+    """Recommend sketch states and append them to the Processor Sketches grid.
+
+    The sketches join the processor's own state rows, so they inherit its
+    group-by, filter, and time grains — no separate exploration processor.
+    """
+
     with components.bordered_panel(
-        "Top-K And Sketch Exploration",
-        "Answer high-cardinality questions with sketches instead of exploding dimensions.",
+        "Sketch Helper",
+        "Answer high-cardinality questions with sketches instead of exploding "
+        "dimensions. Added sketches become Processor Sketches rows and use this "
+        "processor's own group-by and filter.",
     ):
         if not options:
-            st.info("No source fields are available for sketch exploration.")
+            st.info("No source fields are available for sketch suggestions.")
             return
         sample = _source_profile_sample(ctx, source)
         rows = (
@@ -3200,129 +3255,88 @@ def _sketch_exploration_panel(
             key=f"builder_sketch_entity_field_{processor.id}",
             help=config_help.field_help("dimension.entity_field"),
         )
-        dim_key = f"builder_sketch_dims_{processor.id}"
-        if dim_key not in st.session_state:
-            st.session_state[dim_key] = [
-                field for field in selected_dimensions[:2] if field in options
-            ]
-        sketch_dims = st.multiselect(
-            "Sketch Grouping Dimensions",
-            options,
-            accept_new_options=True,
-            key=dim_key,
-            help=config_help.field_help("dimension.sketch_group_by"),
-        )
-        processor_def, metric_defs = _sketch_processor_and_metrics(
-            source,
-            base_processor=processor,
-            dimensions=sketch_dims,
+        new_rows = _sketch_state_rows(
             topk_field=str(topk_field or "") if include_topk else "",
-            entity_field=entity_field,
+            entity_field=str(entity_field or ""),
             include_cpc=include_cpc,
             include_theta=include_theta,
         )
+        existing_names = {
+            str(row.get("State", "")).strip()
+            for row in builder.normalize_editor_rows(st.session_state.get(state_key, []))
+        }
+        additions = [row for row in new_rows if row["State"] not in existing_names]
+        duplicates = [row["State"] for row in new_rows if row["State"] in existing_names]
+        if duplicates:
+            st.caption("Already in Processor Sketches: " + ", ".join(duplicates))
         _technical_yaml(
-            "Sketch exploration YAML",
+            "Sketch states to add",
             yaml.safe_dump(
                 {
-                    "processors": [processor_def],
-                    "metrics": metric_defs,
+                    row["State"]: {"type": row["Type"], "source_column": row["Source Column"]}
+                    for row in additions
                 },
                 sort_keys=False,
             ),
         )
         if st.button(
-            "Create sketch exploration",
+            "Add to Processor Sketches",
             icon=":material/add:",
-            disabled=not processor_def.get("states"),
-            key=f"builder_sketch_create_{processor.id}",
+            disabled=not additions,
+            key=f"builder_sketch_add_{processor.id}",
         ):
-            try:
-                with builder.validated_catalog_transaction(
-                    ctx.workspace, source_columns_by_id=_observed_source_columns()
-                ):
-                    builder.write_processor_definition(ctx.workspace, processor_def)
-                    for metric_name, metric_def in metric_defs.items():
-                        builder.write_metric_definition(ctx.workspace, str(metric_name), metric_def)
-            except Exception as exc:  # pragma: no cover - Streamlit display path
-                _record_builder_apply_failed(exc)
-                logger.exception(
-                    "Failed to write sketch exploration: processor=%s", processor_def.get("id")
-                )
-                st.error(str(exc))
-            else:
-                apply_outcome = builder.builder_apply_outcome(
-                    humanize_identifier(str(processor_def["id"])),
-                    source_ids=[source.id],
-                    requires_data_run=True,
-                )
-                _store_builder_apply_outcome(apply_outcome)
-                _record_builder_applied(apply_outcome)
-                st.session_state["builder_apply_notice"] = (
-                    "Sketch exploration processor written. Use Data Load to materialize it."
-                )
-                st.rerun(scope="app")
+            state_rows = builder.normalize_editor_rows(st.session_state.get(state_key, []))
+            st.session_state[state_key] = [*state_rows, *additions]
+            components.clear_pinned_editor(f"builder_proc_state_editor_{processor.id}")
+            st.rerun()
+        st.caption(
+            "Added sketches apply with the processor. Build metrics over them "
+            "(approx distinct, top-k items, set operations) in the Metrics step."
+        )
         _exploration_lifecycle_controls(ctx, source.id)
 
 
-def _sketch_processor_and_metrics(
-    source: model.Source,
+def _sketch_state_rows(
     *,
-    base_processor: model.Processor,
-    dimensions: list[str],
     topk_field: str,
     entity_field: str,
     include_cpc: bool,
     include_theta: bool,
-) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
-    now = _utc_now()
-    fields = [field for field in [topk_field, entity_field] if field]
-    processor_id = _exploration_id("explore_sketch", base_processor.id, fields)
-    states: dict[str, dict[str, Any]] = {}
-    metrics: dict[str, dict[str, Any]] = {}
+) -> list[dict[str, Any]]:
+    """Build Processor Sketches rows for the selected sketch helpers."""
+
+    rows: list[dict[str, Any]] = []
     if topk_field:
-        state_name = _state_name("Top", topk_field, "topk")
-        states[state_name] = {
-            "type": "topk",
-            "source_column": topk_field,
-            "lg_max_map_size": 12,
-        }
-        metrics[f"{processor_id}_topk"] = builder.build_topk_items_metric(
-            processor_id,
-            state_name,
-            limit=10,
+        rows.append(
+            {
+                "State": _state_name("Top", topk_field, "topk"),
+                "Type": "topk",
+                "Source Column": topk_field,
+                "Derived From": f"top values of {topk_field}",
+                "Enabled": True,
+            }
         )
     if include_cpc and entity_field:
-        state_name = _state_name("Unique", entity_field, "cpc")
-        states[state_name] = {"type": "cpc", "source_column": entity_field, "lg_k": 11}
-        metrics[f"{processor_id}_unique"] = builder.build_approx_distinct_metric(
-            processor_id,
-            state_name,
+        rows.append(
+            {
+                "State": _state_name("Unique", entity_field, "cpc"),
+                "Type": "cpc",
+                "Source Column": entity_field,
+                "Derived From": f"approx distinct {entity_field}",
+                "Enabled": True,
+            }
         )
     if include_theta and entity_field:
-        state_name = _state_name("Audience", entity_field, "theta")
-        states[state_name] = {"type": "theta", "source_column": entity_field, "lg_k": 12}
-    return (
-        {
-            "id": processor_id,
-            "source": source.id,
-            "kind": "entity_set",
-            "description": f"Sketch exploration states for {base_processor.id}.",
-            "dimensions": builder.dedupe(dimensions),
-            "entity": entity_field,
-            "states": states,
-            "exploration": {
-                "temporary": True,
-                "base_processor": base_processor.id,
-                "created_at": now.isoformat(),
-                "expires_at": (now + dt.timedelta(days=14)).isoformat(),
-                "ttl_days": 14,
-                "sketch": True,
-                "promoted": False,
-            },
-        },
-        metrics,
-    )
+        rows.append(
+            {
+                "State": _state_name("Audience", entity_field, "theta"),
+                "Type": "theta",
+                "Source Column": entity_field,
+                "Derived From": f"approx distinct {entity_field}",
+                "Enabled": True,
+            }
+        )
+    return rows
 
 
 def _exploration_lifecycle_controls(ctx: ValueStreamContext, source_id: str) -> None:
@@ -3423,13 +3437,6 @@ def _default_topk_field(options: list[str]) -> str:
     return options[0] if options else ""
 
 
-def _exploration_id(prefix: str, base: str, fields: list[str]) -> str:
-    parts = [_slug_token(prefix), _slug_token(base), *[_slug_token(field) for field in fields]]
-    stem = "_".join(part for part in parts if part)
-    timestamp = _utc_now().strftime("%Y%m%d%H%M%S")
-    return f"{stem[:72]}_{timestamp}"
-
-
 def _state_name(prefix: str, field: str, suffix: str) -> str:
     token = _slug_token(field).title().replace("_", "")
     return f"{prefix}{token}_{suffix}"
@@ -3475,16 +3482,11 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     mode_options = ["Create New Processor"]
     if processors:
         mode_options.append("Edit Existing Processor")
-    mode = (
-        st.segmented_control(
-            "Processor Mode",
-            mode_options,
-            default=mode_options[-1],
-            selection_mode="single",
-            key="builder_processor_mode",
-            help=config_help.field_help("processor.mode"),
-        )
-        or mode_options[-1]
+    mode = _mode_button_selector(
+        "builder_processor_mode",
+        mode_options,
+        default=mode_options[-1],
+        help_key="processor.mode",
     )
     creating = mode == "Create New Processor"
     if creating:
@@ -3640,9 +3642,9 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         _blank_state_row,
     )
     with components.bordered_panel(
-        "Auto Outputs",
-        "Edit automatically created aggregate states written by this processor. You "
-        "can add more as metrics later.",
+        "Processor Sketches",
+        "Aggregate states this processor materializes — counters and sketches. "
+        "Edit them here; the Sketch Helper below can add recommended sketches.",
     ):
         _render_state_rows_editor(
             state_key,
@@ -3664,7 +3666,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             default=st.session_state[filter_mode_key],
             key=f"{filter_mode_key}_control",
             help=config_help.field_help("processor.filter_mode"),
-        )
+        ) or str(st.session_state[filter_mode_key])
         st.session_state[filter_mode_key] = mode
         if mode == "Rules":
             rows_key = f"builder_proc_filter_rows_{processor.id}"
@@ -3704,7 +3706,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             )
 
     if source is not None and not creating and kind == "entity_set":
-        _sketch_exploration_panel(ctx, source, processor, field_options, list(group_by))
+        _sketch_states_panel(ctx, source, processor, field_options, state_key)
 
     time_def = dict(processor_def.get("time", {}))
     time_def.update(
@@ -3862,7 +3864,7 @@ def _reseed_state_rows_for_kind(
     processor_id: str,
     field_mapping: dict[str, str],
 ) -> None:
-    """Reset the Auto Outputs grid when the kind's default states change.
+    """Reset the Processor Sketches grid when the kind's default states change.
 
     Row edits that leave the kind settings untouched are preserved; changing
     the kind (or a setting that alters its default states, such as the
@@ -3930,24 +3932,17 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
         _render_metric_write_feedback(feedback)
 
     mode_options = _metric_mode_options(metric_names)
-    if st.session_state.get("builder_metric_mode") not in mode_options:
-        st.session_state.pop("builder_metric_mode", None)
     with st.container(border=True):
         st.write("### Metric Workflow")
         st.caption(
             "Create a metric from a reviewed recipe or from scratch, then use the same "
             "editor to inspect and maintain catalog metrics."
         )
-        mode = (
-            st.segmented_control(
-                "Metric action",
-                mode_options,
-                default=st.session_state.get("builder_metric_mode", mode_options[0]),
-                selection_mode="single",
-                key="builder_metric_mode",
-                help=config_help.field_help("metric.action"),
-            )
-            or mode_options[0]
+        mode = _mode_button_selector(
+            "builder_metric_mode",
+            mode_options,
+            default=mode_options[0],
+            help_key="metric.action",
         )
         creation_method = METRIC_CREATE_LIBRARY
         if mode == METRIC_ACTION_CREATE:

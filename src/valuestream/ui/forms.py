@@ -9,6 +9,7 @@ definition, or ``None`` when the form cannot produce a valid definition yet.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -148,7 +149,14 @@ SNAPSHOT_KIND_OPTIONS = ("periodic", "accumulating")
 SNAPSHOT_CADENCE_OPTIONS = ("", "daily", "weekly", "monthly")
 TOPK_ERROR_TYPE_OPTIONS = ("NO_FALSE_POSITIVES", "NO_FALSE_NEGATIVES")
 CONTINGENCY_TEST_OPTIONS = ("chi2", "g", "z")
-SET_OP_OPTIONS = ("intersection", "union", "a_not_b", "diff")
+# "diff" stays valid in the schema as an engine alias of "a_not_b", but the
+# picker offers only the canonical value and shows it as "Minus".
+SET_OP_OPTIONS = ("intersection", "union", "a_not_b")
+SET_OP_LABELS = {
+    "intersection": "Intersection — entities in every set (in A and B)",
+    "union": "Union — entities in any set (in A or B)",
+    "a_not_b": "Minus — entities in the first set only (A - B)",
+}
 FUNNEL_OUTPUT_OPTIONS = ("rate", "count")
 CURVE_OUTPUT_OPTIONS = ("roc_auc", "average_precision")
 LIFECYCLE_OUTPUT_OPTIONS = (
@@ -336,7 +344,7 @@ def _entity_set_fields(
         settings["entities"] = {"subject": subject}
     with entity_col:
         entity = select_or_text(
-            "Entity Column",
+            "Primary Entity Column",
             field_options,
             str(processor_def.get("entity", "") or "") or subject,
             key=f"{key_prefix}_entity_column",
@@ -1273,30 +1281,57 @@ def _lifecycle_fields(seed: dict[str, Any], key_prefix: str) -> dict[str, Any]:
     return {"outputs": outputs} if outputs else {}
 
 
-def _set_op_fields(
+_SET_OPERAND_MODES = ("Theta states", "Time windows")
+_SET_WINDOW_KINDS = ("All time", "Last", "Between")
+_SET_DURATION_PATTERN = re.compile(r"^([+-]?)(\d+)([dDwW])$")
+
+
+def _set_op_fields(  # noqa: PLR0911
     seed: dict[str, Any],
     ctx: MetricFormContext,
     key_prefix: str,
 ) -> dict[str, Any] | None:
     states = ctx.state_options({"theta"})
-    if len(states) < 2:
-        st.warning("Set operations require at least two theta states.")
+    if not states:
+        st.warning("Set operations require at least one theta state on the processor.")
         return None
     raw_operands = seed.get("operands")
-    operands = raw_operands if isinstance(raw_operands, list) else []
-    if any(isinstance(operand, dict) and operand.get("time_window") for operand in operands):
-        st.info(
-            "This metric uses time-window operands. The visual editor keeps those operands "
-            "read-only so their windows cannot be lost; use the YAML catalog for structural edits."
-        )
-        return {key: seed[key] for key in ("op", "operands", "states", "output") if key in seed}
+    seed_operands = (
+        [operand for operand in raw_operands if isinstance(operand, dict)]
+        if isinstance(raw_operands, list)
+        else []
+    )
+    windowed_seed = any(operand.get("time_window") for operand in seed_operands)
+    # "diff" is an engine alias of "a_not_b"; edit it as Minus and save canonically.
+    seed_op = "a_not_b" if seed.get("op") == "diff" else seed.get("op")
     op = st.selectbox(
         "Operation",
         list(SET_OP_OPTIONS),
-        index=builder.option_index(SET_OP_OPTIONS, seed.get("op")),
+        index=builder.option_index(SET_OP_OPTIONS, seed_op),
+        format_func=lambda value: SET_OP_LABELS.get(value, value),
         key=f"{key_prefix}_set_op",
         help=config_help.field_help("metric.set_operation"),
     )
+    default_mode = _SET_OPERAND_MODES[1] if windowed_seed else _SET_OPERAND_MODES[0]
+    mode = (
+        st.segmented_control(
+            "Operands",
+            list(_SET_OPERAND_MODES),
+            default=default_mode,
+            key=f"{key_prefix}_set_operand_mode",
+            help=config_help.field_help("metric.set_operand_mode"),
+        )
+        or default_mode
+    )
+    if mode == "Time windows":
+        return _windowed_set_op_fields(seed, seed_operands, states, op, key_prefix)
+    if len(states) < 2:
+        st.warning(
+            "State-vs-state operations need at least two theta states. With a "
+            "single state, use Time windows mode to combine periods of the "
+            "same state."
+        )
+        return None
     default_states = (
         builder.string_list(seed.get("states")) or builder.operand_states(seed) or states[:2]
     )
@@ -1308,14 +1343,155 @@ def _set_op_fields(
         help=config_help.field_help("metric.theta_states"),
     )
     if op in {"a_not_b", "diff"} and len(selected) != 2:
-        st.warning("Difference metrics require exactly two theta states.")
+        st.warning("Minus requires exactly two theta states: the first minus the second.")
         return None
     if not selected:
         st.warning("Choose at least one theta state.")
         return None
-    if operands and op == seed.get("op") and list(selected) == builder.operand_states(seed):
+    if seed_operands and op == seed.get("op") and list(selected) == builder.operand_states(seed):
         return {key: seed[key] for key in ("op", "operands", "states", "output") if key in seed}
     return {"op": op, "states": list(selected)}
+
+
+def _windowed_set_op_fields(
+    seed: dict[str, Any],
+    seed_operands: list[dict[str, Any]],
+    states: list[str],
+    op: str,
+    key_prefix: str,
+) -> dict[str, Any] | None:
+    """Editable operand rows for time-window set operations."""
+
+    if op in {"a_not_b", "diff"}:
+        count = 2
+        st.caption("Minus uses exactly two operands: the first minus the second.")
+    else:
+        count = int(
+            st.number_input(
+                "Operand Count",
+                min_value=2,
+                max_value=6,
+                value=min(max(len(seed_operands), 2), 6),
+                key=f"{key_prefix}_set_operand_count",
+                help=config_help.field_help("metric.set_operand_count"),
+            )
+        )
+    problems: list[str] = []
+    operands = [
+        _windowed_operand_row(
+            seed_operands[index] if index < len(seed_operands) else {},
+            states,
+            index,
+            key_prefix,
+            problems,
+        )
+        for index in range(count)
+    ]
+    st.caption("Windows are relative to the report's anchor (end) date.")
+    for problem in problems:
+        st.warning(problem)
+    if problems:
+        return None
+    return {
+        "op": op,
+        "operands": operands,
+        "output": str(seed.get("output", "count") or "count"),
+    }
+
+
+def _windowed_operand_row(
+    operand_seed: dict[str, Any],
+    states: list[str],
+    index: int,
+    key_prefix: str,
+    problems: list[str],
+) -> dict[str, Any]:
+    window_seed = operand_seed.get("time_window")
+    window_seed = window_seed if isinstance(window_seed, dict) else {}
+    if "last" in window_seed:
+        kind_default = "Last"
+    elif window_seed:
+        kind_default = "Between"
+    else:
+        kind_default = "All time"
+    number = index + 1
+    state_col, kind_col, from_col, to_col = st.columns(
+        [0.38, 0.22, 0.2, 0.2], vertical_alignment="bottom"
+    )
+    state = state_col.selectbox(
+        f"Operand {number} State",
+        states,
+        index=builder.option_index(states, operand_seed.get("state")),
+        key=f"{key_prefix}_set_operand_{index}_state",
+        help=config_help.field_help("metric.set_operand_state"),
+    )
+    kind = kind_col.selectbox(
+        f"Window {number}",
+        list(_SET_WINDOW_KINDS),
+        index=builder.option_index(_SET_WINDOW_KINDS, kind_default),
+        key=f"{key_prefix}_set_operand_{index}_window",
+        help=config_help.field_help("metric.set_window_kind"),
+    )
+    if kind == "Last":
+        last = (
+            from_col.text_input(
+                f"Last {number}",
+                value=str(window_seed.get("last", "") or ""),
+                key=f"{key_prefix}_set_operand_{index}_last",
+                placeholder="7d",
+                help=config_help.field_help("metric.set_window_last"),
+            )
+            or ""
+        ).strip()
+        if not _valid_set_duration(last, allow_negative=False):
+            problems.append(
+                f"Operand {number}: 'last' must be a positive duration such as 7d or 4w."
+            )
+        return {"state": state, "time_window": {"last": last}}
+    if kind == "Between":
+        between = window_seed.get("between")
+        if isinstance(between, list | tuple) and len(between) == 2:
+            from_default, to_default = str(between[0]), str(between[1])
+        else:
+            from_default, to_default = "", ""
+        window_from = (
+            from_col.text_input(
+                f"From {number}",
+                value=from_default,
+                key=f"{key_prefix}_set_operand_{index}_from",
+                placeholder="-30d",
+                help=config_help.field_help("metric.set_window_offset"),
+            )
+            or ""
+        ).strip()
+        window_to = (
+            to_col.text_input(
+                f"To {number}",
+                value=to_default,
+                key=f"{key_prefix}_set_operand_{index}_to",
+                placeholder="-1d",
+                help=config_help.field_help("metric.set_window_offset"),
+            )
+            or ""
+        ).strip()
+        for label, value in (("from", window_from), ("to", window_to)):
+            if not _valid_set_duration(value, allow_negative=True):
+                problems.append(
+                    f"Operand {number}: '{label}' must be an anchor-relative offset "
+                    "such as -30d, -1d, or 0d."
+                )
+        return {"state": state, "time_window": {"between": [window_from, window_to]}}
+    return {"state": state}
+
+
+def _valid_set_duration(value: str, *, allow_negative: bool) -> bool:
+    """Mirror the engine's set_op duration grammar: signed integer + d/w unit."""
+
+    match = _SET_DURATION_PATTERN.match(value)
+    if match is None:
+        return False
+    sign, amount, _unit = match.groups()
+    return allow_negative or (sign != "-" and int(amount) > 0)
 
 
 def _funnel_dropoff_fields(
@@ -1366,6 +1542,7 @@ __all__ = [
     "PROCESSOR_KIND_MANAGED_FIELDS",
     "PROCESSOR_KIND_OPTIONS",
     "QUANTILE_ENGINE_OPTIONS",
+    "SET_OP_LABELS",
     "SET_OP_OPTIONS",
     "SKETCH_BUILD_MODE_OPTIONS",
     "SNAPSHOT_CADENCE_OPTIONS",
