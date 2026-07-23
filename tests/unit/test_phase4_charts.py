@@ -338,7 +338,7 @@ def test_grouped_report_uses_the_app_dark_chart_palette_and_surface() -> None:
                 "y": "Interactions",
                 "color": "Channel",
             },
-            theme=ui_theme.dashboard_theme(),
+            theme=ui_theme.dashboard_theme({"base": "dark"}),
         )
     finally:
         pio.templates.default = previous_default

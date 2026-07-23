@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from functools import lru_cache
 
@@ -13,9 +12,7 @@ import streamlit as st
 _CHROME_TOKENS: dict[str, dict[str, str]] = {
     "light": {
         "cream": "#f7f9fc",
-        "sidebar": "#f2f5f9",
         "card": "#ffffff",
-        "raised": "#e7eef8",
         "ink": "#17202a",
         "muted": "#52606d",
         "border": "#d5dee8",
@@ -24,7 +21,6 @@ _CHROME_TOKENS: dict[str, dict[str, str]] = {
         "input-border": "#7c8ca0",
         "action": "#275dad",
         "action-hover": "#1e4a8f",
-        "accent": "#0072b2",
         "attention": "#b45309",
         "attention-soft": "#fff7ed",
         "verified": "#0f766e",
@@ -36,8 +32,6 @@ _CHROME_TOKENS: dict[str, dict[str, str]] = {
         "color-scheme": "light",
         "primary-fg": "#ffffff",
         "shadow": "rgba(23, 32, 42, 0.06)",
-        "surface-shadow": "rgba(23, 32, 42, 0.10)",
-        "glow": "rgba(0, 114, 178, 0.14)",
         "metric-delta-bg": "#e7f4f1",
     },
     "dark": {
@@ -161,45 +155,26 @@ def _resolved_theme_overrides(
     return base, merged
 
 
-def _active_theme_base(environ: Mapping[str, str] | None = None) -> str:
-    """Return the application theme selected for this server process.
+def _active_theme_base() -> str:
+    """Resolve the theme actually rendered in the user's browser session.
 
-    Streamlit uses its light rendering engine for startup compatibility, but
-    the application chrome and Plotly defaults use the same resolved token set.
-    The review branch remains dark by default; set ``VALUESTREAM_UI_THEME`` to
-    ``light`` when starting the server to review the true light application.
+    ``st.context.theme.type`` reflects the per-session theme (including the
+    browser's ``prefers-color-scheme`` resolution); the server-level
+    ``theme.base`` option is only a fallback outside a script run.
     """
 
-    values = os.environ if environ is None else environ
-    configured = str(values.get("VALUESTREAM_UI_THEME", "dark") or "dark")
-    normalized = configured.strip().casefold()
-    return normalized if normalized in {"light", "dark"} else "dark"
+    base: str | None
+    try:
+        base = st.context.theme.type
+    except Exception:  # pragma: no cover - bare-mode/test fallback
+        base = None
+    base = base or st.get_option("theme.base") or "light"
+    return "dark" if base == "dark" else "light"
 
 
-def apply_app_chrome_tuning() -> None:
-    """Apply the small CSS layer Streamlit theming cannot express.
-
-    ``st.context.theme`` resolves the per-session theme server-side, so only
-    the active theme's variables are emitted; a rerun re-emits them if the
-    browser theme changes.
-    """
-    active_css_vars = _css_variables(_CHROME_TOKENS[_active_theme_base()])
-    st.markdown(
-        """
-        <style>
-        :root {
-__VS_ACTIVE_CSS_VARS__
-        }
-
+_DARK_CHROME_OVERRIDES = """
         .stApp {
-            background: var(--vs-cream);
-            color: var(--vs-ink);
-            color-scheme: var(--vs-color-scheme);
             font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        }
-
-        div[data-testid="stAppViewContainer"] {
-            background: var(--vs-cream);
         }
 
         div[data-testid="stHeader"] {
@@ -212,9 +187,6 @@ __VS_ACTIVE_CSS_VARS__
             padding-left: clamp(0.75rem, 1.25vw, 1.5rem) !important;
             padding-right: clamp(0.75rem, 1.25vw, 1.5rem) !important;
             max-width: 108rem !important;
-            width: 100% !important;
-            margin-left: auto;
-            margin-right: auto;
         }
 
         div[data-testid="stMainBlockContainer"].block-container {
@@ -222,6 +194,230 @@ __VS_ACTIVE_CSS_VARS__
             padding-left: clamp(0.75rem, 1.25vw, 1.5rem) !important;
             padding-right: clamp(0.75rem, 1.25vw, 1.5rem) !important;
             max-width: 108rem !important;
+        }
+
+        .block-container h1,
+        .block-container h2 {
+            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 700;
+            letter-spacing: -0.035em;
+        }
+
+        .block-container h3,
+        .block-container h4,
+        .block-container h5 {
+            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            letter-spacing: -0.02em;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stSidebarContent"] {
+            background: var(--vs-sidebar);
+            padding-top: 2.25rem;
+            box-shadow: 0.7rem 0 2.2rem -1.8rem var(--vs-surface-shadow);
+        }
+
+        section[data-testid="stSidebar"] div[class*="st-key-vs_brand"] p {
+            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 750;
+            font-size: 1.45rem;
+            letter-spacing: -0.035em;
+        }
+
+        section[data-testid="stSidebar"] details,
+        section[data-testid="stSidebar"] details > summary,
+        section[data-testid="stSidebar"] div[data-testid="stExpanderDetails"] {
+            background: var(--vs-soft) !important;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stPageLink"] a {
+            border: 1px solid transparent;
+            border-radius: 0.7rem;
+            color: var(--vs-muted);
+            min-height: 2.4rem;
+            transition:
+                background-color 140ms ease,
+                border-color 140ms ease,
+                color 140ms ease;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stPageLink"] a:hover {
+            background: var(--vs-raised);
+            border-color: var(--vs-border);
+            color: var(--vs-ink);
+        }
+
+        section[data-testid="stSidebar"] div[class*="st-key-vs_nav_active_"] a {
+            background: var(--vs-raised) !important;
+            border-color: var(--vs-border) !important;
+            border-left: 0.22rem solid var(--vs-accent) !important;
+            box-shadow: 0 0.55rem 1.25rem -0.8rem var(--vs-glow);
+            color: var(--vs-ink) !important;
+            opacity: 1 !important;
+        }
+
+        section[data-testid="stSidebar"] div[class*="st-key-vs_nav_active_"] a p {
+            color: var(--vs-ink) !important;
+            font-weight: 700;
+        }
+
+        section[data-testid="stSidebar"] div[class*="st-key-vs_nav_active_"] a [data-testid="stIconMaterial"] {
+            color: var(--vs-accent) !important;
+            opacity: 1 !important;
+        }
+
+        div[data-testid="stTextInputRootElement"],
+        div[data-testid="stTextAreaRootElement"],
+        div[data-testid="stSelectbox"] [role="combobox"],
+        div[data-testid="stNumberInputContainer"],
+        div[data-testid="stDateInput"] > div {
+            background: var(--vs-soft) !important;
+            border-color: var(--vs-input-border) !important;
+            border-radius: 0.7rem !important;
+            box-shadow: none !important;
+        }
+
+        input,
+        textarea,
+        div[data-testid="stSelectbox"] [role="combobox"] {
+            color: var(--vs-ink) !important;
+            caret-color: var(--vs-accent);
+        }
+
+        input::placeholder,
+        textarea::placeholder {
+            color: var(--vs-muted) !important;
+            opacity: 0.86;
+        }
+
+        div[data-testid="stTextInputRootElement"]:focus-within,
+        div[data-testid="stTextAreaRootElement"]:focus-within,
+        div[data-testid="stSelectbox"]:focus-within [role="combobox"],
+        div[data-testid="stNumberInputContainer"]:focus-within {
+            border-color: var(--vs-accent) !important;
+            box-shadow: 0 0 0 0.15rem var(--vs-glow) !important;
+        }
+
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            border-radius: 1rem;
+            box-shadow: 0 0.85rem 2rem -1.35rem var(--vs-surface-shadow);
+        }
+
+        div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 650;
+        }
+
+        div[data-testid="stAlert"] {
+            background: var(--vs-soft);
+            border-color: var(--vs-border);
+            border-radius: 0.8rem;
+            color: var(--vs-ink);
+        }
+
+        div[data-testid="stAlert"] p {
+            color: var(--vs-ink) !important;
+        }
+
+        div[data-testid="stTabs"] [role="tablist"] {
+            background: var(--vs-soft);
+            border: 1px solid var(--vs-border);
+            border-radius: 0.75rem;
+            padding: 0.2rem;
+        }
+
+        div[data-testid="stTabs"] [role="tab"] {
+            border-radius: 0.55rem;
+            color: var(--vs-muted);
+        }
+
+        div[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+            background: var(--vs-raised);
+            color: var(--vs-ink);
+        }
+
+        div[data-testid="stPopoverBody"],
+        div[data-testid="stDialog"],
+        div[role="dialog"] {
+            background: var(--vs-card) !important;
+            border-color: var(--vs-border) !important;
+            color: var(--vs-ink) !important;
+        }
+
+        button[kind="secondary"] {
+            background: var(--vs-soft) !important;
+        }
+
+        button[kind="primary"]:not(:disabled) {
+            background-color: var(--vs-action) !important;
+            border-color: var(--vs-action) !important;
+            box-shadow: 0 0.5rem 1.25rem -0.65rem var(--vs-glow);
+        }
+
+        button[kind="primary"]:hover:not(:disabled),
+        button[kind="primary"]:active:not(:disabled) {
+            box-shadow: 0 0.65rem 1.5rem -0.65rem var(--vs-glow);
+        }
+
+        button[kind="secondary"]:hover:not(:disabled) {
+            background: var(--vs-raised) !important;
+            border-color: var(--vs-accent) !important;
+        }
+
+        button {
+            border-radius: 0.65rem !important;
+            font-weight: 600 !important;
+            transition:
+                background-color 140ms ease,
+                border-color 140ms ease,
+                box-shadow 140ms ease;
+        }
+"""
+
+
+def apply_app_chrome_tuning() -> None:
+    """Apply the small CSS layer Streamlit theming cannot express.
+
+    ``st.context.theme`` resolves the per-session theme server-side, so only
+    the active theme's variables are emitted; a rerun re-emits them if the
+    browser theme changes.
+    """
+    active_base = _active_theme_base()
+    active_css_vars = _css_variables(_CHROME_TOKENS[active_base])
+    dark_chrome_overrides = _DARK_CHROME_OVERRIDES if active_base == "dark" else ""
+    st.markdown(
+        """
+        <style>
+        :root {
+__VS_ACTIVE_CSS_VARS__
+        }
+
+        .stApp {
+            background: var(--vs-cream);
+            color: var(--vs-ink);
+            color-scheme: var(--vs-color-scheme);
+        }
+
+        div[data-testid="stAppViewContainer"],
+        div[data-testid="stHeader"] {
+            background: var(--vs-cream);
+        }
+
+        .block-container {
+            padding-top: 0.75rem;
+            padding-bottom: 2.5rem;
+            padding-left: clamp(0.5rem, 0.8vw, 1rem) !important;
+            padding-right: clamp(0.5rem, 0.8vw, 1rem) !important;
+            max-width: 100rem !important;
+            width: 100% !important;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        div[data-testid="stMainBlockContainer"].block-container {
+            padding-top: 0.75rem !important;
+            padding-left: clamp(0.5rem, 0.8vw, 1rem) !important;
+            padding-right: clamp(0.5rem, 0.8vw, 1rem) !important;
+            max-width: 100rem !important;
             width: 100% !important;
             margin-left: auto !important;
             margin-right: auto !important;
@@ -230,9 +426,9 @@ __VS_ACTIVE_CSS_VARS__
         .block-container h1,
         .block-container h2 {
             color: var(--vs-ink);
-            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            font-weight: 700;
-            letter-spacing: -0.035em;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 650;
+            letter-spacing: -0.025em;
             padding-top: 0;
         }
 
@@ -255,9 +451,9 @@ __VS_ACTIVE_CSS_VARS__
         .block-container h4,
         .block-container h5 {
             color: var(--vs-ink);
-            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             font-weight: 650;
-            letter-spacing: -0.02em;
+            letter-spacing: -0.01em;
         }
 
         .block-container p,
@@ -311,10 +507,9 @@ __VS_ACTIVE_CSS_VARS__
         }
 
         section[data-testid="stSidebar"] div[data-testid="stSidebarContent"] {
-            background: var(--vs-sidebar);
-            padding-top: 2.25rem;
+            background: var(--vs-cream);
+            padding-top: 2rem;
             border-right: 1px solid var(--vs-border);
-            box-shadow: 0.7rem 0 2.2rem -1.8rem var(--vs-surface-shadow);
         }
 
         section[data-testid="stSidebar"] div[data-testid="stSidebarHeader"] {
@@ -328,10 +523,10 @@ __VS_ACTIVE_CSS_VARS__
 
         section[data-testid="stSidebar"] div[class*="st-key-vs_brand"] p {
             color: var(--vs-ink);
-            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            font-weight: 750;
-            font-size: 1.45rem;
-            letter-spacing: -0.035em;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 700;
+            font-size: 1.4rem;
+            letter-spacing: -0.025em;
             line-height: 1.15;
             margin-bottom: 0.2rem;
         }
@@ -339,7 +534,7 @@ __VS_ACTIVE_CSS_VARS__
         section[data-testid="stSidebar"] details,
         section[data-testid="stSidebar"] details > summary,
         section[data-testid="stSidebar"] div[data-testid="stExpanderDetails"] {
-            background: var(--vs-soft) !important;
+            background: var(--vs-card) !important;
             border-color: var(--vs-border) !important;
             color: var(--vs-ink) !important;
         }
@@ -349,80 +544,11 @@ __VS_ACTIVE_CSS_VARS__
             color: var(--vs-muted) !important;
         }
 
-        section[data-testid="stSidebar"] div[data-testid="stPageLink"] a {
-            border: 1px solid transparent;
-            border-radius: 0.7rem;
-            color: var(--vs-muted);
-            min-height: 2.4rem;
-            transition:
-                background-color 140ms ease,
-                border-color 140ms ease,
-                color 140ms ease;
-        }
-
-        section[data-testid="stSidebar"] div[data-testid="stPageLink"] a:hover {
-            background: var(--vs-raised);
-            border-color: var(--vs-border);
-            color: var(--vs-ink);
-        }
-
-        /* The keyed active-page container carries the cyan signal rail. */
-        section[data-testid="stSidebar"] div[class*="st-key-vs_nav_active_"] a {
-            background: var(--vs-raised) !important;
-            border-color: var(--vs-border) !important;
-            border-left: 0.22rem solid var(--vs-accent) !important;
-            box-shadow: 0 0.55rem 1.25rem -0.8rem var(--vs-glow);
-            color: var(--vs-ink) !important;
-            opacity: 1 !important;
-        }
-
-        section[data-testid="stSidebar"] div[class*="st-key-vs_nav_active_"] a p {
-            color: var(--vs-ink) !important;
-            font-weight: 700;
-        }
-
-        section[data-testid="stSidebar"] div[class*="st-key-vs_nav_active_"] a [data-testid="stIconMaterial"] {
-            color: var(--vs-accent) !important;
-            opacity: 1 !important;
-        }
-
-        div[data-testid="stTextInputRootElement"],
-        div[data-testid="stTextAreaRootElement"],
-        div[data-testid="stSelectbox"] [role="combobox"],
-        div[data-testid="stNumberInputContainer"],
-        div[data-testid="stDateInput"] > div {
-            background: var(--vs-soft) !important;
-            border-color: var(--vs-input-border) !important;
-            border-radius: 0.7rem !important;
-            box-shadow: none !important;
-        }
-
-        input,
-        textarea,
-        div[data-testid="stSelectbox"] [role="combobox"] {
-            color: var(--vs-ink) !important;
-            caret-color: var(--vs-accent);
-        }
-
-        input::placeholder,
-        textarea::placeholder {
-            color: var(--vs-muted) !important;
-            opacity: 0.86;
-        }
-
-        div[data-testid="stTextInputRootElement"]:focus-within,
-        div[data-testid="stTextAreaRootElement"]:focus-within,
-        div[data-testid="stSelectbox"]:focus-within [role="combobox"],
-        div[data-testid="stNumberInputContainer"]:focus-within {
-            border-color: var(--vs-accent) !important;
-            box-shadow: 0 0 0 0.15rem var(--vs-glow) !important;
-        }
-
         div[data-testid="stVerticalBlockBorderWrapper"] {
             background: var(--vs-card);
             border-color: var(--vs-border);
-            border-radius: 1rem;
-            box-shadow: 0 0.85rem 2rem -1.35rem var(--vs-surface-shadow);
+            border-radius: 0.75rem;
+            box-shadow: 0 1px 2px var(--vs-shadow);
         }
 
         div[data-testid="stMetric"] label p {
@@ -431,8 +557,8 @@ __VS_ACTIVE_CSS_VARS__
 
         div[data-testid="stMetric"] [data-testid="stMetricValue"] {
             color: var(--vs-ink);
-            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            font-weight: 650;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 600;
         }
 
         div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
@@ -444,73 +570,16 @@ __VS_ACTIVE_CSS_VARS__
             width: fit-content;
         }
 
-        div[data-testid="stAlert"] {
-            background: var(--vs-soft);
-            border-color: var(--vs-border);
-            border-radius: 0.8rem;
-            color: var(--vs-ink);
-        }
-
-        div[data-testid="stAlert"] p {
-            color: var(--vs-ink) !important;
-        }
-
-        div[data-testid="stTabs"] [role="tablist"] {
-            background: var(--vs-soft);
-            border: 1px solid var(--vs-border);
-            border-radius: 0.75rem;
-            padding: 0.2rem;
-        }
-
-        div[data-testid="stTabs"] [role="tab"] {
-            border-radius: 0.55rem;
-            color: var(--vs-muted);
-        }
-
-        div[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-            background: var(--vs-raised);
-            color: var(--vs-ink);
-        }
-
-        div[data-testid="stPopoverBody"],
-        div[data-testid="stDialog"],
-        div[role="dialog"] {
+        button[kind="secondary"] {
             background: var(--vs-card) !important;
             border-color: var(--vs-border) !important;
             color: var(--vs-ink) !important;
-        }
-
-        button[kind="secondary"] {
-            background: var(--vs-soft) !important;
-            border-color: var(--vs-border) !important;
-            color: var(--vs-ink) !important;
-        }
-
-        button[kind="primary"]:not(:disabled) {
-            background-color: var(--vs-action) !important;
-            border-color: var(--vs-action) !important;
-            box-shadow: 0 0.5rem 1.25rem -0.65rem var(--vs-glow);
         }
 
         button[kind="primary"]:hover:not(:disabled),
         button[kind="primary"]:active:not(:disabled) {
             background-color: var(--vs-action-hover) !important;
             border-color: var(--vs-action-hover) !important;
-            box-shadow: 0 0.65rem 1.5rem -0.65rem var(--vs-glow);
-        }
-
-        button[kind="secondary"]:hover:not(:disabled) {
-            background: var(--vs-raised) !important;
-            border-color: var(--vs-accent) !important;
-        }
-
-        button {
-            border-radius: 0.65rem !important;
-            font-weight: 600 !important;
-            transition:
-                background-color 140ms ease,
-                border-color 140ms ease,
-                box-shadow 140ms ease;
         }
 
         /*
@@ -747,6 +816,8 @@ __VS_ACTIVE_CSS_VARS__
             background: var(--vs-soft) !important;
         }
 
+__VS_DARK_CHROME_OVERRIDES__
+
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: 0.01ms !important;
@@ -756,7 +827,9 @@ __VS_ACTIVE_CSS_VARS__
             }
         }
         </style>
-        """.replace("__VS_ACTIVE_CSS_VARS__", active_css_vars),
+        """.replace("__VS_ACTIVE_CSS_VARS__", active_css_vars).replace(
+            "__VS_DARK_CHROME_OVERRIDES__", dark_chrome_overrides
+        ),
         unsafe_allow_html=True,
     )
 
@@ -779,14 +852,15 @@ def init_plotly_theme() -> None:
         source_name = "plotly_dark" if base == "dark" else "plotly_white"
         grid_color = tokens["border"] if base == "dark" else tokens["soft"]
         chart_background = tokens["card"]
+        font_family = (
+            "Avenir Next, Avenir, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            if base == "dark"
+            else "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+        )
         template = go.layout.Template(pio.templates[source_name])
         template.layout.update(
             colorway=colorway,
-            font={
-                "family": (
-                    "Avenir Next, Avenir, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-                )
-            },
+            font={"family": font_family},
             margin={"l": 40, "r": 18, "t": 18, "b": 76},
             hovermode="x unified",
             hoverlabel=_hoverlabel(tokens),

@@ -250,11 +250,76 @@ def test_dark_theme_uses_accessible_surface_ladder() -> None:
 
 
 @pytest.mark.unit
-def test_review_theme_defaults_dark_and_accepts_runtime_override() -> None:
-    assert theme._active_theme_base({}) == "dark"
-    assert theme._active_theme_base({"VALUESTREAM_UI_THEME": " Light "}) == "light"
-    assert theme._active_theme_base({"VALUESTREAM_UI_THEME": "dark"}) == "dark"
-    assert theme._active_theme_base({"VALUESTREAM_UI_THEME": "unknown"}) == "dark"
+def test_light_theme_retains_pre_dark_settings() -> None:
+    config = tomllib.loads((UI_ROOT / ".streamlit" / "config.toml").read_text())
+    light_theme = config["theme"]
+    light_override = light_theme["light"]
+    light_sidebar = light_override["sidebar"]
+
+    expected_root = {
+        "base": "light",
+        "primaryColor": "#275DAD",
+        "backgroundColor": "#F7F9FC",
+        "secondaryBackgroundColor": "#EEF3F8",
+        "textColor": "#17202A",
+        "linkColor": "#275DAD",
+        "codeBackgroundColor": "#EEF3F8",
+        "codeTextColor": "#17202A",
+        "font": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+        "headingFont": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+        "baseRadius": "0.625rem",
+        "buttonRadius": "0.5rem",
+        "borderColor": "#7C8CA0",
+        "dataframeBorderColor": "#7C8CA0",
+        "dataframeHeaderBackgroundColor": "#EEF3F8",
+        "blueColor": "#275DAD",
+        "violetColor": "#7C65A9",
+        "greenColor": "#0F766E",
+        "orangeColor": "#C77920",
+        "redColor": "#B84B45",
+        "grayColor": "#52606D",
+    }
+    assert all(light_theme[key] == value for key, value in expected_root.items())
+    assert light_override["backgroundColor"] == "#F7F9FC"
+    assert light_override["secondaryBackgroundColor"] == "#EEF3F8"
+    assert light_override["textColor"] == "#17202A"
+    assert light_sidebar == {
+        "primaryColor": "#275DAD",
+        "backgroundColor": "#F7F9FC",
+        "secondaryBackgroundColor": "#EEF3F8",
+        "textColor": "#17202A",
+    }
+
+
+@pytest.mark.unit
+def test_dark_chrome_overrides_are_not_emitted_in_light_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered: list[str] = []
+    monkeypatch.setattr(theme, "_active_theme_base", lambda: "light")
+    monkeypatch.setattr(
+        theme.st,
+        "markdown",
+        lambda body, **_kwargs: rendered.append(body),
+    )
+
+    theme.apply_app_chrome_tuning()
+
+    assert len(rendered) == 1
+    light_css = rendered[0]
+    assert "padding-left: clamp(0.5rem, 0.8vw, 1rem) !important" in light_css
+    assert "padding-left: clamp(0.75rem, 1.25vw, 1.5rem) !important" not in light_css
+    assert "Avenir Next" not in light_css
+    assert "st-key-vs_nav_active_" not in light_css
+
+    rendered.clear()
+    monkeypatch.setattr(theme, "_active_theme_base", lambda: "dark")
+    theme.apply_app_chrome_tuning()
+
+    dark_css = rendered[0]
+    assert "padding-left: clamp(0.75rem, 1.25vw, 1.5rem) !important" in dark_css
+    assert "Avenir Next" in dark_css
+    assert "st-key-vs_nav_active_" in dark_css
 
 
 @pytest.mark.unit
@@ -288,8 +353,10 @@ def test_plotly_template_uses_distinct_report_colorways() -> None:
     ]
     assert light_paper_bgcolor == "#ffffff"
     assert light_plot_bgcolor == "#ffffff"
+    assert light_layout.font.family == ("-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif")
     assert dark_paper_bgcolor == "#162438"
     assert dark_plot_bgcolor == "#162438"
+    assert str(dark_layout.font.family).startswith("Avenir Next")
 
 
 @pytest.mark.unit
@@ -375,7 +442,8 @@ def test_authoring_theme_has_visible_focus_and_reduced_motion() -> None:
     assert "@media (prefers-reduced-motion: reduce)" in theme_source
     assert "Playfair" not in theme_source + config_source
     assert "DM Sans" not in theme_source + config_source
-    assert 'buttonRadius = "0.625rem"' in config_source
+    assert 'buttonRadius = "0.5rem"' in config_source
+    assert "border-radius: 0.65rem !important" in theme_source
 
 
 @pytest.mark.unit

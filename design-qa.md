@@ -101,4 +101,19 @@ typography, radii, and action emphasis rather than coordinate matching.
 - At 1280 px, `scrollWidth` equals `clientWidth`; the fourth report-library
   filter does not introduce horizontal overflow.
 
+## Light application restoration
+
+- Restored light Configuration Builder:
+  `artifacts/ui-audit/chart-theme/14-restored-light-application.jpg`
+- The global, `[theme.light]`, and `[theme.light.sidebar]` Streamlit settings
+  match the pre-dark-theme commit. Only `[theme.dark]` and
+  `[theme.dark.sidebar]` retain the redesigned instrument palette.
+- Dark-only typography, spacing, navigation, field, card, and button
+  refinements are emitted only when the resolved browser theme is dark.
+- Rendered light mode uses the original system font, 100 rem content width,
+  original compact padding, white secondary buttons, light sidebar, and no
+  dark cyan navigation rail.
+- Regression tests render both CSS branches and verify that dark selectors and
+  Avenir typography are absent from the light stylesheet.
+
 Final result: passed
