@@ -2503,6 +2503,10 @@ continue it, or choose <strong>Discard draft</strong> to restore the persisted d
 result. If either the write or validation fails, every affected catalog file is
 restored to its exact prior contents. Applying configuration never ingests
 source data and never materializes aggregates.</p>
+<p>Create drafts use the same recovery contract as maintenance drafts. For
+example, a recovered <strong>Create Metric</strong> draft is offered before the source and
+metric-kind selectors can replace its identity. When Apply is unavailable, the
+editor states the exact missing or invalid input beside the disabled action.</p>
 <p>After a successful Apply, the Builder recommends one explicit next action:</p>
 <ul>
 <li><strong>Run data</strong> for source, processor, dimension, workspace-setting, or recipe
@@ -2618,14 +2622,25 @@ with that kind's definition; text you typed yourself is never overwritten. A
 short guide under Group By explains what the kind is for and lists example
 KPIs (for <code>entity_set</code>: unique counts, audience overlap, Top-N frequent
 values).</p>
-<p><strong>Auto Outputs</strong> always mirrors the selected kind's engine-default states —
-switching kind while creating replaces the grid (binary outcome: counts plus
-a unique-subject sketch; entity set: CPC and theta sketches over the entity
-column; derived kinds show their computed states). Add further sketch states
-(Top-K, CPC, theta, digests) as rows when the kind supports them.</p>
+<p><strong>Auto Outputs</strong> starts from the selected kind's engine-default states (binary
+outcome: counts plus a unique-subject sketch; entity set: CPC and theta sketches
+over the entity column; derived kinds show their computed states). Switching
+kind reseeds those defaults while preserving rows whose state, type, source
+column, or <strong>Enabled</strong> value you changed. In particular, disabling a default
+row remains an intentional edit. Add further sketch states (Top-K, CPC, theta,
+digests) as rows when the kind supports them.</p>
 <p>Kind-specific settings cover every engine-read property: <code>entity_set</code> exposes
 the sketched <strong>Entity Column</strong>, and <code>entity_lifecycle</code> exposes its customer,
 order, monetary, and purchase-date key columns.</p>
+<p><strong>Dedup Keys</strong> is available only for <code>binary_outcome</code> and
+<code>score_distribution</code>, the processor kinds that consume <code>dedup_keys</code> at runtime.
+Rows with the same configured values are counted once within each load chunk;
+leaving the control empty aggregates every row. Other processor kinds do not
+persist a no-op dedup setting.</p>
+<p>Renaming an existing processor is one transactional catalog change. It replaces
+the old processor ID, retargets metrics whose <code>source</code> referenced that ID, and
+moves the matching Chat With Data description in <code>ai.yaml</code> before validating
+the resulting workspace.</p>
 <h2 id="metrics">Metrics<a class="headerlink" href="#metrics" title="Permanent link">&para;</a></h2>
 <p>Choose <strong>Create Metric</strong>, then <strong>From Recipe Library</strong> for a reviewed business
 definition or <strong>From Scratch</strong> for the direct editor. The recipe path asks you
@@ -2644,7 +2659,9 @@ same draft. The dashboard title and layout (<code>tabs</code>, <code>grid</code>
 page title are editable in the same flow. Before Apply is enabled, the proposed
 dashboard, page settings, and tile are validated as a complete catalog. Visual
 mode round-trips settings outside its controls unchanged; Raw YAML remains the
-escape hatch for editing them directly.</p>
+escape hatch for editing them directly. A new Raw YAML draft starts from the
+same valid report scaffold as Visual mode, and its session-local text survives
+reruns caused by presentation and page-settings controls.</p>
 <p>The collapsed <strong>Report inventory</strong> is searchable and uses dashboard, page,
 tile, metric, and chart labels designed for recognition. Enable technical IDs
 only when exact catalog identity is needed. The visual report library groups
@@ -2678,9 +2695,13 @@ kinds without matching tiles, since searching targets existing reports.</p>
 </ul>
 <p>Each confirmed deletion updates the affected catalog files and related
 <code>ai.yaml</code> descriptions in one rollback boundary, then validates the resulting
-workspace. Dashboard and page containers are retained. Aggregate Parquet files
-and run history are not deleted by catalog CRUD; use the separate
-<code>valuestream vacuum</code> lifecycle when persisted files are eligible for removal.</p>
+workspace. Source, processor, metric, and tile cascades retain dashboard and
+page containers. To remove a container, open <strong>Report inventory → Manage
+dashboards</strong> and confirm the exact page or dashboard target separately. A page
+confirmation cannot authorize another page or the whole dashboard; deleting
+the last page also removes its dashboard. Aggregate Parquet files and run
+history are not deleted by catalog CRUD; use the separate <code>valuestream vacuum</code>
+lifecycle when persisted files are eligible for removal.</p>
 <h2 id="exporting">Exporting<a class="headerlink" href="#exporting" title="Permanent link">&para;</a></h2>
 <p><strong>Export current workspace</strong> begins with the outcome handoff. Download buttons
 for sources, processors, metrics, and dashboards come before collapsed YAML

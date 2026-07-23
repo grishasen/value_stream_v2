@@ -2608,11 +2608,17 @@ even when it remains inside the two-second safety ceiling.</p>
 An unknown column name cannot be typed into a source-field mapping. Defaults,
 filters, and calculated-field editors start empty; rows appear only after an
 explicit add action.</p>
-<p>The <strong>Suggested Group-By Fields</strong> profile treats approved <code>Day</code>, <code>Month</code>,
+<p>The <strong>Suggested Group-By Fields</strong> profile treats source-provided <code>Day</code>, <code>Month</code>,
 <code>Quarter</code>, and <code>Year</code> fields as explicit recommended calendar granularities,
-even when those fields are required source mappings. The initial selection
-reserves room for every available calendar granularity, then fills its remaining
-capacity with recommended low-cardinality business dimensions.</p>
+even when those fields are required source mappings. When the draft will derive
+those fields from <code>OutcomeTime</code>, they are grain outputs rather than business
+dimensions and are removed before the five-field recommendation limit is
+applied. They therefore cannot consume slots that should hold recommended
+low-cardinality business dimensions.</p>
+<p>When both <code>DecisionTime</code> and <code>OutcomeTime</code> are available, the deterministic
+draft adds a <code>ResponseTime</code> calculation in seconds only if neither the effective
+sample schema nor an enabled user calculation already defines that output. A
+user-authored <code>ResponseTime</code> expression always wins.</p>
 <h2 id="describe-the-outcome">Describe the outcome<a class="headerlink" href="#describe-the-outcome" title="Permanent link">&para;</a></h2>
 <p>The Sample and Draft steps include <strong>Business Requirements</strong>. Describe the
 decision or measure in plain language, such as “weekly conversion by channel
@@ -2685,6 +2691,10 @@ shows the affected catalog areas and bounded validation findings, and includes
 a diagnostic reference that operators can correlate with application logs.
 The current accepted revision is presented separately so a failed proposal is
 never styled as a newly accepted success.</p>
+<p>For sample-backed drafts, repair guidance leads with effective-schema field
+contract failures before secondary catalog or report failures. Correcting a
+stale pre-rename field at its processor or transform source can resolve several
+downstream report findings in the same repair.</p>
 <p>Debug logs contain only the diagnostic reference, operation, attempt number,
 response size, parsed section names, parse exception class and location, and
 aggregate issue counts by catalog area. Prompts, raw model responses,

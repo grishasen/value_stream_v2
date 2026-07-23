@@ -3071,6 +3071,12 @@ while writing it; before the chunk marker, the ledger confirms the file still
 exists with the recorded size. The normal ingestion path does not reopen the
 new file merely to recover metadata it already knows. Recovery still
 deep-scans embedded provenance before publishing an interrupted run.</p>
+<p>Data Load dispatches source, workspace, and clean-rebuild actions to daemon
+threads in the Streamlit server process. A locked, process-local registry keyed
+by resolved workspace and run scope supplies poll-friendly progress across
+browser reloads and websocket reconnects. It is not a durable job queue:
+restarting the server ends those threads, after which the normal ingestion
+ledger recovery verifies and adopts completed chunk work.</p>
 <h3 id="configuration-authoring-surfaces">Configuration authoring surfaces<a class="headerlink" href="#configuration-authoring-surfaces" title="Permanent link">&para;</a></h3>
 <p>Value Stream exposes a top-level <strong>Build</strong> choice over two Streamlit authoring
 paths backed by the same YAML catalog. <strong>Start from a sample</strong> enters AI

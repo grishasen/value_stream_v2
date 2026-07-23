@@ -3261,8 +3261,10 @@ Bars can also be sorted and capped:</p>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="39-boxplot">3.9 <code>boxplot</code><a class="headerlink" href="#39-boxplot" title="Permanent link">&para;</a></h3>
-<p>Required: <code>x</code> and a <code>tdigest_quantile</code> metric. Optional: <code>color, facet_row,
-facet_col</code>.</p>
+<p>Required: a <code>tdigest_quantile</code> metric. Optional: <code>x, color, facet_row,
+facet_col</code>. Without <code>x</code>, the renderer produces one overall distribution box;
+set <code>x</code> to compare the distribution across time or another persisted
+dimension.</p>
 <p>Boxplots are reconstructed from <code>&lt;prop&gt;_p25, &lt;prop&gt;_Median, &lt;prop&gt;_p75, &lt;prop&gt;_Min, &lt;prop&gt;_Max</code> (or t-digest quantiles) — the metric output already exposes those.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">()</span>
 <span class="k">for</span> <span class="n">group</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">partition_by</span><span class="p">(</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;color&quot;</span><span class="p">),</span> <span class="n">as_dict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
@@ -3617,7 +3619,7 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <tr>
 <td><code>boxplot</code></td>
 <td>numeric_distribution</td>
-<td>first time-grain dim</td>
+<td>optional first time-grain dim</td>
 <td>property</td>
 </tr>
 <tr>
@@ -3700,31 +3702,45 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <p>A workspace-level theme block in <code>dashboards.yaml</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">theme</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">template</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;valuestream&quot;</span><span class="w">           </span><span class="c1"># app-matching default; any Plotly template name</span>
-<span class="w">  </span><span class="nt">paper_bgcolor</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#f5f3ee&quot;</span><span class="w">          </span><span class="c1"># defaults to the app background</span>
-<span class="w">  </span><span class="nt">plot_bgcolor</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#f5f3ee&quot;</span><span class="w">           </span><span class="c1"># defaults to the app background</span>
-<span class="w">  </span><span class="nt">font</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> family</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Inter&quot;</span><span class="p p-Indicator">,</span><span class="nt"> size</span><span class="p">:</span><span class="w"> </span><span class="nv">14</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">paper_bgcolor</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#162438&quot;</span><span class="w">           </span><span class="c1"># defaults to the app chart-card surface</span>
+<span class="w">  </span><span class="nt">plot_bgcolor</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#162438&quot;</span><span class="w">            </span><span class="c1"># defaults to the app chart-card surface</span>
+<span class="w">  </span><span class="nt">font</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> family</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Avenir</span><span class="nv"> </span><span class="s">Next&quot;</span><span class="p p-Indicator">,</span><span class="nt"> size</span><span class="p">:</span><span class="w"> </span><span class="nv">14</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <span class="w">  </span><span class="nt">margins</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> l</span><span class="p">:</span><span class="w"> </span><span class="nv">32</span><span class="p p-Indicator">,</span><span class="nt"> r</span><span class="p">:</span><span class="w"> </span><span class="nv">16</span><span class="p p-Indicator">,</span><span class="nt"> t</span><span class="p">:</span><span class="w"> </span><span class="nv">48</span><span class="p p-Indicator">,</span><span class="nt"> b</span><span class="p">:</span><span class="w"> </span><span class="nv">32</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <span class="w">  </span><span class="nt">legend</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> orientation</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;h&quot;</span><span class="p p-Indicator">,</span><span class="nt"> y</span><span class="p">:</span><span class="w"> </span><span class="nv">-0.2</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">colorway</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;#4B73F0&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;#22C7F3&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;#45D6A5&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;#F2C14E&quot;</span><span class="p p-Indicator">]</span>
 <span class="w">  </span><span class="nt">color_continuous_scale</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Viridis&quot;</span>
 <span class="w">  </span><span class="nt">qualitative_palette</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Set2&quot;</span>
-<span class="w">  </span><span class="nt">category_colors</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">Channel</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">Web</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#2563EB&quot;</span>
-<span class="w">      </span><span class="nt">Mobile</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#14B8A6&quot;</span>
+<span class="w">  </span><span class="nt">category_colors_dark</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">Channel</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> Web</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#4B73F0&quot;</span><span class="p p-Indicator">,</span><span class="nt"> Mobile</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#22C7F3&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">category_colors_light</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">Channel</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> Web</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#0072B2&quot;</span><span class="p p-Indicator">,</span><span class="nt"> Mobile</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#009E73&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p>The application initializes a built-in <code>valuestream</code> Plotly template before
-dashboard rendering. Its <code>paper_bgcolor</code> and <code>plot_bgcolor</code> match the app
-background token (<code>#f5f3ee</code> in light mode, <code>#020203</code> in dark mode) so Plotly
-figures blend into the Streamlit shell instead of rendering white panels. The
-default dashboard theme also passes those colors explicitly, so a workspace or
-tile that overrides only <code>template</code> still keeps the app-matched background.</p>
+dashboard rendering. Its qualitative sequence starts with the app's royal blue,
+cyan, verified green, attention amber, danger coral, and violet tokens. Its
+<code>paper_bgcolor</code> and <code>plot_bgcolor</code> match the chart-card surface (<code>#ffffff</code> in
+light mode and <code>#162438</code> in dark mode), so Plotly figures blend into the
+Streamlit report cards instead of rendering a separate panel. The Configuration
+Builder's chart library uses the same sequence and foreground tokens. The
+default dashboard theme passes these values explicitly, so a workspace or tile
+that overrides only <code>template</code> still keeps the app-matched presentation.
+<code>category_colors_dark</code> and <code>category_colors_light</code> keep important business
+categories stable within each theme without putting low-contrast dark-theme
+accents onto the white chart surface. The legacy theme-neutral
+<code>category_colors</code> mapping remains supported as a fallback.</p>
 <p>The chart factory applies the theme via <code>fig.update_layout(template=...)</code> etc. Per-tile overrides are allowed:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">tiles</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hot_metric</span>
 <span class="w">    </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">line</span>
 <span class="w">    </span><span class="nt">theme</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">template</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;plotly_dark&quot;</span>
+<span class="w">      </span><span class="nt">base</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">light</span>
+<span class="w">      </span><span class="nt">template</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;valuestream_light&quot;</span>
 </code></pre></div>
+<p>In Configuration Builder Visual mode, <strong>Chart Theme</strong> offers <strong>Follow
+application</strong>, <strong>Light Plotly</strong>, <strong>Dark Plotly</strong>, and <strong>Custom YAML</strong>. Selecting
+Light or Dark stores the corresponding <code>base</code> and <code>valuestream_*</code> template on
+the tile. The Report library's <strong>Preview theme</strong> control switches the chart
+gallery without changing saved configuration.</p>
 <h2 id="6-presentation-settings">6. Presentation settings<a class="headerlink" href="#6-presentation-settings" title="Permanent link">&para;</a></h2>
 <p>Presentation settings are optional Tile fields. They are intentionally limited
 to common BI refinements so report authors can improve clarity without adding
