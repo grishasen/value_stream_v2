@@ -924,7 +924,7 @@ def _kpi_strip(
 ) -> None:
     kpi_tiles = [
         tile for tile in page.tiles if tile.chart == "kpi_card" and tile.placement == "kpi_strip"
-    ][:5]
+    ]
     if not kpi_tiles:
         return
     items: list[components.MetricItem] = []
@@ -986,7 +986,7 @@ def _kpi_strip(
                 tile.metric,
             )
             items.append(components.MetricItem(tile.title, "n/a"))
-    components.metric_strip(items, key=f"reports_{page.id}")
+    components.metric_strip(items, columns=min(len(items), 5) or None, key=f"reports_{page.id}")
 
 
 @dataclass(frozen=True)

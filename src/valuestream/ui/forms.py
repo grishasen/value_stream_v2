@@ -233,17 +233,23 @@ def select_or_text(
 
     def _label(value: str) -> str:
         if not value:
-            return "Select..."
+            return "None"
         return format_option(value) if format_option else value
 
-    return st.selectbox(
+    # No initial selection renders the placeholder with an empty search input,
+    # so typing filters options instead of appending to a selected sentinel
+    # label. The explicit "None" row keeps the field clearable afterwards.
+    index = builder.option_index(choices, current_text) if current_text in choices[1:] else None
+    selected = st.selectbox(
         label,
         choices,
-        index=builder.option_index(choices, current_text),
+        index=index,
+        placeholder="Select...",
         format_func=_label,
         key=key,
         help=config_help.field_help(help_key),
     )
+    return str(selected or "")
 
 
 def csv_list_field(label: str, value: Any, *, key: str, help_key: str) -> list[str]:
@@ -1112,6 +1118,7 @@ def _quantile_fields(
                 seed.get("quantile"), default=0.5, minimum=0.0, maximum=1.0
             ),
             step=0.05,
+            format="%.2f",
             key=f"{key_prefix}_quantile_value",
             help=config_help.field_help("metric.quantile"),
         )
@@ -1219,6 +1226,7 @@ def _variant_compare_fields(
         max_value=0.999,
         value=float(seed.get("confidence_level") or 0.95),
         step=0.01,
+        format="%.3f",
         key=f"{key_prefix}_confidence_level",
         help=config_help.field_help("metric.confidence_level"),
     )
@@ -1433,7 +1441,7 @@ def _windowed_operand_row(
         kind_default = "All time"
     number = index + 1
     state_col, kind_col, from_col, to_col = st.columns(
-        [0.38, 0.22, 0.2, 0.2], vertical_alignment="bottom"
+        [0.32, 0.28, 0.2, 0.2], vertical_alignment="bottom"
     )
     state = state_col.selectbox(
         f"Operand {number} State",

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import threading
+import time
 import zipfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +31,146 @@ from valuestream.ui.instrumentation import (
 from valuestream.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _BackgroundRun:
+    """One detached source/workspace run and its poll-friendly progress."""
+
+    label: str
+    started_at: float
+    thread: threading.Thread | None = None
+    progress: dict[str, Any] = field(default_factory=dict)
+    result: Any = None
+    error: str | None = None
+
+
+# Runs execute on daemon threads keyed by workspace+scope so a browser reload
+# or websocket reconnect only detaches the *view*; the load itself continues
+# and any session polling this registry picks it back up.
+_BACKGROUND_RUNS: dict[str, _BackgroundRun] = {}
+_BACKGROUND_RUNS_LOCK = threading.Lock()
+
+
+def _background_run_key(workspace: Path, scope: str) -> str:
+    return f"{Path(workspace).resolve()}::{scope}"
+
+
+def _progress_recorder(run: _BackgroundRun) -> Callable[[Any], None]:
+    """Return a chunk-progress callback that never touches Streamlit state."""
+
+    def update(progress: Any) -> None:
+        run.progress = {
+            "source_id": getattr(progress, "source_id", ""),
+            "chunk_name": getattr(progress, "chunk_name", ""),
+            "chunk_order": int(getattr(progress, "chunk_order", 0) or 0),
+            "chunks_total": int(getattr(progress, "chunks_total", 0) or 0),
+            "status": str(getattr(progress, "status", "processing")),
+        }
+
+    return update
+
+
+def _start_background_run(
+    key: str,
+    label: str,
+    target: Callable[[Callable[[Any], None]], Any],
+) -> _BackgroundRun:
+    with _BACKGROUND_RUNS_LOCK:
+        existing = _BACKGROUND_RUNS.get(key)
+        if existing is not None and existing.thread is not None and existing.thread.is_alive():
+            return existing
+        run = _BackgroundRun(label=label, started_at=time.perf_counter())
+
+        def work() -> None:
+            try:
+                run.result = target(_progress_recorder(run))
+            except Exception as exc:
+                logger.exception("Background data load failed: %s", label)
+                run.error = str(exc)
+
+        thread = threading.Thread(target=work, name=f"vs-data-load-{label}", daemon=True)
+        run.thread = thread
+        _BACKGROUND_RUNS[key] = run
+        thread.start()
+        return run
+
+
+def _format_elapsed(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3_600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _run_summary(result: Any) -> str:
+    if hasattr(result, "sources_ok"):
+        return (
+            f"{result.status}: {result.sources_ok} source(s) ok, "
+            f"{result.sources_partial} partial, {result.sources_failed} failed"
+        )
+    if hasattr(result, "chunks_rebuilt"):
+        return (
+            f"rebuilt {result.chunks_rebuilt} chunk(s) across {len(result.source_ids)} "
+            f"source(s); removed {result.vacuum.files_deleted} superseded aggregate file(s) "
+            f"({_format_bytes(result.vacuum.bytes_deleted)})"
+        )
+    if hasattr(result, "chunks_ok"):
+        return (
+            f"{result.status}: {result.chunks_ok} chunk(s) ok, "
+            f"{result.chunks_failed} failed, {result.rows_kept:,} rows kept"
+        )
+    return str(result)
+
+
+def _render_background_runs(workspace: Path) -> bool:
+    """Show every active or just-finished run for this workspace.
+
+    Returns whether any run is still alive so the caller can schedule a poll
+    rerun after the rest of the page has rendered.
+    """
+
+    prefix = f"{Path(workspace).resolve()}::"
+    with _BACKGROUND_RUNS_LOCK:
+        entries = [(key, run) for key, run in _BACKGROUND_RUNS.items() if key.startswith(prefix)]
+    any_alive = False
+    for key, run in entries:
+        alive = run.thread is not None and run.thread.is_alive()
+        if alive:
+            any_alive = True
+            progress = dict(run.progress)
+            elapsed = _format_elapsed(time.perf_counter() - run.started_at)
+            total = progress.get("chunks_total") or 0
+            if total:
+                verb = {
+                    "processing": "Processing",
+                    "recovering": "Verifying",
+                    "skipped": "Skipping",
+                }.get(str(progress.get("status")), "Processing")
+                order = progress.get("chunk_order") or 0
+                st.progress(
+                    min(order / total, 1.0),
+                    text=(
+                        f"{run.label} — {verb} chunk {order}/{total}: "
+                        f"{progress.get('chunk_name', '')} · Elapsed {elapsed}"
+                    ),
+                )
+            else:
+                st.progress(0.0, text=f"{run.label} — discovering files... · Elapsed {elapsed}")
+            st.caption(
+                "The run continues on the server — reloading or leaving this page "
+                "does not interrupt it."
+            )
+        else:
+            with _BACKGROUND_RUNS_LOCK:
+                _BACKGROUND_RUNS.pop(key, None)
+            if run.error is not None:
+                st.toast("Data load failed.", icon=":material/error:")
+                st.error(f"{run.label} failed: {run.error}")
+            elif run.result is not None:
+                st.toast("Data load finished.", icon=":material/database_upload:")
+                st.success(f"{run.label} — {_run_summary(run.result)}")
+    return any_alive
 
 
 def render(ctx: ValueStreamContext) -> None:
@@ -76,10 +219,16 @@ def render(ctx: ValueStreamContext) -> None:
         st.session_state["data_load_clean_rebuild_confirm"] = False
         _clean_rebuild_dialog(ctx)
 
+    runs_active = _render_background_runs(ctx.workspace)
+
     tabs = st.tabs([_source_tab_label(source.id) for source in sources])
     for tab, source in zip(tabs, sources, strict=True):
         with tab:
             _render_source_tab(ctx, source, force_default=force_all)
+
+    if runs_active:
+        time.sleep(1.5)
+        st.rerun()
 
 
 def _ordered_sources(sources: Iterable[Any]) -> list[Any]:
@@ -197,62 +346,32 @@ def _render_upload(ctx: ValueStreamContext, source: Any, root: Path) -> None:
 
 def _run_all(ctx: ValueStreamContext, *, force: bool) -> None:
     _record_authoring_run_started()
-    try:
-        with st.status("Running workspace", expanded=True) as status:
-            status.write("Discovering files and processing configured sources...")
-            chunk_progress = components.chunk_progress_indicator(include_source=True)
-            result = run_workspace(
-                ctx.workspace,
-                force=force,
-                progress_callback=chunk_progress,
-            )
-            status.write(
-                f"{result.sources_ok} ok, {result.sources_partial} partial, {result.sources_failed} failed."
-            )
-            status.update(label=f"Workspace run {result.status}", state="complete")
-        st.toast("Dashboard ready.", icon=":material/dashboard:")
-        st.success(
-            f"{result.status}: {result.sources_ok} ok, "
-            f"{result.sources_partial} partial, {result.sources_failed} failed"
-        )
-    except Exception as exc:  # pragma: no cover - Streamlit display path
-        _record_authoring_run_failed()
-        logger.exception("Workspace data load failed: workspace=%s", ctx.workspace)
-        st.toast("Data load failed.", icon=":material/error:")
-        st.error(str(exc))
+    workspace = ctx.workspace
+
+    def target(progress_callback: Callable[[Any], None]) -> Any:
+        return run_workspace(workspace, force=force, progress_callback=progress_callback)
+
+    _start_background_run(
+        _background_run_key(workspace, "workspace"),
+        "Workspace run",
+        target,
+    )
+    st.rerun()
 
 
 def _run_one(ctx: ValueStreamContext, source_id: str, *, force: bool) -> None:
     _record_authoring_run_started()
-    try:
-        with st.status(f"Running {source_id}", expanded=True) as status:
-            status.write("Discovering files...")
-            chunk_progress = components.chunk_progress_indicator(include_source=False)
-            result = run_source(
-                ctx.workspace,
-                source_id,
-                force=force,
-                progress_callback=chunk_progress,
-            )
-            status.write(
-                f"{result.chunks_ok} ok, {result.chunks_failed} failed, "
-                f"{result.chunks_skipped} skipped."
-            )
-            status.update(label=f"Source run {result.status}", state="complete")
-        st.toast("Source data loaded.", icon=":material/database_upload:")
-        st.success(
-            f"{result.status}: {result.chunks_ok} ok, {result.chunks_failed} failed, "
-            f"{result.rows_kept:,} rows kept"
-        )
-    except Exception as exc:  # pragma: no cover - Streamlit display path
-        _record_authoring_run_failed()
-        logger.exception(
-            "Source data load failed: workspace=%s source=%s",
-            ctx.workspace,
-            source_id,
-        )
-        st.toast("Source run failed.", icon=":material/error:")
-        st.error(str(exc))
+    workspace = ctx.workspace
+
+    def target(progress_callback: Callable[[Any], None]) -> Any:
+        return run_source(workspace, source_id, force=force, progress_callback=progress_callback)
+
+    _start_background_run(
+        _background_run_key(workspace, f"source:{source_id}"),
+        f"Source run · {source_id}",
+        target,
+    )
+    st.rerun()
 
 
 def _record_authoring_run_started() -> None:
@@ -267,22 +386,6 @@ def _record_authoring_run_started() -> None:
         workflow=handoff_workflow,
         stage=AuthoringStage.RUN,
         outcome=AuthoringOutcome.STARTED,
-        once=True,
-    )
-
-
-def _record_authoring_run_failed() -> None:
-    """Record a bounded failure without leaking the engine exception."""
-
-    handoff_workflow = workflow_from_handoff(st.query_params.get("from"))
-    if handoff_workflow is None:
-        return
-    record_event(
-        st.session_state,
-        event=AuthoringEvent.FAILED,
-        workflow=handoff_workflow,
-        stage=AuthoringStage.RUN,
-        outcome=AuthoringOutcome.ERROR,
         once=True,
     )
 
@@ -348,35 +451,21 @@ def _clean_rebuild_dialog(ctx: ValueStreamContext) -> None:
 
 
 def _run_clean_rebuild(ctx: ValueStreamContext, source_ids: tuple[str, ...]) -> None:
-    try:
-        with st.status("Rebuilding selected sources", expanded=True) as status:
-            status.write("Holding source locks and force-processing every discovered chunk...")
-            chunk_progress = components.chunk_progress_indicator(include_source=True)
-            try:
-                result = clean_rebuild(
-                    ctx.workspace,
-                    source_ids=source_ids,
-                    progress_callback=chunk_progress,
-                )
-            except Exception:
-                status.update(label="Clean rebuild stopped", state="error")
-                raise
-            status.write("Coverage verified; superseded aggregate files removed.")
-            status.update(label="Clean rebuild complete", state="complete")
-        st.toast("Clean rebuild complete.", icon=":material/check_circle:")
-        st.success(
-            f"Rebuilt {result.chunks_rebuilt} chunk(s) across {len(result.source_ids)} "
-            f"source(s). Removed {result.vacuum.files_deleted} old aggregate file(s) "
-            f"({_format_bytes(result.vacuum.bytes_deleted)}). Audit metadata was retained."
+    workspace = ctx.workspace
+
+    def target(progress_callback: Callable[[Any], None]) -> Any:
+        return clean_rebuild(
+            workspace,
+            source_ids=source_ids,
+            progress_callback=progress_callback,
         )
-    except Exception as exc:  # pragma: no cover - Streamlit display path
-        logger.exception(
-            "Clean rebuild failed: workspace=%s sources=%s",
-            ctx.workspace,
-            ",".join(source_ids),
-        )
-        st.toast("Clean rebuild stopped.", icon=":material/error:")
-        st.error(str(exc))
+
+    _start_background_run(
+        _background_run_key(workspace, "rebuild"),
+        "Clean rebuild · " + ", ".join(source_ids),
+        target,
+    )
+    st.rerun()
 
 
 def _aggregate_inventory(workspace: Path, source_ids: Iterable[str]) -> tuple[int, int]:

@@ -3118,7 +3118,12 @@ def _studio_apply_readiness(  # noqa: PLR0912
                 findings.append(
                     StudioReadinessIssue(
                         area=area,
-                        severity="blocker" if issue in blocking_set else "warning",
+                        # A validation pass (`snapshot.ok`) means every issue is
+                        # advisory; labeling one "blocker" while Apply is enabled
+                        # contradicts the readiness chip.
+                        severity=(
+                            "blocker" if issue in blocking_set and not snapshot.ok else "warning"
+                        ),
                         object_path=_readiness_issue_path(issue),
                         current_value=_safe_readiness_current_value(issue),
                         expected_contract=_readiness_expected_contract(area),
@@ -8434,7 +8439,16 @@ def _build_draft_catalog(working: pl.DataFrame, approved_fields: list[str]) -> d
     transforms.extend(
         builder.build_derive_column_transforms(st.session_state.get("ai_studio_calculations", []))
     )
-    if {"OutcomeTime", "DecisionTime"} <= set(working.columns):
+    derived_outputs = {
+        str(transform.get("output"))
+        for transform in transforms
+        if transform.get("kind") == "derive_column"
+    }
+    if (
+        {"OutcomeTime", "DecisionTime"} <= set(working.columns)
+        and "ResponseTime" not in working.columns
+        and "ResponseTime" not in derived_outputs
+    ):
         transforms.append(
             {
                 "kind": "derive_column",
@@ -9192,9 +9206,17 @@ def _default_group_by_fields(
     approved_fields: list[str],
     required_fields: list[str] | None = None,
 ) -> list[str]:
-    return dimension_profile.default_group_by_fields(
+    fields = dimension_profile.default_group_by_fields(
         sample,
         approved_fields,
         required_fields=required_fields or _studio_required_fields(sample),
         limit=5,
     )
+    # Calendar fields the draft derives from the timestamp are grain outputs,
+    # not business dimensions; grouping by them duplicates the grain machinery.
+    # Real calendar columns shipped by the source (no timestamp to derive from)
+    # remain eligible.
+    derived_calendar = (
+        set(_calendar_outputs_to_derive()) if "OutcomeTime" in sample.columns else set()
+    )
+    return [field for field in fields if field not in derived_calendar]

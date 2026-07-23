@@ -703,7 +703,9 @@ def _builder_primary_action_key() -> str:
 def _render_continue_primary(save_slot: Any) -> None:
     """Render the current step's primary Continue action."""
     next_step = _next_builder_step()
-    save_slot.empty()
+    # Writing into the placeholder replaces its content atomically; an explicit
+    # empty() first paints an intermediate frame with no button, which swallows
+    # clicks that land during a fragment rerun.
     clicked = save_slot.button(
         "Continue",
         type="primary",
@@ -756,6 +758,7 @@ def _render_editor_primary_action(
     widget_prefixes: tuple[str, ...],
     help_text: str,
     preserve_widget_keys: tuple[str, ...] = (),
+    invalid_reason: str | None = None,
 ) -> bool:
     """Render one canonical draft status and the single active apply action."""
     registered = builder.registered_builder_draft(st.session_state, status.key)
@@ -788,7 +791,11 @@ def _render_editor_primary_action(
             st.write(f"**Editing draft · revision `{status.revision}`**")
             st.caption(
                 ("Restored from this session. " if restored else "Stored for this session. ")
-                + ("Ready to apply." if valid else "Resolve the highlighted issue before applying.")
+                + (
+                    "Ready to apply."
+                    if valid
+                    else (invalid_reason or "Resolve the highlighted issue before applying.")
+                )
             )
         discard_col.button(
             "Discard draft",
@@ -799,13 +806,12 @@ def _render_editor_primary_action(
             args=(status.key, widget_prefixes, preserve_widget_keys),
         )
 
-    save_slot.empty()
     apply_requested = save_slot.button(
         "Apply to workspace",
         type="primary",
         icon=":material/publish:",
         disabled=not valid,
-        help=help_text,
+        help=help_text if valid else (invalid_reason or help_text),
         width="stretch",
         key=_builder_primary_action_key(),
     )
@@ -861,6 +867,60 @@ def _restore_registered_builder_draft(key: str) -> None:
     """Restore shadow widget values in the callback prefix before rerendering."""
     if builder.restore_builder_draft(st.session_state, key):
         st.session_state["builder_restored_draft_key"] = key
+
+
+_METRIC_DRAFT_PRESERVE_KEYS = (
+    "builder_metric_mode",
+    "builder_metric_creation_method",
+    "builder_metric_pending_refresh",
+    "builder_metric_create_counter",
+)
+
+
+def _offer_unfinished_metric_draft(draft_slot: Any) -> None:
+    """Surface an in-progress create-metric draft before the form is reopened.
+
+    Leaving the step drops the scratch form's widget values, so on return the
+    editor renders empty and the registered draft would only resurface after
+    the user re-picked the same processor and kind.  Offering the restore up
+    front keeps the "unapplied draft preserved" promise honest.
+    """
+
+    raw_registry = st.session_state.get(builder.BUILDER_DRAFTS_KEY)
+    registry = raw_registry if isinstance(raw_registry, Mapping) else {}
+    key = next((str(k) for k in registry if str(k).startswith("metric:new:")), None)
+    if key is None:
+        return
+    registered = builder.registered_builder_draft(st.session_state, key)
+    if registered is None:
+        return
+    widget_state = registered.get("widget_state")
+    can_restore = isinstance(widget_state, Mapping) and bool(widget_state)
+    revision = str(registered.get("revision", "saved") or "saved")
+    with draft_slot.container(border=True):
+        message_col, restore_col, discard_col = st.columns(
+            [0.62, 0.19, 0.19], vertical_alignment="center"
+        )
+        with message_col:
+            st.write(f"**Unapplied metric draft available · revision `{revision}`**")
+            st.caption("Restore the in-progress metric draft from this session, or discard it.")
+        restore_col.button(
+            "Restore draft",
+            icon=":material/restore:",
+            disabled=not can_restore,
+            width="stretch",
+            key=f"builder_restore_{builder.widget_key_fragment(key)}",
+            on_click=_restore_registered_builder_draft,
+            args=(key,),
+        )
+        discard_col.button(
+            "Discard draft",
+            icon=":material/delete_sweep:",
+            width="stretch",
+            key=f"builder_discard_available_{builder.widget_key_fragment(key)}",
+            on_click=_discard_registered_builder_draft,
+            args=(key, ("builder_metric_",), _METRIC_DRAFT_PRESERVE_KEYS),
+        )
 
 
 def _discard_registered_builder_draft(
@@ -2195,7 +2255,11 @@ def _delete_processor_dialog(ctx: ValueStreamContext, processor_id: str) -> None
         key=f"builder_delete_processor_action_{plan.processor_id}",
     ):
         try:
-            deleted = builder.delete_processor_cascade(ctx.workspace, plan.processor_id)
+            deleted = builder.delete_processor_cascade(
+                ctx.workspace,
+                plan.processor_id,
+                source_columns_by_id=_observed_source_columns(),
+            )
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
             logger.exception("Failed to delete processor cascade: processor=%s", plan.processor_id)
@@ -2283,6 +2347,7 @@ def _delete_metric_dialog(workspace: Path, catalog: model.Catalog, metric_id: st
                 workspace,
                 plan.metric_id,
                 cascade_tiles=cascade_tiles,
+                source_columns_by_id=_observed_source_columns(),
             )
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
@@ -3626,6 +3691,25 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             key=f"builder_proc_grains_{processor.id}",
             help=config_help.field_help("processor.grains"),
         )
+        seed_dedup_keys = [
+            field
+            for field in field_remap.remap_field_list(
+                [str(value) for value in (processor.model_extra or {}).get("dedup_keys") or []],
+                field_mapping,
+            )
+            if field
+        ]
+        dedup_keys = st.multiselect(
+            "Dedup Keys",
+            builder.dedupe([*field_options, *seed_dedup_keys]),
+            default=seed_dedup_keys,
+            accept_new_options=True,
+            key=f"builder_proc_dedup_{processor.id}",
+            help=(
+                "Rows sharing these column values within one load chunk are counted once. "
+                "Leave empty to aggregate every row."
+            ),
+        )
         kind_settings = _processor_kind_settings(
             processor,
             kind,
@@ -3662,6 +3746,15 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             state_key,
             f"builder_proc_state_editor_{processor.id}",
             state_frame,
+        )
+        st.caption(
+            "Sketch parameters omitted from the YAML use these effective defaults: "
+            + "; ".join(
+                f"{sketch_type}: "
+                + ", ".join(f"{name}={value}" for name, value in params.items())
+                for sketch_type, params in model.DEFAULT_STATE_PARAMETERS.items()
+            )
+            + "."
         )
 
     filter_expression = builder.first_filter_expression(processor)
@@ -3737,6 +3830,13 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             "time": time_def,
         }
     )
+    cleaned_dedup_keys = builder.dedupe(
+        [str(value).strip() for value in dedup_keys if str(value).strip()]
+    )
+    if cleaned_dedup_keys:
+        processor_def["dedup_keys"] = cleaned_dedup_keys
+    else:
+        processor_def.pop("dedup_keys", None)
     for managed_key in forms.PROCESSOR_KIND_MANAGED_FIELDS:
         processor_def.pop(managed_key, None)
     processor_def.update(kind_settings)
@@ -3781,11 +3881,27 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         ),
     ):
         try:
-            with builder.validated_catalog_transaction(
-                ctx.workspace, source_columns_by_id=_observed_source_columns()
-            ):
-                builder.write_processor_definition(ctx.workspace, processor_def)
-            message = "Processor created." if creating else "Processor written."
+            renamed = not creating and processor_id.strip() != processor.id
+            if renamed:
+                # An edited ID is a rename: keep one definition and retarget
+                # metric sources instead of leaving the old id behind as a copy.
+                builder.rename_processor_definition(
+                    ctx.workspace,
+                    processor.id,
+                    processor_def,
+                    source_columns_by_id=_observed_source_columns(),
+                )
+            else:
+                with builder.validated_catalog_transaction(
+                    ctx.workspace, source_columns_by_id=_observed_source_columns()
+                ):
+                    builder.write_processor_definition(ctx.workspace, processor_def)
+            if creating:
+                message = "Processor created."
+            elif renamed:
+                message = f"Processor renamed from `{processor.id}` to `{processor_id.strip()}`."
+            else:
+                message = "Processor written."
             _complete_builder_apply(
                 status=draft_status,
                 scope="processor",
@@ -3876,21 +3992,45 @@ def _reseed_state_rows_for_kind(
     processor_id: str,
     field_mapping: dict[str, str],
 ) -> None:
-    """Reset the Processor Sketches grid when the kind's default states change.
+    """Refresh the Processor Sketches grid when the kind's default states change.
 
-    Row edits that leave the kind settings untouched are preserved; changing
-    the kind (or a setting that alters its default states, such as the
-    entity column) replaces the grid with the new kind's outputs.
+    Changing the kind (or a setting that alters its default states, such as
+    the entity column) swaps in the new defaults, but rows the user added or
+    edited are carried over instead of being wiped: any row that does not
+    match one of the previously seeded defaults survives the reseed and wins
+    over a new default with the same state name.
     """
     rows = _state_rows(states_baseline, field_mapping)
     signature = json.dumps(
         [[row["State"], row["Type"], row["Source Column"]] for row in rows],
     )
     signature_key = f"{state_key}_kind_signature"
+    defaults_key = f"{state_key}_kind_defaults"
     if st.session_state.get(signature_key) == signature and state_key in st.session_state:
         return
-    st.session_state[state_key] = rows
+    merged = list(rows)
+    previous_defaults = st.session_state.get(defaults_key)
+    current_rows = st.session_state.get(state_key)
+    if isinstance(previous_defaults, list) and isinstance(current_rows, list):
+        default_triples = {
+            (row.get("State"), row.get("Type"), row.get("Source Column"))
+            for row in previous_defaults
+            if isinstance(row, dict)
+        }
+        custom_rows = [
+            row
+            for row in current_rows
+            if isinstance(row, dict)
+            and (row.get("State"), row.get("Type"), row.get("Source Column"))
+            not in default_triples
+        ]
+        if custom_rows:
+            custom_names = {row.get("State") for row in custom_rows}
+            merged = [row for row in rows if row.get("State") not in custom_names]
+            merged.extend(custom_rows)
+    st.session_state[state_key] = merged
     st.session_state[signature_key] = signature
+    st.session_state[defaults_key] = copy.deepcopy(rows)
     st.session_state.pop(f"builder_proc_state_editor_{processor_id}", None)
 
 
@@ -3982,6 +4122,12 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 )
         else:
             st.caption("Choose an existing metric by processor and kind to inspect or edit it.")
+
+    if mode == METRIC_ACTION_CREATE:
+        pending_token = f"create_{int(st.session_state.get('builder_metric_create_counter', 0))}"
+        scratch_started = bool(st.session_state.get(f"builder_metric_processor_{pending_token}"))
+        if creation_method != METRIC_CREATE_SCRATCH or not scratch_started:
+            _offer_unfinished_metric_draft(draft_slot)
 
     if mode == METRIC_ACTION_CREATE and creation_method == METRIC_CREATE_LIBRARY:
         recipe_request = recipe_library.render_recipe_library(
@@ -4165,8 +4311,9 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             processor_ids = list(processors_by_id)
             processor_choice = st.selectbox(
                 "Processor",
-                ["", *processor_ids],
-                index=0,
+                processor_ids,
+                index=None,
+                placeholder="Select processor",
                 format_func=lambda value: _processor_choice_label(value, processors_by_id),
                 key=f"builder_metric_processor_{create_token}",
                 help=config_help.field_help("metric.processor"),
@@ -4183,11 +4330,10 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 return
             metric_kind = st.selectbox(
                 "Metric Kind",
-                ["", *metric_kind_options],
-                index=0,
-                format_func=lambda kind: (
-                    builder.metric_kind_label(kind) if kind else "Select metric kind"
-                ),
+                metric_kind_options,
+                index=None,
+                placeholder="Select metric kind",
+                format_func=builder.metric_kind_label,
                 key=f"builder_metric_kind_{create_token}_{processor.id}",
                 help=config_help.field_help("metric.kind"),
             )
@@ -4289,12 +4435,34 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 metric_def,
             )
         else:
+            # The baseline must be the pristine kind template: user-authored
+            # identity fields may already hold text by the time the kind form
+            # first completes (e.g. a state picked after typing the name), and
+            # capturing them would make the finished draft compare clean.
+            pristine_def = {
+                field: value
+                for field, value in metric_def.items()
+                if field not in ("description", "depends_on", "display")
+            }
             draft_status = builder.builder_template_draft_status(
                 st.session_state,
                 f"metric:new:{metric_token}",
                 f"builder_metric_template_baseline_{metric_token}",
                 {"metric": metric_def, "name": metric_name},
+                baseline_draft={"metric": pristine_def, "name": ""},
             )
+        if not metric_ready:
+            if not editing and not metric_label.strip():
+                metric_invalid_reason = "Enter a Metric Display Name before applying."
+            elif not metric_name.strip():
+                metric_invalid_reason = "Enter a Metric ID before applying."
+            else:
+                metric_invalid_reason = (
+                    "Metric ID must start with an ASCII letter and contain only ASCII "
+                    "letters, numbers, and underscores."
+                )
+        else:
+            metric_invalid_reason = None
         if _render_editor_primary_action(
             save_slot=save_slot,
             draft_slot=draft_slot,
@@ -4305,11 +4473,13 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 "builder_metric_mode",
                 "builder_metric_creation_method",
                 "builder_metric_pending_refresh",
+                "builder_metric_create_counter",
             ),
             help_text=(
                 "Validate and apply this metric to the active workspace. Existing aggregate "
                 "states can be used without running data."
             ),
+            invalid_reason=metric_invalid_reason,
         ):
             try:
                 if not editing and metric_name.strip() in catalog.metrics.metrics:
@@ -4404,7 +4574,13 @@ def _metric_definition_form(
 
 def _metric_display_controls(raw: Any, *, key_suffix: str) -> dict[str, Any]:
     seed = dict(raw) if isinstance(raw, Mapping) else {}
-    with st.expander("Report presentation", expanded=False):
+    # A keyed expander keeps its open state across fragment reruns, so typing
+    # the unit/format fields no longer fights an auto-collapsing section.
+    with st.expander(
+        "Report presentation",
+        expanded=False,
+        key=f"builder_metric_display_expander_{key_suffix}",
+    ):
         label = st.text_input(
             "Display label",
             value=str(seed.get("label", "") or ""),
@@ -5241,7 +5417,9 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             "Editing Mode",
             ["Visual", "Raw YAML"],
             default="Visual",
-            key=f"builder_tile_mode_{editor_token}",
+            # Token-independent key: switching to a new draft keeps the chosen
+            # editing mode instead of silently flipping back to Visual.
+            key="builder_tile_editing_mode",
             help=config_help.field_help("report.editing_mode"),
         )
         seed_metric = seed_tile.get("metric") if seed_tile.get("metric") in metric_names else None
@@ -5467,9 +5645,23 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                     chart_kind=chart_kind,
                     fields=defaults,
                 )
+            if default_raw_tile:
+                raw_default = yaml.safe_dump(default_raw_tile, sort_keys=False)
+            else:
+                # Raw YAML replaces the whole tile definition, so seed the
+                # required scaffold instead of an empty box that fails with a
+                # bare KeyError once applied.
+                raw_default = (
+                    "# Tile YAML replaces the whole tile definition.\n"
+                    "# id, title, metric, and chart are required.\n"
+                    "id: my_tile\n"
+                    "title: My tile\n"
+                    "metric: \n"
+                    "chart: \n"
+                )
             raw_tile = st.text_area(
                 "Tile YAML",
-                value=yaml.safe_dump(default_raw_tile, sort_keys=False) if default_raw_tile else "",
+                value=raw_default,
                 height=360,
                 key=f"builder_raw_tile_{editor_token}",
                 help=config_help.field_help("report.tile_yaml"),
@@ -5599,6 +5791,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                 "builder_page_",
                 "builder_report_",
             ),
+            preserve_widget_keys=("builder_tile_editing_mode",),
             help_text=(
                 "Validate and apply this report tile and its page settings to the workspace."
             ),
@@ -5638,6 +5831,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                         "builder_page_",
                         "builder_report_",
                     ),
+                    preserve_widget_keys=("builder_tile_editing_mode",),
                     state_updates={
                         "builder_tile_selection_override": (
                             f"{dashboard_id.strip()}/{page_id.strip()}/{built_tile.get('id', '')}"
@@ -5662,6 +5856,102 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
     with st.expander("Report inventory", expanded=False, icon=":material/inventory_2:"):
         st.caption("Search configured reports by human title, metric, or chart type.")
         _report_inventory_tab(catalog)
+        _render_dashboard_manager(workspace, catalog)
+
+
+def _render_dashboard_manager(workspace: Path, catalog: model.Catalog) -> None:
+    """Delete whole pages or dashboards — the tile editor only removes tiles."""
+
+    dashboards = list(catalog.dashboards.dashboards)
+    if not dashboards:
+        return
+    st.divider()
+    st.write("**Manage dashboards**")
+    st.caption(
+        "Remove an entire page (all of its tiles) or a whole dashboard. "
+        "Deleting the last page also removes its dashboard."
+    )
+    dashboard_col, page_col = st.columns(2)
+    dashboard_ids = [dashboard.id for dashboard in dashboards]
+    dashboard_titles = {dashboard.id: dashboard.title for dashboard in dashboards}
+    selected_dashboard = dashboard_col.selectbox(
+        "Dashboard to manage",
+        dashboard_ids,
+        format_func=lambda value: f"{dashboard_titles.get(value, value)} (`{value}`)",
+        key="builder_manage_dashboard_select",
+    )
+    dashboard = next(
+        (entry for entry in dashboards if entry.id == selected_dashboard), None
+    )
+    pages = list(dashboard.pages) if dashboard is not None else []
+    page_ids = [page.id for page in pages]
+    page_titles = {page.id: page.title for page in pages}
+    tile_counts = {page.id: len(page.tiles) for page in pages}
+    selected_page = page_col.selectbox(
+        "Page to manage",
+        page_ids,
+        format_func=lambda value: (
+            f"{page_titles.get(value, value)} · {tile_counts.get(value, 0)} tile(s)"
+        ),
+        key=f"builder_manage_page_select_{selected_dashboard}",
+    )
+    total_tiles = sum(tile_counts.values())
+    confirmed = st.checkbox(
+        f"I understand the selected page or dashboard of `{selected_dashboard}` "
+        "and every tile on it will be deleted.",
+        key=f"builder_manage_confirm_{selected_dashboard}",
+    )
+    delete_page_col, delete_dashboard_col = st.columns(2)
+    if delete_page_col.button(
+        "Delete page",
+        icon=":material/delete:",
+        disabled=not (confirmed and selected_page),
+        width="stretch",
+        key="builder_manage_delete_page",
+    ):
+        try:
+            builder.delete_report_page(
+                workspace,
+                selected_dashboard,
+                str(selected_page),
+                source_columns_by_id=_observed_source_columns(),
+            )
+        except Exception as exc:  # pragma: no cover - Streamlit display path
+            logger.exception(
+                "Failed to delete report page: dashboard=%s page=%s",
+                selected_dashboard,
+                selected_page,
+            )
+            st.error(str(exc))
+        else:
+            st.session_state["builder_apply_notice"] = (
+                f"Deleted page `{selected_page}` "
+                f"({tile_counts.get(str(selected_page), 0)} tile(s)) from "
+                f"`{selected_dashboard}`."
+            )
+            st.rerun(scope="app")
+    if delete_dashboard_col.button(
+        "Delete dashboard",
+        icon=":material/delete_forever:",
+        disabled=not confirmed,
+        width="stretch",
+        key="builder_manage_delete_dashboard",
+    ):
+        try:
+            builder.delete_dashboard(
+                workspace,
+                selected_dashboard,
+                source_columns_by_id=_observed_source_columns(),
+            )
+        except Exception as exc:  # pragma: no cover - Streamlit display path
+            logger.exception("Failed to delete dashboard: dashboard=%s", selected_dashboard)
+            st.error(str(exc))
+        else:
+            st.session_state["builder_apply_notice"] = (
+                f"Deleted dashboard `{selected_dashboard}` "
+                f"({len(pages)} page(s), {total_tiles} tile(s))."
+            )
+            st.rerun(scope="app")
 
 
 def _visual_tile_control_keys(chart_kind: str) -> set[str]:
@@ -5767,7 +6057,11 @@ def _page_settings_editor(
     page: model.DashboardPage | None,
     key_suffix: str,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], bool]:
-    with st.expander("Page filters and time range", expanded=False):
+    with st.expander(
+        "Page filters and time range",
+        expanded=False,
+        key=f"builder_page_settings_expander_{key_suffix}",
+    ):
         rows = [item.model_dump(mode="python") for item in page.filters] if page is not None else []
         edited = st.data_editor(
             rows,

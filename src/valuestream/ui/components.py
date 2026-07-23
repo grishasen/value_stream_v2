@@ -157,19 +157,22 @@ def metric_cards(
     column_count = columns or len(normalized)
 
     def render_cards() -> None:
-        cols = st.columns(column_count)
-        for col, item in zip(cols, normalized, strict=False):
-            with col, card():
-                st.metric(
-                    item.label,
-                    item.value,
-                    item.delta,
-                    delta_color=item.delta_color,
-                    help=item.help,
-                    chart_data=item.chart_data,
-                    chart_type=item.chart_type,
-                    delta_description=item.delta_description,
-                )
+        # Chunk into rows so every item renders; a plain zip against one
+        # st.columns row silently drops items beyond the column count.
+        for start in range(0, len(normalized), column_count):
+            cols = st.columns(column_count)
+            for col, item in zip(cols, normalized[start : start + column_count], strict=False):
+                with col, card():
+                    st.metric(
+                        item.label,
+                        item.value,
+                        item.delta,
+                        delta_color=item.delta_color,
+                        help=item.help,
+                        chart_data=item.chart_data,
+                        chart_type=item.chart_type,
+                        delta_description=item.delta_description,
+                    )
 
     if key is None:
         render_cards()

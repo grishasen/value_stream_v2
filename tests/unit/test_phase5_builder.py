@@ -884,7 +884,8 @@ def test_new_processor_empty_entity_fallback_is_explicit(tmp_path: Path) -> None
     assert "No subject/entity field could be inferred" in warning_text
     assert "intentionally empty" in warning_text
     subject = next(item for item in rendered.selectbox if item.label == "Subject Entity Field")
-    assert subject.value == ""
+    # No selection renders the placeholder (value None); callers receive "".
+    assert not subject.value
 
 
 @pytest.mark.unit
@@ -5806,7 +5807,9 @@ def test_delete_processor_cascade_rolls_back_on_post_write_validation(
     monkeypatch.setattr(
         builder,
         "require_valid_workspace",
-        lambda _workspace: (_ for _ in ()).throw(ValueError("processor validation failed")),
+        lambda _workspace, **_kwargs: (_ for _ in ()).throw(
+            ValueError("processor validation failed")
+        ),
     )
 
     with pytest.raises(ValueError, match="processor validation failed"):
@@ -5907,7 +5910,9 @@ def test_delete_metric_rolls_back_catalog_and_chat_on_validation_failure(
     monkeypatch.setattr(
         builder,
         "require_valid_workspace",
-        lambda _workspace: (_ for _ in ()).throw(ValueError("metric validation failed")),
+        lambda _workspace, **_kwargs: (_ for _ in ()).throw(
+            ValueError("metric validation failed")
+        ),
     )
 
     with pytest.raises(ValueError, match="metric validation failed"):

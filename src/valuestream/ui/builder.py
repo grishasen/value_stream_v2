@@ -178,6 +178,8 @@ def builder_template_draft_status(
     key: str,
     baseline_key: str,
     draft: Any,
+    *,
+    baseline_draft: Any | None = None,
 ) -> BuilderDraftStatus:
     """Compare a create-mode editor with its first untouched template.
 
@@ -186,10 +188,16 @@ def builder_template_draft_status(
     until the user actually changes one of its values.  The baseline lives
     beside the editor widgets so Discard and post-apply cleanup can remove it
     with the same prefix.
+
+    ``baseline_draft`` lets editors whose form only becomes complete after a
+    required selection register a pristine template instead of the live draft.
+    Without it, values typed before that selection would be captured into the
+    baseline and the finished draft would compare clean, hiding Apply.
     """
 
     if baseline_key not in session_state:
-        session_state[baseline_key] = copy.deepcopy(config_canonical.canonicalize(draft))
+        template = draft if baseline_draft is None else baseline_draft
+        session_state[baseline_key] = copy.deepcopy(config_canonical.canonicalize(template))
     return builder_draft_status(
         key,
         session_state[baseline_key],
@@ -1609,7 +1617,11 @@ def metric_kind_options(processor: model.Processor) -> list[str]:
 
     extra = dict(processor.model_extra or {})
     has_outcome_counts = {"Positives", "Negatives"} <= set(states)
-    has_variant = bool(extra.get("variant_column")) and has_outcome_counts
+    # Variant metrics may name their column per metric (any group-by dimension
+    # qualifies), so a processor-level variant_column is a default, not a gate.
+    has_variant = has_outcome_counts and bool(
+        extra.get("variant_column") or getattr(processor, "group_by", None)
+    )
     stages = funnel_stage_names(processor)
 
     if processor.kind == "score_distribution":
@@ -2649,12 +2661,17 @@ def delete_source_cascade(
 def delete_processor_cascade(
     workspace: str | Path,
     processor_id: str,
+    *,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
 ) -> ProcessorCascadePlan:
     """Delete exactly one processor and every catalog definition that depends on it.
 
     Persisted aggregates and run metadata intentionally remain untouched. The
     catalog and Chat-description writes share one rollback boundary and the
-    resulting workspace is validated before commit.
+    resulting workspace is validated before commit. ``source_columns_by_id``
+    provides the same observed-schema context authoring transactions use, so a
+    delete is not rolled back over columns the remaining catalog can no longer
+    seed by declaration alone.
     """
 
     catalog = load(workspace)
@@ -2709,7 +2726,7 @@ def delete_processor_cascade(
             processor_ids={plan.processor_id},
             metric_ids=metric_ids,
         )
-        require_valid_workspace(workspace)
+        require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
     return plan
 
 
@@ -2718,6 +2735,7 @@ def delete_metric_definition(
     metric_id: str,
     *,
     cascade_tiles: bool,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
 ) -> MetricDeletePlan:
     """Delete exactly one metric after explicit handling of its dependencies.
 
@@ -2766,8 +2784,67 @@ def delete_metric_definition(
         _write_yaml(dashboards_path, dashboards)
         _write_yaml(metrics_path, metrics)
         _remove_chat_descriptions(workspace, metric_ids={plan.metric_id})
-        require_valid_workspace(workspace)
+        require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
     return plan
+
+
+def delete_report_page(
+    workspace: str | Path,
+    dashboard_id: str,
+    page_id: str,
+    *,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+) -> None:
+    """Delete one dashboard page (and its tiles); drop the dashboard when empty."""
+
+    with workspace_configuration_transaction(workspace):
+        dashboards_path = _catalog_file(workspace, "dashboards.yaml")
+        data = _read_yaml(dashboards_path)
+        dashboards = data.get("dashboards", [])
+        if not isinstance(dashboards, list):
+            raise ValueError("dashboards.yaml must contain a list at `dashboards`")
+        dashboard = next(
+            (entry for entry in dashboards if entry.get("id") == dashboard_id), None
+        )
+        if dashboard is None:
+            raise ValueError(f"dashboard {dashboard_id!r} was not found")
+        pages = dashboard.get("pages", [])
+        if not isinstance(pages, list) or not any(
+            page.get("id") == page_id for page in pages
+        ):
+            raise ValueError(f"page {page_id!r} was not found in dashboard {dashboard_id!r}")
+        dashboard["pages"] = [page for page in pages if page.get("id") != page_id]
+        if not dashboard["pages"]:
+            data["dashboards"] = [
+                entry for entry in dashboards if entry.get("id") != dashboard_id
+            ]
+        model.Dashboards.model_validate(data)
+        _write_yaml(dashboards_path, data)
+        require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
+
+
+def delete_dashboard(
+    workspace: str | Path,
+    dashboard_id: str,
+    *,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+) -> None:
+    """Delete one dashboard with all of its pages and tiles."""
+
+    with workspace_configuration_transaction(workspace):
+        dashboards_path = _catalog_file(workspace, "dashboards.yaml")
+        data = _read_yaml(dashboards_path)
+        dashboards = data.get("dashboards", [])
+        if not isinstance(dashboards, list):
+            raise ValueError("dashboards.yaml must contain a list at `dashboards`")
+        if not any(entry.get("id") == dashboard_id for entry in dashboards):
+            raise ValueError(f"dashboard {dashboard_id!r} was not found")
+        data["dashboards"] = [
+            entry for entry in dashboards if entry.get("id") != dashboard_id
+        ]
+        model.Dashboards.model_validate(data)
+        _write_yaml(dashboards_path, data)
+        require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
 
 
 def _dimension_key(value: str) -> str:
@@ -2996,6 +3073,65 @@ def write_processor_definition(
     _write_yaml(path, data)
 
 
+def rename_processor_definition(
+    workspace: str | Path,
+    old_id: str,
+    processor_def: dict[str, Any],
+    *,
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+) -> None:
+    """Rename one processor: rewrite it in place and retarget metric sources.
+
+    Editing an ID previously wrote the definition under the new id and left
+    the old one behind as a copy. A rename keeps exactly one definition,
+    updates every metric whose ``source`` referenced the old id, and validates
+    the workspace inside one rollback boundary.
+    """
+
+    new_id = str(processor_def.get("id", "")).strip()
+    if not new_id:
+        raise ValueError("processor definition must include `id`")
+    if new_id == old_id:
+        write_processor_definition(workspace, processor_def)
+        return
+
+    with workspace_configuration_transaction(workspace):
+        processors_path = _catalog_file(workspace, "processors.yaml")
+        processors = _read_yaml(processors_path)
+        processor_defs = processors.get("processors", [])
+        if not isinstance(processor_defs, list):
+            raise ValueError("processors.yaml must contain a list at `processors`")
+        if any(entry.get("id") == new_id for entry in processor_defs):
+            raise ValueError(
+                f"processor id {new_id!r} already exists; pick a different id to rename "
+                f"{old_id!r}"
+            )
+        replaced = False
+        for index, entry in enumerate(processor_defs):
+            if entry.get("id") == old_id:
+                processor_defs[index] = processor_def
+                replaced = True
+                break
+        if not replaced:
+            raise ValueError(f"processor {old_id!r} was not found")
+        processors["processors"] = processor_defs
+
+        metrics_path = _catalog_file(workspace, "metrics.yaml")
+        metrics = _read_yaml(metrics_path)
+        metric_defs = metrics.get("metrics", {})
+        if not isinstance(metric_defs, dict):
+            raise ValueError("metrics.yaml must contain a mapping at `metrics`")
+        for definition in metric_defs.values():
+            if isinstance(definition, dict) and definition.get("source") == old_id:
+                definition["source"] = new_id
+
+        model.Processors.model_validate(processors)
+        model.Metrics.model_validate(metrics)
+        _write_yaml(processors_path, processors)
+        _write_yaml(metrics_path, metrics)
+        require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
+
+
 def write_pipelines_definition(
     workspace: str | Path,
     pipelines_def: dict[str, Any],
@@ -3171,6 +3307,12 @@ def validate_report_candidate(
 ) -> tuple[bool, list[str]]:
     """Validate one proposed report edit against a complete in-memory catalog."""
 
+    missing = [field for field in ("id", "title", "metric", "chart") if not tile.get(field)]
+    if missing:
+        return False, [
+            "Tile YAML replaces the whole tile definition; required field(s) missing: "
+            + ", ".join(f"`{name}`" for name in missing)
+        ]
     try:
         payload = catalog.model_dump(mode="json", by_alias=True, exclude_none=True)
         dashboards_payload = cast(dict[str, Any], payload["dashboards"])
