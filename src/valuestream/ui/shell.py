@@ -117,7 +117,9 @@ def _navigation_pages(ctx: ValueStreamContext) -> list[NavigationPage]:
         NavigationPage("Home", "Home", ":material/home:", lambda: home.render(ctx), default=True),
         NavigationPage("Analysis", "Reports", ":material/area_chart:", lambda: reports.render(ctx)),
         NavigationPage("Analysis", "Chat With Data", ":material/chat:", lambda: chat.render(ctx)),
-        NavigationPage("Configuration", "Catalog", ":material/database:", lambda: catalog.render(ctx)),
+        NavigationPage(
+            "Configuration", "Catalog", ":material/database:", lambda: catalog.render(ctx)
+        ),
         NavigationPage(
             "Data Integration",
             "Data Load",
@@ -229,12 +231,15 @@ def _render_sidebar_links(
                     # Children of a section landing page read as a submenu:
                     # a spacer column insets the link and its highlight pill.
                     _, container = st.columns([0.08, 0.92], gap="small")
-                container.page_link(
-                    page_lookup[(section, page.title)],
-                    label=page.title,
-                    icon=page.icon,
-                    width="stretch",
-                )
+                state = "active" if page.title == selected_title else "idle"
+                nav_key = f"vs_nav_{state}_{_url_path(section)}_{_url_path(page.title)}"
+                with container.container(key=nav_key):
+                    st.page_link(
+                        page_lookup[(section, page.title)],
+                        label=page.title,
+                        icon=page.icon,
+                        width="stretch",
+                    )
 
 
 def _active_navigation_section(

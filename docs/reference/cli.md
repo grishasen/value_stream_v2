@@ -83,6 +83,9 @@ uv run valuestream serve WORKSPACE [--port N] [--browser/--headless]
 
 Starts the Streamlit dashboard UI for a workspace.
 
+This review branch starts the UI with the dark instrument theme so reports
+and configuration workflows can be evaluated against one deterministic palette.
+
 | Option | Default | Meaning |
 |---|---|---|
 | `--port N` | `8501` | Streamlit server port |

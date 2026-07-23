@@ -212,37 +212,46 @@ def test_dark_theme_uses_accessible_surface_ladder() -> None:
     theme_source = (UI_ROOT / "theme.py").read_text(encoding="utf-8")
 
     expected_theme_tokens = {
-        "primaryColor": "#6EA8FE",
-        "backgroundColor": "#0B1017",
-        "secondaryBackgroundColor": "#18212C",
-        "textColor": "#F3F7FB",
-        "borderColor": "#5D7186",
-        "dataframeHeaderBackgroundColor": "#18212C",
-        "blueColor": "#6EA8FE",
+        "primaryColor": "#365EDB",
+        "backgroundColor": "#0B1220",
+        "secondaryBackgroundColor": "#1C2C43",
+        "textColor": "#F7FAFF",
+        "borderColor": "#7890AA",
+        "dataframeHeaderBackgroundColor": "#223750",
+        "blueColor": "#4B73F0",
         "violetColor": "#AD87ED",
-        "greenColor": "#4FD1C5",
-        "orangeColor": "#FF8B25",
-        "redColor": "#F14D4C",
-        "grayColor": "#A9B5C2",
+        "greenColor": "#45D6A5",
+        "orangeColor": "#F2C14E",
+        "yellowColor": "#F2C14E",
+        "redColor": "#FF8A80",
+        "grayColor": "#B8C4D2",
     }
     for key, value in expected_theme_tokens.items():
         assert dark_theme[key] == value
 
-    assert dark_sidebar["backgroundColor"] == "#0B1017"
-    assert dark_sidebar["secondaryBackgroundColor"] == "#18212C"
+    assert dark_sidebar["backgroundColor"] == "#0F1A2A"
+    assert dark_sidebar["secondaryBackgroundColor"] == "#1C2C43"
 
     for token in (
-        '"cream": "#0b1017"',
-        '"card": "#121a24"',
-        '"soft": "#18212c"',
-        '"border": "#304052"',
-        '"input-border": "#5d7186"',
-        '"action": "#6ea8fe"',
-        '"verified": "#4fd1c5"',
-        '"danger": "#f28b82"',
-        '"muted": "#a9b5c2"',
+        '"cream": "#0b1220"',
+        '"sidebar": "#0f1a2a"',
+        '"card": "#162438"',
+        '"raised": "#223750"',
+        '"soft": "#1c2c43"',
+        '"border": "#3c5573"',
+        '"input-border": "#7890aa"',
+        '"action": "#365edb"',
+        '"accent": "#22c7f3"',
+        '"verified": "#45d6a5"',
+        '"danger": "#ff8a80"',
+        '"muted": "#b8c4d2"',
     ):
         assert token in theme_source
+
+
+@pytest.mark.unit
+def test_dark_review_theme_is_deterministic() -> None:
+    assert theme._active_theme_base() == "dark"
 
 
 @pytest.mark.unit
@@ -269,8 +278,8 @@ def test_plotly_template_uses_distinct_report_colorways() -> None:
     assert dark_colorway[:2] == ["#56B4E9", "#F2C14E"]
     assert light_paper_bgcolor == "#f7f9fc"
     assert light_plot_bgcolor == "#f7f9fc"
-    assert dark_paper_bgcolor == "#0b1017"
-    assert dark_plot_bgcolor == "#0b1017"
+    assert dark_paper_bgcolor == "#0b1220"
+    assert dark_plot_bgcolor == "#0b1220"
 
 
 @pytest.mark.unit
@@ -283,8 +292,8 @@ def test_dashboard_theme_carries_app_background(monkeypatch: pytest.MonkeyPatch)
 
     assert light["paper_bgcolor"] == "#f7f9fc"
     assert light["plot_bgcolor"] == "#f7f9fc"
-    assert dark["paper_bgcolor"] == "#0b1017"
-    assert dark["plot_bgcolor"] == "#0b1017"
+    assert dark["paper_bgcolor"] == "#0b1220"
+    assert dark["plot_bgcolor"] == "#0b1220"
 
 
 @pytest.mark.unit
@@ -294,10 +303,10 @@ def test_authoring_theme_tokens_meet_wcag_aa_contrast() -> None:
         ("#52606D", "#F7F9FC"),
         ("#FFFFFF", "#275DAD"),
         ("#8C1D18", "#FFFFFF"),
-        ("#F3F7FB", "#0B1017"),
-        ("#A9B5C2", "#0B1017"),
-        ("#08101C", "#6EA8FE"),
-        ("#F28B82", "#121A24"),
+        ("#F7FAFF", "#0B1220"),
+        ("#B8C4D2", "#0B1220"),
+        ("#FFFFFF", "#365EDB"),
+        ("#FFB4AD", "#162438"),
     )
     assert all(
         _contrast_ratio(foreground, background) >= 4.5 for foreground, background in required_pairs
@@ -308,8 +317,8 @@ def test_authoring_theme_tokens_meet_wcag_aa_contrast() -> None:
     component_boundary_pairs = (
         ("#7C8CA0", "#EEF3F8"),
         ("#7C8CA0", "#FFFFFF"),
-        ("#5D7186", "#18212C"),
-        ("#5D7186", "#121A24"),
+        ("#7890AA", "#1C2C43"),
+        ("#7890AA", "#162438"),
     )
     assert all(
         _contrast_ratio(foreground, background) >= 3.0
@@ -326,7 +335,7 @@ def test_authoring_theme_has_visible_focus_and_reduced_motion() -> None:
     assert "@media (prefers-reduced-motion: reduce)" in theme_source
     assert "Playfair" not in theme_source + config_source
     assert "DM Sans" not in theme_source + config_source
-    assert 'buttonRadius = "0.5rem"' in config_source
+    assert 'buttonRadius = "0.625rem"' in config_source
 
 
 @pytest.mark.unit
@@ -335,10 +344,12 @@ def test_theme_covers_surface_gaps_native_theming_cannot_express() -> None:
 
     for selector in (
         'div[data-testid="stMainBlockContainer"].block-container',
-        "padding-left: clamp(0.5rem, 0.8vw, 1rem) !important",
-        "max-width: 100rem !important",
+        "padding-left: clamp(0.75rem, 1.25vw, 1.5rem) !important",
+        "max-width: 108rem !important",
         'div[data-testid="stBadge"]',
+        'div[class*="st-key-vs_nav_active_"] a',
         'div[data-testid="stSegmentedControl"] button[aria-checked="false"]',
+        'div[data-testid="stTextInputRootElement"]:focus-within',
         'body > div:has([data-testid="stSelectboxVirtualDropdown"])',
         'div[class*="st-key-vs_metric_grid_"] div[data-testid="stHorizontalBlock"]',
         'div[data-testid="stVerticalBlockBorderWrapper"]:has(div[data-testid="stDataFrame"])',

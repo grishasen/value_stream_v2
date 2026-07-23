@@ -11,7 +11,9 @@ import streamlit as st
 _CHROME_TOKENS: dict[str, dict[str, str]] = {
     "light": {
         "cream": "#f7f9fc",
+        "sidebar": "#f2f5f9",
         "card": "#ffffff",
+        "raised": "#e7eef8",
         "ink": "#17202a",
         "muted": "#52606d",
         "border": "#d5dee8",
@@ -20,6 +22,7 @@ _CHROME_TOKENS: dict[str, dict[str, str]] = {
         "input-border": "#7c8ca0",
         "action": "#275dad",
         "action-hover": "#1e4a8f",
+        "accent": "#0072b2",
         "attention": "#b45309",
         "attention-soft": "#fff7ed",
         "verified": "#0f766e",
@@ -31,30 +34,37 @@ _CHROME_TOKENS: dict[str, dict[str, str]] = {
         "color-scheme": "light",
         "primary-fg": "#ffffff",
         "shadow": "rgba(23, 32, 42, 0.06)",
+        "surface-shadow": "rgba(23, 32, 42, 0.10)",
+        "glow": "rgba(0, 114, 178, 0.14)",
         "metric-delta-bg": "#e7f4f1",
     },
     "dark": {
-        "cream": "#0b1017",
-        "card": "#121a24",
-        "ink": "#f3f7fb",
-        "muted": "#a9b5c2",
-        "border": "#304052",
-        # 3.23:1 on the #18212c input fill, 3.48:1 on card.
-        "input-border": "#5d7186",
-        "action": "#6ea8fe",
-        "action-hover": "#8ebafe",
-        "attention": "#fbbf24",
+        "cream": "#0b1220",
+        "sidebar": "#0f1a2a",
+        "card": "#162438",
+        "raised": "#223750",
+        "ink": "#f7faff",
+        "muted": "#b8c4d2",
+        "border": "#3c5573",
+        # High-contrast field boundary across #1c2c43 inputs and #162438 cards.
+        "input-border": "#7890aa",
+        "action": "#365edb",
+        "action-hover": "#4b73f0",
+        "accent": "#22c7f3",
+        "attention": "#f2c14e",
         "attention-soft": "rgba(245, 158, 11, 0.12)",
-        "verified": "#4fd1c5",
-        "danger": "#f28b82",
-        "danger-soft": "#3a1512",
-        "danger-ink": "#f28b82",
-        "sage": "#18263a",
-        "soft": "#18212c",
+        "verified": "#45d6a5",
+        "danger": "#ff8a80",
+        "danger-soft": "#3b1f26",
+        "danger-ink": "#ffb4ad",
+        "sage": "#1a3348",
+        "soft": "#1c2c43",
         "color-scheme": "dark",
-        "primary-fg": "#08101c",
-        "shadow": "rgba(0, 0, 0, 0.32)",
-        "metric-delta-bg": "rgba(79, 209, 197, 0.16)",
+        "primary-fg": "#ffffff",
+        "shadow": "rgba(0, 0, 0, 0.42)",
+        "surface-shadow": "rgba(0, 0, 0, 0.55)",
+        "glow": "rgba(34, 199, 243, 0.18)",
+        "metric-delta-bg": "rgba(69, 214, 165, 0.16)",
     },
 }
 
@@ -90,19 +100,13 @@ PLOTLY_LIGHT_COLORWAY = [
 
 
 def _active_theme_base() -> str:
-    """Resolve the theme actually rendered in the user's browser session.
+    """Return the theme rendered by the isolated dark-theme review branch.
 
-    ``st.context.theme.type`` reflects the per-session theme (including the
-    browser's ``prefers-color-scheme`` resolution); the server-level
-    ``theme.base`` option is only a fallback outside a script run.
+    Streamlit uses its light rendering engine for startup compatibility, but
+    both native theme tables and the application chrome carry the same dark
+    tokens. Keeping the branch dark-only makes the visual review deterministic.
     """
-    base: str | None
-    try:
-        base = st.context.theme.type
-    except Exception:  # pragma: no cover - bare-mode/test fallback
-        base = None
-    base = base or st.get_option("theme.base") or "light"
-    return "dark" if base == "dark" else "light"
+    return "dark"
 
 
 def apply_app_chrome_tuning() -> None:
@@ -124,29 +128,33 @@ __VS_ACTIVE_CSS_VARS__
             background: var(--vs-cream);
             color: var(--vs-ink);
             color-scheme: var(--vs-color-scheme);
+            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
 
-        div[data-testid="stAppViewContainer"],
-        div[data-testid="stHeader"] {
+        div[data-testid="stAppViewContainer"] {
             background: var(--vs-cream);
         }
 
+        div[data-testid="stHeader"] {
+            background: transparent;
+        }
+
         .block-container {
-            padding-top: 0.75rem;
-            padding-bottom: 2.5rem;
-            padding-left: clamp(0.5rem, 0.8vw, 1rem) !important;
-            padding-right: clamp(0.5rem, 0.8vw, 1rem) !important;
-            max-width: 100rem !important;
+            padding-top: 1rem;
+            padding-bottom: 3rem;
+            padding-left: clamp(0.75rem, 1.25vw, 1.5rem) !important;
+            padding-right: clamp(0.75rem, 1.25vw, 1.5rem) !important;
+            max-width: 108rem !important;
             width: 100% !important;
             margin-left: auto;
             margin-right: auto;
         }
 
         div[data-testid="stMainBlockContainer"].block-container {
-            padding-top: 0.75rem !important;
-            padding-left: clamp(0.5rem, 0.8vw, 1rem) !important;
-            padding-right: clamp(0.5rem, 0.8vw, 1rem) !important;
-            max-width: 100rem !important;
+            padding-top: 1rem !important;
+            padding-left: clamp(0.75rem, 1.25vw, 1.5rem) !important;
+            padding-right: clamp(0.75rem, 1.25vw, 1.5rem) !important;
+            max-width: 108rem !important;
             width: 100% !important;
             margin-left: auto !important;
             margin-right: auto !important;
@@ -155,9 +163,9 @@ __VS_ACTIVE_CSS_VARS__
         .block-container h1,
         .block-container h2 {
             color: var(--vs-ink);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            font-weight: 650;
-            letter-spacing: -0.025em;
+            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 700;
+            letter-spacing: -0.035em;
             padding-top: 0;
         }
 
@@ -180,9 +188,9 @@ __VS_ACTIVE_CSS_VARS__
         .block-container h4,
         .block-container h5 {
             color: var(--vs-ink);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             font-weight: 650;
-            letter-spacing: -0.01em;
+            letter-spacing: -0.02em;
         }
 
         .block-container p,
@@ -236,9 +244,10 @@ __VS_ACTIVE_CSS_VARS__
         }
 
         section[data-testid="stSidebar"] div[data-testid="stSidebarContent"] {
-            background: var(--vs-cream);
-            padding-top: 2rem;
+            background: var(--vs-sidebar);
+            padding-top: 2.25rem;
             border-right: 1px solid var(--vs-border);
+            box-shadow: 0.7rem 0 2.2rem -1.8rem var(--vs-surface-shadow);
         }
 
         section[data-testid="stSidebar"] div[data-testid="stSidebarHeader"] {
@@ -252,10 +261,10 @@ __VS_ACTIVE_CSS_VARS__
 
         section[data-testid="stSidebar"] div[class*="st-key-vs_brand"] p {
             color: var(--vs-ink);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            font-weight: 700;
-            font-size: 1.4rem;
-            letter-spacing: -0.025em;
+            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 750;
+            font-size: 1.45rem;
+            letter-spacing: -0.035em;
             line-height: 1.15;
             margin-bottom: 0.2rem;
         }
@@ -263,7 +272,7 @@ __VS_ACTIVE_CSS_VARS__
         section[data-testid="stSidebar"] details,
         section[data-testid="stSidebar"] details > summary,
         section[data-testid="stSidebar"] div[data-testid="stExpanderDetails"] {
-            background: var(--vs-card) !important;
+            background: var(--vs-soft) !important;
             border-color: var(--vs-border) !important;
             color: var(--vs-ink) !important;
         }
@@ -273,11 +282,80 @@ __VS_ACTIVE_CSS_VARS__
             color: var(--vs-muted) !important;
         }
 
+        section[data-testid="stSidebar"] div[data-testid="stPageLink"] a {
+            border: 1px solid transparent;
+            border-radius: 0.7rem;
+            color: var(--vs-muted);
+            min-height: 2.4rem;
+            transition:
+                background-color 140ms ease,
+                border-color 140ms ease,
+                color 140ms ease;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stPageLink"] a:hover {
+            background: var(--vs-raised);
+            border-color: var(--vs-border);
+            color: var(--vs-ink);
+        }
+
+        /* The keyed active-page container carries the cyan signal rail. */
+        section[data-testid="stSidebar"] div[class*="st-key-vs_nav_active_"] a {
+            background: var(--vs-raised) !important;
+            border-color: var(--vs-border) !important;
+            border-left: 0.22rem solid var(--vs-accent) !important;
+            box-shadow: 0 0.55rem 1.25rem -0.8rem var(--vs-glow);
+            color: var(--vs-ink) !important;
+            opacity: 1 !important;
+        }
+
+        section[data-testid="stSidebar"] div[class*="st-key-vs_nav_active_"] a p {
+            color: var(--vs-ink) !important;
+            font-weight: 700;
+        }
+
+        section[data-testid="stSidebar"] div[class*="st-key-vs_nav_active_"] a [data-testid="stIconMaterial"] {
+            color: var(--vs-accent) !important;
+            opacity: 1 !important;
+        }
+
+        div[data-testid="stTextInputRootElement"],
+        div[data-testid="stTextAreaRootElement"],
+        div[data-testid="stSelectbox"] [role="combobox"],
+        div[data-testid="stNumberInputContainer"],
+        div[data-testid="stDateInput"] > div {
+            background: var(--vs-soft) !important;
+            border-color: var(--vs-input-border) !important;
+            border-radius: 0.7rem !important;
+            box-shadow: none !important;
+        }
+
+        input,
+        textarea,
+        div[data-testid="stSelectbox"] [role="combobox"] {
+            color: var(--vs-ink) !important;
+            caret-color: var(--vs-accent);
+        }
+
+        input::placeholder,
+        textarea::placeholder {
+            color: var(--vs-muted) !important;
+            opacity: 0.86;
+        }
+
+        div[data-testid="stTextInputRootElement"]:focus-within,
+        div[data-testid="stTextAreaRootElement"]:focus-within,
+        div[data-testid="stSelectbox"]:focus-within [role="combobox"],
+        div[data-testid="stNumberInputContainer"]:focus-within {
+            border-color: var(--vs-accent) !important;
+            box-shadow: 0 0 0 0.15rem var(--vs-glow) !important;
+        }
+
         div[data-testid="stVerticalBlockBorderWrapper"] {
             background: var(--vs-card);
             border-color: var(--vs-border);
-            border-radius: 0.75rem;
-            box-shadow: 0 1px 2px var(--vs-shadow);
+            border-radius: 1rem;
+            box-shadow: 0 0.85rem 2rem -1.35rem var(--vs-surface-shadow);
         }
 
         div[data-testid="stMetric"] label p {
@@ -286,8 +364,8 @@ __VS_ACTIVE_CSS_VARS__
 
         div[data-testid="stMetric"] [data-testid="stMetricValue"] {
             color: var(--vs-ink);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            font-weight: 600;
+            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-weight: 650;
         }
 
         div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
@@ -299,16 +377,73 @@ __VS_ACTIVE_CSS_VARS__
             width: fit-content;
         }
 
-        button[kind="secondary"] {
+        div[data-testid="stAlert"] {
+            background: var(--vs-soft);
+            border-color: var(--vs-border);
+            border-radius: 0.8rem;
+            color: var(--vs-ink);
+        }
+
+        div[data-testid="stAlert"] p {
+            color: var(--vs-ink) !important;
+        }
+
+        div[data-testid="stTabs"] [role="tablist"] {
+            background: var(--vs-soft);
+            border: 1px solid var(--vs-border);
+            border-radius: 0.75rem;
+            padding: 0.2rem;
+        }
+
+        div[data-testid="stTabs"] [role="tab"] {
+            border-radius: 0.55rem;
+            color: var(--vs-muted);
+        }
+
+        div[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+            background: var(--vs-raised);
+            color: var(--vs-ink);
+        }
+
+        div[data-testid="stPopoverBody"],
+        div[data-testid="stDialog"],
+        div[role="dialog"] {
             background: var(--vs-card) !important;
             border-color: var(--vs-border) !important;
             color: var(--vs-ink) !important;
+        }
+
+        button[kind="secondary"] {
+            background: var(--vs-soft) !important;
+            border-color: var(--vs-border) !important;
+            color: var(--vs-ink) !important;
+        }
+
+        button[kind="primary"]:not(:disabled) {
+            background-color: var(--vs-action) !important;
+            border-color: var(--vs-action) !important;
+            box-shadow: 0 0.5rem 1.25rem -0.65rem var(--vs-glow);
         }
 
         button[kind="primary"]:hover:not(:disabled),
         button[kind="primary"]:active:not(:disabled) {
             background-color: var(--vs-action-hover) !important;
             border-color: var(--vs-action-hover) !important;
+            box-shadow: 0 0.65rem 1.5rem -0.65rem var(--vs-glow);
+        }
+
+        button[kind="secondary"]:hover:not(:disabled) {
+            background: var(--vs-raised) !important;
+            border-color: var(--vs-accent) !important;
+        }
+
+        button {
+            border-radius: 0.65rem !important;
+            font-weight: 600 !important;
+            transition:
+                background-color 140ms ease,
+                border-color 140ms ease,
+                box-shadow 140ms ease;
         }
 
         /*
@@ -592,7 +727,7 @@ def init_plotly_theme() -> None:
         pio.templates[f"valuestream_{base}"] = template
     # Alias kept for catalogs that persisted the pre-split template name; the
     # process default is only a fallback for theme-less renders.
-    server_base = "dark" if (st.get_option("theme.base") or "light") == "dark" else "light"
+    server_base = _active_theme_base()
     pio.templates["valuestream"] = pio.templates[f"valuestream_{server_base}"]
     pio.templates.default = f"valuestream_{server_base}"
 
