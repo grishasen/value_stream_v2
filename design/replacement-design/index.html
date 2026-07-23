@@ -5161,7 +5161,7 @@ failure of that fallback fails the whole chunk.</p>
 <ol>
 <li>Resolve <code>metric</code> → processor + grain.</li>
 <li>Resolve <code>chart</code> → Plotly figure factory (<code>line, bar, treemap, heatmap, scatter, bar_polar, gauge, funnel, boxplot, histogram, rfm_density, calibration_curve, exposure, corr, model</code>).</li>
-<li>Pull data via the SDK with the tile's <code>group_by/filters/time_range</code>.</li>
+<li>Pull data via the SDK with the tile's <code>group_by/filters</code> and the page's selected date bounds.</li>
 <li>Pass into the figure factory.</li>
 <li>Render with <code>st.plotly_chart(fig, use_container_width=True)</code>.</li>
 </ol>
@@ -5707,7 +5707,6 @@ and generated-code analysis remain later surfaces. See
 <span class="w">            </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">UniqueCustomers</span>
 <span class="w">            </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gauge</span>
 <span class="w">            </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">UniqueCustomers</span>
-<span class="w">            </span><span class="nt">time_range</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">last</span><span class="p">:</span><span class="w"> </span><span class="nv">30d</span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <hr />
 <h2 id="appendix-b-duckdb-ddl-for-engagement-aggregate">Appendix B — DuckDB DDL for engagement aggregate<a class="headerlink" href="#appendix-b-duckdb-ddl-for-engagement-aggregate" title="Permanent link">&para;</a></h2>

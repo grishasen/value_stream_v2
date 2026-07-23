@@ -2110,10 +2110,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#317-descriptive_line-descriptive_boxplot-descriptive_histogram-descriptive_heatmap-descriptive_funnel" class="md-nav__link">
+  <a href="#317-descriptive_line-descriptive_histogram-descriptive_heatmap-descriptive_funnel" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3.17 descriptive_line / descriptive_boxplot / descriptive_histogram / descriptive_heatmap / descriptive_funnel
+        3.17 descriptive_line / descriptive_histogram / descriptive_heatmap / descriptive_funnel
       
     </span>
   </a>
@@ -2715,10 +2715,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#317-descriptive_line-descriptive_boxplot-descriptive_histogram-descriptive_heatmap-descriptive_funnel" class="md-nav__link">
+  <a href="#317-descriptive_line-descriptive_histogram-descriptive_heatmap-descriptive_funnel" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3.17 descriptive_line / descriptive_boxplot / descriptive_histogram / descriptive_heatmap / descriptive_funnel
+        3.17 descriptive_line / descriptive_histogram / descriptive_heatmap / descriptive_funnel
       
     </span>
   </a>
@@ -2887,7 +2887,6 @@ input and does not perform option lookup.</p>
 <span class="w">    </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;metric id&gt;</span><span class="w">          </span><span class="c1"># required</span>
 <span class="w">    </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;chart kind&gt;</span><span class="w">          </span><span class="c1"># required (key in this catalog)</span>
 <span class="w">    </span><span class="c1"># chart-specific fields below ...</span>
-<span class="w">    </span><span class="nt">time_range</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> last</span><span class="p">:</span><span class="w"> </span><span class="nv">30d</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">    </span><span class="c1"># optional, overrides dashboard default</span>
 <span class="w">    </span><span class="nt">filters</span><span class="p">:</span><span class="w">                     </span><span class="c1"># optional, AND-ed with dashboard filters</span>
 <span class="w">      </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;Web&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;Mobile&quot;</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;string&gt;</span><span class="w">        </span><span class="c1"># optional</span>
@@ -2895,6 +2894,12 @@ input and does not perform option lookup.</p>
 <span class="w">    </span><span class="nt">scale_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">absolute</span><span class="w">         </span><span class="c1"># absolute | index_100 | percent_change</span>
 </code></pre></div>
 <p>Tile-level filters are passed straight to the metric query as <code>filters</code>.</p>
+<p>The Configuration Builder and catalog validator use the same chart-field
+contract. A tile is rejected when it uses an unsupported key, a field with the
+wrong shape, a chart that is incompatible with the metric's processor or metric
+kind, or a field that the selected metric cannot expose. Raw YAML supports the
+same contract as Visual mode; it is an editing escape hatch, not a way to bypass
+validation.</p>
 <p>The chart factory receives <code>(rows: pl.DataFrame, tile: dict, plan: PlanInfo)</code> and returns a <code>plotly.graph_objects.Figure</code>.</p>
 <hr />
 <h2 id="2-common-tile-fields">2. Common Tile fields<a class="headerlink" href="#2-common-tile-fields" title="Permanent link">&para;</a></h2>
@@ -3256,7 +3261,8 @@ Bars can also be sorted and capped:</p>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="39-boxplot">3.9 <code>boxplot</code><a class="headerlink" href="#39-boxplot" title="Permanent link">&para;</a></h3>
-<p>Required: <code>x, y</code>. Optional: <code>color, facet_row, facet_col</code>.</p>
+<p>Required: <code>x</code> and a <code>tdigest_quantile</code> metric. Optional: <code>color, facet_row,
+facet_col</code>.</p>
 <p>Boxplots are reconstructed from <code>&lt;prop&gt;_p25, &lt;prop&gt;_Median, &lt;prop&gt;_p75, &lt;prop&gt;_Min, &lt;prop&gt;_Max</code> (or t-digest quantiles) — the metric output already exposes those.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">()</span>
 <span class="k">for</span> <span class="n">group</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">partition_by</span><span class="p">(</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;color&quot;</span><span class="p">),</span> <span class="n">as_dict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
@@ -3333,7 +3339,7 @@ Bars can also be sorted and capped:</p>
     <span class="n">horizon</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;frequency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;recency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;tenure&quot;</span><span class="p">]))</span>
 <span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">x</span><span class="o">=</span><span class="s2">&quot;frequency&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;predicted_purchases&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;rfm_segment&quot;</span><span class="p">)</span>
 </code></pre></div>
-<h3 id="317-descriptive_line-descriptive_boxplot-descriptive_histogram-descriptive_heatmap-descriptive_funnel">3.17 <code>descriptive_line</code> / <code>descriptive_boxplot</code> / <code>descriptive_histogram</code> / <code>descriptive_heatmap</code> / <code>descriptive_funnel</code><a class="headerlink" href="#317-descriptive_line-descriptive_boxplot-descriptive_histogram-descriptive_heatmap-descriptive_funnel" title="Permanent link">&para;</a></h3>
+<h3 id="317-descriptive_line-descriptive_histogram-descriptive_heatmap-descriptive_funnel">3.17 <code>descriptive_line</code> / <code>descriptive_histogram</code> / <code>descriptive_heatmap</code> / <code>descriptive_funnel</code><a class="headerlink" href="#317-descriptive_line-descriptive_histogram-descriptive_heatmap-descriptive_funnel" title="Permanent link">&para;</a></h3>
 <p>Specializations for <code>numeric_distribution</code> metrics. Required Tile fields differ:</p>
 <table>
 <thead>
@@ -3346,10 +3352,6 @@ Bars can also be sorted and capped:</p>
 <tr>
 <td><code>descriptive_line</code></td>
 <td><code>x, property, score</code> (e.g. <code>score: Mean</code>)</td>
-</tr>
-<tr>
-<td><code>descriptive_boxplot</code></td>
-<td><code>x, property</code></td>
 </tr>
 <tr>
 <td><code>descriptive_histogram</code></td>

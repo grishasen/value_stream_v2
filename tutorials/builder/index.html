@@ -2504,8 +2504,9 @@ editor fills both state references while preserving manual selection for custom
 state names.</p>
 <h2 id="4-build-a-report-tile">4. Build a report tile<a class="headerlink" href="#4-build-a-report-tile" title="Permanent link">&para;</a></h2>
 <p>Continue to <strong>Reports / Tiles</strong>. Choose a dashboard and page, or create a new
-target, then configure the tile. Existing tiles keep their IDs; new dashboard,
-page, and tile IDs are generated from their display names.</p>
+target, then configure the tile. Dashboard titles and <code>tabs</code>, <code>grid</code>, or
+<code>stacked</code> layout are editable alongside page titles. Existing tiles keep their
+IDs; new dashboard, page, and tile IDs are generated from their display names.</p>
 <p>Use <strong>Page filters and time range</strong> to set filter order, label, placement,
 control type, coverage, date presets, and the default preset. An <code>all_tiles</code>
 filter must be persisted by every tile processor; use <code>compatible_tiles</code> when
@@ -2519,9 +2520,12 @@ guesses an aggregation to turn another chart into a KPI.</p>
 visual report library. The stored catalog kind, such as <code>bar_polar</code>, appears as
 secondary technical detail and is unchanged when you save the tile.</p>
 <p>Choose the one <strong>Apply to workspace</strong> action. The tile and page settings are
-written and validated together. Then choose <strong>Open report</strong>. Browse the
-searchable, human-readable <strong>Report inventory</strong> when you need to locate another
-configured object; enable technical IDs only for exact catalog work.</p>
+validated as a complete catalog before Apply, then written and validated
+together. Visual mode preserves chart settings it does not own; use Raw YAML
+when you need to edit those uncommon settings directly. Then choose <strong>Open
+report</strong>. Browse the searchable, human-readable <strong>Report inventory</strong> when you
+need to locate another configured object; enable technical IDs only for exact
+catalog work.</p>
 <h2 id="5-review-chat-and-workspace-settings">5. Review chat and workspace settings<a class="headerlink" href="#5-review-chat-and-workspace-settings" title="Permanent link">&para;</a></h2>
 <p>In <strong>Chat Review</strong>, review which aggregate metrics are available to Chat With
 Data. Edit the chat-only agent prompt and dataset or metric descriptions to
