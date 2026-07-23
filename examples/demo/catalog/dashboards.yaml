@@ -438,10 +438,10 @@ dashboards:
       property: VS_ResponseTime
       score: P95
       color: Channel
-    - id: response_time_descriptive_boxplot
-      title: Response Time Descriptive Boxplot
+    - id: response_time_boxplot_by_outcome
+      title: Response Time Boxplot by Outcome
       metric: VS_ResponseTime_P95
-      chart: descriptive_boxplot
+      chart: boxplot
       property: ResponseTime
       x: Outcome
       color: Channel

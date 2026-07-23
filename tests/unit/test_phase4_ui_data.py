@@ -1088,7 +1088,8 @@ def test_descriptive_report_pages_default_to_advanced_mode() -> None:
                     "id": "quartiles",
                     "title": "Quartiles",
                     "metric": "ResponseP50",
-                    "chart": "descriptive_boxplot",
+                    "chart": "boxplot",
+                    "x": "Month",
                     "property": "ResponseTime",
                 }
             ],

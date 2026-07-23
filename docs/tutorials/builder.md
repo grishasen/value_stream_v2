@@ -144,8 +144,9 @@ state names.
 ## 4. Build a report tile
 
 Continue to **Reports / Tiles**. Choose a dashboard and page, or create a new
-target, then configure the tile. Existing tiles keep their IDs; new dashboard,
-page, and tile IDs are generated from their display names.
+target, then configure the tile. Dashboard titles and `tabs`, `grid`, or
+`stacked` layout are editable alongside page titles. Existing tiles keep their
+IDs; new dashboard, page, and tile IDs are generated from their display names.
 
 Use **Page filters and time range** to set filter order, label, placement,
 control type, coverage, date presets, and the default preset. An `all_tiles`
@@ -163,9 +164,12 @@ visual report library. The stored catalog kind, such as `bar_polar`, appears as
 secondary technical detail and is unchanged when you save the tile.
 
 Choose the one **Apply to workspace** action. The tile and page settings are
-written and validated together. Then choose **Open report**. Browse the
-searchable, human-readable **Report inventory** when you need to locate another
-configured object; enable technical IDs only for exact catalog work.
+validated as a complete catalog before Apply, then written and validated
+together. Visual mode preserves chart settings it does not own; use Raw YAML
+when you need to edit those uncommon settings directly. Then choose **Open
+report**. Browse the searchable, human-readable **Report inventory** when you
+need to locate another configured object; enable technical IDs only for exact
+catalog work.
 
 ## 5. Review chat and workspace settings
 

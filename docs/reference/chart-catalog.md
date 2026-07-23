@@ -49,7 +49,6 @@ tiles:
     metric: <metric id>          # required
     chart: <chart kind>          # required (key in this catalog)
     # chart-specific fields below ...
-    time_range: { last: 30d }    # optional, overrides dashboard default
     filters:                     # optional, AND-ed with dashboard filters
       channel: ["Web", "Mobile"]
     description: <string>        # optional
@@ -58,6 +57,13 @@ tiles:
 ```
 
 Tile-level filters are passed straight to the metric query as `filters`.
+
+The Configuration Builder and catalog validator use the same chart-field
+contract. A tile is rejected when it uses an unsupported key, a field with the
+wrong shape, a chart that is incompatible with the metric's processor or metric
+kind, or a field that the selected metric cannot expose. Raw YAML supports the
+same contract as Visual mode; it is an editing escape hatch, not a way to bypass
+validation.
 
 The chart factory receives `(rows: pl.DataFrame, tile: dict, plan: PlanInfo)` and returns a `plotly.graph_objects.Figure`.
 
@@ -283,7 +289,8 @@ fig = px.funnel(
 
 ### 3.9 `boxplot`
 
-Required: `x, y`. Optional: `color, facet_row, facet_col`.
+Required: `x` and a `tdigest_quantile` metric. Optional: `color, facet_row,
+facet_col`.
 
 Boxplots are reconstructed from `<prop>_p25, <prop>_Median, <prop>_p75, <prop>_Min, <prop>_Max` (or t-digest quantiles) — the metric output already exposes those.
 
@@ -396,14 +403,13 @@ df = df.with_columns(predicted_purchases = bgnbd.conditional_expected_number_of_
 fig = px.scatter(df.to_pandas(), x="frequency", y="predicted_purchases", color="rfm_segment")
 ```
 
-### 3.17 `descriptive_line` / `descriptive_boxplot` / `descriptive_histogram` / `descriptive_heatmap` / `descriptive_funnel`
+### 3.17 `descriptive_line` / `descriptive_histogram` / `descriptive_heatmap` / `descriptive_funnel`
 
 Specializations for `numeric_distribution` metrics. Required Tile fields differ:
 
 | Variant | Required |
 |---|---|
 | `descriptive_line` | `x, property, score` (e.g. `score: Mean`) |
-| `descriptive_boxplot` | `x, property` |
 | `descriptive_histogram` | `property` |
 | `descriptive_heatmap` | `x, y, property, score` |
 | `descriptive_funnel` | `x, color, stages` |

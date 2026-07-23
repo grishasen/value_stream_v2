@@ -124,15 +124,6 @@ SUPPORTED_CHART_CASES = [
     ),
     (
         {
-            "chart": "descriptive_boxplot",
-            "title": "DBox",
-            "x": "Channel",
-            "property": "ResponseTime",
-        },
-        "box",
-    ),
-    (
-        {
             "chart": "descriptive_histogram",
             "title": "DHist",
             "property": "ResponseTime",
@@ -1114,7 +1105,7 @@ def test_colored_quantile_boxplots_render_in_group_mode() -> None:
         {
             "id": "descriptive_box",
             "metric": "Propensity",
-            "chart": "descriptive_boxplot",
+            "chart": "boxplot",
             "title": "Quartiles",
             "x": "Month",
             "property": "Propensity",
@@ -1166,7 +1157,7 @@ def test_quantile_boxplots_render_faceted_grouped_subplots() -> None:
         {
             "id": "descriptive_box",
             "metric": "Propensity",
-            "chart": "descriptive_boxplot",
+            "chart": "boxplot",
             "title": "Quartiles",
             "x": "Month",
             "property": "Propensity",

@@ -26,7 +26,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from valuestream.charts.recipes import (
+    RECIPES,
+    SUPPORTED_TILE_FIELDS,
+    TILE_REQUIRED_ALTERNATIVES,
+)
 from valuestream.config import model
+from valuestream.config.report_fields import report_field_options
 from valuestream.expr import ast as expr_ast
 from valuestream.expr.parser import ParseError
 from valuestream.expr.parser import parse as parse_expr
@@ -57,41 +63,6 @@ _STATE_TYPE_DTYPE: Mapping[str, expr_ast.Dtype] = {
     "topk": "String",
 }
 
-# Each tuple is one required role; aliases reflect what the chart factory
-# actually accepts (for example treemap path may be authored as ``x``).
-_TILE_REQUIRED_ALTERNATIVES: Mapping[str, tuple[tuple[str, ...], ...]] = {
-    "line": (("x",), ("y",)),
-    "stacked_area": (("x",), ("y",), ("color",)),
-    "bar": (("x",), ("y",)),
-    "kpi_card": (("value", "y"),),
-    "waterfall": (("x",), ("y",)),
-    "pareto": (("x",), ("y",)),
-    "treemap": (("path", "x", "names"),),
-    "heatmap": (("x",), ("y",), ("color",)),
-    "cohort_heatmap": (("x",), ("y",), ("color",)),
-    "scatter": (("x",), ("y",)),
-    "combo": (("x",), ("y",), ("y2",)),
-    "interval": (("x",), ("y",)),
-    "donut": (("names", "x"), ("values", "value", "y")),
-    "calendar_heatmap": (("date", "x"), ("value", "y")),
-    "bar_polar": (("r",), ("theta",), ("color",)),
-    "sankey": (("source",), ("target",), ("value",)),
-    "gauge": (("value", "y"),),
-    "funnel": (("stages",), ("color",)),
-    "boxplot": (("x",), ("y", "property")),
-    "histogram": (("property", "x", "y"),),
-    "corr": (("x",), ("y",)),
-    "descriptive_line": (("x",), ("property",), ("score",)),
-    "descriptive_boxplot": (("x",), ("property", "y")),
-    "descriptive_histogram": (("property", "x", "y"),),
-    "descriptive_heatmap": (("x",), ("y",), ("property",), ("score",)),
-    "descriptive_funnel": (("x",), ("color",), ("stages",)),
-    "experiment_z_score": (("x",), ("y",)),
-    "experiment_odds_ratio": (("x",), ("y",)),
-    "clv_treemap": (("path", "x", "names"),),
-}
-
-
 @dataclass(frozen=True)
 class CatalogIssue:
     """One catalog-level validation finding."""
@@ -114,7 +85,7 @@ class CatalogValidationResult:
 
 
 @timed
-def validate_catalog(
+def validate_catalog(  # noqa: PLR0915
     catalog: model.Catalog,
     *,
     source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
@@ -135,6 +106,14 @@ def validate_catalog(
     processor_by_id = {p.id: p for p in catalog.processors.processors}
     processor_ids = {p.id for p in catalog.processors.processors}
     metric_names = set(catalog.metrics.metrics.keys())
+    metric_processor_kinds = {
+        name: processor_by_id[metric.source].kind
+        for name, metric in catalog.metrics.metrics.items()
+        if metric.source in processor_by_id
+    }
+    report_fields_by_metric = {
+        name: frozenset(report_field_options(catalog, name)) for name in catalog.metrics.metrics
+    }
 
     seed_columns_by_source: dict[str, set[str]] = {}
     for processor in catalog.processors.processors:
@@ -211,7 +190,15 @@ def validate_catalog(
                             message=f"unknown metric {tile.metric!r}",
                         )
                     )
-                _validate_tile_config(dashboard.id, page.id, tile, issues, metric_kinds)
+                _validate_tile_config(
+                    dashboard.id,
+                    page.id,
+                    tile,
+                    issues,
+                    metric_kinds,
+                    metric_processor_kinds,
+                    report_fields_by_metric.get(tile.metric),
+                )
             _validate_page_filters(
                 dashboard.id,
                 page,
@@ -319,16 +306,55 @@ def _validate_tile_config(
     tile: model.Tile,
     issues: list[CatalogIssue],
     metric_kinds: Mapping[str, str] | None = None,
+    metric_processor_kinds: Mapping[str, str] | None = None,
+    report_fields: frozenset[str] | None = None,
 ) -> None:
     values = tile.model_dump(by_alias=True, exclude_none=True)
-    # A boxplot over a digest metric draws that metric's quantile suite; the
-    # property is implied by the metric, so neither y nor property is needed.
-    digest_boxplot = (
-        tile.chart == "boxplot" and (metric_kinds or {}).get(tile.metric) == "tdigest_quantile"
-    )
-    for alternatives in _TILE_REQUIRED_ALTERNATIVES.get(tile.chart, ()):
-        if digest_boxplot and set(alternatives) == {"y", "property"}:
-            continue
+    location = f"dashboards[{dashboard_id}].pages[{page_id}].tiles[{tile.id}]"
+    unknown_fields = sorted(set(values) - SUPPORTED_TILE_FIELDS)
+    for field_name in unknown_fields:
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.{field_name}",
+                message=f"unsupported tile field {field_name!r}",
+            )
+        )
+
+    recipe = RECIPES.get(tile.chart)
+    processor_kind = (metric_processor_kinds or {}).get(tile.metric)
+    if recipe is not None and processor_kind and processor_kind not in recipe.allowed_processor_kinds:
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.chart",
+                message=(
+                    f"chart {tile.chart!r} is not compatible with processor kind "
+                    f"{processor_kind!r}"
+                ),
+            )
+        )
+
+    metric_kind = (metric_kinds or {}).get(tile.metric)
+    required_metric_kinds = {
+        "calibration_curve": {"calibration_from_digests"},
+        "roc_curve": {"curve_from_digests"},
+        "precision_recall_curve": {"curve_from_digests"},
+        "gain_curve": {"curve_from_digests"},
+        "lift_curve": {"curve_from_digests"},
+        "boxplot": {"tdigest_quantile"},
+    }
+    allowed_metric_kinds = required_metric_kinds.get(tile.chart)
+    if metric_kind and allowed_metric_kinds and metric_kind not in allowed_metric_kinds:
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.metric",
+                message=(
+                    f"chart {tile.chart!r} requires metric kind "
+                    + " or ".join(repr(value) for value in sorted(allowed_metric_kinds))
+                ),
+            )
+        )
+
+    for alternatives in TILE_REQUIRED_ALTERNATIVES.get(tile.chart, ()):
         if any(_configured_tile_value(values.get(field)) for field in alternatives):
             continue
         choices = " or ".join(repr(field) for field in alternatives)
@@ -341,7 +367,8 @@ def _validate_tile_config(
                 message=f"chart {tile.chart!r} requires {choices}",
             )
         )
-    location = f"dashboards[{dashboard_id}].pages[{page_id}].tiles[{tile.id}]"
+    _validate_tile_field_shapes(values, location, issues)
+    _validate_tile_field_references(values, location, tile.metric, report_fields, issues)
     if tile.placement == "kpi_strip" and tile.chart != "kpi_card":
         issues.append(
             CatalogIssue(
@@ -388,6 +415,151 @@ def _validate_tile_config(
                 message="index_100 and percent_change scale modes require a time-series chart",
             )
         )
+
+
+def _validate_tile_field_shapes(
+    values: Mapping[str, Any],
+    location: str,
+    issues: list[CatalogIssue],
+) -> None:
+    """Validate permissive chart extras before they reach the query/render paths."""
+
+    for field_name in ("path", "columns", "group_by", "stages"):
+        value = values.get(field_name)
+        if value is None:
+            continue
+        if not isinstance(value, list) or any(
+            not isinstance(item, str) or not item.strip() for item in value
+        ):
+            issues.append(
+                CatalogIssue(
+                    location=f"{location}.{field_name}",
+                    message=f"{field_name} must be a list of non-empty strings",
+                )
+            )
+    for field_name in ("filters", "facets", "labels", "theme", "references"):
+        value = values.get(field_name)
+        if value is not None and not isinstance(value, Mapping):
+            issues.append(
+                CatalogIssue(
+                    location=f"{location}.{field_name}",
+                    message=f"{field_name} must be a mapping",
+                )
+            )
+    for field_name in ("showlegend", "log_x", "log_y", "show_trend_delta"):
+        value = values.get(field_name)
+        if value is not None and not isinstance(value, bool):
+            issues.append(
+                CatalogIssue(
+                    location=f"{location}.{field_name}",
+                    message=f"{field_name} must be a boolean",
+                )
+            )
+    conditional_formatting = values.get("conditional_formatting")
+    if conditional_formatting is not None and not isinstance(conditional_formatting, list):
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.conditional_formatting",
+                message="conditional_formatting must be a list",
+            )
+        )
+
+
+_TILE_COLUMN_FIELDS = (
+    "animation_frame",
+    "animation_group",
+    "color",
+    "columns",
+    "date",
+    "error_y",
+    "error_y_lower",
+    "error_y_minus",
+    "error_y_plus",
+    "error_y_upper",
+    "facet_col",
+    "facet_column",
+    "facet_row",
+    "field",
+    "group_by",
+    "hover_name",
+    "lat",
+    "line_y",
+    "locations",
+    "lon",
+    "names",
+    "path",
+    "property",
+    "r",
+    "size",
+    "sort_by",
+    "source",
+    "target",
+    "theta",
+    "value",
+    "values",
+    "x",
+    "y",
+    "y2",
+    "z",
+)
+
+
+def _validate_tile_field_references(
+    values: Mapping[str, Any],
+    location: str,
+    metric_name: str,
+    report_fields: frozenset[str] | None,
+    issues: list[CatalogIssue],
+) -> None:
+    """Reject field mappings that the selected metric cannot expose."""
+
+    if report_fields is None:
+        return
+    for field_name in _TILE_COLUMN_FIELDS:
+        raw = values.get(field_name)
+        configured = raw if isinstance(raw, list) else [raw]
+        for selected_field in configured:
+            if (
+                not isinstance(selected_field, str)
+                or not selected_field
+                or selected_field in report_fields
+            ):
+                continue
+            issues.append(
+                CatalogIssue(
+                    location=f"{location}.{field_name}",
+                    message=(
+                        f"field {selected_field!r} is not exposed by metric {metric_name!r}"
+                    ),
+                )
+            )
+    facets = values.get("facets")
+    if isinstance(facets, Mapping):
+        for role in ("row", "col", "column"):
+            field = facets.get(role)
+            if isinstance(field, str) and field and field not in report_fields:
+                issues.append(
+                    CatalogIssue(
+                        location=f"{location}.facets.{role}",
+                        message=f"field {field!r} is not exposed by metric {metric_name!r}",
+                    )
+                )
+    filters = values.get("filters")
+    if isinstance(filters, Mapping):
+        for selected_field in filters:
+            if (
+                isinstance(selected_field, str)
+                and selected_field
+                and selected_field not in report_fields
+            ):
+                issues.append(
+                    CatalogIssue(
+                        location=f"{location}.filters.{selected_field}",
+                        message=(
+                            f"field {selected_field!r} is not exposed by metric {metric_name!r}"
+                        ),
+                    )
+                )
 
 
 def _validate_page_filters(

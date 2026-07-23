@@ -403,7 +403,6 @@ _CHART_REQUIRED_FIELD_DICTIONARY: dict[str, Any] = {
         "corr": ["x", "y"],
         "model": [],
         "descriptive_line": ["x", "property", "score"],
-        "descriptive_boxplot": ["x", "property|y"],
         "descriptive_histogram": ["property|x|y"],
         "descriptive_heatmap": ["x", "y", "property", "score"],
         "descriptive_funnel": ["x", "color", "stages"],

@@ -18,10 +18,23 @@ from typing import Any, cast
 import polars as pl
 import yaml
 
-from valuestream.charts.recipes import RECIPES
+from valuestream.charts.recipes import (
+    CHART_OPTIONAL_FIELDS,
+    CHART_REQUIRED_FIELDS,
+    RECIPES,
+)
+from valuestream.charts.recipes import (
+    chart_field_controls as _recipe_chart_field_controls,
+)
 from valuestream.config import canonical as config_canonical
 from valuestream.config import model
 from valuestream.config.loader import CatalogLoadError, load
+from valuestream.config.report_fields import (
+    metric_output_columns as _report_metric_output_columns,
+)
+from valuestream.config.report_fields import (
+    report_field_options,
+)
 from valuestream.config.validate import validate_catalog
 from valuestream.expr import parser as expr_parser
 from valuestream.expr import translator as expr_translator
@@ -419,46 +432,6 @@ _METRIC_KIND_ORDER = (
     "formula",
 )
 
-_LIFECYCLE_OUTPUT_COLUMNS = [
-    "customers_count",
-    "unique_holdings",
-    "lifetime_value",
-    "frequency",
-    "recency",
-    "monetary_value",
-    "rfm_segment",
-    "rfm_score",
-]
-_VARIANT_OUTPUT_COLUMNS = [
-    "Count",
-    "Positives",
-    "Negatives",
-    "CTR",
-    "TestCTR",
-    "ControlCTR",
-    "TestSampleSize",
-    "ControlSampleSize",
-    "AbsoluteRateDifference",
-    "AbsoluteRateDifference_CI_Low",
-    "AbsoluteRateDifference_CI_High",
-    "Lift",
-    "Lift_Z_Score",
-    "Lift_P_Val",
-    "StdErr",
-]
-_CONTINGENCY_OUTPUT_COLUMNS = [
-    "Count",
-    "Positives",
-    "Negatives",
-    "chi2_stat",
-    "chi2_dof",
-    "chi2_p_val",
-    "g_stat",
-    "g_dof",
-    "g_p_val",
-    "z_score",
-    "z_p_val",
-]
 DESCRIPTIVE_SCALAR_SUFFIXES = ("Count", "Sum", "Mean", "Var", "Min", "Max")
 DESCRIPTIVE_QUANTILE_SCORES = ("p25", "p50", "p75", "p90", "p95")
 _DESCRIPTIVE_STATE_SUFFIXES = (
@@ -468,48 +441,6 @@ _DESCRIPTIVE_STATE_SUFFIXES = (
     "tdigest",
     "kll",
 )
-
-CHART_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
-    "line": ("x", "y"),
-    "stacked_area": ("x", "y", "color"),
-    "bar": ("x", "y"),
-    "kpi_card": ("value",),
-    "waterfall": ("x", "y"),
-    "pareto": ("x", "y"),
-    "treemap": ("path", "color"),
-    "heatmap": ("x", "y", "color"),
-    "cohort_heatmap": ("x", "y", "color"),
-    "scatter": ("x", "y"),
-    "combo": ("x", "y", "y2"),
-    "interval": ("x", "y"),
-    "donut": ("names", "values"),
-    "geo_map": ("locations", "value"),
-    "table": (),
-    "calendar_heatmap": ("date", "value"),
-    "bar_polar": ("r", "theta", "color"),
-    "sankey": ("source", "target", "value"),
-    "gauge": ("value",),
-    "funnel": ("stages", "color"),
-    "boxplot": ("x",),
-    "histogram": ("property",),
-    "calibration_curve": (),
-    "roc_curve": (),
-    "precision_recall_curve": (),
-    "gain_curve": (),
-    "lift_curve": (),
-    "rfm_density": (),
-    "exposure": (),
-    "corr": ("x", "y"),
-    "model": (),
-    "descriptive_line": ("x", "property", "score"),
-    "descriptive_boxplot": ("x", "property"),
-    "descriptive_histogram": ("property",),
-    "descriptive_heatmap": ("x", "y", "property", "score"),
-    "descriptive_funnel": ("x", "color", "stages"),
-    "experiment_z_score": ("x", "y"),
-    "experiment_odds_ratio": ("x", "y"),
-    "clv_treemap": ("path",),
-}
 
 CHART_DISPLAY_LABELS: dict[str, str] = {
     "bar": "Bar",
@@ -521,7 +452,6 @@ CHART_DISPLAY_LABELS: dict[str, str] = {
     "cohort_heatmap": "Cohort heatmap",
     "combo": "Combo",
     "corr": "Correlation",
-    "descriptive_boxplot": "Descriptive box plot",
     "descriptive_funnel": "Descriptive funnel",
     "descriptive_heatmap": "Descriptive heatmap",
     "descriptive_histogram": "Descriptive histogram",
@@ -563,7 +493,6 @@ CHART_DISPLAY_PURPOSES: dict[str, str] = {
     "cohort_heatmap": "Compare retention or behavior across cohort periods.",
     "combo": "Place two measures on coordinated bar and line axes.",
     "corr": "Scan the strength and direction of pairwise relationships.",
-    "descriptive_boxplot": "Compare aggregate distribution summaries by group.",
     "descriptive_funnel": "Follow aggregate descriptive measures through ordered stages.",
     "descriptive_heatmap": "Compare an aggregate statistic across two dimensions.",
     "descriptive_histogram": "Show the distribution of an aggregate numeric property.",
@@ -595,49 +524,6 @@ CHART_DISPLAY_PURPOSES: dict[str, str] = {
     "waterfall": "Explain how positive and negative contributions build a total.",
 }
 
-CHART_OPTIONAL_FIELDS: dict[str, tuple[str, ...]] = {
-    "line": ("color", "facet_row", "facet_col"),
-    "stacked_area": ("facet_row", "facet_col"),
-    "bar": ("color", "facet_row", "facet_col"),
-    "waterfall": ("color", "facet_row", "facet_col"),
-    "pareto": ("color", "facet_row", "facet_col"),
-    "treemap": (),
-    "heatmap": (),
-    "cohort_heatmap": (),
-    "scatter": ("color", "size", "animation_frame", "animation_group", "facet_row", "facet_col"),
-    "combo": ("color", "facet_row", "facet_col"),
-    "interval": (
-        "error_y",
-        "error_y_lower",
-        "error_y_upper",
-        "color",
-        "facet_row",
-        "facet_col",
-    ),
-    "donut": ("color",),
-    "geo_map": ("lat", "lon", "color", "size"),
-    "table": ("columns", "group_by"),
-    "gauge": ("facet_row", "facet_col"),
-    "funnel": ("facet_row", "facet_col"),
-    "boxplot": ("color", "facet_row", "facet_col"),
-    "histogram": ("color", "facet_row", "facet_col"),
-    "calibration_curve": ("color", "facet_row", "facet_col"),
-    "roc_curve": ("color", "facet_row", "facet_col"),
-    "precision_recall_curve": ("color", "facet_row", "facet_col"),
-    "gain_curve": ("color", "facet_row", "facet_col"),
-    "lift_curve": ("color", "facet_row", "facet_col"),
-    "rfm_density": ("x", "y", "color"),
-    "exposure": ("color",),
-    "model": ("color",),
-    "descriptive_line": ("color", "facet_row", "facet_col"),
-    "descriptive_boxplot": ("color", "facet_row", "facet_col"),
-    "descriptive_histogram": ("color", "facet_row", "facet_col"),
-    "descriptive_funnel": ("facet_row", "facet_col"),
-    "experiment_z_score": ("color", "facet_row", "facet_col"),
-    "experiment_odds_ratio": ("color", "facet_row", "facet_col"),
-    "clv_treemap": ("value", "color"),
-}
-
 CHART_SETTING_FIELDS = {
     "description",
     "placement",
@@ -666,10 +552,7 @@ CHART_SETTING_FIELDS = {
 
 def chart_field_controls(chart_kind: str) -> tuple[str, ...]:
     """Return ordered tile field controls, always starting with required fields."""
-    required = CHART_REQUIRED_FIELDS.get(chart_kind)
-    if required is None:
-        return ("x", "y", "color", "facet_row", "facet_col")
-    return tuple(_dedupe([*required, *CHART_OPTIONAL_FIELDS.get(chart_kind, ())]))
+    return _recipe_chart_field_controls(chart_kind)
 
 
 MINIMUM_CATALOG_FILES = ("pipelines.yaml", "processors.yaml", "metrics.yaml", "dashboards.yaml")
@@ -2020,17 +1903,7 @@ def chart_choices_for_metric(catalog: model.Catalog, metric_name: str) -> list[s
 
 def metric_output_columns(metric_name: str, metric: model.Metric) -> list[str]:
     """Best-effort output column names for a metric."""
-    if isinstance(metric, model.LifecycleSummaryMetric):
-        return metric.outputs or list(_LIFECYCLE_OUTPUT_COLUMNS)
-    if isinstance(metric, model.VariantCompareMetric):
-        return metric.outputs or list(_VARIANT_OUTPUT_COLUMNS)
-    if isinstance(metric, model.ContingencyTestMetric):
-        return metric.outputs or list(_CONTINGENCY_OUTPUT_COLUMNS)
-    if isinstance(metric, model.ProportionTestMetric):
-        return metric.outputs or [metric_name]
-    if isinstance(metric, model.FunnelDropoffMetric):
-        return [metric_name]
-    return [metric_name]
+    return _report_metric_output_columns(metric_name, metric)
 
 
 def _scalar_state_columns(processor: model.Processor | None) -> list[str]:
@@ -2061,15 +1934,7 @@ def _preferred_size_column(processor: model.Processor | None, outputs: list[str]
 
 def chart_field_options(catalog: model.Catalog, metric_name: str) -> list[str]:
     """Return columns that are sensible for chart field selectors."""
-    processor = processor_for_metric(catalog, metric_name)
-    metric = catalog.metrics.metrics.get(metric_name)
-    fields: list[str] = ["Day", "Month", "Quarter", "Year"]
-    if processor is not None:
-        fields.extend(processor.group_by)
-        fields.extend(_scalar_state_columns(processor))
-    if metric is not None:
-        fields.extend(metric_output_columns(metric_name, metric))
-    return _dedupe(fields)
+    return report_field_options(catalog, metric_name)
 
 
 def descriptive_property_options(catalog: model.Catalog, metric_name: str) -> list[str]:
@@ -2211,8 +2076,6 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
             fields = {"x": time_x or first_dim or "Month", "property": prop, "score": score}
             if first_dim:
                 fields["color"] = first_dim
-        elif chart_kind == "descriptive_boxplot":
-            fields = {"x": first_dim or time_x or "Month", "property": prop}
         elif chart_kind == "descriptive_histogram":
             fields = {"property": prop}
         elif chart_kind == "descriptive_heatmap":
@@ -3236,6 +3099,7 @@ def write_tile_definition(
     *,
     dashboard_id: str,
     dashboard_title: str,
+    dashboard_layout: str | None = None,
     page_id: str,
     page_title: str,
     tile: dict[str, Any],
@@ -3246,7 +3110,12 @@ def write_tile_definition(
     dashboards = data.setdefault("dashboards", [])
     if not isinstance(dashboards, list):
         raise ValueError("dashboards.yaml must contain a list at `dashboards`")
-    dashboard = _find_or_create_dashboard(dashboards, dashboard_id, dashboard_title)
+    dashboard = _find_or_create_dashboard(
+        dashboards,
+        dashboard_id,
+        dashboard_title,
+        layout=dashboard_layout,
+    )
     page = _find_or_create_page(dashboard, page_id, page_title)
     tiles = page.setdefault("tiles", [])
     if not isinstance(tiles, list):
@@ -3285,6 +3154,47 @@ def write_page_settings(
         page.pop("time_filter", None)
     model.Dashboards.model_validate(data)
     _write_yaml(path, data)
+
+
+def validate_report_candidate(
+    catalog: model.Catalog,
+    *,
+    dashboard_id: str,
+    dashboard_title: str,
+    dashboard_layout: str,
+    page_id: str,
+    page_title: str,
+    filters: list[dict[str, Any]],
+    time_filter: dict[str, Any],
+    tile: dict[str, Any],
+    source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+) -> tuple[bool, list[str]]:
+    """Validate one proposed report edit against a complete in-memory catalog."""
+
+    try:
+        payload = catalog.model_dump(mode="json", by_alias=True, exclude_none=True)
+        dashboards_payload = cast(dict[str, Any], payload["dashboards"])
+        dashboards = cast(list[dict[str, Any]], dashboards_payload["dashboards"])
+        dashboard = _find_or_create_dashboard(
+            dashboards,
+            dashboard_id,
+            dashboard_title,
+            layout=dashboard_layout,
+        )
+        page = _find_or_create_page(dashboard, page_id, page_title)
+        page["title"] = page_title
+        page["filters"] = filters
+        page["time_filter"] = time_filter
+        tiles = page.setdefault("tiles", [])
+        if not isinstance(tiles, list):
+            raise ValueError("dashboard page must contain a list at `tiles`")
+        _replace_or_append(tiles, tile)
+        candidate = model.Catalog.model_validate(payload)
+    except (KeyError, TypeError, ValueError) as exc:
+        return False, [str(exc)]
+    result = validate_catalog(candidate, source_columns_by_id=source_columns_by_id)
+    errors = [issue for issue in result.issues if issue.severity == "error"]
+    return not errors, [f"{issue.location}: {issue.message}" for issue in errors]
 
 
 def write_dashboards_definition(
@@ -3413,14 +3323,21 @@ def _find_or_create_dashboard(
     dashboards: list[dict[str, Any]],
     dashboard_id: str,
     dashboard_title: str,
+    *,
+    layout: str | None = None,
 ) -> dict[str, Any]:
+    if layout is not None and layout not in {"tabs", "grid", "stacked"}:
+        raise ValueError("dashboard layout must be `tabs`, `grid`, or `stacked`")
     for dashboard in dashboards:
         if dashboard.get("id") == dashboard_id:
+            dashboard["title"] = dashboard_title
+            if layout is not None:
+                dashboard["layout"] = layout
             return dashboard
     dashboard = {
         "id": dashboard_id,
         "title": dashboard_title,
-        "layout": "tabs",
+        "layout": layout or "tabs",
         "pages": [],
     }
     dashboards.append(dashboard)
@@ -3437,6 +3354,7 @@ def _find_or_create_page(
         raise ValueError("dashboard must contain a list at `pages`")
     for page in pages:
         if page.get("id") == page_id:
+            page["title"] = page_title
             return page
     page = {"id": page_id, "title": page_title, "tiles": []}
     pages.append(page)
@@ -3977,6 +3895,7 @@ __all__ = [
     "title_from_identifier",
     "update_builder_draft_registry",
     "validate_calculated_expression",
+    "validate_report_candidate",
     "validate_workspace",
     "visual_case_state_from_expression",
     "widget_key_fragment",

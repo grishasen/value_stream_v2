@@ -1051,7 +1051,7 @@ class TestSchemaParity:
 
 @pytest.mark.unit
 def test_validator_accepts_boxplot_without_y_for_distribution_metrics() -> None:
-    """The digest metric implies the boxplot property; y stays required elsewhere."""
+    """A digest metric implies the boxplot property; scalar metrics are incompatible."""
     catalog = model.Catalog.model_validate(
         {
             "pipelines": {
@@ -1124,6 +1124,6 @@ def test_validator_accepts_boxplot_without_y_for_distribution_metrics() -> None:
 
     assert not any("distribution_box" in issue.location for issue in result.issues)
     assert any(
-        "scalar_box" in issue.location and "requires 'y' or 'property'" in issue.message
+        "scalar_box" in issue.location and "requires metric kind 'tdigest_quantile'" in issue.message
         for issue in result.issues
     )

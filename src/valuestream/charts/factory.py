@@ -1494,8 +1494,6 @@ def _descriptive(
     rows, metric_col = _with_descriptive_metric_column(rows, prop, str(tile.get("score", "Mean")))
     if kind == "descriptive_line":
         return _line(rows, {**tile, "y": metric_col}, max_points=MAX_POINTS)
-    if kind == "descriptive_boxplot":
-        return _boxplot(rows, {**tile, "property": prop}, theme)
     if kind == "descriptive_histogram":
         return _descriptive_histogram(
             rows,

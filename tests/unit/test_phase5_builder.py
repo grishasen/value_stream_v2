@@ -3333,6 +3333,62 @@ def test_report_tile_semantic_noop_preserves_exact_authored_defaults() -> None:
 
 
 @pytest.mark.unit
+def test_visual_tile_merge_preserves_unowned_settings_and_legacy_facets() -> None:
+    seed = {
+        "id": "trend",
+        "title": "Trend",
+        "metric": "CTR",
+        "chart": "line",
+        "x": "Day",
+        "y": "CTR",
+        "facets": {"row": "Channel", "column": "Issue"},
+        "axis_title_standoff": 18,
+        "goal_lines": [{"value": 0.25, "label": "Target"}],
+    }
+    rebuilt = {
+        "id": "trend",
+        "title": "Trend",
+        "metric": "CTR",
+        "chart": "line",
+        "x": "Day",
+        "y": "CTR",
+        "facet_row": "Channel",
+        "facet_col": "Issue",
+    }
+
+    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "line")
+
+    assert merged == seed
+
+
+@pytest.mark.unit
+def test_visual_tile_merge_allows_clearing_a_controlled_setting() -> None:
+    seed = {
+        "id": "ranked",
+        "title": "Ranked",
+        "metric": "CTR",
+        "chart": "bar",
+        "x": "Channel",
+        "y": "CTR",
+        "top_n": 5,
+        "axis_title_standoff": 18,
+    }
+    rebuilt = {
+        "id": "ranked",
+        "title": "Ranked",
+        "metric": "CTR",
+        "chart": "bar",
+        "x": "Channel",
+        "y": "CTR",
+    }
+
+    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "bar")
+
+    assert "top_n" not in merged
+    assert merged["axis_title_standoff"] == 18
+
+
+@pytest.mark.unit
 def test_existing_report_tile_opens_clean_in_visual_editor(tmp_path: Path) -> None:
     _write_source_cascade_catalog(tmp_path)
 
@@ -3350,6 +3406,50 @@ def test_existing_report_tile_opens_clean_in_visual_editor(tmp_path: Path) -> No
     assert any(button.label == "Continue" for button in rendered.button)
     assert not any(button.label == "Apply to workspace" for button in rendered.button)
     assert not any("Editing draft" in item.value for item in rendered.markdown)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "selected",
+    [
+        "ih_value_stream_overview/executive_summary/interactions_by_segment",
+        (
+            "ih_value_stream_overview/experiment_monitoring/"
+            "model_control_engagement_compare"
+        ),
+        (
+            "ih_value_stream_overview/aggregate_report_type_coverage/"
+            "interactions_pareto"
+        ),
+        (
+            "ih_value_stream_overview/numeric_report_type_coverage/"
+            "response_time_boxplot_by_outcome"
+        ),
+    ],
+)
+def test_demo_advanced_tiles_open_clean_in_visual_editor(selected: str) -> None:
+    workspace = Path(__file__).resolve().parents[2] / "examples" / "demo"
+
+    def app(workspace_path: str, selected_tile: str) -> None:
+        import streamlit as st  # noqa: PLC0415
+
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        st.session_state.setdefault("builder_step", "Reports / Tiles")
+        st.session_state.setdefault("builder_selected_tile_key", selected_tile)
+        _builder_steps(load_context(workspace_path))
+
+    rendered = AppTest.from_function(
+        app,
+        kwargs={"workspace_path": str(workspace), "selected_tile": selected},
+    ).run(timeout=30)
+
+    assert not rendered.exception
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+    assert not any("Editing draft" in item.value for item in rendered.markdown)
+    if selected.endswith("interactions_pareto"):
+        assert next(item for item in rendered.number_input if item.label == "Top N").value == 12
 
 
 @pytest.mark.unit
@@ -4241,6 +4341,114 @@ def test_write_tile_definition_replaces_existing_tile(tmp_path: Path) -> None:
     tiles = catalog.dashboards.dashboards[0].pages[0].tiles
     assert len(tiles) == 1
     assert tiles[0].title == "CTR Updated"
+
+
+@pytest.mark.unit
+def test_write_tile_definition_updates_dashboard_layout_and_container_titles(
+    tmp_path: Path,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    tile = builder.build_tile(
+        tile_id="ctr_line",
+        title="CTR Line",
+        metric_name="CTR",
+        chart_kind="line",
+        fields={"x": "Day", "y": "CTR", "color": "Channel"},
+    )
+    builder.write_tile_definition(
+        tmp_path,
+        dashboard_id="builder_overview",
+        dashboard_title="Original dashboard",
+        dashboard_layout="tabs",
+        page_id="engagement",
+        page_title="Original page",
+        tile=tile,
+    )
+
+    builder.write_tile_definition(
+        tmp_path,
+        dashboard_id="builder_overview",
+        dashboard_title="Updated dashboard",
+        dashboard_layout="stacked",
+        page_id="engagement",
+        page_title="Updated page",
+        tile=tile,
+    )
+
+    dashboard = load(tmp_path).dashboards.dashboards[0]
+    assert dashboard.title == "Updated dashboard"
+    assert dashboard.layout == "stacked"
+    assert dashboard.pages[0].title == "Updated page"
+
+
+@pytest.mark.unit
+def test_validate_report_candidate_checks_complete_catalog_and_metric_fields(
+    tmp_path: Path,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    catalog = load(tmp_path)
+    valid_tile = builder.build_tile(
+        tile_id="ctr_line",
+        title="CTR Line",
+        metric_name="CTR",
+        chart_kind="line",
+        fields={"x": "Day", "y": "CTR", "color": "Channel"},
+    )
+
+    ok, issues = builder.validate_report_candidate(
+        catalog,
+        dashboard_id="builder_overview",
+        dashboard_title="Builder Overview",
+        dashboard_layout="grid",
+        page_id="engagement",
+        page_title="Engagement",
+        filters=[],
+        time_filter={"default": "all_time", "presets": ["all_time"]},
+        tile=valid_tile,
+    )
+    assert ok, issues
+
+    ok, issues = builder.validate_report_candidate(
+        catalog,
+        dashboard_id="builder_overview",
+        dashboard_title="Builder Overview",
+        dashboard_layout="grid",
+        page_id="engagement",
+        page_title="Engagement",
+        filters=[],
+        time_filter={"default": "all_time", "presets": ["all_time"]},
+        tile={**valid_tile, "y": "CTRR", "time_range": {"last": "30d"}},
+    )
+    assert not ok
+    assert any("unsupported tile field 'time_range'" in issue for issue in issues)
+    assert any("field 'CTRR' is not exposed by metric 'CTR'" in issue for issue in issues)
+
+
+@pytest.mark.unit
+def test_every_demo_report_is_a_valid_editor_candidate() -> None:
+    workspace = Path(__file__).resolve().parents[2] / "examples" / "demo"
+    catalog = load(workspace)
+
+    for dashboard in catalog.dashboards.dashboards:
+        for page in dashboard.pages:
+            for tile in page.tiles:
+                ok, issues = builder.validate_report_candidate(
+                    catalog,
+                    dashboard_id=dashboard.id,
+                    dashboard_title=dashboard.title,
+                    dashboard_layout=dashboard.layout,
+                    page_id=page.id,
+                    page_title=page.title,
+                    filters=[
+                        item.model_dump(mode="json", by_alias=True, exclude_none=True)
+                        for item in page.filters
+                    ],
+                    time_filter=page.time_filter.model_dump(
+                        mode="json", by_alias=True, exclude_none=True
+                    ),
+                    tile=tile.model_dump(mode="json", by_alias=True, exclude_none=True),
+                )
+                assert ok, f"{dashboard.id}/{page.id}/{tile.id}: {issues}"
 
 
 @pytest.mark.unit
@@ -7047,9 +7255,10 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
 def test_descriptive_boxplot_is_retired_from_chart_offering() -> None:
     assert "descriptive_boxplot" not in RECIPES
     assert "boxplot" in RECIPES
-    # Existing tiles keep their labels and field controls for editing.
-    assert "descriptive_boxplot" in builder.CHART_DISPLAY_LABELS
-    assert builder.chart_field_controls("descriptive_boxplot")[0] == "x"
+    assert "descriptive_boxplot" not in builder.CHART_DISPLAY_LABELS
+    assert set(RECIPES) == set(builder.CHART_REQUIRED_FIELDS)
+    assert set(RECIPES) == set(config_builder.REPORT_LIBRARY_GROUP_BY_CHART)
+    assert set(model.Tile.model_json_schema()["properties"]["chart"]["enum"]) == set(RECIPES)
 
 
 def _tile_option(dashboard_id: str, page_id: str, tile_id: str, title: str):

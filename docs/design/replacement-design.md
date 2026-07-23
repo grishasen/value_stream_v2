@@ -1201,7 +1201,7 @@ A dashboard is a YAML-driven page. For each tile:
 
 1. Resolve `metric` → processor + grain.
 2. Resolve `chart` → Plotly figure factory (`line, bar, treemap, heatmap, scatter, bar_polar, gauge, funnel, boxplot, histogram, rfm_density, calibration_curve, exposure, corr, model`).
-3. Pull data via the SDK with the tile's `group_by/filters/time_range`.
+3. Pull data via the SDK with the tile's `group_by/filters` and the page's selected date bounds.
 4. Pass into the figure factory.
 5. Render with `st.plotly_chart(fig, use_container_width=True)`.
 
@@ -1603,7 +1603,6 @@ dashboards:
             metric: UniqueCustomers
             chart: gauge
             value: UniqueCustomers
-            time_range: {last: 30d}
 ```
 
 ---

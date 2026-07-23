@@ -212,7 +212,11 @@ metric for maintenance. See the
 
 The Reports / Tiles Apply action writes the current tile and its page settings
 together inside one rollback boundary. The visual and Raw YAML modes edit the
-same draft.
+same draft. The dashboard title and layout (`tabs`, `grid`, or `stacked`) and
+page title are editable in the same flow. Before Apply is enabled, the proposed
+dashboard, page settings, and tile are validated as a complete catalog. Visual
+mode round-trips settings outside its controls unchanged; Raw YAML remains the
+escape hatch for editing them directly.
 
 The collapsed **Report inventory** is searchable and uses dashboard, page,
 tile, metric, and chart labels designed for recognition. Enable technical IDs

@@ -6126,7 +6126,7 @@
     },
     "Tile": {
       "additionalProperties": true,
-      "description": "One tile on a dashboard page.\n\nRequired and optional fields per chart kind are documented in\n``docs/CHART_CATALOG.md`` \u00a73. We allow extras here so chart-specific\nkeys (``x``, ``y``, ``color``, ``facets``, ``path``, ``references``,\n``value``) don't need their own per-kind schemas at Phase 0.",
+      "description": "One tile on a dashboard page.\n\nRequired and optional fields per chart kind are documented in\n``docs/reference/chart-catalog.md`` \u00a73. We allow extras here so chart-specific\nkeys (``x``, ``y``, ``color``, ``facets``, ``path``, ``references``,\n``value``) don't need their own per-kind schemas at Phase 0.",
       "properties": {
         "chart": {
           "enum": [
@@ -6162,7 +6162,6 @@
             "corr",
             "model",
             "descriptive_line",
-            "descriptive_boxplot",
             "descriptive_histogram",
             "descriptive_heatmap",
             "descriptive_funnel",

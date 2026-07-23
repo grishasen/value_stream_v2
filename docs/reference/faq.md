@@ -349,7 +349,9 @@ DuckDB scans Parquet at multi-GB/s on local SSD. Aggregate stores up to a few hu
 **G4. Why is my dashboard slow?**
 Three usual suspects:
 
-1. The metric resolves to `daily` when `monthly` would do — fix by adding a `time_range` to the tile.
+1. The metric resolves to `daily` when `monthly` would do — make sure the
+   processor publishes a `monthly` grain and use the page date selector to
+   request a range that can use it.
 2. The metric pulls a big sketch column (`<prop>_tdigest` ~32 KB) for many groups — fix by adding a more selective `filters` block.
 3. A facet has too many categories — fix by reducing `facet_row` cardinality or pre-aggregating to `monthly`.
 

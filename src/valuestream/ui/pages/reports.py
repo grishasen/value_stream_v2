@@ -145,7 +145,6 @@ ADVANCED_FIELD_CONTROLS: dict[str, tuple[str, ...]] = {
     "corr": ("x", "y", "color"),
     "model": ("color",),
     "descriptive_line": ("x", "property", "score", "color", "facet_row", "facet_col"),
-    "descriptive_boxplot": ("x", "property", "color", "facet_row", "facet_col"),
     "descriptive_histogram": ("property", "color", "facet_row", "facet_col"),
     "descriptive_heatmap": ("x", "y", "property", "score"),
     "descriptive_funnel": ("x", "stages", "color", "facet_row", "facet_col"),
@@ -909,7 +908,10 @@ def _is_coverage_page(page: Any) -> bool:
 
 
 def _is_descriptive_report_page(page: Any) -> bool:
-    return any(str(tile.chart).startswith("descriptive_") for tile in page.tiles)
+    return any(
+        tile.chart == "boxplot" or str(tile.chart).startswith("descriptive_")
+        for tile in page.tiles
+    )
 
 
 @st.fragment(parallel=True)

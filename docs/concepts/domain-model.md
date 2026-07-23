@@ -436,7 +436,7 @@ Resolver:
   CTR -> processor=engagement, kind=formula, expression=safe_div(Positives, Positives+Negatives)
 
 Planner:
-  tile fields = {grain: Day, x: Day, color: Channel}; tile.time_range = 2024-08
+  tile fields = {grain: Day, x: Day, color: Channel}; page date bounds = 2024-08
   -> aggregates/ih/engagement/daily, period=2024-08
 
 Executor:

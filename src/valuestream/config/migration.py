@@ -1043,7 +1043,7 @@ def _chart_for_report(cfg: dict[str, Any]) -> str:
     if family == "descriptive":
         mapped = {
             "line": "descriptive_line",
-            "boxplot": "descriptive_boxplot",
+            "boxplot": "boxplot",
             "histogram": "descriptive_histogram",
             "heatmap": "descriptive_heatmap",
             "funnel": "descriptive_funnel",

@@ -883,7 +883,7 @@ class Tile(_PermissiveModel):
     """One tile on a dashboard page.
 
     Required and optional fields per chart kind are documented in
-    ``docs/CHART_CATALOG.md`` §3. We allow extras here so chart-specific
+    ``docs/reference/chart-catalog.md`` §3. We allow extras here so chart-specific
     keys (``x``, ``y``, ``color``, ``facets``, ``path``, ``references``,
     ``value``) don't need their own per-kind schemas at Phase 0.
     """
@@ -929,7 +929,6 @@ class Tile(_PermissiveModel):
         "corr",
         "model",
         "descriptive_line",
-        "descriptive_boxplot",
         "descriptive_histogram",
         "descriptive_heatmap",
         "descriptive_funnel",

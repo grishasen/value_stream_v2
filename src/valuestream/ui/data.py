@@ -82,7 +82,6 @@ _CHART_DIMENSION_FIELDS = {
     "lift_curve": (*_FACET_FIELDS, "color"),
     "corr": ("color",),
     "descriptive_line": ("x", *_FACET_FIELDS, "color"),
-    "descriptive_boxplot": ("x", *_FACET_FIELDS, "color"),
     "descriptive_histogram": (*_FACET_FIELDS, "color"),
     "descriptive_heatmap": ("x", "y"),
     "descriptive_funnel": (*_FACET_FIELDS, "color"),
@@ -164,7 +163,7 @@ def query_tile(
         tile.chart in _STATEFUL_CHARTS
         or tile.chart.startswith("descriptive_")
         or _tile_references_scalar_state(catalog, tile.metric, canonical_tile),
-        tile.chart in {"boxplot", "descriptive_boxplot", "combo"},
+        tile.chart in {"boxplot", "combo"},
         tile.chart in _CURVE_CHARTS,
     )
     return _restore_dimension_aliases(_restore_time_columns(rows, tile_dict), dimension_aliases)

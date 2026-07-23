@@ -286,7 +286,6 @@ REPORT_LIBRARY_GROUPS = {
             "histogram",
             "corr",
             "rfm_density",
-            "descriptive_boxplot",
             "descriptive_histogram",
             "descriptive_heatmap",
             "calibration_curve",
@@ -4982,7 +4981,7 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
                 marker={"size": [7, 11, 8, 14, 10, 13], "color": colors[0]},
             )
         )
-    elif chart_type in {"boxplot", "descriptive_boxplot"}:
+    elif chart_type == "boxplot":
         figure.add_trace(
             go.Box(y=[1.0, 1.5, 1.8, 2.1, 2.3, 3.8], marker_color=colors[0], boxpoints="outliers")
         )
@@ -5250,8 +5249,6 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         chart_choices = (
             builder.chart_choices_for_metric(catalog, metric_name) if metric_name else []
         )
-        # Retired chart kinds stay selectable on the tiles that already use
-        # them, so opening an old tile never silently rewrites its chart.
         seed_chart_value = str(seed_tile.get("chart", "") or "")
         if (
             not is_new_tile
@@ -5296,18 +5293,13 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                     ).items()
                 ]
             )
-        compatible_field_keys = _compatible_tile_field_keys(str(chart_kind or ""))
         selection_matches_seed = bool(
             not is_new_tile
             and metric_name == seed_tile.get("metric")
             and chart_kind == seed_tile.get("chart")
         )
         if selection_matches_seed:
-            defaults = {
-                key: value
-                for key, value in seed_tile.items()
-                if key in compatible_field_keys or key in builder.CHART_SETTING_FIELDS
-            }
+            defaults = dict(seed_tile)
         else:
             defaults = (
                 builder.default_tile_fields(catalog, metric_name, chart_kind)
@@ -5356,7 +5348,29 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         else:
             existing_dashboard = dashboards_by_id[str(dashboard_choice)]
             dashboard_id = existing_dashboard.id
-            dashboard_title = existing_dashboard.title
+            dashboard_title = st.text_input(
+                "Dashboard Name",
+                value=existing_dashboard.title,
+                key=(
+                    f"builder_dashboard_name_{editor_token}_"
+                    f"{builder.widget_key_fragment(existing_dashboard.id)}"
+                ),
+                help=config_help.field_help("report.dashboard_id"),
+            )
+        dashboard_layout = st.selectbox(
+            "Dashboard Layout",
+            ["tabs", "grid", "stacked"],
+            index=builder.option_index(
+                ["tabs", "grid", "stacked"],
+                existing_dashboard.layout if existing_dashboard is not None else "tabs",
+            ),
+            format_func=lambda value: value.title(),
+            key=(
+                f"builder_dashboard_layout_{editor_token}_"
+                f"{builder.widget_key_fragment(str(dashboard_choice))}"
+            ),
+            help="Choose how this dashboard organizes its report pages.",
+        )
 
         pages_by_id = (
             {page.id: page for page in existing_dashboard.pages} if existing_dashboard else {}
@@ -5389,7 +5403,16 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         else:
             page = pages_by_id[str(page_choice)]
             page_id = page.id
-            page_title = page.title
+            page_title = st.text_input(
+                "Page Name",
+                value=page.title,
+                key=(
+                    f"builder_page_name_{editor_token}_"
+                    f"{builder.widget_key_fragment(dashboard_id)}_"
+                    f"{builder.widget_key_fragment(page.id)}"
+                ),
+                help=config_help.field_help("report.page_id"),
+            )
 
         page_filters, page_time_filter, page_settings_ready = _page_settings_editor(
             dashboard_id=dashboard_id,
@@ -5472,6 +5495,8 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             )
         else:
             built_tile = {}
+        if mode != "Raw YAML" and selected_seed is not None and not is_new_tile and built_tile:
+            built_tile = _merge_visual_tile_definition(seed_tile, built_tile, chart_kind)
         if selected_seed is not None and not is_new_tile and built_tile:
             built_tile = _preserve_untouched_tile_definition(seed_tile, built_tile)
 
@@ -5498,9 +5523,31 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         }
         proposed_report = {
             "dashboard_id": dashboard_id.strip(),
+            "dashboard_title": dashboard_title.strip(),
+            "dashboard_layout": dashboard_layout,
             "page": proposed_page,
             "tile": built_tile,
         }
+        report_candidate_ok = False
+        report_candidate_issues: list[str] = []
+        if built_tile and dashboard_id.strip() and page_id.strip() and page_settings_ready:
+            report_candidate_ok, report_candidate_issues = builder.validate_report_candidate(
+                catalog,
+                dashboard_id=dashboard_id.strip(),
+                dashboard_title=dashboard_title.strip()
+                or builder.title_from_identifier(dashboard_id),
+                dashboard_layout=str(dashboard_layout),
+                page_id=page_id.strip(),
+                page_title=page_title.strip() or builder.title_from_identifier(page_id),
+                filters=page_filters,
+                time_filter=page_time_filter,
+                tile=built_tile,
+                source_columns_by_id=_observed_source_columns(),
+            )
+        if report_candidate_issues:
+            with st.expander("Resolve report validation issues", expanded=True):
+                for issue in report_candidate_issues:
+                    st.error(issue)
         if is_new_tile:
             draft_status = builder.builder_template_draft_status(
                 st.session_state,
@@ -5513,13 +5560,23 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                 f"report:{selected_tile_key}",
                 {
                     "dashboard_id": seed_dashboard,
+                    "dashboard_title": (
+                        existing_dashboard.title if existing_dashboard is not None else ""
+                    ),
+                    "dashboard_layout": (
+                        existing_dashboard.layout if existing_dashboard is not None else "tabs"
+                    ),
                     "page": baseline_page,
                     "tile": seed_tile if selected_seed is not None else None,
                 },
                 proposed_report,
             )
         report_ready = bool(
-            built_tile and dashboard_id.strip() and page_id.strip() and page_settings_ready
+            built_tile
+            and dashboard_id.strip()
+            and page_id.strip()
+            and page_settings_ready
+            and report_candidate_ok
         )
         if _render_editor_primary_action(
             save_slot=save_slot,
@@ -5545,6 +5602,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                         dashboard_id=dashboard_id.strip(),
                         dashboard_title=dashboard_title.strip()
                         or builder.title_from_identifier(dashboard_id),
+                        dashboard_layout=dashboard_layout,
                         page_id=page_id.strip(),
                         page_title=page_title.strip() or builder.title_from_identifier(page_id),
                         tile=built_tile,
@@ -5596,18 +5654,79 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         _report_inventory_tab(catalog)
 
 
-def _compatible_tile_field_keys(chart_kind: str) -> set[str]:
+def _visual_tile_control_keys(chart_kind: str) -> set[str]:
+    """Return fields Visual mode owns; all other authored fields pass through."""
+
     keys = set(builder.chart_field_controls(chart_kind))
-    keys.update({"facet_column", "facets"})
-    if "error_y" in keys:
-        keys.update({"error_y_plus", "error_y_minus"})
-    if "locations" in keys:
-        keys.add("location")
-    if chart_kind in {"calendar_heatmap", "donut"}:
-        keys.update({"x", "y"})
-    if chart_kind in {"gauge", "table"}:
-        keys.add("group_by")
+    keys.update(
+        {
+            "description",
+            "value_format",
+            "show_trend_delta",
+            "goal_line",
+            "conditional_formatting",
+            "x_axis_title",
+            "y_axis_title",
+            "legend_title",
+            "showlegend",
+            "group_by",
+            "labels",
+            "filters",
+            "theme",
+        }
+    )
+    if chart_kind in {"line", "stacked_area"}:
+        keys.add("scale_mode")
+    if chart_kind in {"line", "scatter"}:
+        keys.update({"log_x", "log_y"})
+    if chart_kind == "combo":
+        keys.add("y2_axis_title")
+    if chart_kind == "kpi_card":
+        keys.update({"placement", "kpi"})
+    if chart_kind == "gauge":
+        keys.update({"reference", "references"})
+    if chart_kind in {"bar", "waterfall", "pareto", "donut"}:
+        keys.update({"sort_by", "sort_direction", "top_n"})
+    if chart_kind == "bar":
+        keys.add("barmode")
     return keys
+
+
+def _merge_visual_tile_definition(
+    seed_tile: dict[str, Any],
+    built_tile: dict[str, Any],
+    chart_kind: str,
+) -> dict[str, Any]:
+    """Overlay Visual-mode controls while preserving every unowned field verbatim."""
+
+    controlled = _visual_tile_control_keys(chart_kind)
+    passthrough = {key: value for key, value in seed_tile.items() if key not in controlled}
+    if "stages" in seed_tile and _stage_values(seed_tile.get("stages")) == built_tile.get("stages"):
+        built_tile["stages"] = seed_tile["stages"]
+    facets = seed_tile.get("facets")
+    if isinstance(facets, Mapping):
+        if "facet_row" not in seed_tile and built_tile.get("facet_row") == facets.get("row"):
+            built_tile.pop("facet_row", None)
+        expected_col = facets.get("col", facets.get("column"))
+        if "facet_col" not in seed_tile and built_tile.get("facet_col") == expected_col:
+            built_tile.pop("facet_col", None)
+    if (
+        "facet_column" in seed_tile
+        and "facet_col" not in seed_tile
+        and built_tile.get("facet_col") == seed_tile.get("facet_column")
+    ):
+        built_tile.pop("facet_col", None)
+    group_by = seed_tile.get("group_by")
+    if isinstance(group_by, list):
+        if "facet_row" not in seed_tile and group_by and built_tile.get("facet_row") == group_by[0]:
+            built_tile.pop("facet_row", None)
+        if (
+            "facet_col" not in seed_tile
+            and len(group_by) > 1
+            and built_tile.get("facet_col") == group_by[1]
+        ):
+            built_tile.pop("facet_col", None)
+    return {**passthrough, **built_tile}
 
 
 def _preserve_untouched_tile_definition(
@@ -5765,10 +5884,12 @@ def _field_controls_for_keys(
         if key == "stages":
             fields[key] = _stage_list_control(defaults.get("stages"), key_suffix)
         elif key in {"path", "columns", "group_by"}:
+            current_values = _default_multiselect_values(defaults.get(key))
+            options = builder.dedupe([*field_options[1:], *current_values])
             fields[key] = st.multiselect(
                 _field_label(key),
-                field_options[1:],
-                default=_default_multiselect_values(defaults.get(key), field_options),
+                options,
+                default=current_values,
                 key=f"builder_tile_{key}_{key_suffix}",
                 help=config_help.field_help("report.field"),
             )
@@ -5796,10 +5917,10 @@ def _field_label(key: str) -> str:
     return key.upper() if len(key) == 1 else key.title()
 
 
-def _default_multiselect_values(value: Any, field_options: list[str]) -> list[str]:
+def _default_multiselect_values(value: Any) -> list[str]:
     if not isinstance(value, list | tuple):
         return []
-    return [str(item) for item in value if isinstance(item, str) and item in field_options]
+    return [str(item) for item in value if isinstance(item, str) and item]
 
 
 def _tile_field_options(
@@ -5817,7 +5938,7 @@ def _tile_field_options(
             if catalog is not None and metric_name
             else []
         )
-        return properties or field_options
+        return _options_with_current(properties or field_options, defaults.get(key))
     if chart_kind.startswith("descriptive_") and key == "score":
         property_name = str(selected_fields.get("property") or defaults.get("property") or "")
         scores = (
@@ -5825,8 +5946,15 @@ def _tile_field_options(
             if catalog is not None and metric_name
             else []
         )
-        return scores or ["Mean"]
-    return field_options
+        return _options_with_current(scores or ["Mean"], defaults.get(key))
+    return _options_with_current(field_options, _tile_field_default(defaults, key))
+
+
+def _options_with_current(options: list[str], current: Any) -> list[str]:
+    values = list(options)
+    if isinstance(current, str) and current and current not in values:
+        values.append(current)
+    return values
 
 
 def _stage_list_control(value: Any, key_suffix: str) -> list[str]:
@@ -5871,7 +5999,7 @@ def _selectbox_fields(
     return fields
 
 
-def _chart_setting_controls(  # noqa: PLR0912
+def _chart_setting_controls(  # noqa: PLR0912, PLR0915
     chart_kind: str,
     defaults: dict[str, Any],
     field_options: list[str],
@@ -5901,6 +6029,72 @@ def _chart_setting_controls(  # noqa: PLR0912
         if selected_format:
             settings["value_format"] = selected_format
 
+        for field_name, label in (
+            ("x_axis_title", "X Axis Title"),
+            ("y_axis_title", "Y Axis Title"),
+            ("legend_title", "Legend Title"),
+        ):
+            value = st.text_input(
+                label,
+                value=str(defaults.get(field_name, "") or ""),
+                key=f"builder_tile_{field_name}_{key_suffix}",
+                help="Optional presentation label; leave blank to use the metric or field label.",
+            )
+            if value.strip():
+                settings[field_name] = value.strip()
+        if chart_kind == "combo":
+            y2_title = st.text_input(
+                "Secondary Y Axis Title",
+                value=str(defaults.get("y2_axis_title", "") or ""),
+                key=f"builder_tile_y2_axis_title_{key_suffix}",
+            )
+            if y2_title.strip():
+                settings["y2_axis_title"] = y2_title.strip()
+
+        showlegend = st.checkbox(
+            "Show Legend",
+            value=bool(defaults.get("showlegend", True)),
+            key=f"builder_tile_showlegend_{key_suffix}",
+        )
+        if "showlegend" in defaults or not showlegend:
+            settings["showlegend"] = showlegend
+
+        if chart_kind in {"line", "scatter"}:
+            for field_name, label in (("log_x", "Log X Axis"), ("log_y", "Log Y Axis")):
+                enabled = st.checkbox(
+                    label,
+                    value=bool(defaults.get(field_name, False)),
+                    key=f"builder_tile_{field_name}_{key_suffix}",
+                )
+                if field_name in defaults or enabled:
+                    settings[field_name] = enabled
+
+        if "group_by" not in builder.chart_field_controls(chart_kind):
+            group_by_values = _default_multiselect_values(defaults.get("group_by"))
+            group_by_options = builder.dedupe([*field_options[1:], *group_by_values])
+            group_by = st.multiselect(
+                "Query Group By",
+                group_by_options,
+                default=group_by_values,
+                key=f"builder_tile_group_by_setting_{key_suffix}",
+                help="Optional extra aggregate dimensions needed by the tile query.",
+            )
+            if group_by:
+                settings["group_by"] = group_by
+
+        for field_name, label in (
+            ("labels", "Display Labels YAML"),
+            ("filters", "Tile Filters YAML"),
+            ("theme", "Tile Theme YAML"),
+        ):
+            configured = _yaml_mapping_control(
+                label,
+                defaults.get(field_name),
+                key=f"builder_tile_{field_name}_{key_suffix}",
+            )
+            if configured not in (None, {}):
+                settings[field_name] = configured
+
         if chart_kind in {"line", "stacked_area"}:
             scale_modes = ["absolute", "index_100", "percent_change"]
             scale_mode = st.selectbox(
@@ -5926,7 +6120,9 @@ def _chart_setting_controls(  # noqa: PLR0912
             key=f"builder_tile_trend_delta_{key_suffix}",
             help=config_help.field_help("report.show_trend_delta"),
         )
-        if show_trend_delta:
+        if show_trend_delta and not (
+            "show_trend_delta" not in defaults and defaults.get("trend_delta") is not None
+        ):
             settings["show_trend_delta"] = True
 
         goal_enabled = st.checkbox(
@@ -5936,8 +6132,9 @@ def _chart_setting_controls(  # noqa: PLR0912
             help=config_help.field_help("report.goal_enabled"),
         )
         if goal_enabled:
-            goal_value, goal_label, goal_color = _goal_line_defaults(defaults.get("goal_line"))
-            settings["goal_line"] = {
+            raw_goal = defaults.get("goal_line")
+            goal_value, goal_label, goal_color = _goal_line_defaults(raw_goal)
+            edited_goal = {
                 "value": st.number_input(
                     "Goal Value",
                     value=goal_value,
@@ -5957,6 +6154,12 @@ def _chart_setting_controls(  # noqa: PLR0912
                     help=config_help.field_help("report.goal_color"),
                 ),
             }
+            if _goal_line_matches(raw_goal, edited_goal):
+                settings["goal_line"] = raw_goal
+            else:
+                if isinstance(raw_goal, Mapping):
+                    edited_goal = {**raw_goal, **edited_goal}
+                settings["goal_line"] = edited_goal
 
         if chart_kind == "bar":
             barmode_options = ["group", "stack", "relative", "percent"]
@@ -5969,10 +6172,12 @@ def _chart_setting_controls(  # noqa: PLR0912
             )
             if selected_barmode != "group" or defaults.get("barmode"):
                 settings["barmode"] = selected_barmode
+        if chart_kind in {"bar", "waterfall", "pareto", "donut"}:
+            sort_options = _options_with_current(field_options, defaults.get("sort_by"))
             sort_by = st.selectbox(
                 "Sort By",
-                field_options,
-                index=builder.option_index(field_options, defaults.get("sort_by")),
+                sort_options,
+                index=builder.option_index(sort_options, defaults.get("sort_by")),
                 key=f"builder_tile_sort_by_{key_suffix}",
                 help=config_help.field_help("report.sort_by"),
             )
@@ -6013,9 +6218,11 @@ def _chart_setting_controls(  # noqa: PLR0912
                     settings["conditional_formatting"] = rules
                 else:
                     st.warning("Conditional formatting must be a YAML list.")
+                    settings["conditional_formatting"] = rules
             except Exception as exc:
                 logger.exception("Failed to parse conditional formatting YAML")
                 st.warning(str(exc))
+                settings["conditional_formatting"] = rules_text
     return settings
 
 
@@ -6089,13 +6296,15 @@ def _kpi_card_settings(defaults: dict[str, Any], key_suffix: str) -> dict[str, A
         if target_enabled
         else None
     )
-    settings["kpi"] = {
+    kpi = {
         "comparison": comparison,
         "comparison_period": comparison_period,
         "sparkline_grain": sparkline_grain or None,
         "sparkline_points": int(sparkline_points),
         "target": target,
     }
+    if seed or comparison != "none" or sparkline_grain or target is not None:
+        settings["kpi"] = kpi
     return settings
 
 
@@ -6132,6 +6341,36 @@ def _goal_line_defaults(raw: Any) -> tuple[float, str, str]:
     if isinstance(raw, int | float):
         return float(raw), "Goal", "#475569"
     return 0.0, "Goal", "#475569"
+
+
+def _goal_line_matches(raw: Any, edited: Mapping[str, Any]) -> bool:
+    if raw in (None, "", []):
+        return False
+    value, label, color = _goal_line_defaults(raw)
+    return (
+        float(edited.get("value", 0.0) or 0.0) == value
+        and str(edited.get("label", "")) == label
+        and str(edited.get("color", "")) == color
+    )
+
+
+def _yaml_mapping_control(label: str, raw: Any, *, key: str) -> Any:
+    text = st.text_area(
+        label,
+        value=yaml.safe_dump(raw, sort_keys=False).strip() if raw else "",
+        height=100,
+        key=key,
+    )
+    if not text.strip():
+        return None
+    try:
+        parsed = yaml.safe_load(text)
+    except Exception as exc:
+        st.warning(str(exc))
+        return text
+    if not isinstance(parsed, Mapping):
+        st.warning(f"{label} must be a YAML mapping.")
+    return parsed
 
 
 def _gauge_reference_settings(defaults: dict[str, Any], key_suffix: str) -> dict[str, Any]:
