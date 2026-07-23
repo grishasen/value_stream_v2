@@ -367,6 +367,13 @@ exists with the recorded size. The normal ingestion path does not reopen the
 new file merely to recover metadata it already knows. Recovery still
 deep-scans embedded provenance before publishing an interrupted run.
 
+Data Load dispatches source, workspace, and clean-rebuild actions to daemon
+threads in the Streamlit server process. A locked, process-local registry keyed
+by resolved workspace and run scope supplies poll-friendly progress across
+browser reloads and websocket reconnects. It is not a durable job queue:
+restarting the server ends those threads, after which the normal ingestion
+ledger recovery verifies and adopts completed chunk work.
+
 ### Configuration authoring surfaces
 
 Value Stream exposes a top-level **Build** choice over two Streamlit authoring

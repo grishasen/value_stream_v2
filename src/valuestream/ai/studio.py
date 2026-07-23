@@ -15,13 +15,14 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Any
+from typing import Any, get_args
 
 import polars as pl
 import yaml
 from litellm import completion as litellm_completion
 from pydantic import ValidationError
 
+from valuestream.charts.recipes import TILE_REQUIRED_ALTERNATIVES
 from valuestream.config import model
 from valuestream.config.validate import validate_catalog
 from valuestream.utils.logger import get_logger
@@ -371,44 +372,8 @@ _CHART_REQUIRED_FIELD_DICTIONARY: dict[str, Any] = {
         "color, names, and path keys take approved low-cardinality dimensions.",
     ],
     "required_fields_by_chart": {
-        "line": ["x", "y"],
-        "stacked_area": ["x", "y", "color"],
-        "bar": ["x", "y"],
-        "kpi_card": ["value|y"],
-        "waterfall": ["x", "y"],
-        "pareto": ["x", "y"],
-        "treemap": ["path|x|names"],
-        "heatmap": ["x", "y", "color"],
-        "cohort_heatmap": ["x", "y", "color"],
-        "scatter": ["x", "y"],
-        "combo": ["x", "y", "y2"],
-        "interval": ["x", "y"],
-        "donut": ["names|x", "values|value|y"],
-        "geo_map": ["locations", "value"],
-        "table": [],
-        "calendar_heatmap": ["date|x", "value|y"],
-        "bar_polar": ["r", "theta", "color"],
-        "sankey": ["source", "target", "value"],
-        "gauge": ["value|y"],
-        "funnel": ["stages", "color"],
-        "boxplot": ["x", "y|property"],
-        "histogram": ["property|x|y"],
-        "calibration_curve": [],
-        "roc_curve": [],
-        "precision_recall_curve": [],
-        "gain_curve": [],
-        "lift_curve": [],
-        "rfm_density": [],
-        "exposure": [],
-        "corr": ["x", "y"],
-        "model": [],
-        "descriptive_line": ["x", "property", "score"],
-        "descriptive_histogram": ["property|x|y"],
-        "descriptive_heatmap": ["x", "y", "property", "score"],
-        "descriptive_funnel": ["x", "color", "stages"],
-        "experiment_z_score": ["x", "y"],
-        "experiment_odds_ratio": ["x", "y"],
-        "clv_treemap": ["path|x|names"],
+        chart: ["|".join(group) for group in TILE_REQUIRED_ALTERNATIVES.get(chart, ())]
+        for chart in get_args(model.Tile.model_fields["chart"].annotation)
     },
     "tile_examples": {
         "kpi_card": {

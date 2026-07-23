@@ -1050,8 +1050,8 @@ class TestSchemaParity:
 
 
 @pytest.mark.unit
-def test_validator_accepts_boxplot_without_y_for_distribution_metrics() -> None:
-    """A digest metric implies the boxplot property; scalar metrics are incompatible."""
+def test_validator_accepts_boxplot_without_axes_for_distribution_metrics() -> None:
+    """A digest metric can render one overall box; scalar metrics are incompatible."""
     catalog = model.Catalog.model_validate(
         {
             "pipelines": {
@@ -1102,7 +1102,7 @@ def test_validator_accepts_boxplot_without_y_for_distribution_metrics() -> None:
                                         "title": "Distribution",
                                         "metric": "PropensityDistribution",
                                         "chart": "boxplot",
-                                        "x": "Year",
+                                        "property": "Propensity",
                                     },
                                     {
                                         "id": "scalar_box",

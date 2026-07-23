@@ -233,7 +233,7 @@ def render(ctx: ValueStreamContext) -> None:
 
 def _ordered_sources(sources: Iterable[Any]) -> list[Any]:
     """Show newer/default-adjacent sources first without mutating the catalog."""
-    return list(sources)
+    return list(reversed(list(sources)))
 
 
 def _source_tab_label(source_id: str) -> str:

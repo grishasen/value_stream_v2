@@ -3691,25 +3691,27 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             key=f"builder_proc_grains_{processor.id}",
             help=config_help.field_help("processor.grains"),
         )
-        seed_dedup_keys = [
-            field
-            for field in field_remap.remap_field_list(
-                [str(value) for value in (processor.model_extra or {}).get("dedup_keys") or []],
-                field_mapping,
+        dedup_keys: list[str] = []
+        if builder.processor_supports_dedup(kind):
+            seed_dedup_keys = [
+                field
+                for field in field_remap.remap_field_list(
+                    [str(value) for value in (processor.model_extra or {}).get("dedup_keys") or []],
+                    field_mapping,
+                )
+                if field
+            ]
+            dedup_keys = st.multiselect(
+                "Dedup Keys",
+                builder.dedupe([*field_options, *seed_dedup_keys]),
+                default=seed_dedup_keys,
+                accept_new_options=True,
+                key=f"builder_proc_dedup_{processor.id}",
+                help=(
+                    "Rows sharing these column values within one load chunk are counted once. "
+                    "Leave empty to aggregate every row."
+                ),
             )
-            if field
-        ]
-        dedup_keys = st.multiselect(
-            "Dedup Keys",
-            builder.dedupe([*field_options, *seed_dedup_keys]),
-            default=seed_dedup_keys,
-            accept_new_options=True,
-            key=f"builder_proc_dedup_{processor.id}",
-            help=(
-                "Rows sharing these column values within one load chunk are counted once. "
-                "Leave empty to aggregate every row."
-            ),
-        )
         kind_settings = _processor_kind_settings(
             processor,
             kind,
@@ -4001,9 +4003,7 @@ def _reseed_state_rows_for_kind(
     over a new default with the same state name.
     """
     rows = _state_rows(states_baseline, field_mapping)
-    signature = json.dumps(
-        [[row["State"], row["Type"], row["Source Column"]] for row in rows],
-    )
+    signature = json.dumps([_editable_state_row_signature(row) for row in rows])
     signature_key = f"{state_key}_kind_signature"
     defaults_key = f"{state_key}_kind_defaults"
     if st.session_state.get(signature_key) == signature and state_key in st.session_state:
@@ -4012,17 +4012,14 @@ def _reseed_state_rows_for_kind(
     previous_defaults = st.session_state.get(defaults_key)
     current_rows = st.session_state.get(state_key)
     if isinstance(previous_defaults, list) and isinstance(current_rows, list):
-        default_triples = {
-            (row.get("State"), row.get("Type"), row.get("Source Column"))
-            for row in previous_defaults
-            if isinstance(row, dict)
+        default_signatures = {
+            _editable_state_row_signature(row) for row in previous_defaults if isinstance(row, dict)
         }
         custom_rows = [
             row
             for row in current_rows
             if isinstance(row, dict)
-            and (row.get("State"), row.get("Type"), row.get("Source Column"))
-            not in default_triples
+            and _editable_state_row_signature(row) not in default_signatures
         ]
         if custom_rows:
             custom_names = {row.get("State") for row in custom_rows}
@@ -4032,6 +4029,17 @@ def _reseed_state_rows_for_kind(
     st.session_state[signature_key] = signature
     st.session_state[defaults_key] = copy.deepcopy(rows)
     st.session_state.pop(f"builder_proc_state_editor_{processor_id}", None)
+
+
+def _editable_state_row_signature(row: dict[str, Any]) -> tuple[Any, Any, Any, bool]:
+    """Return the user-editable state values that distinguish a custom row."""
+
+    return (
+        row.get("State"),
+        row.get("Type"),
+        row.get("Source Column"),
+        bool(row.get("Enabled", True)),
+    )
 
 
 def _remap_processor_def_fields(
@@ -5896,18 +5904,23 @@ def _render_dashboard_manager(workspace: Path, catalog: model.Catalog) -> None:
         key=f"builder_manage_page_select_{selected_dashboard}",
     )
     total_tiles = sum(tile_counts.values())
-    confirmed = st.checkbox(
-        f"I understand the selected page or dashboard of `{selected_dashboard}` "
-        "and every tile on it will be deleted.",
-        key=f"builder_manage_confirm_{selected_dashboard}",
-    )
     delete_page_col, delete_dashboard_col = st.columns(2)
+    page_confirmed = False
+    with delete_page_col:
+        if selected_page:
+            page_confirmed = st.checkbox(
+                f"Confirm deleting page `{selected_page}` from `{selected_dashboard}` "
+                "and every tile on that page.",
+                key=f"builder_manage_confirm_page_{selected_dashboard}_{selected_page}",
+            )
+        else:
+            st.caption("This dashboard has no page to delete.")
     if delete_page_col.button(
         "Delete page",
         icon=":material/delete:",
-        disabled=not (confirmed and selected_page),
+        disabled=not (page_confirmed and selected_page),
         width="stretch",
-        key="builder_manage_delete_page",
+        key=f"builder_manage_delete_page_{selected_dashboard}_{selected_page}",
     ):
         try:
             builder.delete_report_page(
@@ -5930,12 +5943,18 @@ def _render_dashboard_manager(workspace: Path, catalog: model.Catalog) -> None:
                 f"`{selected_dashboard}`."
             )
             st.rerun(scope="app")
+    with delete_dashboard_col:
+        dashboard_confirmed = st.checkbox(
+            f"Confirm deleting dashboard `{selected_dashboard}`, all {len(pages)} page(s), "
+            f"and all {total_tiles} tile(s).",
+            key=f"builder_manage_confirm_dashboard_{selected_dashboard}",
+        )
     if delete_dashboard_col.button(
         "Delete dashboard",
         icon=":material/delete_forever:",
-        disabled=not confirmed,
+        disabled=not dashboard_confirmed,
         width="stretch",
-        key="builder_manage_delete_dashboard",
+        key=f"builder_manage_delete_dashboard_{selected_dashboard}",
     ):
         try:
             builder.delete_dashboard(

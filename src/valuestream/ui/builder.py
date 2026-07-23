@@ -101,6 +101,7 @@ STATE_TYPES = [
 
 SCALAR_STATE_TYPES = ("count", "value_sum", "min", "max", "pooled_mean", "pooled_variance")
 DIGEST_STATE_TYPES = ("tdigest", "kll")
+DEDUP_PROCESSOR_KINDS = frozenset({"binary_outcome", "score_distribution"})
 
 BUILDER_DRAFTS_KEY = "builder_unapplied_drafts"
 _RUN_DATA_SCOPES = frozenset(
@@ -1486,6 +1487,12 @@ def processor_to_dict(processor: model.Processor) -> dict[str, Any]:
     if not processor.states:
         data.pop("states", None)
     return data
+
+
+def processor_supports_dedup(kind: str) -> bool:
+    """Return whether the runtime processor consumes ``dedup_keys``."""
+
+    return kind in DEDUP_PROCESSOR_KINDS
 
 
 def metric_to_dict(metric: model.Metric) -> dict[str, Any]:
@@ -2961,6 +2968,39 @@ def _remove_chat_descriptions(
         _write_yaml(path, data)
 
 
+def _rename_processor_chat_description(
+    workspace: str | Path,
+    *,
+    old_id: str,
+    new_id: str,
+) -> None:
+    """Move a processor's shared chat description to its new identifier."""
+
+    path = Path(workspace) / "ai.yaml"
+    if not path.exists():
+        return
+    data = _read_yaml(path)
+    blocks: list[dict[str, Any]] = []
+    top_level = data.get("chat_with_data")
+    if isinstance(top_level, dict):
+        blocks.append(top_level)
+    ai = data.get("ai")
+    nested = ai.get("chat_with_data") if isinstance(ai, dict) else None
+    if isinstance(nested, dict):
+        blocks.append(nested)
+
+    changed = False
+    for block in blocks:
+        metric_descriptions = block.get("metric_descriptions")
+        if not isinstance(metric_descriptions, dict) or old_id not in metric_descriptions:
+            continue
+        description = metric_descriptions.pop(old_id)
+        metric_descriptions.setdefault(new_id, description)
+        changed = True
+    if changed:
+        _write_yaml(path, data)
+
+
 @contextmanager
 def catalog_transaction(workspace: str | Path) -> Iterator[None]:
     """Restore every catalog file if a multi-file authoring write fails midway."""
@@ -3129,6 +3169,7 @@ def rename_processor_definition(
         model.Metrics.model_validate(metrics)
         _write_yaml(processors_path, processors)
         _write_yaml(metrics_path, metrics)
+        _rename_processor_chat_description(workspace, old_id=old_id, new_id=new_id)
         require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
 
 
@@ -3440,10 +3481,19 @@ def require_valid_workspace(
 ) -> None:
     """Raise with validation details so an enclosing authoring transaction rolls back."""
 
-    ok, issues = validate_workspace(workspace, source_columns_by_id=source_columns_by_id)
-    if ok:
+    ensure_minimum_workspace(workspace)
+    try:
+        catalog = load(workspace)
+    except CatalogLoadError as exc:
+        raise ValueError(
+            "Workspace catalog validation failed; changes were rolled back:\n"
+            f"- {exc}"
+        ) from exc
+    result = validate_catalog(catalog, source_columns_by_id=source_columns_by_id)
+    if result.ok:
         return
-    details = "\n".join(f"- {issue}" for issue in issues)
+    errors = [issue for issue in result.issues if issue.severity == "error"]
+    details = "\n".join(f"- {issue.location}: {issue.message}" for issue in errors)
     raise ValueError(f"Workspace catalog validation failed; changes were rolled back:\n{details}")
 
 

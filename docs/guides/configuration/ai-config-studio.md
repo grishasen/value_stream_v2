@@ -100,11 +100,18 @@ An unknown column name cannot be typed into a source-field mapping. Defaults,
 filters, and calculated-field editors start empty; rows appear only after an
 explicit add action.
 
-The **Suggested Group-By Fields** profile treats approved `Day`, `Month`,
+The **Suggested Group-By Fields** profile treats source-provided `Day`, `Month`,
 `Quarter`, and `Year` fields as explicit recommended calendar granularities,
-even when those fields are required source mappings. The initial selection
-reserves room for every available calendar granularity, then fills its remaining
-capacity with recommended low-cardinality business dimensions.
+even when those fields are required source mappings. When the draft will derive
+those fields from `OutcomeTime`, they are grain outputs rather than business
+dimensions and are removed before the five-field recommendation limit is
+applied. They therefore cannot consume slots that should hold recommended
+low-cardinality business dimensions.
+
+When both `DecisionTime` and `OutcomeTime` are available, the deterministic
+draft adds a `ResponseTime` calculation in seconds only if neither the effective
+sample schema nor an enabled user calculation already defines that output. A
+user-authored `ResponseTime` expression always wins.
 
 ## Describe the outcome
 
@@ -191,6 +198,11 @@ shows the affected catalog areas and bounded validation findings, and includes
 a diagnostic reference that operators can correlate with application logs.
 The current accepted revision is presented separately so a failed proposal is
 never styled as a newly accepted success.
+
+For sample-backed drafts, repair guidance leads with effective-schema field
+contract failures before secondary catalog or report failures. Correcting a
+stale pre-rename field at its processor or transform source can resolve several
+downstream report findings in the same repair.
 
 Debug logs contain only the diagnostic reference, operation, attempt number,
 response size, parsed section names, parse exception class and location, and

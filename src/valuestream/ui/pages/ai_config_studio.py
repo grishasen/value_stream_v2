@@ -6473,7 +6473,9 @@ def _validate_draft_for_active_schema(
         baseline_draft=baseline_draft,
         expected_rename_capitalize=_expected_rename_capitalize_contract(),
     )
-    return catalog_ok and fields_ok, list(dict.fromkeys([*catalog_issues, *field_issues]))
+    # Lead repair prompts with sample-backed field-contract failures: a stale
+    # source field can cause secondary catalog/report errors downstream.
+    return catalog_ok and fields_ok, list(dict.fromkeys([*field_issues, *catalog_issues]))
 
 
 def _draft_validation_cache_key(
@@ -9206,12 +9208,6 @@ def _default_group_by_fields(
     approved_fields: list[str],
     required_fields: list[str] | None = None,
 ) -> list[str]:
-    fields = dimension_profile.default_group_by_fields(
-        sample,
-        approved_fields,
-        required_fields=required_fields or _studio_required_fields(sample),
-        limit=5,
-    )
     # Calendar fields the draft derives from the timestamp are grain outputs,
     # not business dimensions; grouping by them duplicates the grain machinery.
     # Real calendar columns shipped by the source (no timestamp to derive from)
@@ -9219,4 +9215,10 @@ def _default_group_by_fields(
     derived_calendar = (
         set(_calendar_outputs_to_derive()) if "OutcomeTime" in sample.columns else set()
     )
-    return [field for field in fields if field not in derived_calendar]
+    eligible_fields = [field for field in approved_fields if field not in derived_calendar]
+    return dimension_profile.default_group_by_fields(
+        sample,
+        eligible_fields,
+        required_fields=required_fields or _studio_required_fields(sample),
+        limit=5,
+    )

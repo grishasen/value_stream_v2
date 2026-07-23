@@ -289,8 +289,10 @@ fig = px.funnel(
 
 ### 3.9 `boxplot`
 
-Required: `x` and a `tdigest_quantile` metric. Optional: `color, facet_row,
-facet_col`.
+Required: a `tdigest_quantile` metric. Optional: `x, color, facet_row,
+facet_col`. Without `x`, the renderer produces one overall distribution box;
+set `x` to compare the distribution across time or another persisted
+dimension.
 
 Boxplots are reconstructed from `<prop>_p25, <prop>_Median, <prop>_p75, <prop>_Min, <prop>_Max` (or t-digest quantiles) — the metric output already exposes those.
 
@@ -493,7 +495,7 @@ The Builder UI uses the following metadata table to filter chart kinds by the me
 | `sankey` | aggregate metrics | source/target dims | metric.outputs[0] |
 | `gauge` | binary_outcome, snapshot | — | — |
 | `funnel` | funnel | — | — |
-| `boxplot` | numeric_distribution | first time-grain dim | property |
+| `boxplot` | numeric_distribution | optional first time-grain dim | property |
 | `histogram` | numeric_distribution | — | — |
 | `calibration_curve` | score_distribution (Calibration metric) | — | — |
 | `roc_curve` | score_distribution (`curve_from_digests`) | — | — |

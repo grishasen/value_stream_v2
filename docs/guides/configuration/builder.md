@@ -46,6 +46,11 @@ result. If either the write or validation fails, every affected catalog file is
 restored to its exact prior contents. Applying configuration never ingests
 source data and never materializes aggregates.
 
+Create drafts use the same recovery contract as maintenance drafts. For
+example, a recovered **Create Metric** draft is offered before the source and
+metric-kind selectors can replace its identity. When Apply is unavailable, the
+editor states the exact missing or invalid input beside the disabled action.
+
 After a successful Apply, the Builder recommends one explicit next action:
 
 - **Run data** for source, processor, dimension, workspace-setting, or recipe
@@ -184,15 +189,28 @@ short guide under Group By explains what the kind is for and lists example
 KPIs (for `entity_set`: unique counts, audience overlap, Top-N frequent
 values).
 
-**Auto Outputs** always mirrors the selected kind's engine-default states —
-switching kind while creating replaces the grid (binary outcome: counts plus
-a unique-subject sketch; entity set: CPC and theta sketches over the entity
-column; derived kinds show their computed states). Add further sketch states
-(Top-K, CPC, theta, digests) as rows when the kind supports them.
+**Auto Outputs** starts from the selected kind's engine-default states (binary
+outcome: counts plus a unique-subject sketch; entity set: CPC and theta sketches
+over the entity column; derived kinds show their computed states). Switching
+kind reseeds those defaults while preserving rows whose state, type, source
+column, or **Enabled** value you changed. In particular, disabling a default
+row remains an intentional edit. Add further sketch states (Top-K, CPC, theta,
+digests) as rows when the kind supports them.
 
 Kind-specific settings cover every engine-read property: `entity_set` exposes
 the sketched **Entity Column**, and `entity_lifecycle` exposes its customer,
 order, monetary, and purchase-date key columns.
+
+**Dedup Keys** is available only for `binary_outcome` and
+`score_distribution`, the processor kinds that consume `dedup_keys` at runtime.
+Rows with the same configured values are counted once within each load chunk;
+leaving the control empty aggregates every row. Other processor kinds do not
+persist a no-op dedup setting.
+
+Renaming an existing processor is one transactional catalog change. It replaces
+the old processor ID, retargets metrics whose `source` referenced that ID, and
+moves the matching Chat With Data description in `ai.yaml` before validating
+the resulting workspace.
 
 ## Metrics
 
@@ -216,7 +234,9 @@ same draft. The dashboard title and layout (`tabs`, `grid`, or `stacked`) and
 page title are editable in the same flow. Before Apply is enabled, the proposed
 dashboard, page settings, and tile are validated as a complete catalog. Visual
 mode round-trips settings outside its controls unchanged; Raw YAML remains the
-escape hatch for editing them directly.
+escape hatch for editing them directly. A new Raw YAML draft starts from the
+same valid report scaffold as Visual mode, and its session-local text survives
+reruns caused by presentation and page-settings controls.
 
 The collapsed **Report inventory** is searchable and uses dashboard, page,
 tile, metric, and chart labels designed for recognition. Enable technical IDs
@@ -254,9 +274,13 @@ Deletion always starts from the explicitly selected object and shows exact
 
 Each confirmed deletion updates the affected catalog files and related
 `ai.yaml` descriptions in one rollback boundary, then validates the resulting
-workspace. Dashboard and page containers are retained. Aggregate Parquet files
-and run history are not deleted by catalog CRUD; use the separate
-`valuestream vacuum` lifecycle when persisted files are eligible for removal.
+workspace. Source, processor, metric, and tile cascades retain dashboard and
+page containers. To remove a container, open **Report inventory → Manage
+dashboards** and confirm the exact page or dashboard target separately. A page
+confirmation cannot authorize another page or the whole dashboard; deleting
+the last page also removes its dashboard. Aggregate Parquet files and run
+history are not deleted by catalog CRUD; use the separate `valuestream vacuum`
+lifecycle when persisted files are eligible for removal.
 
 ## Exporting
 

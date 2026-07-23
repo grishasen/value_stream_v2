@@ -79,6 +79,23 @@ def test_builder_draft_status_uses_canonical_object_equality() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("kind", "supported"),
+    [
+        ("binary_outcome", True),
+        ("score_distribution", True),
+        ("numeric_distribution", False),
+        ("entity_lifecycle", False),
+        ("entity_set", False),
+        ("funnel", False),
+        ("snapshot", False),
+    ],
+)
+def test_processor_dedup_control_matches_runtime_support(kind: str, supported: bool) -> None:
+    assert builder.processor_supports_dedup(kind) is supported
+
+
+@pytest.mark.unit
 def test_builder_create_template_stays_clean_until_edited_and_discard_resets_it() -> None:
     state: dict[str, object] = {"builder_processor_mode": "Create New Processor"}
     template = {"id": "ih_processor", "description": ""}
@@ -3441,6 +3458,53 @@ def test_existing_report_tile_opens_clean_in_visual_editor(tmp_path: Path) -> No
 
 
 @pytest.mark.unit
+def test_dashboard_manager_confirmation_is_scoped_to_the_exact_target(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    dashboards_path = tmp_path / "catalog" / "dashboards.yaml"
+    dashboards = yaml.safe_load(dashboards_path.read_text(encoding="utf-8"))
+    dashboards["dashboards"][0]["pages"].append(
+        {"id": "secondary", "title": "Secondary", "tiles": []}
+    )
+    dashboards_path.write_text(yaml.safe_dump(dashboards, sort_keys=False), encoding="utf-8")
+    builder.require_valid_workspace(tmp_path)
+
+    def app(workspace: str) -> None:
+        from pathlib import Path  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.config.loader import load  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import (  # noqa: PLC0415
+            _render_dashboard_manager,
+        )
+
+        _render_dashboard_manager(Path(workspace), load(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+
+    page_confirmation = next(
+        item
+        for item in rendered.checkbox
+        if item.key == "builder_manage_confirm_page_overview_portfolio"
+    )
+    rendered = page_confirmation.set_value(True).run()
+    assert not next(button for button in rendered.button if button.label == "Delete page").disabled
+    assert next(button for button in rendered.button if button.label == "Delete dashboard").disabled
+
+    page_selector = next(item for item in rendered.selectbox if item.label == "Page to manage")
+    rendered = page_selector.set_value("secondary").run()
+
+    assert not rendered.exception
+    new_confirmation = next(
+        item
+        for item in rendered.checkbox
+        if item.key == "builder_manage_confirm_page_overview_secondary"
+    )
+    assert new_confirmation.value is False
+    assert next(button for button in rendered.button if button.label == "Delete page").disabled
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "selected",
     [
@@ -4130,6 +4194,7 @@ def test_kind_switch_reseeds_description_and_auto_outputs(tmp_path: Path) -> Non
         "Negatives",
         "UniqueSubjects_cpc",
     ]
+    assert any(item.label == "Dedup Keys" for item in rendered.multiselect)
 
     kind = next(item for item in rendered.selectbox if item.label == "Kind")
     rendered = kind.set_value("entity_set").run()
@@ -4141,6 +4206,44 @@ def test_kind_switch_reseeds_description_and_auto_outputs(tmp_path: Path) -> Non
     assert [row["State"] for row in state_rows] == ["ActiveUsers_cpc", "ActiveUsers_theta"]
     assert all(row["Source Column"] == "InteractionID" for row in state_rows)
     assert any(item.label == "Primary Entity Column" for item in rendered.selectbox)
+    assert not any(item.label == "Dedup Keys" for item in rendered.multiselect)
+
+
+@pytest.mark.unit
+def test_kind_state_reseed_preserves_a_disabled_default_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    processor = model.Processors.model_validate(
+        {
+            "processors": [
+                {
+                    "id": "engagement",
+                    "source": "ih",
+                    "kind": "binary_outcome",
+                }
+            ]
+        }
+    ).processors[0]
+    state_key = "builder_proc_states_engagement"
+    defaults = config_builder._state_rows(processor)
+    current = copy.deepcopy(defaults)
+    next(row for row in current if row["State"] == "Count")["Enabled"] = False
+    state = {
+        state_key: current,
+        f"{state_key}_kind_defaults": defaults,
+        f"{state_key}_kind_signature": "previous-kind",
+    }
+    monkeypatch.setattr(config_builder.st, "session_state", state)
+
+    config_builder._reseed_state_rows_for_kind(
+        processor,
+        state_key,
+        processor.id,
+        {},
+    )
+
+    count_row = next(row for row in state[state_key] if row["State"] == "Count")
+    assert count_row["Enabled"] is False
 
 
 @pytest.mark.unit
@@ -4647,6 +4750,39 @@ def test_validate_workspace_accepts_observed_data_only_columns(tmp_path: Path) -
         source_columns_by_id={"ih": ["ActionContext", "CustomerID", "OutcomeTime"]},
     )
     assert ok, issues
+
+
+@pytest.mark.unit
+def test_require_valid_workspace_reports_only_blocking_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    monkeypatch.setattr(
+        builder,
+        "validate_catalog",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ok=False,
+            issues=[
+                SimpleNamespace(
+                    location="sources[ih].transforms[0]",
+                    message="runtime-only expression warning",
+                    severity="warning",
+                ),
+                SimpleNamespace(
+                    location="dashboards[overview]",
+                    message="blocking report error",
+                    severity="error",
+                ),
+            ],
+        ),
+    )
+
+    with pytest.raises(ValueError, match="blocking report error") as captured:
+        builder.require_valid_workspace(tmp_path)
+
+    assert "blocking report error" in str(captured.value)
+    assert "runtime-only expression warning" not in str(captured.value)
 
 
 @pytest.mark.unit
@@ -5734,6 +5870,29 @@ def test_processor_cascade_plan_is_transitive_and_names_exact_report_paths(
         "overview/portfolio/holdings_value",
     )
     assert plan.page_filter_locations == ("overview/portfolio/HoldingType",)
+
+
+@pytest.mark.unit
+def test_rename_processor_retargets_metrics_and_chat_description(tmp_path: Path) -> None:
+    _write_source_cascade_catalog(tmp_path)
+    processor = next(
+        item for item in load(tmp_path).processors.processors if item.id == "engagement"
+    )
+    definition = builder.processor_to_dict(processor)
+    definition["id"] = "engagement_v2"
+
+    builder.rename_processor_definition(tmp_path, "engagement", definition)
+
+    renamed = load(tmp_path)
+    assert [item.id for item in renamed.processors.processors] == [
+        "engagement_v2",
+        "holdings_lifecycle",
+    ]
+    assert renamed.metrics.metrics["CTR"].source == "engagement_v2"
+    ai_config = yaml.safe_load((tmp_path / "ai.yaml").read_text(encoding="utf-8"))
+    descriptions = ai_config["chat_with_data"]["metric_descriptions"]
+    assert descriptions["engagement_v2"] == "Interaction processor"
+    assert "engagement" not in descriptions
 
 
 @pytest.mark.unit
@@ -7274,7 +7433,7 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
 
     assert "boxplot" in builder.chart_choices_for_metric(catalog, "PropensityDistribution")
     assert "boxplot" not in builder.chart_choices_for_metric(catalog, "PropensityCount")
-    # The editor asks only for the axis; the digest property comes from the metric.
+    # The axis is optional; the digest property comes from the metric.
     assert builder.chart_field_controls("boxplot") == ("x", "color", "facet_row", "facet_col")
 
 

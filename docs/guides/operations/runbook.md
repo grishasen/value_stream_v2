@@ -79,6 +79,13 @@ chunk remains invisible and is processed again. For large interrupted runs,
 the engine logs and reports deep-verification progress to the caller/UI by
 processor/grain group before new chunk processing begins.
 
+Data Load starts source, workspace, and clean-rebuild actions in the application
+server process and tracks them by workspace and scope. A browser reload,
+websocket reconnect, or page navigation only detaches the view; returning to
+Data Load resumes progress polling. An application-server restart does stop
+those process-local background threads. In that case, invoke the same normal
+run again and rely on the interrupted-run verification described above.
+
 Files created by older releases that have chunk/lineage metadata but no
 `pipeline_runs` row cannot be adopted automatically because their source
 computation hash was never persisted. Let the replacement run finish, inspect

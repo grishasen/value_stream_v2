@@ -790,7 +790,7 @@ processors:
             ["Channel", "CustomerID", "Outcome", "OutcomeTime"],
             source_id="ih",
         )
-        return catalog_ok and fields_ok, [*catalog_issues, *field_issues]
+        return catalog_ok and fields_ok, [*field_issues, *catalog_issues]
 
     result = ai_studio.generate_validated_candidate(
         base_draft=base,
@@ -1398,6 +1398,41 @@ def test_default_group_by_fields_include_explicit_calendar_granularities() -> No
 
 
 @pytest.mark.unit
+def test_default_group_by_filters_derived_calendar_before_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ai_config_studio_page,
+        "_calendar_outputs_to_derive",
+        lambda: ["Day", "Month", "Quarter", "Year"],
+    )
+    sample = pl.DataFrame(
+        {
+            "Channel": ["Web", "Mobile", "Branch", "Web", "Mobile", "Branch"],
+            "Day": [f"2026-01-0{day}" for day in range(1, 7)],
+            "Month": ["2026-01"] * 6,
+            "Quarter": ["2026-Q1"] * 6,
+            "Year": [2026] * 6,
+            "Issue": ["Cards", "Loans", "Savings", "Cards", "Loans", "Savings"],
+            "Group": ["A", "B", "C", "A", "B", "C"],
+            "Direction": ["Inbound", "Outbound"] * 3,
+            "PlacementType": ["Banner", "Tile", "Email"] * 2,
+            "Outcome": ["Clicked", "Impression"] * 3,
+            "OutcomeTime": [f"2026-01-0{day}T10:00:00" for day in range(1, 7)],
+        }
+    )
+
+    group_by = ai_config_studio_page._default_group_by_fields(
+        sample,
+        list(sample.columns),
+        ["Outcome", "OutcomeTime"],
+    )
+
+    assert group_by == ["Channel", "Group", "Issue", "PlacementType"]
+    assert not set(group_by) & {"Day", "Month", "Quarter", "Year"}
+
+
+@pytest.mark.unit
 def test_missing_kind_specific_metric_fields_are_repairable_draft_issues() -> None:
     issues = [
         "metrics.metrics.customer_reach.approx_distinct_count.state: Field required",
@@ -1542,8 +1577,8 @@ def test_expression_prompt_dictionary_covers_the_closed_dsl() -> None:
 def test_chart_prompt_dictionary_matches_tile_validation_contract() -> None:
     from typing import get_args  # noqa: PLC0415 - test-only introspection
 
-    from valuestream.config.validate import (  # noqa: PLC0415 - contract under test
-        _TILE_REQUIRED_ALTERNATIVES,
+    from valuestream.charts.recipes import (  # noqa: PLC0415 - shared contract under test
+        TILE_REQUIRED_ALTERNATIVES,
     )
 
     chart_dictionary = ai_studio.catalog_prompt_dictionaries()["chart_required_fields"]
@@ -1551,7 +1586,7 @@ def test_chart_prompt_dictionary_matches_tile_validation_contract() -> None:
     chart_kinds = set(get_args(model.Tile.model_fields["chart"].annotation))
 
     assert set(required_by_chart) == chart_kinds
-    for chart, alternatives in _TILE_REQUIRED_ALTERNATIVES.items():
+    for chart, alternatives in TILE_REQUIRED_ALTERNATIVES.items():
         assert required_by_chart[chart] == ["|".join(group) for group in alternatives], chart
 
     for chart, example in chart_dictionary["tile_examples"].items():

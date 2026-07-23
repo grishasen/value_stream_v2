@@ -34,6 +34,18 @@ pages:
 4. Use "Run Source" for one source or "Run All Sources" for the workspace.
 5. Review discovered chunks and the run result.
 
+Data Load presents later-declared catalog sources first so a newly added source
+is immediately visible, without changing the source order persisted in YAML.
+
+Source, workspace, and clean-rebuild runs continue in the Streamlit server
+process if you reload the browser, lose the websocket, or navigate away from
+Data Load. Returning to the page reconnects to the process-local run registry,
+which polls active progress about every 1.5 seconds and shows the completion or
+failure receipt. Restarting or stopping the application server is different:
+its background thread ends with the process. Start the same normal run again so
+the ingestion recovery path can verify and adopt completed chunks; do not add
+**Force rebuild** solely because the UI server restarted.
+
 When Configuration Builder links here after installing a recipe, run the named
 source to materialize its proposed states. A changed processor computation
 contract normally makes the affected chunks eligible without **Force rebuild**;
@@ -91,7 +103,8 @@ Reports only filter by dimensions persisted by the backing processor. Pages may
 declare filters for all tiles or compatible tiles. Partial coverage remains
 usable but is never silent: both the filter chip and unsupported tile disclose
 it. KPI-strip cards are explicitly configured scalar queries; ordinary charts
-are not promoted into KPI cards.
+are not promoted into KPI cards. Every configured KPI-strip card renders, with
+the strip wrapping after five cards instead of dropping later cards.
 
 For `multiselect` and `selectbox` filters, the displayed choices are suggestions
 loaded from aggregates rather than a fixed whitelist. Value Stream queries
