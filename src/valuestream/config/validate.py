@@ -63,6 +63,7 @@ _STATE_TYPE_DTYPE: Mapping[str, expr_ast.Dtype] = {
     "topk": "String",
 }
 
+
 @dataclass(frozen=True)
 class CatalogIssue:
     """One catalog-level validation finding."""
@@ -322,13 +323,16 @@ def _validate_tile_config(
 
     recipe = RECIPES.get(tile.chart)
     processor_kind = (metric_processor_kinds or {}).get(tile.metric)
-    if recipe is not None and processor_kind and processor_kind not in recipe.allowed_processor_kinds:
+    if (
+        recipe is not None
+        and processor_kind
+        and processor_kind not in recipe.allowed_processor_kinds
+    ):
         issues.append(
             CatalogIssue(
                 location=f"{location}.chart",
                 message=(
-                    f"chart {tile.chart!r} is not compatible with processor kind "
-                    f"{processor_kind!r}"
+                    f"chart {tile.chart!r} is not compatible with processor kind {processor_kind!r}"
                 ),
             )
         )
@@ -528,9 +532,7 @@ def _validate_tile_field_references(
             issues.append(
                 CatalogIssue(
                     location=f"{location}.{field_name}",
-                    message=(
-                        f"field {selected_field!r} is not exposed by metric {metric_name!r}"
-                    ),
+                    message=(f"field {selected_field!r} is not exposed by metric {metric_name!r}"),
                 )
             )
     facets = values.get("facets")
@@ -618,14 +620,22 @@ def _validate_page_filters(
 
 
 def _validate_dashboard_theme(theme: Mapping[str, Any], issues: list[CatalogIssue]) -> None:
-    raw = theme.get("category_colors")
-    if raw is None:
-        return
+    for key in ("category_colors", "category_colors_light", "category_colors_dark"):
+        raw = theme.get(key)
+        if raw is not None:
+            _validate_category_colors(key, raw, issues)
+
+
+def _validate_category_colors(
+    key: str,
+    raw: object,
+    issues: list[CatalogIssue],
+) -> None:
     if not isinstance(raw, Mapping):
         issues.append(
             CatalogIssue(
-                location="dashboards.theme.category_colors",
-                message="category_colors must map dimension names to category/color mappings",
+                location=f"dashboards.theme.{key}",
+                message=f"{key} must map dimension names to category/color mappings",
             )
         )
         return
@@ -633,7 +643,7 @@ def _validate_dashboard_theme(theme: Mapping[str, Any], issues: list[CatalogIssu
         if not isinstance(category_map, Mapping) or not category_map:
             issues.append(
                 CatalogIssue(
-                    location=f"dashboards.theme.category_colors.{dimension}",
+                    location=f"dashboards.theme.{key}.{dimension}",
                     message="category color entry must be a non-empty mapping",
                 )
             )
@@ -642,7 +652,7 @@ def _validate_dashboard_theme(theme: Mapping[str, Any], issues: list[CatalogIssu
             if not isinstance(color, str) or not color.strip():
                 issues.append(
                     CatalogIssue(
-                        location=(f"dashboards.theme.category_colors.{dimension}.{category}"),
+                        location=f"dashboards.theme.{key}.{dimension}.{category}",
                         message="category color must be a non-empty color string",
                     )
                 )

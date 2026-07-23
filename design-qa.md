@@ -79,4 +79,26 @@ typography, radii, and action emphasis rather than coordinate matching.
 - The first six dark chart colors meet 3:1 non-text contrast against the chart
   surface, and targeted preview/report theme tests pass.
 
+## Light Plotly follow-up
+
+- Light gallery state:
+  `artifacts/ui-audit/chart-theme/09-config-light-preview.jpg`
+- Light multiseries state:
+  `artifacts/ui-audit/chart-theme/10-config-light-multiseries.jpg`
+- Per-tile theme control:
+  `artifacts/ui-audit/chart-theme/11-tile-light-theme-control.jpg`
+- Dark/light comparison:
+  `artifacts/ui-audit/chart-theme/12-dark-light-chart-preview.jpg`
+- The report library now previews either the application-dark or true
+  white-surface Plotly theme without changing the application chrome.
+- The tile editor exposes Follow application, Light Plotly, Dark Plotly, and
+  Custom YAML choices. A light tile overrides inherited dark presentation
+  tokens while retaining non-presentation configuration.
+- Production chart tests verify that a light tile changes both the chart canvas
+  and the actual qualitative trace colors, not only the Plotly template.
+- Theme-specific semantic category mappings keep category identity stable in
+  both modes while using contrast-appropriate colors.
+- At 1280 px, `scrollWidth` equals `clientWidth`; the fourth report-library
+  filter does not introduce horizontal overflow.
+
 Final result: passed

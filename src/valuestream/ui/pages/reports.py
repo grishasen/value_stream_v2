@@ -909,8 +909,7 @@ def _is_coverage_page(page: Any) -> bool:
 
 def _is_descriptive_report_page(page: Any) -> bool:
     return any(
-        tile.chart == "boxplot" or str(tile.chart).startswith("descriptive_")
-        for tile in page.tiles
+        tile.chart == "boxplot" or str(tile.chart).startswith("descriptive_") for tile in page.tiles
     )
 
 
@@ -1489,7 +1488,10 @@ def _tile_card(
                 else render_chart(
                     rows,
                     tile_dict,
-                    theme={**dashboard_theme(), **ctx.catalog.dashboards.theme},
+                    theme=dashboard_theme(
+                        ctx.catalog.dashboards.theme,
+                        tile_dict.get("theme"),
+                    ),
                 )
             )
             with header_slot.container():

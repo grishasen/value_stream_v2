@@ -215,6 +215,7 @@ def render_chart(  # noqa: PLR0912, PLR0915
     _strip_facet_annotation_prefixes(fig, tile, base)
     _apply_theme(fig, theme or {}, tile)
     _apply_display_labels(fig, tile)
+    _apply_qualitative_colorway(fig, tile, theme or {})
     _apply_semantic_category_colors(fig, tile, theme or {})
     # After _apply_theme so the top-margin reserved for the delta badge is not
     # clobbered by the theme's default margins.
@@ -2301,6 +2302,98 @@ def _apply_display_labels(fig: go.Figure, tile: Mapping[str, Any]) -> None:
         name = getattr(trace, "name", None)
         if isinstance(name, str) and name in labels:
             trace.update(name=labels[name])
+
+
+def _apply_qualitative_colorway(
+    fig: go.Figure,
+    tile: Mapping[str, Any],
+    theme: Mapping[str, Any],
+) -> None:
+    """Apply a resolved qualitative palette after Plotly Express construction."""
+
+    raw_tile_theme = tile.get("theme")
+    tile_theme: Mapping[str, Any] = raw_tile_theme if isinstance(raw_tile_theme, Mapping) else {}
+    raw_colorway = tile_theme.get("colorway", theme.get("colorway"))
+    if not isinstance(raw_colorway, list | tuple):
+        return
+    colorway = [str(color) for color in raw_colorway if str(color)]
+    if not colorway:
+        return
+    chart = str(tile.get("chart", ""))
+    if (
+        tile.get("conditional_formatting")
+        or chart.startswith("experiment_")
+        or chart
+        in {
+            "calendar_heatmap",
+            "clv_treemap",
+            "cohort_heatmap",
+            "corr",
+            "gauge",
+            "heatmap",
+            "kpi_card",
+            "rfm_density",
+            "table",
+            "treemap",
+            "waterfall",
+        }
+    ):
+        return
+
+    color_index = 0
+    for trace in fig.data:
+        color = colorway[color_index % len(colorway)]
+        trace_type = str(getattr(trace, "type", ""))
+        if trace_type == "pie":
+            labels = list(getattr(trace, "labels", None) or [])
+            if labels:
+                trace.update(
+                    marker={
+                        "colors": [
+                            colorway[(color_index + index) % len(colorway)]
+                            for index in range(len(labels))
+                        ]
+                    }
+                )
+                color_index += len(labels)
+            continue
+        if trace_type == "funnel":
+            stages = list(getattr(trace, "y", None) or [])
+            trace.update(
+                marker={
+                    "color": [
+                        colorway[(color_index + index) % len(colorway)]
+                        for index in range(max(1, len(stages)))
+                    ]
+                }
+            )
+            color_index += max(1, len(stages))
+            continue
+        if trace_type == "sankey":
+            labels = list(getattr(trace.node, "label", None) or [])
+            if labels:
+                trace.node.update(
+                    color=[
+                        colorway[(color_index + index) % len(colorway)]
+                        for index in range(len(labels))
+                    ]
+                )
+                color_index += len(labels)
+            continue
+
+        updated = False
+        marker = getattr(trace, "marker", None)
+        marker_color = getattr(marker, "color", None)
+        if marker is not None and (marker_color is None or isinstance(marker_color, str)):
+            trace.update(marker_color=color)
+            updated = True
+        line = getattr(trace, "line", None)
+        line_color = getattr(line, "color", None)
+        if line is not None and (line_color is None or isinstance(line_color, str)):
+            trace.update(line_color=color)
+            updated = True
+        if updated:
+            color_index += 1
 
 
 def _apply_semantic_category_colors(

@@ -349,6 +349,48 @@ def test_grouped_report_uses_the_app_dark_chart_palette_and_surface() -> None:
 
 
 @pytest.mark.unit
+def test_grouped_report_can_use_the_true_light_chart_palette_and_surface() -> None:
+    frame = pl.DataFrame(
+        {
+            "Day": [
+                dt.date(2024, 1, 1),
+                dt.date(2024, 1, 2),
+                dt.date(2024, 1, 1),
+                dt.date(2024, 1, 2),
+            ],
+            "Channel": ["Web", "Web", "Mobile", "Mobile"],
+            "Interactions": [120, 140, 90, 110],
+        }
+    )
+    previous_default = pio.templates.default
+    try:
+        ui_theme.init_plotly_theme.cache_clear()
+        ui_theme.init_plotly_theme()
+        tile_theme = {"base": "light", "template": "valuestream_light"}
+        figure = render_chart(
+            frame,
+            {
+                "id": "interactions_trend",
+                "metric": "Interactions",
+                "chart": "line",
+                "title": "Interactions Trend",
+                "x": "Day",
+                "y": "Interactions",
+                "color": "Channel",
+                "theme": tile_theme,
+            },
+            theme=ui_theme.dashboard_theme(tile_theme),
+        )
+    finally:
+        pio.templates.default = previous_default
+
+    assert [trace.marker.color for trace in figure.data] == ["#0072B2", "#D55E00"]
+    assert figure.layout.paper_bgcolor == "#ffffff"
+    assert figure.layout.plot_bgcolor == "#ffffff"
+    assert figure.layout.font.color == "#17202a"
+
+
+@pytest.mark.unit
 def test_line_downsampling_caps_large_frames() -> None:
     frame = pl.DataFrame(
         {

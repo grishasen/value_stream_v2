@@ -479,6 +479,10 @@ FIELD_HELP: dict[str, str] = {
     "report.library_purpose": _tip(
         "Group report tiles by the business question their chart is designed to answer."
     ),
+    "report.preview_theme": _tip(
+        "Preview the chart gallery against the dark or true light Plotly surface.",
+        "Light",
+    ),
     "report.metric_filter": _tip("Show only tiles that use the selected metric."),
     "report.chart_filter": _tip(
         "Focus the library on one chart kind; kinds without reports offer a create action."
@@ -509,6 +513,10 @@ FIELD_HELP: dict[str, str] = {
     ),
     "report.value_format": _tip(
         "Tile-specific numeric format overriding the metric default.", "percent"
+    ),
+    "report.theme_preset": _tip(
+        "Follow the application theme or pin this tile to the light or dark Plotly theme.",
+        "Light Plotly",
     ),
     "report.scale": _tip(
         "Transform time-series values to absolute, index-100, or percentage change.", "index_100"

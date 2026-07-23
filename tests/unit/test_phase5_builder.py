@@ -3285,6 +3285,8 @@ def test_report_library_plotly_previews_cover_every_supported_chart() -> None:
         figure = config_builder._chart_library_preview(chart_type, theme_base="light")
 
         assert figure.data
+        assert figure.layout.paper_bgcolor == "#ffffff"
+        assert figure.layout.plot_bgcolor == "#ffffff"
         assert pio.to_json(figure, validate=True)
 
 
@@ -3295,6 +3297,26 @@ def test_report_library_dark_previews_share_the_app_chart_theme() -> None:
     assert figure.data[0].marker.color == theme.PLOTLY_DARK_COLORWAY[0]
     assert figure.data[1].line.color == theme.PLOTLY_DARK_COLORWAY[1]
     assert figure.layout.font.color == "#f7faff"
+    assert figure.layout.paper_bgcolor == "#162438"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("raw_theme", "expected"),
+    [
+        (None, "app"),
+        ({}, "app"),
+        ({"base": "light", "template": "valuestream_light"}, "light"),
+        ({"template": "valuestream_dark"}, "dark"),
+        ({"template": "plotly_white"}, "custom"),
+        ({"base": "light", "paper_bgcolor": "#fff"}, "custom"),
+    ],
+)
+def test_tile_theme_mode_preserves_simple_presets_and_custom_yaml(
+    raw_theme: object,
+    expected: str,
+) -> None:
+    assert config_builder._tile_theme_mode(raw_theme) == expected
 
 
 @pytest.mark.unit

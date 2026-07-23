@@ -4619,7 +4619,8 @@ def _render_report_library_browser(
         REPORT_LIBRARY_GROUP_BY_CHART,
         key=lambda chart_type: _report_library_chart_label(chart_type).casefold(),
     )
-    filter_columns = st.columns([2, 1, 1], vertical_alignment="bottom")
+    active_theme_base = str(dashboard_theme().get("base", "light"))
+    filter_columns = st.columns([2, 1, 1, 1], vertical_alignment="bottom")
     with filter_columns[0]:
         search = st.text_input(
             "Search",
@@ -4642,6 +4643,15 @@ def _render_report_library_browser(
             key="builder_chart_filter",
             format_func=builder.chart_kind_selector_label,
             help=config_help.field_help("report.chart_filter"),
+        )
+    with filter_columns[3]:
+        theme_base = st.selectbox(
+            "Preview theme",
+            ["dark", "light"],
+            index=builder.option_index(["dark", "light"], active_theme_base),
+            key="builder_chart_preview_theme",
+            format_func=str.title,
+            help=config_help.field_help("report.preview_theme"),
         )
     if chart_filter != "All":
         st.caption(
@@ -4710,7 +4720,6 @@ def _render_report_library_browser(
             for chart_type in visible_chart_types
             if any(option[3].get("chart") == chart_type for option in visible_options)
         ]
-    theme_base = str(dashboard_theme().get("base", "light"))
     for chart_type in visible_chart_types:
         chart_options = [
             option for option in visible_options if option[3].get("chart") == chart_type
@@ -4863,6 +4872,7 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
     preview_tokens = chart_preview_tokens(theme_base)
     ink = preview_tokens["ink"]
     soft = preview_tokens["soft"]
+    background = preview_tokens["background"]
     transparent = "rgba(0,0,0,0)"
     x = [0, 1, 2, 3, 4]
     y = [1.0, 2.8, 2.1, 4.2, 3.6]
@@ -5065,8 +5075,8 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
         margin={"l": 5, "r": 5, "t": 5, "b": 5},
         showlegend=False,
         hovermode=False,
-        paper_bgcolor=transparent,
-        plot_bgcolor=transparent,
+        paper_bgcolor=background,
+        plot_bgcolor=background,
         font={"color": ink, "size": 10},
     )
     figure.update_xaxes(visible=False, fixedrange=True)
@@ -5999,6 +6009,22 @@ def _selectbox_fields(
     return fields
 
 
+def _tile_theme_mode(raw_theme: Any) -> str:
+    """Return the Visual editor mode for an authored tile theme mapping."""
+
+    if not isinstance(raw_theme, Mapping) or not raw_theme:
+        return "app"
+    if not set(raw_theme).issubset({"base", "template"}):
+        return "custom"
+    base = str(raw_theme.get("base", "")).casefold()
+    template = str(raw_theme.get("template", "")).casefold()
+    if base == "light" or template == "valuestream_light":
+        return "light"
+    if base == "dark" or template == "valuestream_dark":
+        return "dark"
+    return "custom"
+
+
 def _chart_setting_controls(  # noqa: PLR0912, PLR0915
     chart_kind: str,
     defaults: dict[str, Any],
@@ -6085,7 +6111,6 @@ def _chart_setting_controls(  # noqa: PLR0912, PLR0915
         for field_name, label in (
             ("labels", "Display Labels YAML"),
             ("filters", "Tile Filters YAML"),
-            ("theme", "Tile Theme YAML"),
         ):
             configured = _yaml_mapping_control(
                 label,
@@ -6094,6 +6119,37 @@ def _chart_setting_controls(  # noqa: PLR0912, PLR0915
             )
             if configured not in (None, {}):
                 settings[field_name] = configured
+
+        raw_theme = defaults.get("theme")
+        theme_mode = st.selectbox(
+            "Chart Theme",
+            ["app", "light", "dark", "custom"],
+            index=builder.option_index(
+                ["app", "light", "dark", "custom"],
+                _tile_theme_mode(raw_theme),
+            ),
+            key=f"builder_tile_theme_mode_{key_suffix}",
+            format_func=lambda mode: {
+                "app": "Follow application",
+                "light": "Light Plotly",
+                "dark": "Dark Plotly",
+                "custom": "Custom YAML",
+            }[mode],
+            help=config_help.field_help("report.theme_preset"),
+        )
+        if theme_mode in {"light", "dark"}:
+            settings["theme"] = {
+                "base": theme_mode,
+                "template": f"valuestream_{theme_mode}",
+            }
+        elif theme_mode == "custom":
+            configured_theme = _yaml_mapping_control(
+                "Tile Theme YAML",
+                raw_theme,
+                key=f"builder_tile_theme_{key_suffix}",
+            )
+            if configured_theme not in (None, {}):
+                settings["theme"] = configured_theme
 
         if chart_kind in {"line", "stacked_area"}:
             scale_modes = ["absolute", "index_100", "percent_change"]
@@ -6414,7 +6470,11 @@ def _preview_tile(workspace: Path, catalog: model.Catalog, tile: dict[str, Any])
     try:
         parsed = model.Tile.model_validate(tile)
         rows = query_tile(workspace, catalog, parsed)
-        figure = render_chart(rows, tile, theme={**dashboard_theme(), **catalog.dashboards.theme})
+        figure = render_chart(
+            rows,
+            tile,
+            theme=dashboard_theme(catalog.dashboards.theme, tile.get("theme")),
+        )
         st.plotly_chart(
             figure,
             width="stretch",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
 
 import plotly.graph_objects as go  # type: ignore[import-untyped]
@@ -112,7 +113,51 @@ def chart_preview_tokens(base: str) -> dict[str, str]:
     return {
         "ink": tokens["ink"],
         "soft": tokens["soft"],
+        "background": tokens["card"],
     }
+
+
+_THEME_PRESENTATION_KEYS = {
+    "template",
+    "colorway",
+    "font",
+    "hoverlabel",
+    "paper_bgcolor",
+    "plot_bgcolor",
+    "color_continuous_scale",
+    "qualitative_palette",
+}
+
+
+def _configured_theme_base(source: Mapping[str, object]) -> str | None:
+    explicit = str(source.get("base", source.get("theme_base", ""))).casefold()
+    if explicit in {"light", "dark"}:
+        return explicit
+    template = str(source.get("template", "")).casefold()
+    if template in {"plotly_white", "valuestream_light"} or "light" in template:
+        return "light"
+    if template in {"plotly_dark", "valuestream_dark"} or "dark" in template:
+        return "dark"
+    return None
+
+
+def _resolved_theme_overrides(
+    overrides: tuple[Mapping[str, object] | None, ...],
+    *,
+    fallback: str,
+) -> tuple[str, dict[str, object]]:
+    base = fallback
+    merged: dict[str, object] = {}
+    for source in overrides:
+        if not isinstance(source, Mapping):
+            continue
+        configured_base = _configured_theme_base(source)
+        if configured_base is not None and configured_base != base:
+            for key in _THEME_PRESENTATION_KEYS:
+                merged.pop(key, None)
+            base = configured_base
+        merged.update(source)
+    return base, merged
 
 
 def _active_theme_base() -> str:
@@ -761,19 +806,22 @@ def _hoverlabel(tokens: dict[str, str]) -> dict[str, object]:
     }
 
 
-def dashboard_theme() -> dict[str, object]:
+def dashboard_theme(*overrides: Mapping[str, object] | None) -> dict[str, object]:
     """Return a default chart theme overlay for catalog dashboard rendering.
 
     Font and hoverlabel are set explicitly on every figure (not only in the
     template): Streamlit patches ``layout.font`` client-side with the light
     theme's text color even in dark mode and with ``theme=None``, which made
     hover tooltips render dark-on-dark. Explicit figure-level values keep the
-    hover layer readable regardless of that patch.
+    hover layer readable regardless of that patch. Later overrides may select
+    ``light`` or ``dark``; changing the base replaces inherited presentation
+    colors while retaining non-presentation settings such as semantic category
+    mappings.
     """
-    base = _active_theme_base()
+    base, configured = _resolved_theme_overrides(overrides, fallback=_active_theme_base())
     tokens = _CHROME_TOKENS[base]
     background = tokens["card"]
-    return {
+    resolved: dict[str, object] = {
         "base": base,
         "template": f"valuestream_{base}",
         "colorway": chart_palette(base),
@@ -790,3 +838,9 @@ def dashboard_theme() -> dict[str, object]:
             "x": 0.5,
         },
     }
+    resolved.update(configured)
+    themed_categories = configured.get(f"category_colors_{base}")
+    if isinstance(themed_categories, Mapping):
+        resolved["category_colors"] = themed_categories
+    resolved["base"] = base
+    return resolved

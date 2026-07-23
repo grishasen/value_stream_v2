@@ -526,10 +526,10 @@ theme:
   colorway: ["#4B73F0", "#22C7F3", "#45D6A5", "#F2C14E"]
   color_continuous_scale: "Viridis"
   qualitative_palette: "Set2"
-  category_colors:
-    Channel:
-      Web: "#4B73F0"
-      Mobile: "#22C7F3"
+  category_colors_dark:
+    Channel: { Web: "#4B73F0", Mobile: "#22C7F3" }
+  category_colors_light:
+    Channel: { Web: "#0072B2", Mobile: "#009E73" }
 ```
 
 The application initializes a built-in `valuestream` Plotly template before
@@ -541,6 +541,10 @@ Streamlit report cards instead of rendering a separate panel. The Configuration
 Builder's chart library uses the same sequence and foreground tokens. The
 default dashboard theme passes these values explicitly, so a workspace or tile
 that overrides only `template` still keeps the app-matched presentation.
+`category_colors_dark` and `category_colors_light` keep important business
+categories stable within each theme without putting low-contrast dark-theme
+accents onto the white chart surface. The legacy theme-neutral
+`category_colors` mapping remains supported as a fallback.
 
 The chart factory applies the theme via `fig.update_layout(template=...)` etc. Per-tile overrides are allowed:
 
@@ -549,8 +553,15 @@ tiles:
   - id: hot_metric
     chart: line
     theme:
-      template: "plotly_dark"
+      base: light
+      template: "valuestream_light"
 ```
+
+In Configuration Builder Visual mode, **Chart Theme** offers **Follow
+application**, **Light Plotly**, **Dark Plotly**, and **Custom YAML**. Selecting
+Light or Dark stores the corresponding `base` and `valuestream_*` template on
+the tile. The Report library's **Preview theme** control switches the chart
+gallery without changing saved configuration.
 
 ## 6. Presentation settings
 

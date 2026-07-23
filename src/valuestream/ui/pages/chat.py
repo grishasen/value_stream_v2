@@ -867,10 +867,9 @@ def _render_download(data: Any, index: int) -> None:
 
 
 def _chat_theme(ctx: ValueStreamContext) -> dict[str, Any]:
-    base = dict(dashboard_theme())
     dashboards = getattr(ctx.catalog, "dashboards", None)
     extra = getattr(dashboards, "theme", {}) if dashboards is not None else {}
-    return {**base, **(extra or {})}
+    return dashboard_theme(extra or {})
 
 
 def _chat_figure(rows, intent: ChatIntent, theme: dict[str, Any]):

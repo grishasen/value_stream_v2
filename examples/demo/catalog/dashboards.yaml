@@ -1,5 +1,5 @@
 theme:
-  category_colors:
+  category_colors_dark:
     Channel:
       Web: '#4B73F0'
       Mobile: '#22C7F3'
@@ -12,6 +12,19 @@ theme:
     ModelControlGroup:
       Test: '#4B73F0'
       NBA: '#7890AA'
+  category_colors_light:
+    Channel:
+      Web: '#0072B2'
+      Mobile: '#009E73'
+      Email: '#D55E00'
+    Outcome:
+      Impression: '#52606D'
+      Clicked: '#0072B2'
+      Conversion: '#009E73'
+      Pending: '#D55E00'
+    ModelControlGroup:
+      Test: '#0072B2'
+      NBA: '#52606D'
 dashboards:
 - id: ih_value_stream_overview
   title: Interaction History Value Stream Overview

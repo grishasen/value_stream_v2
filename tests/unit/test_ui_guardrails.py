@@ -305,6 +305,29 @@ def test_dashboard_theme_carries_app_background(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.unit
+def test_dashboard_theme_resolves_true_light_tile_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(theme, "_active_theme_base", lambda: "dark")
+    resolved = theme.dashboard_theme(
+        {
+            "base": "dark",
+            "paper_bgcolor": "#111827",
+            "category_colors_dark": {"Channel": {"Web": "#4B73F0"}},
+            "category_colors_light": {"Channel": {"Web": "#0072B2"}},
+        },
+        {"base": "light", "template": "valuestream_light"},
+    )
+
+    assert resolved["base"] == "light"
+    assert resolved["template"] == "valuestream_light"
+    assert resolved["paper_bgcolor"] == "#ffffff"
+    assert resolved["plot_bgcolor"] == "#ffffff"
+    assert resolved["colorway"][:2] == ["#0072B2", "#D55E00"]
+    assert resolved["category_colors"] == {"Channel": {"Web": "#0072B2"}}
+
+
+@pytest.mark.unit
 def test_primary_dark_chart_colors_meet_non_text_contrast() -> None:
     for color in theme.PLOTLY_DARK_COLORWAY[:6]:
         assert _contrast_ratio(color, "#162438") >= 3.0
