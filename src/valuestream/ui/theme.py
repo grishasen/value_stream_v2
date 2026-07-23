@@ -69,18 +69,18 @@ _CHROME_TOKENS: dict[str, dict[str, str]] = {
 }
 
 PLOTLY_DARK_COLORWAY = [
-    "#56B4E9",
-    "#F2C14E",
+    _CHROME_TOKENS["dark"]["action-hover"].upper(),
+    _CHROME_TOKENS["dark"]["accent"].upper(),
     "#45D6A5",
-    "#F17CB0",
-    "#FF8B5C",
-    "#B89CFF",
+    "#F2C14E",
+    "#FF8A80",
+    "#AD87ED",
     "#7BDFF2",
-    "#F6AE2D",
+    "#8EA6FF",
     "#9CE37D",
-    "#E76F91",
-    "#F4D35E",
-    "#8ECAE6",
+    "#FFAA64",
+    "#F17CB0",
+    "#C6B8FF",
 ]
 
 PLOTLY_LIGHT_COLORWAY = [
@@ -97,6 +97,22 @@ PLOTLY_LIGHT_COLORWAY = [
     "#B36B00",
     "#4D648D",
 ]
+
+
+def chart_palette(base: str) -> list[str]:
+    """Return the qualitative chart palette for an application theme."""
+
+    return list(PLOTLY_DARK_COLORWAY if base == "dark" else PLOTLY_LIGHT_COLORWAY)
+
+
+def chart_preview_tokens(base: str) -> dict[str, str]:
+    """Return app-matched foreground and supporting surface colors for previews."""
+
+    tokens = _CHROME_TOKENS["dark" if base == "dark" else "light"]
+    return {
+        "ink": tokens["ink"],
+        "soft": tokens["soft"],
+    }
 
 
 def _active_theme_base() -> str:
@@ -708,18 +724,23 @@ def init_plotly_theme() -> None:
     """
     for base in ("light", "dark"):
         tokens = _CHROME_TOKENS[base]
-        colorway = PLOTLY_DARK_COLORWAY if base == "dark" else PLOTLY_LIGHT_COLORWAY
+        colorway = chart_palette(base)
         source_name = "plotly_dark" if base == "dark" else "plotly_white"
         grid_color = tokens["border"] if base == "dark" else tokens["soft"]
+        chart_background = tokens["card"]
         template = go.layout.Template(pio.templates[source_name])
         template.layout.update(
             colorway=colorway,
-            font={"family": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"},
+            font={
+                "family": (
+                    "Avenir Next, Avenir, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+                )
+            },
             margin={"l": 40, "r": 18, "t": 18, "b": 76},
             hovermode="x unified",
             hoverlabel=_hoverlabel(tokens),
-            paper_bgcolor=tokens["cream"],
-            plot_bgcolor=tokens["cream"],
+            paper_bgcolor=chart_background,
+            plot_bgcolor=chart_background,
             font_color=tokens["ink"],
             xaxis={"gridcolor": grid_color, "zerolinecolor": grid_color},
             yaxis={"gridcolor": grid_color, "zerolinecolor": grid_color},
@@ -751,10 +772,11 @@ def dashboard_theme() -> dict[str, object]:
     """
     base = _active_theme_base()
     tokens = _CHROME_TOKENS[base]
-    background = tokens["cream"]
+    background = tokens["card"]
     return {
         "base": base,
         "template": f"valuestream_{base}",
+        "colorway": chart_palette(base),
         "paper_bgcolor": background,
         "plot_bgcolor": background,
         "font": {"color": tokens["ink"]},

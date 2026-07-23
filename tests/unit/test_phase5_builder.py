@@ -22,7 +22,7 @@ from valuestream.config.loader import load
 from valuestream.expr import parser as expr_parser
 from valuestream.query import executor
 from valuestream.states import kll, topk
-from valuestream.ui import builder, dimension_profile, forms
+from valuestream.ui import builder, dimension_profile, forms, theme
 from valuestream.ui.pages import config_builder
 
 
@@ -3289,6 +3289,15 @@ def test_report_library_plotly_previews_cover_every_supported_chart() -> None:
 
 
 @pytest.mark.unit
+def test_report_library_dark_previews_share_the_app_chart_theme() -> None:
+    figure = config_builder._chart_library_preview("combo", theme_base="dark")
+
+    assert figure.data[0].marker.color == theme.PLOTLY_DARK_COLORWAY[0]
+    assert figure.data[1].line.color == theme.PLOTLY_DARK_COLORWAY[1]
+    assert figure.layout.font.color == "#f7faff"
+
+
+@pytest.mark.unit
 def test_report_library_searches_business_and_technical_tile_context(tmp_path: Path) -> None:
     _write_source_cascade_catalog(tmp_path)
     catalog = load(tmp_path)
@@ -3413,18 +3422,9 @@ def test_existing_report_tile_opens_clean_in_visual_editor(tmp_path: Path) -> No
     "selected",
     [
         "ih_value_stream_overview/executive_summary/interactions_by_segment",
-        (
-            "ih_value_stream_overview/experiment_monitoring/"
-            "model_control_engagement_compare"
-        ),
-        (
-            "ih_value_stream_overview/aggregate_report_type_coverage/"
-            "interactions_pareto"
-        ),
-        (
-            "ih_value_stream_overview/numeric_report_type_coverage/"
-            "response_time_boxplot_by_outcome"
-        ),
+        ("ih_value_stream_overview/experiment_monitoring/model_control_engagement_compare"),
+        ("ih_value_stream_overview/aggregate_report_type_coverage/interactions_pareto"),
+        ("ih_value_stream_overview/numeric_report_type_coverage/response_time_boxplot_by_outcome"),
     ],
 )
 def test_demo_advanced_tiles_open_clean_in_visual_editor(selected: str) -> None:

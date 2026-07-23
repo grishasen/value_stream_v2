@@ -518,25 +518,29 @@ A workspace-level theme block in `dashboards.yaml`:
 ```yaml
 theme:
   template: "valuestream"           # app-matching default; any Plotly template name
-  paper_bgcolor: "#f5f3ee"          # defaults to the app background
-  plot_bgcolor: "#f5f3ee"           # defaults to the app background
-  font: { family: "Inter", size: 14 }
+  paper_bgcolor: "#162438"           # defaults to the app chart-card surface
+  plot_bgcolor: "#162438"            # defaults to the app chart-card surface
+  font: { family: "Avenir Next", size: 14 }
   margins: { l: 32, r: 16, t: 48, b: 32 }
   legend: { orientation: "h", y: -0.2 }
+  colorway: ["#4B73F0", "#22C7F3", "#45D6A5", "#F2C14E"]
   color_continuous_scale: "Viridis"
   qualitative_palette: "Set2"
   category_colors:
     Channel:
-      Web: "#2563EB"
-      Mobile: "#14B8A6"
+      Web: "#4B73F0"
+      Mobile: "#22C7F3"
 ```
 
 The application initializes a built-in `valuestream` Plotly template before
-dashboard rendering. Its `paper_bgcolor` and `plot_bgcolor` match the app
-background token (`#f5f3ee` in light mode, `#020203` in dark mode) so Plotly
-figures blend into the Streamlit shell instead of rendering white panels. The
-default dashboard theme also passes those colors explicitly, so a workspace or
-tile that overrides only `template` still keeps the app-matched background.
+dashboard rendering. Its qualitative sequence starts with the app's royal blue,
+cyan, verified green, attention amber, danger coral, and violet tokens. Its
+`paper_bgcolor` and `plot_bgcolor` match the chart-card surface (`#ffffff` in
+light mode and `#162438` in dark mode), so Plotly figures blend into the
+Streamlit report cards instead of rendering a separate panel. The Configuration
+Builder's chart library uses the same sequence and foreground tokens. The
+default dashboard theme passes these values explicitly, so a workspace or tile
+that overrides only `template` still keeps the app-matched presentation.
 
 The chart factory applies the theme via `fig.update_layout(template=...)` etc. Per-tile overrides are allowed:
 

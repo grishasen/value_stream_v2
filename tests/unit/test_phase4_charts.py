@@ -14,6 +14,7 @@ from plotly.graph_objects import Figure  # type: ignore[import-untyped]
 from valuestream.charts import render_chart
 from valuestream.charts.factory import _infer_quantile_property
 from valuestream.states import tdigest
+from valuestream.ui import theme as ui_theme
 
 SUPPORTED_CHART_CASES = [
     ({"chart": "line", "title": "Line", "x": "Day", "y": "CTR", "color": "Channel"}, None),
@@ -297,13 +298,54 @@ def test_theme_background_overrides_builtin_plotly_template_background() -> None
         },
         theme={
             "template": "plotly_white",
+            "colorway": ["#4B73F0", "#22C7F3"],
             "paper_bgcolor": "#f5f3ee",
             "plot_bgcolor": "#f5f3ee",
         },
     )
 
+    assert list(figure.layout.colorway) == ["#4B73F0", "#22C7F3"]
     assert figure.layout.paper_bgcolor == "#f5f3ee"
     assert figure.layout.plot_bgcolor == "#f5f3ee"
+
+
+@pytest.mark.unit
+def test_grouped_report_uses_the_app_dark_chart_palette_and_surface() -> None:
+    frame = pl.DataFrame(
+        {
+            "Day": [
+                dt.date(2024, 1, 1),
+                dt.date(2024, 1, 2),
+                dt.date(2024, 1, 1),
+                dt.date(2024, 1, 2),
+            ],
+            "Channel": ["Web", "Web", "Mobile", "Mobile"],
+            "Interactions": [120, 140, 90, 110],
+        }
+    )
+    previous_default = pio.templates.default
+    try:
+        ui_theme.init_plotly_theme.cache_clear()
+        ui_theme.init_plotly_theme()
+        figure = render_chart(
+            frame,
+            {
+                "id": "interactions_trend",
+                "metric": "Interactions",
+                "chart": "line",
+                "title": "Interactions Trend",
+                "x": "Day",
+                "y": "Interactions",
+                "color": "Channel",
+            },
+            theme=ui_theme.dashboard_theme(),
+        )
+    finally:
+        pio.templates.default = previous_default
+
+    assert [trace.marker.color for trace in figure.data] == ["#4B73F0", "#22C7F3"]
+    assert figure.layout.paper_bgcolor == "#162438"
+    assert figure.layout.plot_bgcolor == "#162438"
 
 
 @pytest.mark.unit

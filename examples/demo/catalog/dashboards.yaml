@@ -1,17 +1,17 @@
 theme:
   category_colors:
     Channel:
-      Web: '#2563EB'
-      Mobile: '#14B8A6'
-      Email: '#F59E0B'
+      Web: '#4B73F0'
+      Mobile: '#22C7F3'
+      Email: '#F2C14E'
     Outcome:
-      Impression: '#64748B'
-      Clicked: '#2563EB'
-      Conversion: '#16A34A'
-      Pending: '#F59E0B'
+      Impression: '#7890AA'
+      Clicked: '#22C7F3'
+      Conversion: '#45D6A5'
+      Pending: '#F2C14E'
     ModelControlGroup:
-      Test: '#2563EB'
-      NBA: '#64748B'
+      Test: '#4B73F0'
+      NBA: '#7890AA'
 dashboards:
 - id: ih_value_stream_overview
   title: Interaction History Value Stream Overview

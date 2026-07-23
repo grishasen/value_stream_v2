@@ -569,7 +569,7 @@ FIELD_HELP: dict[str, str] = {
     "workspace.week_start": _tip("First weekday used for weekly calendar buckets.", "monday"),
     "workspace.theme_yaml": _tip(
         "Dashboard theme mapping merged into chart presentation settings.",
-        'colorway: ["#1f77b4", "#ff7f0e"]',
+        'colorway: ["#4B73F0", "#22C7F3", "#45D6A5", "#F2C14E"]',
     ),
     "chat.agent_prompt": _tip(
         "Business terminology and interpretation guidance sent to the aggregate-only chat planner.",

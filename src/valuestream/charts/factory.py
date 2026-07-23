@@ -2259,7 +2259,15 @@ def _apply_theme(fig: go.Figure, theme: Mapping[str, Any], tile: Mapping[str, An
     tile_theme: Mapping[str, Any] = raw_tile_theme if isinstance(raw_tile_theme, Mapping) else {}
     merged = {**theme, **dict(tile_theme)}
     layout: dict[str, Any] = {}
-    for key in ("template", "font", "hoverlabel", "legend", "paper_bgcolor", "plot_bgcolor"):
+    for key in (
+        "template",
+        "colorway",
+        "font",
+        "hoverlabel",
+        "legend",
+        "paper_bgcolor",
+        "plot_bgcolor",
+    ):
         if key in merged:
             layout[key] = merged[key]
     if "margins" in merged:

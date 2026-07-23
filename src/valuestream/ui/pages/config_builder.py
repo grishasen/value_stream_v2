@@ -51,8 +51,8 @@ from valuestream.ui.instrumentation import (
 )
 from valuestream.ui.presentation import humanize_identifier
 from valuestream.ui.theme import (
-    PLOTLY_DARK_COLORWAY,
-    PLOTLY_LIGHT_COLORWAY,
+    chart_palette,
+    chart_preview_tokens,
     dashboard_theme,
 )
 from valuestream.utils.logger import get_logger
@@ -4859,10 +4859,10 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
 ) -> go.Figure:
     """Return a small representative Plotly figure for one chart kind."""
 
-    dark = theme_base == "dark"
-    colors = PLOTLY_DARK_COLORWAY if dark else PLOTLY_LIGHT_COLORWAY
-    ink = "#f0f3f0" if dark else "#1a1a1a"
-    soft = "#171c18" if dark else "#e8ebe6"
+    colors = chart_palette(theme_base)
+    preview_tokens = chart_preview_tokens(theme_base)
+    ink = preview_tokens["ink"]
+    soft = preview_tokens["soft"]
     transparent = "rgba(0,0,0,0)"
     x = [0, 1, 2, 3, 4]
     y = [1.0, 2.8, 2.1, 4.2, 3.6]

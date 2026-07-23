@@ -275,11 +275,18 @@ def test_plotly_template_uses_distinct_report_colorways() -> None:
     assert light_colorway == theme.PLOTLY_LIGHT_COLORWAY
     assert dark_colorway == theme.PLOTLY_DARK_COLORWAY
     assert light_colorway[:2] == ["#0072B2", "#D55E00"]
-    assert dark_colorway[:2] == ["#56B4E9", "#F2C14E"]
-    assert light_paper_bgcolor == "#f7f9fc"
-    assert light_plot_bgcolor == "#f7f9fc"
-    assert dark_paper_bgcolor == "#0b1220"
-    assert dark_plot_bgcolor == "#0b1220"
+    assert dark_colorway[:6] == [
+        "#4B73F0",
+        "#22C7F3",
+        "#45D6A5",
+        "#F2C14E",
+        "#FF8A80",
+        "#AD87ED",
+    ]
+    assert light_paper_bgcolor == "#ffffff"
+    assert light_plot_bgcolor == "#ffffff"
+    assert dark_paper_bgcolor == "#162438"
+    assert dark_plot_bgcolor == "#162438"
 
 
 @pytest.mark.unit
@@ -290,10 +297,17 @@ def test_dashboard_theme_carries_app_background(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(theme, "_active_theme_base", lambda: "dark")
     dark = theme.dashboard_theme()
 
-    assert light["paper_bgcolor"] == "#f7f9fc"
-    assert light["plot_bgcolor"] == "#f7f9fc"
-    assert dark["paper_bgcolor"] == "#0b1220"
-    assert dark["plot_bgcolor"] == "#0b1220"
+    assert light["paper_bgcolor"] == "#ffffff"
+    assert light["plot_bgcolor"] == "#ffffff"
+    assert dark["paper_bgcolor"] == "#162438"
+    assert dark["plot_bgcolor"] == "#162438"
+    assert dark["colorway"][:2] == ["#4B73F0", "#22C7F3"]
+
+
+@pytest.mark.unit
+def test_primary_dark_chart_colors_meet_non_text_contrast() -> None:
+    for color in theme.PLOTLY_DARK_COLORWAY[:6]:
+        assert _contrast_ratio(color, "#162438") >= 3.0
 
 
 @pytest.mark.unit

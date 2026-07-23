@@ -64,4 +64,19 @@ typography, radii, and action emphasis rather than coordinate matching.
   clipped buttons, inputs, or comboboxes were found.
 - Token contrast and UI guardrail tests passed.
 
+## Chart theme follow-up
+
+- Source state:
+  `artifacts/ui-audit/chart-theme/03-config-trend-cards-before.png`
+- Updated trend and multiseries state:
+  `artifacts/ui-audit/chart-theme/06-config-multiseries-after.png`
+- Updated hierarchy and composition state:
+  `artifacts/ui-audit/chart-theme/08-config-composition-after.png`
+- Side-by-side comparison:
+  `artifacts/ui-audit/chart-theme/07-before-after-chart-theme.png`
+- The Configuration Builder preview generator and production report renderer
+  now share the same royal-blue/cyan-led palette and chart-card surface.
+- The first six dark chart colors meet 3:1 non-text contrast against the chart
+  surface, and targeted preview/report theme tests pass.
+
 Final result: passed
