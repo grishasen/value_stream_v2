@@ -563,6 +563,12 @@ Light or Dark stores the corresponding `base` and `valuestream_*` template on
 the tile. The Report library's **Preview theme** control switches the chart
 gallery without changing saved configuration.
 
+For server-level visual review, set `VALUESTREAM_UI_THEME=light` before
+`valuestream serve`. The review branch defaults to `dark` when the variable is
+unset or invalid. This changes the application chrome and the default Plotly
+theme together; tiles pinned to an explicit theme continue to use their saved
+choice.
+
 ## 6. Presentation settings
 
 Presentation settings are optional Tile fields. They are intentionally limited

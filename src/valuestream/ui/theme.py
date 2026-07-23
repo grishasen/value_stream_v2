@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from functools import lru_cache
 
@@ -160,14 +161,19 @@ def _resolved_theme_overrides(
     return base, merged
 
 
-def _active_theme_base() -> str:
-    """Return the theme rendered by the isolated dark-theme review branch.
+def _active_theme_base(environ: Mapping[str, str] | None = None) -> str:
+    """Return the application theme selected for this server process.
 
     Streamlit uses its light rendering engine for startup compatibility, but
-    both native theme tables and the application chrome carry the same dark
-    tokens. Keeping the branch dark-only makes the visual review deterministic.
+    the application chrome and Plotly defaults use the same resolved token set.
+    The review branch remains dark by default; set ``VALUESTREAM_UI_THEME`` to
+    ``light`` when starting the server to review the true light application.
     """
-    return "dark"
+
+    values = os.environ if environ is None else environ
+    configured = str(values.get("VALUESTREAM_UI_THEME", "dark") or "dark")
+    normalized = configured.strip().casefold()
+    return normalized if normalized in {"light", "dark"} else "dark"
 
 
 def apply_app_chrome_tuning() -> None:

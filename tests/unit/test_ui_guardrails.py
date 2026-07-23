@@ -250,8 +250,11 @@ def test_dark_theme_uses_accessible_surface_ladder() -> None:
 
 
 @pytest.mark.unit
-def test_dark_review_theme_is_deterministic() -> None:
-    assert theme._active_theme_base() == "dark"
+def test_review_theme_defaults_dark_and_accepts_runtime_override() -> None:
+    assert theme._active_theme_base({}) == "dark"
+    assert theme._active_theme_base({"VALUESTREAM_UI_THEME": " Light "}) == "light"
+    assert theme._active_theme_base({"VALUESTREAM_UI_THEME": "dark"}) == "dark"
+    assert theme._active_theme_base({"VALUESTREAM_UI_THEME": "unknown"}) == "dark"
 
 
 @pytest.mark.unit
