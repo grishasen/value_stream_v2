@@ -2850,7 +2850,12 @@ It never blends files from different Processor schemas or substitutes nulls
 for newly configured aggregate states. If no current-hash partial has been
 published, the query reports the metric as not ready and the Reports UI shows
 <strong>Backfill required</strong> instead of exposing a storage-library exception. Legacy
-imports without file-lineage rows retain the embedded-hash scan fallback.</p>
+imports without file-lineage rows retain the embedded-hash scan fallback.
+Freshness reads use the same current-hash lineage selection before opening
+Parquet, so status badges cannot fail by asking Polars to reconcile superseded
+and current Processor schemas. The report summary labels this upstream result
+as the <strong>aggregate status</strong>; chart-rendering failures are reported on the
+affected tile and are not presented as page-health success.</p>
 <p>Metric display metadata lives in <code>metrics.yaml</code>; page controls, KPI semantics,
 and tile presentation live in <code>dashboards.yaml</code>. Typed presentation properties
 cover labels, units, value formats, favorable direction, explicit KPI-strip
@@ -3084,7 +3089,16 @@ Configuration Studio; <strong>Configure the current workspace</strong> enters Co
 Builder. The landing page chooses a workflow but does not create a third
 authoring store.</p>
 <ul>
-<li><strong>Configuration Builder</strong> is the catalog-first, validation-first editor for the active workspace. Its compact outline covers workspace health, sources, processors, dimensions, metrics, reports/tiles, chat review, settings, and <strong>Export current workspace</strong>. Each object editor compares a canonical session-local revision with the applied object. Internal navigation preserves a dirty revision until the user applies or discards it; simply visiting a step cannot make it dirty. A current object exposes exactly one <strong>Apply to workspace</strong> action, and apply never starts ingestion. Source steps edit reader runtime settings, schema keys, defaults, dataset filters, and calculated fields. Filters are authored either as rule rows (<code>field</code>, <code>operator</code>, <code>value</code>, <code>enabled</code>) or raw expression-AST YAML; calculated fields become <code>derive_column</code> transforms with typed AST expressions. Processor steps edit group-by dimensions, grains, states, and optional processor filters. Metric and report steps edit display metadata, page filters/time presets, KPI behavior, descriptions, and scales in addition to chart fields. Page-settings writes merge into the existing page and preserve its tiles, dashboard layout, and theme. Chat review shows which aggregate metrics will be available to Chat With Data and edits chat-only LLM prompt/description guidance in <code>ai.yaml</code>; settings edit workspace defaults plus dashboard theme.</li>
+<li><strong>Configuration Builder</strong> is the catalog-first, validation-first editor for the active workspace. Its compact outline covers workspace health, sources, processors, dimensions, metrics, reports/tiles, chat review, settings, and <strong>Export current workspace</strong>. Each object editor compares a canonical session-local revision with the applied object. Internal navigation preserves a dirty revision until the user applies or discards it; simply visiting a step cannot make it dirty. A current object exposes exactly one <strong>Apply to workspace</strong> action, and apply never starts ingestion. Source steps create new sources or edit existing ones in place, including reader runtime settings, schema keys, defaults, dataset filters, calculated fields, and the in-memory <code>materialize_transforms</code> execution toggle; create mode rejects an existing Source ID rather than replacing it. Create mode also exposes an explicit, optional bounded sample inspection after reader settings are entered. Opening the editor performs no read, the preview persists only field names and types in session state, and the observed names seed later source-field controls without changing catalog configuration or starting ingestion. An <code>OutcomeDate</code> or <code>OutcomeTime</code> timestamp in create mode deterministically seeds the standard Pega datetime, calendar, action-ID, and numeric-cast transforms, constrained by observed optional fields when a sample was loaded. Filters are authored either as rule rows (<code>field</code>, <code>operator</code>, <code>value</code>, <code>enabled</code>) or editable, validated raw expression-AST YAML; calculated fields become <code>derive_column</code> transforms with typed AST expressions. Processor steps edit group-by dimensions, grains, states, and optional processor filters. Metric and report steps edit display metadata, page filters/time presets, KPI behavior, descriptions, and scales in addition to chart fields. Page-settings writes merge into the existing page and preserve its tiles, dashboard layout, and theme. Chat review shows which aggregate metrics will be available to Chat With Data and edits chat-only LLM prompt/description guidance in <code>ai.yaml</code>; settings edit workspace defaults plus dashboard theme.</li>
+<li><strong>Digest state authoring</strong> keeps storage and query roles separate without
+  making the user repeat them. An unconditioned t-digest or KLL state is the
+  persisted mergeable binary accumulator. Applying its processor through
+  Configuration Builder writes a quantile-less distribution metric in the same
+  catalog transaction when no equivalent binding exists. That metric supplies
+  the stable public query/report identity and full distribution output;
+  additional named percentiles remain optional. Outcome-specific positive and
+  negative digests remain internal curve/calibration inputs and are not
+  auto-exposed.</li>
 <li><strong>Configuration Builder checkpointing</strong> persists only privacy-filtered,
   JSON-safe draft registry state, the current step, a UTC timestamp, and the
   full base-catalog hash in <code>meta/config_builder_checkpoint.json</code>. Prompt,

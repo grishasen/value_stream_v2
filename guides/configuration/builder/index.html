@@ -2545,21 +2545,56 @@ source's first natural-key field. If no natural key exists, the Builder may use
 an identity-like field observed in the source sample; otherwise the field stays
 explicitly empty and the editor asks you to select an existing source field.</p>
 <p>Source schema discovery and dimension profiling share one bounded inspection.
-The first uncached read shows an <strong>Inspecting source</strong> status; later controls
-reuse the bounded transformed sample while the workspace, source definition,
-and discovered file identity remain unchanged. If inspection fails, the inline
-message names the source and path pattern. Correct the reader, path, transform,
-or permissions issue, then choose <strong>Retry source inspection</strong> to invalidate only
-that source inspection.</p>
+Existing-source editors inspect on demand. A create-source editor does not read
+files when it first opens; choose the optional <strong>Load sample</strong> step after setting
+Reader, Root, File Pattern, and grouping when you want its field controls
+populated from a representative match. The first uncached read shows an
+<strong>Inspecting source</strong> status; later controls reuse the bounded result while the
+workspace, reader definition, and discovered file identity remain unchanged.
+If inspection fails, the inline message names the source and path pattern.
+Correct the reader, path, or permissions issue, then choose <strong>Retry source
+inspection</strong> to invalidate only that source inspection. In create mode, choose
+<strong>Load sample</strong> again after replacing or changing the matching sample files.</p>
 <h3 id="adding-a-source">Adding a source<a class="headerlink" href="#adding-a-source" title="Permanent link">&para;</a></h3>
-<p>Choose <strong>Add source</strong> on <strong>Sources</strong> to open AI Configuration Studio in its
-deterministic, sample-first mode. The handoff stays on the active workspace and
-keeps the current Builder authoring journey. The reviewed revision carries the
-existing catalog forward and adds the generated source bundle; a duplicate
-Source ID is rejected instead of silently editing the existing source.
-The selected sample seeds a recursive file pattern from its extension, such as
-<code>**/*.parquet</code>, under the inferred workspace root. Narrow that pattern in
-Runtime Settings when the source should include fewer files.</p>
+<p>Choose <strong>Create New Source</strong> on <strong>Sources</strong>. In an empty workspace, the source
+creator opens automatically. The initial template uses the Parquet reader,
+<code>data</code> as its workspace-relative root, and <code>**/*.parquet</code> as its recursive file
+pattern. Change the reader, root, pattern, grouping, schema, defaults, filters,
+or calculated fields in the same editor used for existing sources.</p>
+<p>After the file settings are correct, optionally choose <strong>Load sample</strong>. Builder
+reads one bounded matching sample, keeps only its field names and types in the
+editor session, and populates Natural Key, Drop Columns, defaults, filters, and
+calculated-field selectors. The preview does not ingest data or write catalog
+configuration. Changing reader, root, pattern, or grouping marks the preview
+stale and asks you to reload it. Rename / Capitalize updates the displayed field
+names without another file read.</p>
+<p>Enter a unique, reference-safe Source ID. The Builder rejects a duplicate ID
+instead of silently replacing an existing source. Review the generated YAML,
+then choose <strong>Apply to workspace</strong>. Apply validates and writes the source in the
+catalog transaction, returns the editor to <strong>Edit Existing Source</strong>, and does
+not run data. Use <strong>Data Load</strong> separately after files are available.
+Apply inspects the current draft ID and reader settings, then evolves the
+observed physical columns through transforms in order. Calculated fields may
+therefore reference effective names such as <code>Channel</code> in the same create
+operation that enables <code>rename_capitalize</code> for a physical <code>pyChannel</code> column.</p>
+<p>When the Timestamp Column is <code>OutcomeDate</code> or <code>OutcomeTime</code>, create mode adds
+the standard Pega preprocessing transforms to the generated source: it parses
+the outcome timestamp (and <code>DecisionTime</code> when present), derives calendar
+fields, derives <code>ActionID</code> from <code>Issue</code>, <code>Group</code>, and <code>Name</code> when available,
+and casts the available propensity, priority, and revenue fields to <code>Float64</code>.
+Loaded sample fields constrain these generated references so an optional
+standard field is not added when it is absent. Use <strong>Materialize Transforms</strong>
+to collect each transformed chunk once in memory for reuse by all processors;
+leave it off when the chunk may not fit comfortably in memory.</p>
+<p>Source filters support both the Rules grid and an editable <strong>Filter AST YAML</strong>
+area in Raw AST mode. Invalid YAML or expression DSL stays in the draft and
+blocks Apply with an inline error; it is never replaced by a read-only <code>{}</code>.
+Choosing <strong>Discard draft</strong>, or deleting the source being edited, clears the
+source widgets before the next full render so a later create operation starts
+from the default template rather than inheriting stale values.</p>
+<p>Use <strong>AI Configuration Studio</strong> instead when a sample-first workflow should
+infer format-specific defaults and propose a dependency-closed catalog bundle
+for review.</p>
 <p>When <strong>Use Rename / Capitalize Transform</strong> is enabled, the Sample preview changes
 immediately to the transformed schema. Every later field control and validation
 uses those transformed names: for example, select <code>Channel</code> in required-field
@@ -2570,9 +2605,6 @@ the same contract. A stale raw reference such as <code>pyChannel</code> is rejec
 the transform is enabled.
 Turning the transform off restores the raw schema and remaps compatible editor
 state back to the source names.</p>
-<p>Choose <strong>Cancel and return to Builder</strong> before Apply, or <strong>Return to
-Configuration Builder</strong> from the revision receipt after Apply. Applying the
-source definition still does not run data.</p>
 <h3 id="recovering-unapplied-drafts">Recovering unapplied drafts<a class="headerlink" href="#recovering-unapplied-drafts" title="Permanent link">&para;</a></h3>
 <p>While at least one recoverable draft exists, Configuration Builder atomically
 writes <code>meta/config_builder_checkpoint.json</code>. The checkpoint contains the
@@ -2628,7 +2660,21 @@ over the entity column; derived kinds show their computed states). Switching
 kind reseeds those defaults while preserving rows whose state, type, source
 column, or <strong>Enabled</strong> value you changed. In particular, disabling a default
 row remains an intentional edit. Add further sketch states (Top-K, CPC, theta,
-digests) as rows when the kind supports them.</p>
+digests) with <strong>Add state</strong> or as grid rows when the kind supports them.
+<strong>Parameters YAML</strong> round-trips state-specific settings such as <code>lg_k</code>, <code>k</code>,
+<code>lg_max_map_size</code>, <code>weight</code>, <code>mean</code>, <code>score_property</code>, and <code>outcome</code>; <strong>Type</strong>
+and <strong>Source Column</strong> remain separate fields and cannot be redefined there.
+After a state is added, the popover clears before the next state is authored.
+Sketch-size keys are checked against the selected type so, for example,
+<code>lg_max_map_size</code> cannot leak from a Top-K state into a CPC or theta state.</p>
+<p>Applying a processor automatically adds one distribution metric for every
+unconditioned t-digest or KLL state that does not already have one. The metric
+omits <code>quantile</code>, so it reads the median as its primary value and exposes the
+full quantile suite to distribution charts. Existing distribution metrics are
+reused, explicit percentile metrics remain separate, and outcome-specific
+positive/negative digests are left as internal inputs to curve and calibration
+metrics. The processor and any automatic metrics are written in the same
+validated transaction; the separate data run materializes the new state.</p>
 <p>Kind-specific settings cover every engine-read property: <code>entity_set</code> exposes
 the sketched <strong>Entity Column</strong>, and <code>entity_lifecycle</code> exposes its customer,
 order, monetary, and purchase-date key columns.</p>
@@ -2652,6 +2698,11 @@ and offers <strong>Run data</strong>. The transaction does not start that run. A
 successful metric Apply, the Builder reloads the catalog and opens the saved
 metric for maintenance. See the
 <a href="../../../reference/kpi-recipes/">KPI recipe reference</a>.</p>
+<p>A digest state is the mergeable binary accumulator persisted by a processor;
+it is not itself a public query result. Its automatically authored distribution
+metric is the stable catalog name that tells the query layer to decode that
+state and lets reports bind to it. Use <strong>Create Metric</strong> only for additional
+named percentiles or other derived interpretations of the same digest.</p>
 <h2 id="reports-and-tiles">Reports and tiles<a class="headerlink" href="#reports-and-tiles" title="Permanent link">&para;</a></h2>
 <p>The Reports / Tiles Apply action writes the current tile and its page settings
 together inside one rollback boundary. The visual and Raw YAML modes edit the
@@ -2661,14 +2712,50 @@ dashboard, page settings, and tile are validated as a complete catalog. Visual
 mode round-trips settings outside its controls unchanged; Raw YAML remains the
 escape hatch for editing them directly. A new Raw YAML draft starts from the
 same valid report scaffold as Visual mode, and its session-local text survives
-reruns caused by presentation and page-settings controls.</p>
+reruns caused by presentation and page-settings controls.
+New-page draft state is keyed independently from its generated dashboard and
+page IDs, so changing a new dashboard name cannot reset the entered Page Name.
+The persisted dashboard and page titles are the exact trimmed values shown in
+the editor.</p>
 <p>The collapsed <strong>Report inventory</strong> is searchable and uses dashboard, page,
 tile, metric, and chart labels designed for recognition. Enable technical IDs
 only when exact catalog identity is needed. The visual report library groups
 tiles by purpose and chart type and keeps large groups behind a compact
 selector. Its chart labels and purposes are shared with both chart selectors;
 the persisted chart kind remains visible only as secondary technical detail and
-continues to round-trip unchanged.</p>
+normally round-trips unchanged.</p>
+<p>Heatmaps use one adaptive <strong>Heatmap</strong> choice. The selected metric supplies cell
+intensity, so there is no Value or Color field. X and optional Y contain only
+configured time grains and persisted processor dimensions. Leave Y empty with
+a daily X for a calendar layout; set both axes for a matrix or cohort layout.
+Numeric-distribution metrics additionally expose Property and Metric
+(statistic) controls. The retired <code>calendar_heatmap</code>, <code>cohort_heatmap</code>, and
+<code>descriptive_heatmap</code> kinds still render, but saving one through Visual mode
+migrates it to <code>heatmap</code>.</p>
+<p>Combo charts also use metric-owned values. The tile's selected <strong>Metric</strong>
+supplies the primary Y series, so no Y field is shown. <strong>Y2 Metric</strong> offers
+only other scalar metrics with the same metric kind and backing processor.
+The report query derives both metrics independently and joins them on their
+shared time and dimension keys.</p>
+<p>Pareto charts follow the same metric-owned Y convention. Choose only the X
+category; the selected metric supplies the ranked bar values and cumulative
+share curve.</p>
+<p>Waterfall charts also derive Y from the selected metric. Choose only the X
+category. Bar colors are assigned by change semantics (increase, decrease, or
+total), so Waterfall has no selectable Color dimension or facet controls.</p>
+<p>Polar bar charts derive Radius from the selected metric. Choose only the
+Theta category and optional Color grouping.</p>
+<p>Treemap charts derive Color from the selected metric. Choose only the Path
+hierarchy; advanced mode may optionally configure a separate size value.</p>
+<p>Donut charts derive slice values from the selected metric. Choose only the
+Names category and optional Color grouping.</p>
+<p>Sankey charts derive link values from the selected metric. Choose only the
+Source and Target dimensions.</p>
+<p>Interval charts separate category and numeric roles. Choose a time or dimension
+for X; Y and every Error field offer only outputs produced by the selected
+metric. Variant comparison metrics therefore expose their estimates, confidence
+bounds, standard error, lift, and related statistics without mixing dimensions
+into numeric selectors.</p>
 <p>The library always shows every purpose group and every chart kind of the
 active group, whether or not the workspace uses it yet. Kinds with configured
 reports list them as selectable pills; kinds without any offer <strong>Create … 

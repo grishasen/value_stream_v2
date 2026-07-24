@@ -2413,12 +2413,20 @@ and validate it.</p>
 <p>Applying configuration does not run the source. After a source, processor, or
 dimension Apply, choose the separate <strong>Run data</strong> handoff when you are ready to
 refresh aggregates.</p>
-<p>To add another source, choose <strong>Add source</strong>. The Studio opens in deterministic,
-sample-first mode for the same active workspace. Select a workspace sample,
-review the additive source bundle, and either choose <strong>Cancel and return to
-Builder</strong> or apply it and use <strong>Return to Configuration Builder</strong> on the
-revision receipt. Enter a unique Source ID: this path never turns Add into an
-implicit edit of an existing source.</p>
+<p>To add another source, choose <strong>Create New Source</strong> on <strong>Sources</strong>. In an empty
+workspace, this editor opens automatically. Enter a unique Source ID, choose the
+reader, and set its root and file pattern. The default template looks for
+<code>**/*.parquet</code> below the workspace's <code>data</code> folder. If matching data is already
+available, choose the optional <strong>Load sample</strong> step to populate later field
+selectors from a bounded preview; this does not ingest data. Review the
+generated YAML and choose <strong>Apply to workspace</strong>. The Builder rejects duplicate
+Source IDs and never turns Create into an implicit edit. Use <strong>AI Configuration
+Studio</strong> separately when you want a sample-first inferred configuration.</p>
+<p>For a Pega outcome source, enter <code>OutcomeDate</code> or <code>OutcomeTime</code> as the Timestamp
+Column. The generated YAML adds the standard datetime, calendar, action-ID, and
+numeric-cast transforms for fields present in the loaded sample. Enable
+<strong>Materialize Transforms</strong> only when one transformed chunk fits in memory and
+several processors should reuse it.</p>
 <p>To remove a processor, switch to <strong>Edit Existing Processor</strong>, select the exact
 processor, and choose <strong>Delete processor</strong>. Review the dependent metric and
 <code>dashboard/page/tile</code> paths, confirm the cascade, and apply it. The source and
@@ -2519,6 +2527,25 @@ guesses an aggregation to turn another chart into a KPI.</p>
 <p>Chart selectors use the same friendly names and purpose descriptions as the
 visual report library. The stored catalog kind, such as <code>bar_polar</code>, appears as
 secondary technical detail and is unchanged when you save the tile.</p>
+<p>Choose the single <strong>Heatmap</strong> chart for a matrix, cohort, descriptive, or
+calendar view. Its intensity comes from the selected metric. X and optional Y
+offer only configured time grains and processor dimensions; leave Y empty with
+X set to Day for the calendar layout. Numeric-distribution heatmaps also offer
+Property and Metric (statistic). Older specialized heatmap kinds are migrated
+to <code>heatmap</code> when edited visually.</p>
+<p>For a <strong>Combo</strong> chart, the selected tile metric supplies Y. Choose <strong>Y2
+Metric</strong> from the compatible same-kind metrics backed by the same processor;
+dimensions and raw aggregate columns are not offered for either value axis.</p>
+<p>For a <strong>Pareto</strong> chart, choose only the X category. The selected metric
+supplies the ranked bar values and cumulative share curve.</p>
+<p>For a <strong>Polar bar</strong> chart, the selected metric supplies Radius. Choose Theta
+and Color to control the categorical arrangement.</p>
+<p>For a <strong>Treemap</strong> chart, the selected metric supplies Color. Choose Path for
+the hierarchy; advanced mode can optionally set a separate size value.</p>
+<p>For a <strong>Donut</strong> chart, the selected metric supplies the slice values. Choose
+Names for the category labels; no separate Value field is needed.</p>
+<p>For a <strong>Sankey</strong> chart, the selected metric supplies link values. Choose only
+Source and Target for the flow endpoints.</p>
 <p>Choose the one <strong>Apply to workspace</strong> action. The tile and page settings are
 validated as a complete catalog before Apply, then written and validated
 together. Visual mode preserves chart settings it does not own; use Raw YAML

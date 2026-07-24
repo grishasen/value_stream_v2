@@ -2110,10 +2110,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#317-descriptive_line-descriptive_histogram-descriptive_heatmap-descriptive_funnel" class="md-nav__link">
+  <a href="#317-descriptive_line" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3.17 descriptive_line / descriptive_histogram / descriptive_heatmap / descriptive_funnel
+        3.17 descriptive_line
       
     </span>
   </a>
@@ -2715,10 +2715,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#317-descriptive_line-descriptive_histogram-descriptive_heatmap-descriptive_funnel" class="md-nav__link">
+  <a href="#317-descriptive_line" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3.17 descriptive_line / descriptive_histogram / descriptive_heatmap / descriptive_funnel
+        3.17 descriptive_line
       
     </span>
   </a>
@@ -2929,7 +2929,7 @@ validation.</p>
 <td><code>y2</code></td>
 <td>str</td>
 <td>combo</td>
-<td>column name on the secondary y axis</td>
+<td>compatible secondary metric ID; it must have the same metric kind and backing processor as <code>metric</code></td>
 </tr>
 <tr>
 <td><code>x_axis_title</code> / <code>y_axis_title</code></td>
@@ -2947,7 +2947,7 @@ validation.</p>
 <td><code>color</code></td>
 <td>str</td>
 <td>most</td>
-<td>column name to map to color</td>
+<td>column name to map to color; treemap color comes from <code>metric</code></td>
 </tr>
 <tr>
 <td><code>size</code></td>
@@ -2995,7 +2995,7 @@ validation.</p>
 <td><code>r</code></td>
 <td>str</td>
 <td>bar_polar</td>
-<td>radius column</td>
+<td>legacy radius override; Visual mode derives radius from <code>metric</code></td>
 </tr>
 <tr>
 <td><code>theta</code></td>
@@ -3131,12 +3131,23 @@ validation.</p>
 </tr>
 </tbody>
 </table>
+<p>Interval confidence-bound columns are coerced to nullable numeric values before
+the renderer calculates positive and negative error lengths. A comparison group
+with no eligible rows can therefore render null bounds without raising a
+storage-type error. In both report editors, <code>y</code>, <code>error_y</code>,
+<code>error_y_lower</code>, and <code>error_y_upper</code> can select only outputs produced by the
+tile's selected metric; processor dimensions and time fields are excluded.</p>
 <hr />
 <h2 id="3-chart-catalog">3. Chart catalog<a class="headerlink" href="#3-chart-catalog" title="Permanent link">&para;</a></h2>
 <p>For each chart: required Tile fields, expected metric output shape, and an outline of the Plotly construction.</p>
 <h3 id="30-kpi_card">3.0 <code>kpi_card</code><a class="headerlink" href="#30-kpi_card" title="Permanent link">&para;</a></h3>
-<p>Required: <code>value</code>. An ungrouped card becomes part of the responsive KPI strip
-only when <code>placement: kpi_strip</code> is explicit. The <code>kpi</code> mapping supports:</p>
+<p>Required chart fields: none. The displayed value is always derived from the
+selected metric's primary output; <code>value</code> and <code>y</code> are not configurable card
+roles. Existing overrides are ignored at runtime and removed when a card is
+saved through the visual or advanced editor. Converting a KPI card to another
+chart also removes KPI-only <code>placement</code> and <code>kpi</code> settings. An ungrouped card
+becomes part of the responsive KPI strip only when <code>placement: kpi_strip</code> is
+explicit. The <code>kpi</code> mapping supports:</p>
 <ul>
 <li><code>comparison</code>: <code>none</code> or <code>previous_period</code>;</li>
 <li><code>comparison_period</code>: <code>day</code>, <code>week</code>, <code>month</code>, <code>quarter</code>, or <code>year</code>;</li>
@@ -3150,12 +3161,16 @@ latest available aggregate period anchors the current calendar period. The
 reference window has the same number of days. A card that returns zero/multiple
 rows or a non-numeric value displays <code>n/a</code>; report code never invents a reducer.</p>
 <h3 id="31-line">3.1 <code>line</code><a class="headerlink" href="#31-line" title="Permanent link">&para;</a></h3>
-<p>Required: <code>x, y</code>. Optional: <code>color, facet_row, facet_col, log_x, log_y</code>.</p>
-<p>Metric shape: a Polars frame with <code>x, y</code> and the group-by columns referenced by <code>color/facets</code>.</p>
+<p>Required: <code>x</code>. Optional: <code>color, facet_row, facet_col, log_x, log_y</code>.
+The Y value is always the selected metric's primary output; neither <code>y</code> nor
+<code>value</code> is a configurable role. Existing overrides are ignored and removed on
+save.</p>
+<p>Metric shape: a Polars frame with <code>x</code>, the metric output, and the group-by
+columns referenced by <code>color/facets</code>.</p>
 <p>Construction:</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">line</span><span class="p">(</span>
     <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
-    <span class="n">x</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">y</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">],</span>
+    <span class="n">x</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">y</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;metric&quot;</span><span class="p">],</span>
     <span class="n">color</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;color&quot;</span><span class="p">),</span>
     <span class="n">facet_row</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;facet_row&quot;</span><span class="p">),</span>
     <span class="n">facet_col</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;facet_col&quot;</span><span class="p">),</span>
@@ -3167,14 +3182,16 @@ rows or a non-numeric value displays <code>n/a</code>; report code never invents
 <span class="k">return</span> <span class="n">fig</span>
 </code></pre></div>
 <p>If <code>x</code> is categorical (a non-temporal string column) the factory falls back to <code>px.bar</code> with <code>barmode="group"</code>.</p>
+<p><code>stacked_area</code> uses the same metric-owned Y contract and requires <code>x</code> plus
+<code>color</code>; the selected metric supplies the stacked values.</p>
 <h3 id="32-bar">3.2 <code>bar</code><a class="headerlink" href="#32-bar" title="Permanent link">&para;</a></h3>
-<p>Same as <code>line</code> but always renders as bars. Optional: <code>barmode ∈ {group, stack, relative}</code>.</p>
+<p>Same metric-owned Y contract as <code>line</code>, but always renders as bars. Required:
+<code>x</code>. Optional: <code>color</code>, facets, and <code>barmode ∈ {group, stack, relative}</code>.</p>
 <p>For 100% stacked bars, set <code>barmode: percent</code> or <code>barmode: stacked_percent</code>.
 The chart factory renders a stacked bar chart with Plotly <code>barnorm="percent"</code>.
 Bars can also be sorted and capped:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bar</span>
 <span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
-<span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CTR</span>
 <span class="nt">sort_by</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CTR</span>
 <span class="nt">sort_direction</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">desc</span>
 <span class="nt">top_n</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
@@ -3191,19 +3208,37 @@ Bars can also be sorted and capped:</p>
 <span class="w">    </span><span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#c62828&quot;</span>
 </code></pre></div>
 <h3 id="33-treemap">3.3 <code>treemap</code><a class="headerlink" href="#33-treemap" title="Permanent link">&para;</a></h3>
-<p>Required: <code>path: list[str], color: str</code>.</p>
-<p>Metric shape: aggregated to <code>path[0], path[1], …, color</code>. Typically the metric's <code>summary</code> grain.</p>
+<p>Required: <code>path: list[str]</code>. Color is always the selected metric's primary
+output; <code>color</code> is not a configurable role.</p>
+<p>Metric shape: aggregated to <code>path[0], path[1], …</code>. Typically the metric's
+<code>summary</code> grain.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">treemap</span><span class="p">(</span>
     <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
     <span class="n">path</span><span class="o">=</span><span class="p">[</span><span class="n">px</span><span class="o">.</span><span class="n">Constant</span><span class="p">(</span><span class="s2">&quot;All&quot;</span><span class="p">)]</span> <span class="o">+</span> <span class="n">tile</span><span class="p">[</span><span class="s2">&quot;path&quot;</span><span class="p">],</span>
-    <span class="n">color</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;color&quot;</span><span class="p">],</span>
+    <span class="n">color</span><span class="o">=</span><span class="n">metric_value_column</span><span class="p">,</span>
     <span class="n">color_continuous_scale</span><span class="o">=</span><span class="s2">&quot;Viridis&quot;</span><span class="p">,</span>
     <span class="n">title</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;title&quot;</span><span class="p">],</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="34-heatmap">3.4 <code>heatmap</code><a class="headerlink" href="#34-heatmap" title="Permanent link">&para;</a></h3>
-<p>Required: <code>x, y, color</code>. The frame is pivoted: <code>x</code> × <code>y</code> matrix with <code>color</code> as the value.</p>
-<div class="highlight"><pre><span></span><code><span class="n">matrix</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">pivot</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">],</span> <span class="n">columns</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">values</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;color&quot;</span><span class="p">])</span>
+<p>Required: <code>x</code>. Optional: <code>y</code>, plus <code>property</code> and <code>score</code> for a
+<code>numeric_distribution</code> processor.</p>
+<p>The selected metric owns the cell intensity. <code>value</code> and <code>color</code> are not
+selectable roles and are removed when the tile is saved through an editor.
+Both axes are constrained to configured calendar grains or the metric
+processor's persisted <code>group_by</code> dimensions, so aggregate states such as
+<code>Count</code> cannot be selected as axes.</p>
+<p>The one chart adapts to the configured axes:</p>
+<ul>
+<li><code>x</code> plus <code>y</code> renders an <code>x</code> × <code>y</code> matrix. This covers ordinary comparison
+  and cohort layouts.</li>
+<li>daily <code>x</code> without <code>y</code> renders the calendar layout.</li>
+<li>another one-dimensional <code>x</code> without <code>y</code> renders a one-row intensity strip.</li>
+<li><code>property</code> plus <code>score</code> chooses a descriptive aggregate such as
+  <code>ResponseTime_p95</code>; otherwise the selected metric's primary output is used.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="n">value</span> <span class="o">=</span> <span class="n">selected_metric_output</span>
+<span class="n">matrix</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">pivot</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">],</span> <span class="n">columns</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">values</span><span class="o">=</span><span class="n">value</span><span class="p">)</span>
 <span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span>
     <span class="n">matrix</span><span class="p">,</span>
     <span class="n">color_continuous_scale</span><span class="o">=</span><span class="s2">&quot;Viridis&quot;</span><span class="p">,</span>
@@ -3211,6 +3246,10 @@ Bars can also be sorted and capped:</p>
     <span class="n">aspect</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
+<p><code>calendar_heatmap</code>, <code>cohort_heatmap</code>, and <code>descriptive_heatmap</code> remain accepted
+as read/runtime compatibility aliases. They are no longer offered as separate
+Builder choices; editing one in Visual or Advanced mode migrates it to
+<code>chart: heatmap</code>.</p>
 <h3 id="35-scatter">3.5 <code>scatter</code><a class="headerlink" href="#35-scatter" title="Permanent link">&para;</a></h3>
 <p>Required: <code>x, y</code>. Optional: <code>color, size, animation_frame, animation_group, facet_row, facet_col, log_x, log_y</code>.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span>
@@ -3227,23 +3266,26 @@ Bars can also be sorted and capped:</p>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="36-bar_polar">3.6 <code>bar_polar</code><a class="headerlink" href="#36-bar_polar" title="Permanent link">&para;</a></h3>
-<p>Required: <code>r, theta, color</code>.</p>
+<p>Required: <code>theta, color</code>. Radius is always the selected metric's primary
+output; <code>r</code> is not a configurable role.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">bar_polar</span><span class="p">(</span>
     <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
-    <span class="n">r</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;r&quot;</span><span class="p">],</span> <span class="n">theta</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;theta&quot;</span><span class="p">],</span>
+    <span class="n">r</span><span class="o">=</span><span class="n">metric_value_column</span><span class="p">,</span> <span class="n">theta</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;theta&quot;</span><span class="p">],</span>
     <span class="n">color</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;color&quot;</span><span class="p">],</span>
     <span class="n">title</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;title&quot;</span><span class="p">],</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="37-gauge">3.7 <code>gauge</code><a class="headerlink" href="#37-gauge" title="Permanent link">&para;</a></h3>
-<p>Required: <code>value</code> (a scalar column from the metric).</p>
+<p>Required chart fields: none. The gauge value is always the selected metric's
+primary output; <code>value</code> and <code>y</code> are not configurable roles. Existing overrides
+are ignored at runtime and removed when the gauge is saved through an editor.</p>
 <p>Optional: <code>reference</code> (scalar reference for every gauge) or <code>references</code> (dict of <code>key -&gt; reference_value</code>). The Tile uses the row whose <code>(facet_row, facet_col)</code> value matches a key in <code>references</code> for the threshold rings.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">(</span><span class="n">go</span><span class="o">.</span><span class="n">Indicator</span><span class="p">(</span>
     <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;gauge+number+delta&quot;</span><span class="p">,</span>
-    <span class="n">value</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;value&quot;</span><span class="p">]],</span>
+    <span class="n">value</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;metric&quot;</span><span class="p">]],</span>
     <span class="n">delta</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;reference&quot;</span><span class="p">:</span> <span class="n">references</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="mi">0</span><span class="p">)},</span>
     <span class="n">gauge</span><span class="o">=</span><span class="p">{</span>
-        <span class="s2">&quot;axis&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range&quot;</span><span class="p">:</span> <span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="nb">max</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;value&quot;</span><span class="p">]]</span> <span class="o">*</span> <span class="mf">1.5</span><span class="p">,</span> <span class="n">references_max</span><span class="p">)]},</span>
+        <span class="s2">&quot;axis&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;range&quot;</span><span class="p">:</span> <span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="nb">max</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;metric&quot;</span><span class="p">]]</span> <span class="o">*</span> <span class="mf">1.5</span><span class="p">,</span> <span class="n">references_max</span><span class="p">)]},</span>
         <span class="s2">&quot;threshold&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;line&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;color&quot;</span><span class="p">:</span> <span class="s2">&quot;red&quot;</span><span class="p">},</span> <span class="s2">&quot;value&quot;</span><span class="p">:</span> <span class="n">references</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="mi">0</span><span class="p">)},</span>
     <span class="p">},</span>
     <span class="n">title</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">title</span><span class="p">},</span>
@@ -3252,7 +3294,9 @@ Bars can also be sorted and capped:</p>
 <p>A grid of gauges is rendered when there are multiple <code>(facet_row, facet_col)</code> keys.</p>
 <h3 id="38-funnel">3.8 <code>funnel</code><a class="headerlink" href="#38-funnel" title="Permanent link">&para;</a></h3>
 <p>Required: <code>stages: list[str], color</code>.</p>
-<p>Metric shape: one row per <code>(stage_name, color, …)</code> with <code>Count</code>.</p>
+<p>The chart accepts either configured Funnel-processor stage states such as
+<code>&lt;stage&gt;_Count</code>, or numeric-distribution count rows. For categorical count
+rows, set optional <code>x</code> to the stage dimension. Facet fields remain optional.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">funnel</span><span class="p">(</span>
     <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
     <span class="n">x</span><span class="o">=</span><span class="s2">&quot;Count&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;stage&quot;</span><span class="p">,</span>
@@ -3261,11 +3305,17 @@ Bars can also be sorted and capped:</p>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="39-boxplot">3.9 <code>boxplot</code><a class="headerlink" href="#39-boxplot" title="Permanent link">&para;</a></h3>
-<p>Required: a <code>tdigest_quantile</code> metric. Optional: <code>x, color, facet_row,
-facet_col</code>. Without <code>x</code>, the renderer produces one overall distribution box;
-set <code>x</code> to compare the distribution across time or another persisted
-dimension.</p>
-<p>Boxplots are reconstructed from <code>&lt;prop&gt;_p25, &lt;prop&gt;_Median, &lt;prop&gt;_p75, &lt;prop&gt;_Min, &lt;prop&gt;_Max</code> (or t-digest quantiles) — the metric output already exposes those.</p>
+<p>Required: a <code>tdigest_quantile</code> metric. Optional: <code>property, x, color,
+facet_row, facet_col</code>. <code>property</code> is a constrained selector containing only
+properties backed by an unconditioned t-digest or KLL metric on the same
+processor. Changing it transparently queries that property's distribution
+metric. Without <code>x</code>, the renderer produces one overall distribution box; set
+<code>x</code> to compare the distribution across time or another persisted dimension.</p>
+<p>There is no <code>y</code> field: the selected distribution property owns the sketch and
+supplies the quantile values. Scalar processor outputs such as <code>&lt;prop&gt;_Count</code>
+are therefore not offered. Boxplots are reconstructed from
+<code>&lt;prop&gt;_p25, &lt;prop&gt;_Median, &lt;prop&gt;_p75, &lt;prop&gt;_Min, &lt;prop&gt;_Max</code> (or t-digest
+quantiles) already exposed by that metric.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">()</span>
 <span class="k">for</span> <span class="n">group</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">partition_by</span><span class="p">(</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;color&quot;</span><span class="p">),</span> <span class="n">as_dict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
     <span class="n">fig</span><span class="o">.</span><span class="n">add_trace</span><span class="p">(</span><span class="n">go</span><span class="o">.</span><span class="n">Box</span><span class="p">(</span>
@@ -3333,43 +3383,24 @@ dimension.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">x</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">y</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">],</span> <span class="n">trendline</span><span class="o">=</span><span class="s2">&quot;ols&quot;</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="316-model">3.16 <code>model</code><a class="headerlink" href="#316-model" title="Permanent link">&para;</a></h3>
-<p>CLV prediction overlay using <code>lifetimes</code> (or equivalent) BG/NBD or Pareto/NBD models fit at query time.</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">lifetimes</span>
-<span class="n">bgnbd</span> <span class="o">=</span> <span class="n">lifetimes</span><span class="o">.</span><span class="n">BetaGeoFitter</span><span class="p">()</span>
-<span class="n">bgnbd</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;frequency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;recency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;tenure&quot;</span><span class="p">])</span>
-<span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">with_columns</span><span class="p">(</span><span class="n">predicted_purchases</span> <span class="o">=</span> <span class="n">bgnbd</span><span class="o">.</span><span class="n">conditional_expected_number_of_purchases_up_to_time</span><span class="p">(</span>
-    <span class="n">horizon</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;frequency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;recency&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;tenure&quot;</span><span class="p">]))</span>
+<p>User-facing name: <strong>Purchase frequency projection</strong>. This
+<code>entity_lifecycle</code> chart extrapolates each customer's observed purchase rate
+over a configurable horizon (30 days by default):</p>
+<div class="highlight"><pre><span></span><code><span class="n">predicted_purchases</span> <span class="o">=</span> <span class="p">(</span><span class="n">frequency</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="n">tenure</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span> <span class="o">*</span> <span class="n">horizon</span>
 <span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span> <span class="n">x</span><span class="o">=</span><span class="s2">&quot;frequency&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;predicted_purchases&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;rfm_segment&quot;</span><span class="p">)</span>
 </code></pre></div>
-<h3 id="317-descriptive_line-descriptive_histogram-descriptive_heatmap-descriptive_funnel">3.17 <code>descriptive_line</code> / <code>descriptive_histogram</code> / <code>descriptive_heatmap</code> / <code>descriptive_funnel</code><a class="headerlink" href="#317-descriptive_line-descriptive_histogram-descriptive_heatmap-descriptive_funnel" title="Permanent link">&para;</a></h3>
-<p>Specializations for <code>numeric_distribution</code> metrics. Required Tile fields differ:</p>
-<table>
-<thead>
-<tr>
-<th>Variant</th>
-<th>Required</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>descriptive_line</code></td>
-<td><code>x, property, score</code> (e.g. <code>score: Mean</code>)</td>
-</tr>
-<tr>
-<td><code>descriptive_histogram</code></td>
-<td><code>property</code></td>
-</tr>
-<tr>
-<td><code>descriptive_heatmap</code></td>
-<td><code>x, y, property, score</code></td>
-</tr>
-<tr>
-<td><code>descriptive_funnel</code></td>
-<td><code>x, color, stages</code></td>
-</tr>
-</tbody>
-</table>
-<p>The chart factory pulls <code>&lt;property&gt;_&lt;score&gt;</code> from the metric output; see reference/processors.md §4 for the column naming convention.</p>
+<p>This is a simple run-rate projection. It does not fit a BG/NBD, Pareto/NBD, or
+machine-learning model and must not be interpreted as a model-quality report.
+The rendered axes explicitly identify historical frequency and the configured
+projection horizon.</p>
+<h3 id="317-descriptive_line">3.17 <code>descriptive_line</code><a class="headerlink" href="#317-descriptive_line" title="Permanent link">&para;</a></h3>
+<p>Specialization for <code>numeric_distribution</code> metrics. Required Tile fields are
+<code>x, property, score</code> (for example, <code>score: Mean</code>).</p>
+<p>The chart factory pulls <code>&lt;property&gt;_&lt;score&gt;</code> from the metric output; see
+reference/processors.md §4 for the column naming convention. Score names are
+case-insensitive (<code>P95</code> and <code>p95</code> both resolve to the canonical <code>_p95</code> column).
+Use <code>histogram</code> for a digest-backed distribution and the unified <code>heatmap</code> with
+<code>property</code> and <code>score</code> for a descriptive matrix.</p>
 <h3 id="318-experiment_z_score-experiment_odds_ratio">3.18 <code>experiment_z_score</code> / <code>experiment_odds_ratio</code><a class="headerlink" href="#318-experiment_z_score-experiment_odds_ratio" title="Permanent link">&para;</a></h3>
 <p>Specializations for <code>experiment</code> metrics. The Tile picks which experiment statistic to plot:</p>
 <table>
@@ -3396,6 +3427,9 @@ dimension.</p>
 </tr>
 </tbody>
 </table>
+<p>These are horizontal charts: <code>value_format</code> applies to the numeric x axis and
+hover value only. The categorical experiment-name y axis is never numerically
+formatted.</p>
 <h3 id="319-clv_treemap">3.19 <code>clv_treemap</code><a class="headerlink" href="#319-clv_treemap" title="Permanent link">&para;</a></h3>
 <p>Treemap of RFM segments by lifetime value.</p>
 <p>Required: none (uses <code>rfm_segment, lifetime_value</code> from <code>CLV_Summary</code>).</p>
@@ -3415,47 +3449,47 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <tbody>
 <tr>
 <td><code>kpi_card</code></td>
-<td><code>value</code></td>
+<td>none; value comes from <code>metric</code></td>
 <td>Executive scorecard metric with optional delta reference</td>
 </tr>
 <tr>
 <td><code>stacked_area</code></td>
-<td><code>x, y, color</code></td>
+<td><code>x, color</code>; Y comes from <code>metric</code></td>
 <td>Channel/campaign mix over time</td>
 </tr>
 <tr>
 <td><code>waterfall</code></td>
-<td><code>x, y</code></td>
-<td>Contribution or change decomposition</td>
+<td><code>x</code>; Y comes from <code>metric</code></td>
+<td>Single-trace contribution or change decomposition; no color grouping or facets</td>
 </tr>
 <tr>
 <td><code>pareto</code></td>
-<td><code>x, y</code></td>
+<td><code>x</code>; Y comes from <code>metric</code></td>
 <td>Top campaigns/offers plus cumulative share</td>
 </tr>
 <tr>
-<td><code>cohort_heatmap</code></td>
-<td><code>x, y, color</code></td>
-<td>Cohort or retention matrix</td>
+<td><code>heatmap</code></td>
+<td><code>x</code> and optional <code>y</code>; intensity comes from <code>metric</code></td>
+<td>Matrix, cohort, descriptive, or daily calendar intensity</td>
 </tr>
 <tr>
 <td><code>sankey</code></td>
-<td><code>source, target, value</code></td>
+<td><code>source, target</code>; value comes from <code>metric</code></td>
 <td>Journey/path flow between stages or channels</td>
 </tr>
 <tr>
 <td><code>combo</code></td>
-<td><code>x, y, y2</code></td>
-<td>Bar + line dual-axis comparisons, e.g. spend vs revenue; use <code>y2_axis_title</code> to override the secondary-axis label</td>
+<td><code>x, y2</code>; Y comes from <code>metric</code></td>
+<td>Bar + line dual-axis comparison of two compatible scalar metrics; use <code>y2_axis_title</code> to override the secondary-axis label</td>
 </tr>
 <tr>
 <td><code>interval</code></td>
-<td><code>x, y</code> plus optional <code>error_y</code></td>
+<td><code>x, y</code> plus optional error fields; Y/error roles use metric outputs only</td>
 <td>Lift/estimate with uncertainty interval</td>
 </tr>
 <tr>
 <td><code>donut</code></td>
-<td><code>names, values</code></td>
+<td><code>names</code>; values come from <code>metric</code></td>
 <td>Simple share-of-total for small category sets</td>
 </tr>
 <tr>
@@ -3468,11 +3502,6 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <td>optional <code>columns</code></td>
 <td>Native sortable and scrollable report table with optional conditional formatting; a selected <code>topk_items</code> list is expanded into rank, item, estimate, and lower/upper-bound columns</td>
 </tr>
-<tr>
-<td><code>calendar_heatmap</code></td>
-<td><code>date, value</code></td>
-<td>Daily seasonality and campaign activity</td>
-</tr>
 </tbody>
 </table>
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">campaign_pareto</span>
@@ -3480,7 +3509,6 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <span class="w">  </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Revenue</span>
 <span class="w">  </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pareto</span>
 <span class="w">  </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Campaign</span>
-<span class="w">  </span><span class="nt">y</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Revenue</span>
 <span class="w">  </span><span class="nt">top_n</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12</span>
 </code></pre></div>
 <hr />
@@ -3500,55 +3528,49 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <td><code>line</code></td>
 <td>binary_outcome, score_distribution, conversion, snapshot</td>
 <td>first time-grain dim</td>
-<td>metric.outputs[0]</td>
+<td>selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>stacked_area</code></td>
 <td>binary_outcome, score_distribution, snapshot</td>
 <td>first time-grain dim</td>
-<td>metric.outputs[0]</td>
+<td>selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>bar</code></td>
 <td>binary_outcome, snapshot</td>
 <td>first non-time dim</td>
-<td>metric.outputs[0]</td>
+<td>selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>kpi_card</code></td>
 <td>aggregate metrics</td>
 <td>—</td>
-<td>metric.outputs[0]</td>
+<td>selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>waterfall</code></td>
 <td>aggregate metrics</td>
 <td>first non-time dim</td>
-<td>metric.outputs[0]</td>
+<td>selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>pareto</code></td>
 <td>aggregate metrics</td>
 <td>first non-time dim</td>
-<td>metric.outputs[0]</td>
+<td>selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>treemap</code></td>
 <td>binary_outcome, score_distribution</td>
-<td>—</td>
-<td>—</td>
+<td>path: processor dimensions</td>
+<td>color: selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>heatmap</code></td>
-<td>binary_outcome, score_distribution</td>
-<td>first dim</td>
-<td>second dim</td>
-</tr>
-<tr>
-<td><code>cohort_heatmap</code></td>
-<td>binary_outcome, snapshot</td>
-<td>time/cohort dim</td>
-<td>metric.outputs[0]</td>
+<td>aggregate metrics</td>
+<td>first time grain, else first dimension</td>
+<td>first compatible dimension when available; intensity is the selected metric</td>
 </tr>
 <tr>
 <td><code>scatter</code></td>
@@ -3560,7 +3582,7 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <td><code>combo</code></td>
 <td>aggregate metrics</td>
 <td>first time-grain dim</td>
-<td>metric.outputs[0] + metric.outputs[1]</td>
+<td>selected metric + first compatible same-kind metric on the same processor</td>
 </tr>
 <tr>
 <td><code>interval</code></td>
@@ -3572,7 +3594,7 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <td><code>donut</code></td>
 <td>aggregate metrics</td>
 <td>first dim</td>
-<td>metric.outputs[0]</td>
+<td>selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>geo_map</code></td>
@@ -3587,44 +3609,38 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <td>—</td>
 </tr>
 <tr>
-<td><code>calendar_heatmap</code></td>
-<td>binary_outcome, score_distribution, snapshot</td>
-<td>date dim</td>
-<td>metric.outputs[0]</td>
-</tr>
-<tr>
 <td><code>bar_polar</code></td>
 <td>binary_outcome</td>
-<td>—</td>
-<td>—</td>
+<td>theta: first dimension</td>
+<td>radius: selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>sankey</code></td>
 <td>aggregate metrics</td>
 <td>source/target dims</td>
-<td>metric.outputs[0]</td>
+<td>selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>gauge</code></td>
 <td>binary_outcome, snapshot</td>
 <td>—</td>
-<td>—</td>
+<td>selected metric's primary output</td>
 </tr>
 <tr>
 <td><code>funnel</code></td>
-<td>funnel</td>
-<td>—</td>
-<td>—</td>
+<td>funnel, numeric_distribution</td>
+<td>optional first dimension</td>
+<td>stage counts</td>
 </tr>
 <tr>
 <td><code>boxplot</code></td>
 <td>numeric_distribution</td>
 <td>optional first time-grain dim</td>
-<td>property</td>
+<td>digest/KLL-backed <code>property</code> (no <code>y</code>)</td>
 </tr>
 <tr>
 <td><code>histogram</code></td>
-<td>numeric_distribution</td>
+<td>numeric_distribution, entity_lifecycle</td>
 <td>—</td>
 <td>—</td>
 </tr>
@@ -3704,7 +3720,6 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <span class="w">  </span><span class="nt">template</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;valuestream&quot;</span><span class="w">           </span><span class="c1"># app-matching default; any Plotly template name</span>
 <span class="w">  </span><span class="nt">paper_bgcolor</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#162438&quot;</span><span class="w">           </span><span class="c1"># defaults to the app chart-card surface</span>
 <span class="w">  </span><span class="nt">plot_bgcolor</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;#162438&quot;</span><span class="w">            </span><span class="c1"># defaults to the app chart-card surface</span>
-<span class="w">  </span><span class="nt">font</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> family</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Avenir</span><span class="nv"> </span><span class="s">Next&quot;</span><span class="p p-Indicator">,</span><span class="nt"> size</span><span class="p">:</span><span class="w"> </span><span class="nv">14</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <span class="w">  </span><span class="nt">margins</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> l</span><span class="p">:</span><span class="w"> </span><span class="nv">32</span><span class="p p-Indicator">,</span><span class="nt"> r</span><span class="p">:</span><span class="w"> </span><span class="nv">16</span><span class="p p-Indicator">,</span><span class="nt"> t</span><span class="p">:</span><span class="w"> </span><span class="nv">48</span><span class="p p-Indicator">,</span><span class="nt"> b</span><span class="p">:</span><span class="w"> </span><span class="nv">32</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <span class="w">  </span><span class="nt">legend</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> orientation</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;h&quot;</span><span class="p p-Indicator">,</span><span class="nt"> y</span><span class="p">:</span><span class="w"> </span><span class="nv">-0.2</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <span class="w">  </span><span class="nt">colorway</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;#4B73F0&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;#22C7F3&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;#45D6A5&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;#F2C14E&quot;</span><span class="p p-Indicator">]</span>
@@ -3718,6 +3733,16 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <p>The application initializes a built-in <code>valuestream</code> Plotly template before
 dashboard rendering. Its qualitative sequence starts with the app's royal blue,
 cyan, verified green, attention amber, danger coral, and violet tokens. Its
+typography uses the self-hosted Inter variable webfont at 13px for chart text
+and medium-weight axis ticks, 14px SemiBold axis titles, 12px legends and hover
+labels, and Inter Display SemiBold at 16px for chart titles. Axis ticks have 6px
+of label spacing, axis titles have a 12px standoff, and automatic margins keep
+long labels visible. Legend titles use Inter SemiBold at 13px. The font files
+are served by Streamlit from the packaged <code>ui/static/fonts</code> directory, with
+native system sans-serif fallbacks when a webfont cannot load. Workspaces
+normally omit <code>theme.font</code>; defining it remains supported as an intentional
+per-workspace override.</p>
+<p>The template's
 <code>paper_bgcolor</code> and <code>plot_bgcolor</code> match the chart-card surface (<code>#ffffff</code> in
 light mode and <code>#162438</code> in dark mode), so Plotly figures blend into the
 Streamlit report cards instead of rendering a separate panel. The Configuration

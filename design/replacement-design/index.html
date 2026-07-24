@@ -5253,13 +5253,13 @@ removes the checkpoint.</p>
 <tbody>
 <tr>
 <td><code>line</code></td>
-<td><code>x, y, color?, facets?</code></td>
-<td>drops to bar if <code>x</code> is categorical</td>
+<td><code>x, color?, facets?</code></td>
+<td>Y is the selected metric; drops to bar if <code>x</code> is categorical</td>
 </tr>
 <tr>
 <td><code>bar</code></td>
-<td><code>x, y, color?, facets?</code></td>
-<td></td>
+<td><code>x, color?, facets?</code></td>
+<td>Y is the selected metric</td>
 </tr>
 <tr>
 <td><code>bar_polar</code></td>
@@ -5273,8 +5273,8 @@ removes the checkpoint.</p>
 </tr>
 <tr>
 <td><code>heatmap</code></td>
-<td><code>x, y, color</code></td>
-<td></td>
+<td><code>x, y?, property?, score?</code></td>
+<td>selected metric owns intensity; no Y renders a daily calendar or one-axis strip</td>
 </tr>
 <tr>
 <td><code>scatter</code></td>
@@ -5283,8 +5283,8 @@ removes the checkpoint.</p>
 </tr>
 <tr>
 <td><code>gauge</code></td>
-<td><code>value, references?</code></td>
-<td></td>
+<td><code>references?, facets?</code></td>
+<td>value is the selected metric</td>
 </tr>
 <tr>
 <td><code>funnel</code></td>

@@ -3418,7 +3418,7 @@ Quantile queries against an empty group return <code>0.0</code>.</p>
 <div class="highlight"><pre><span></span><code>sk = tdigest_double.deserialize(blob)
 return sk.get_quantile(q)
 </code></pre></div></p>
-<p><strong>Histogram from digest</strong> (used by descriptive_histogram chart):
+<p><strong>Histogram from digest</strong> (used by the <code>histogram</code> chart):
 <div class="highlight"><pre><span></span><code>sk = tdigest_double.deserialize(blob)
 edges = linspace(value_range[0], value_range[1], bins + 1)
 masses = [ sk.get_cdf([right])[0] - sk.get_cdf([left])[0]

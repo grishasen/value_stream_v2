@@ -3642,6 +3642,19 @@ in the same way as a merged result.</p>
 </tbody>
 </table>
 <p>reference/algorithms.md gives the full algorithmic detail.</p>
+<p>Configuration Builder exposes these kind-specific state settings through a
+<code>Parameters YAML</code> mapping beside the state name, type, and source column. The
+mapping is preserved in <code>processors.yaml</code>; <code>type</code> and <code>source_column</code> remain
+dedicated fields. Empty mappings use the defaults shown above. The Builder
+accepts <code>lg_k</code> only for CPC/HLL/theta states, <code>k</code> only for t-digest/KLL states,
+and <code>lg_max_map_size</code> only for Top-K states.</p>
+<p>When Configuration Builder applies a processor, each unconditioned t-digest or
+KLL state receives a <code>tdigest_quantile</code> metric with no explicit <code>quantile</code> if
+no such distribution binding exists. The state remains the mergeable binary
+storage contract; the metric is the public query/report binding. Explicit
+percentile metrics can coexist with it. States marked <code>outcome: positive</code> or
+<code>outcome: negative</code> are excluded because they are paired implementation inputs
+for curve and calibration metrics.</p>
 <hr />
 <h2 id="3-binary_outcome-processor">3. binary_outcome processor<a class="headerlink" href="#3-binary_outcome-processor" title="Permanent link">&para;</a></h2>
 <h3 id="31-purpose">3.1 Purpose<a class="headerlink" href="#31-purpose" title="Permanent link">&para;</a></h3>
@@ -4029,6 +4042,10 @@ global_var  = (ssw + ssb) / (global_n - 1)     # pooled variance
 </tr>
 </tbody>
 </table>
+<p>The Builder-authored distribution form of <code>tdigest_quantile</code> omits
+<code>quantile</code>. It returns the median as the primary scalar and makes the complete
+quantile suite available to boxplots and other distribution charts. Named
+percentile rows in the table above are optional additional metrics.</p>
 <h3 id="49-edge-cases">4.9 Edge cases<a class="headerlink" href="#49-edge-cases" title="Permanent link">&para;</a></h3>
 <ul>
 <li>A property may exist in some chunks and not in others. The engine fills missing property states with sentinel values (<code>Count=0</code>, sketches empty) and never errors on a missing property.</li>
