@@ -27,6 +27,7 @@ FIELD_HELP: dict[str, str] = {
     ),
     "editor.draft_step": _tip("Open one section of the current catalog draft."),
     # Sources and transforms.
+    "source.mode": _tip("Choose whether to create a source or edit an existing definition."),
     "source.selector": _tip("Choose the source definition to edit."),
     "source.id": _tip(
         "Stable YAML identifier used by processors to reference this source.",
@@ -62,6 +63,10 @@ FIELD_HELP: dict[str, str] = {
     "source.rename_capitalize": _tip(
         "Apply the Pega-aware rename/capitalize transform before defaults, filters, and calculations.",
         "pyName → Name",
+    ),
+    "source.materialize_transforms": _tip(
+        "Collect each transformed chunk once in memory so every bound processor can reuse it. "
+        "Enable this only when the chunk fits comfortably in memory."
     ),
     "source.timestamp_column": _tip(
         "Event timestamp used for calendar grains, incremental windows, and freshness.",
@@ -299,10 +304,20 @@ FIELD_HELP: dict[str, str] = {
     "state.name": _tip(
         "Unique aggregate-state name exposed to metric calculations.", "UniqueSubjects_cpc"
     ),
-    "state.type": _tip("Mergeable aggregation algorithm used to build this state.", "cpc"),
+    "state.type": _tip(
+        "Mergeable aggregation algorithm used to build this state. Applying a public "
+        "t-digest or KLL state also creates its distribution metric automatically.",
+        "cpc",
+    ),
     "state.source_column": _tip(
         "Input field consumed by the state; count states may leave this blank.",
         "SubjectID",
+    ),
+    "state.parameters": _tip(
+        "Optional state-specific settings as a YAML mapping. Common settings are "
+        "lg_k for CPC/HLL/Theta, k for t-digest/KLL, lg_max_map_size for Top-K, "
+        "and weight, mean, outcome, or score_property where required.",
+        "{lg_k: 11}",
     ),
     "state.derived_from": _tip(
         "Processor setting that generated this state; shown for provenance.", "score_properties"
@@ -397,7 +412,8 @@ FIELD_HELP: dict[str, str] = {
     "metric.distribution_only": _tip(
         "Store no single quantile: the metric reads the median by default and "
         "backs distribution charts such as boxplots with the full quantile "
-        "suite.",
+        "suite. Builder creates this binding automatically when its public digest "
+        "state is applied.",
         "checked for boxplot metrics",
     ),
     "metric.digest_property": _tip(

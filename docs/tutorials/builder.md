@@ -58,12 +58,21 @@ Applying configuration does not run the source. After a source, processor, or
 dimension Apply, choose the separate **Run data** handoff when you are ready to
 refresh aggregates.
 
-To add another source, choose **Add source**. The Studio opens in deterministic,
-sample-first mode for the same active workspace. Select a workspace sample,
-review the additive source bundle, and either choose **Cancel and return to
-Builder** or apply it and use **Return to Configuration Builder** on the
-revision receipt. Enter a unique Source ID: this path never turns Add into an
-implicit edit of an existing source.
+To add another source, choose **Create New Source** on **Sources**. In an empty
+workspace, this editor opens automatically. Enter a unique Source ID, choose the
+reader, and set its root and file pattern. The default template looks for
+`**/*.parquet` below the workspace's `data` folder. If matching data is already
+available, choose the optional **Load sample** step to populate later field
+selectors from a bounded preview; this does not ingest data. Review the
+generated YAML and choose **Apply to workspace**. The Builder rejects duplicate
+Source IDs and never turns Create into an implicit edit. Use **AI Configuration
+Studio** separately when you want a sample-first inferred configuration.
+
+For a Pega outcome source, enter `OutcomeDate` or `OutcomeTime` as the Timestamp
+Column. The generated YAML adds the standard datetime, calendar, action-ID, and
+numeric-cast transforms for fields present in the loaded sample. Enable
+**Materialize Transforms** only when one transformed chunk fits in memory and
+several processors should reuse it.
 
 To remove a processor, switch to **Edit Existing Processor**, select the exact
 processor, and choose **Delete processor**. Review the dependent metric and
@@ -162,6 +171,32 @@ guesses an aggregation to turn another chart into a KPI.
 Chart selectors use the same friendly names and purpose descriptions as the
 visual report library. The stored catalog kind, such as `bar_polar`, appears as
 secondary technical detail and is unchanged when you save the tile.
+
+Choose the single **Heatmap** chart for a matrix, cohort, descriptive, or
+calendar view. Its intensity comes from the selected metric. X and optional Y
+offer only configured time grains and processor dimensions; leave Y empty with
+X set to Day for the calendar layout. Numeric-distribution heatmaps also offer
+Property and Metric (statistic). Older specialized heatmap kinds are migrated
+to `heatmap` when edited visually.
+
+For a **Combo** chart, the selected tile metric supplies Y. Choose **Y2
+Metric** from the compatible same-kind metrics backed by the same processor;
+dimensions and raw aggregate columns are not offered for either value axis.
+
+For a **Pareto** chart, choose only the X category. The selected metric
+supplies the ranked bar values and cumulative share curve.
+
+For a **Polar bar** chart, the selected metric supplies Radius. Choose Theta
+and Color to control the categorical arrangement.
+
+For a **Treemap** chart, the selected metric supplies Color. Choose Path for
+the hierarchy; advanced mode can optionally set a separate size value.
+
+For a **Donut** chart, the selected metric supplies the slice values. Choose
+Names for the category labels; no separate Value field is needed.
+
+For a **Sankey** chart, the selected metric supplies link values. Choose only
+Source and Target for the flow endpoints.
 
 Choose the one **Apply to workspace** action. The tile and page settings are
 validated as a complete catalog before Apply, then written and validated

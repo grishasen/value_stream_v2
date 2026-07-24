@@ -118,6 +118,7 @@ def _run_summary(result: Any) -> str:
     if hasattr(result, "chunks_ok"):
         return (
             f"{result.status}: {result.chunks_ok} chunk(s) ok, "
+            f"{getattr(result, 'chunks_skipped', 0)} skipped, "
             f"{result.chunks_failed} failed, {result.rows_kept:,} rows kept"
         )
     return str(result)
@@ -190,11 +191,11 @@ def render(ctx: ValueStreamContext) -> None:
     if not sources:
         st.info(
             "No data sources are configured for this workspace. Add a source in "
-            "AI Configuration Studio before loading or rebuilding data."
+            "Configuration Builder before loading or rebuilding data."
         )
         st.link_button(
-            "Add source in AI Configuration Studio",
-            "/ai_configuration_studio",
+            "Add source in Configuration Builder",
+            "/configuration_builder?builder_step=sources",
             icon=":material/add_circle:",
             type="primary",
         )

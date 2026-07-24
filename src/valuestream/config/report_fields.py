@@ -7,6 +7,13 @@ from collections.abc import Iterable
 from valuestream.config import model
 
 CALENDAR_FIELDS = ("Day", "Month", "Quarter", "Year")
+_TIME_FIELD_BY_GRAIN = {
+    "daily": "Day",
+    "weekly": "Week",
+    "monthly": "Month",
+    "quarterly": "Quarter",
+    "yearly": "Year",
+}
 SCALAR_STATE_TYPES = frozenset(
     {"count", "value_sum", "min", "max", "pooled_mean", "pooled_variance"}
 )
@@ -110,6 +117,63 @@ def descriptive_properties(processor: model.Processor | None) -> list[str]:
     return properties
 
 
+def distribution_property_metrics(
+    catalog: model.Catalog,
+    metric_name: str,
+) -> dict[str, str]:
+    """Map boxplot properties to queryable distribution metrics.
+
+    Only unconditioned t-digest and KLL states from the selected metric's
+    processor qualify. When both a percentile metric and a distribution
+    metric expose the same state, prefer the distribution metric whose
+    ``quantile`` was omitted.
+    """
+
+    metric = catalog.metrics.metrics.get(metric_name)
+    if metric is None:
+        return {}
+    processor = next(
+        (
+            candidate
+            for candidate in catalog.processors.processors
+            if candidate.id == metric.source
+        ),
+        None,
+    )
+    if processor is None:
+        return {}
+
+    states = model.effective_processor_states(processor)
+    property_metrics: dict[str, str] = {}
+    distribution_properties: set[str] = set()
+    for candidate_name, candidate in catalog.metrics.metrics.items():
+        if not isinstance(candidate, model.TdigestQuantileMetric):
+            continue
+        if candidate.source != processor.id:
+            continue
+        state = states.get(candidate.state)
+        if state is None or state.type not in {"tdigest", "kll"}:
+            continue
+        outcome = str(dict(state.model_extra or {}).get("outcome", "") or "").casefold()
+        if outcome in {"positive", "negative"}:
+            continue
+
+        suffix = f"_{state.type}"
+        property_name = (
+            candidate.state[: -len(suffix)]
+            if candidate.state.casefold().endswith(suffix)
+            else candidate.state
+        )
+        is_distribution = "quantile" not in candidate.model_fields_set
+        if property_name not in property_metrics or (
+            is_distribution and property_name not in distribution_properties
+        ):
+            property_metrics[property_name] = candidate_name
+        if is_distribution:
+            distribution_properties.add(property_name)
+    return property_metrics
+
+
 def report_field_options(catalog: model.Catalog, metric_name: str) -> list[str]:
     """Return every field a report tile may address for one metric."""
 
@@ -133,6 +197,30 @@ def report_field_options(catalog: model.Catalog, metric_name: str) -> list[str]:
     if isinstance(metric, model.TdigestQuantileMetric):
         fields.extend(_quantile_metric_aliases(metric_name))
     return _dedupe(fields)
+
+
+def report_axis_options(catalog: model.Catalog, metric_name: str) -> list[str]:
+    """Return persisted time grains and dimensions usable as chart axes."""
+
+    metric = catalog.metrics.metrics.get(metric_name)
+    processor_by_id = {processor.id: processor for processor in catalog.processors.processors}
+    processor = processor_by_id.get(metric.source) if metric is not None else None
+    if processor is None:
+        return []
+    configured_grains = _dedupe(
+        [
+            *processor.grains,
+            *model.normalize_grains(
+                [str(grain) for grain in catalog.pipelines.defaults.calendar.grains]
+            ),
+        ]
+    )
+    time_fields = [
+        _TIME_FIELD_BY_GRAIN[grain]
+        for grain in configured_grains
+        if grain in _TIME_FIELD_BY_GRAIN
+    ]
+    return _dedupe([*time_fields, *processor.group_by])
 
 
 def _metric_and_dependency_outputs(catalog: model.Catalog, metric_name: str) -> list[str]:
@@ -183,6 +271,8 @@ __all__ = [
     "DESCRIPTIVE_SCORES",
     "SCALAR_STATE_TYPES",
     "descriptive_properties",
+    "distribution_property_metrics",
     "metric_output_columns",
+    "report_axis_options",
     "report_field_options",
 ]

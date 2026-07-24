@@ -12,7 +12,7 @@ import polars as pl
 
 from valuestream.config import model
 from valuestream.config.canonical import processor_computation_hash
-from valuestream.engine.ledger import successful_chunk_keys
+from valuestream.engine.ledger import aggregate_lineage_paths, successful_chunk_keys
 from valuestream.processors import grain_levels
 from valuestream.store.meta import meta_dir
 from valuestream.store.parquet import aggregate_exists, scan_aggregate
@@ -55,11 +55,25 @@ def metric_freshness(
             grain=stored_grain,
         ):
             continue
+        paths_by_hash = aggregate_lineage_paths(
+            workspace_path,
+            source_id=processor.source,
+            processor_id=processor.id,
+            grain=stored_grain,
+        )
+        selected_paths: tuple[Path, ...] | None = None
+        if paths_by_hash:
+            selected_paths = tuple(
+                path for path in paths_by_hash.get(config_hash, ()) if path.exists()
+            )
+            if not selected_paths:
+                continue
         scanned = scan_aggregate(
             workspace_path,
             source_id=processor.source,
             processor_id=processor.id,
             grain=stored_grain,
+            paths=selected_paths,
         )
         current = scanned.filter(pl.col("config_hash") == config_hash)
         filtered = _filter_successful_chunks_lazy(current, workspace_path, processor.source)

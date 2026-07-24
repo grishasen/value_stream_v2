@@ -55,7 +55,6 @@ FULL_WIDTH_CHARTS = {
     "calibration_curve",
     "clv_treemap",
     "cohort_heatmap",
-    "descriptive_funnel",
     "descriptive_heatmap",
     "funnel",
     "gain_curve",
@@ -95,14 +94,14 @@ ADVANCED_COLOR_SCALES = [
     "Reds",
 ]
 ADVANCED_FIELD_CONTROLS: dict[str, tuple[str, ...]] = {
-    "line": ("x", "y", "color", "facet_row", "facet_col"),
-    "stacked_area": ("x", "y", "color", "facet_row", "facet_col"),
-    "bar": ("x", "y", "color", "facet_row", "facet_col"),
-    "kpi_card": ("value",),
-    "waterfall": ("x", "y", "color", "facet_row", "facet_col"),
-    "pareto": ("x", "y", "color", "facet_row", "facet_col"),
-    "treemap": ("path", "value", "color"),
-    "heatmap": ("x", "y", "color"),
+    "line": ("x", "color", "facet_row", "facet_col"),
+    "stacked_area": ("x", "color", "facet_row", "facet_col"),
+    "bar": ("x", "color", "facet_row", "facet_col"),
+    "kpi_card": (),
+    "waterfall": ("x",),
+    "pareto": ("x", "color", "facet_row", "facet_col"),
+    "treemap": ("path", "value"),
+    "heatmap": ("x", "y", "property", "score"),
     "cohort_heatmap": ("x", "y", "color"),
     "scatter": (
         "x",
@@ -114,7 +113,7 @@ ADVANCED_FIELD_CONTROLS: dict[str, tuple[str, ...]] = {
         "facet_row",
         "facet_col",
     ),
-    "combo": ("x", "y", "y2", "color", "facet_row", "facet_col"),
+    "combo": ("x", "y2", "color", "facet_row", "facet_col"),
     "interval": (
         "x",
         "y",
@@ -125,15 +124,17 @@ ADVANCED_FIELD_CONTROLS: dict[str, tuple[str, ...]] = {
         "facet_row",
         "facet_col",
     ),
-    "donut": ("names", "values", "color"),
+    "donut": ("names", "color"),
     "geo_map": ("locations", "value", "lat", "lon", "color", "size"),
     "table": ("columns",),
     "calendar_heatmap": ("date", "value"),
-    "bar_polar": ("r", "theta", "color"),
-    "sankey": ("source", "target", "value"),
-    "gauge": ("value", "facet_row", "facet_col"),
-    "funnel": ("stages", "color", "facet_row", "facet_col"),
-    "boxplot": ("x", "y", "color", "facet_row", "facet_col"),
+    "bar_polar": ("theta", "color"),
+    "sankey": ("source", "target"),
+    "gauge": ("facet_row", "facet_col"),
+    "funnel": ("x", "stages", "color", "facet_row", "facet_col"),
+    # Property is restricted to queryable distribution sketches. A separate Y
+    # selector is misleading because scalar states such as Count are not boxes.
+    "boxplot": ("property", "x", "color", "facet_row", "facet_col"),
     "histogram": ("property", "color", "facet_row", "facet_col"),
     "calibration_curve": ("color", "facet_row", "facet_col"),
     "roc_curve": ("color", "facet_row", "facet_col"),
@@ -145,9 +146,7 @@ ADVANCED_FIELD_CONTROLS: dict[str, tuple[str, ...]] = {
     "corr": ("x", "y", "color"),
     "model": ("color",),
     "descriptive_line": ("x", "property", "score", "color", "facet_row", "facet_col"),
-    "descriptive_histogram": ("property", "color", "facet_row", "facet_col"),
     "descriptive_heatmap": ("x", "y", "property", "score"),
-    "descriptive_funnel": ("x", "stages", "color", "facet_row", "facet_col"),
     "experiment_z_score": ("x", "y", "color", "facet_row", "facet_col"),
     "experiment_odds_ratio": ("x", "y", "color", "facet_row", "facet_col"),
     "clv_treemap": ("path", "value", "color"),
@@ -893,7 +892,7 @@ def _page_status_banner(
     freshness_bits = [
         f"latest {latest_periods[0]}" if latest_periods else "no aggregate period",
         f"run {components.format_timestamp(last_run)}",
-        f"status {', '.join(sorted(statuses)) or 'unknown'}",
+        f"aggregate status {', '.join(sorted(statuses)) or 'unknown'}",
     ]
     message = f"{' | '.join(details)}. {' | '.join(freshness_bits)}."
     if stale:
@@ -1009,7 +1008,8 @@ def _kpi_bundle(
     end: dt.date | None,
 ) -> KpiBundle:
     tile_dict = tile_to_dict(tile)
-    value_column = str(tile_dict.get("value") or tile.metric)
+    metric = ctx.catalog.metrics.metrics[tile.metric]
+    value_column = builder.metric_output_columns(tile.metric, metric)[0]
     applied, _ = partition_filters_for_tile(ctx.catalog, tile, filters)
     query_filters = {**dict(tile_dict.get("filters") or {}), **applied}
     kpi = tile.kpi or model.KpiSpec()
@@ -1941,7 +1941,10 @@ def _advanced_tile_controls(
     base_tile: dict[str, Any],
 ) -> dict[str, Any]:
     state_key = _advanced_tile_state_key(dashboard_id, page_id, base_tile)
-    prefix = _advanced_tile_control_prefix(dashboard_id, page_id, base_tile)
+    control_prefix = _advanced_tile_control_prefix(dashboard_id, page_id, base_tile)
+    revision_key = f"{control_prefix}_revision"
+    revision = int(st.session_state.get(revision_key, 0) or 0)
+    prefix = f"{control_prefix}_v{revision}"
     base_signature_key = f"{prefix}_base_signature"
     base_signature = yaml.safe_dump(base_tile, sort_keys=True)
     if st.session_state.get(base_signature_key) != base_signature:
@@ -1952,14 +1955,14 @@ def _advanced_tile_controls(
     with st.expander("Advanced mode", expanded=False):
         st.caption("Session-only. Changes here reset when the session ends and never update YAML.")
         reset_col, status_col = st.columns([0.22, 0.78], vertical_alignment="center")
-        if reset_col.button(
+        reset_col.button(
             "Reset",
             icon=":material/restart_alt:",
             key=f"{prefix}_reset",
             help="Return this tile to its configured report definition.",
-        ):
-            _clear_advanced_tile_state(prefix, state_key)
-            st.rerun()
+            on_click=_reset_advanced_tile_state,
+            args=(prefix, state_key, revision_key),
+        )
         if current != base_tile:
             status_col.caption("Using an unsaved advanced draft.")
         else:
@@ -1983,6 +1986,8 @@ def _advanced_field_controls(
     current: dict[str, Any],
     prefix: str,
 ) -> dict[str, Any]:
+    base_tile = builder.canonicalize_heatmap_tile(base_tile)
+    current = builder.canonicalize_heatmap_tile(current)
     metric_name = str(base_tile["metric"])
     chart_choices = builder.chart_choices_for_metric(ctx.catalog, metric_name)
     if not chart_choices:
@@ -2006,6 +2011,11 @@ def _advanced_field_controls(
     controls = ADVANCED_FIELD_CONTROLS.get(
         chart_kind, ("x", "y", "color", "facet_row", "facet_col")
     )
+    if chart_kind == "heatmap" and not builder.descriptive_property_options(
+        ctx.catalog,
+        metric_name,
+    ):
+        controls = tuple(control for control in controls if control not in {"property", "score"})
     two_col_controls = [
         control for control in controls if control not in {"columns", "path", "stages"}
     ]
@@ -2215,7 +2225,9 @@ def _advanced_field_widget(
     field_options: list[str],
     prefix: str,
 ) -> str:
-    if field_name == "score":
+    if field_name == "y2":
+        label = "Y2 Metric"
+    elif field_name == "score":
         label = "Metric"
     elif field_name == "property":
         label = "Property"
@@ -2233,7 +2245,7 @@ def _advanced_field_widget(
     )
 
 
-def _advanced_field_options(
+def _advanced_field_options(  # noqa: PLR0911
     catalog: model.Catalog,
     metric_name: str,
     chart_kind: str,
@@ -2242,7 +2254,19 @@ def _advanced_field_options(
     selected_fields: Mapping[str, Any],
     field_options: list[str],
 ) -> list[str]:
-    if not chart_kind.startswith("descriptive_"):
+    if chart_kind == "interval" and field_name in builder.INTERVAL_METRIC_OUTPUT_FIELDS:
+        return ["", *builder.metric_output_options(catalog, metric_name)]
+    if chart_kind == "combo" and field_name == "y2":
+        return ["", *builder.combo_secondary_metric_options(catalog, metric_name)]
+    if chart_kind == "heatmap" and field_name in {"x", "y"}:
+        return ["", *builder.chart_axis_options(catalog, metric_name)]
+    if chart_kind == "boxplot" and field_name == "property":
+        properties = builder.distribution_property_options(catalog, metric_name)
+        return properties or [""]
+    if chart_kind == "histogram" and field_name == "property":
+        properties = builder.distribution_property_options(catalog, metric_name)
+        return properties or field_options
+    if not chart_kind.startswith("descriptive_") and chart_kind != "heatmap":
         return field_options
     if field_name == "property":
         properties = builder.descriptive_property_options(catalog, metric_name)
@@ -2271,6 +2295,8 @@ def _advanced_tile_seed(
     current_tile: dict[str, Any],
     chart_kind: str,
 ) -> dict[str, Any]:
+    base_tile = builder.canonicalize_heatmap_tile(base_tile)
+    current_tile = builder.canonicalize_heatmap_tile(current_tile)
     seed = builder.default_tile_fields(catalog, str(base_tile["metric"]), chart_kind)
     for source in (base_tile, current_tile):
         for key, value in source.items():
@@ -2282,6 +2308,27 @@ def _advanced_tile_seed(
                 seed["facet_row"] = facets["row"]
             if facets.get("col") or facets.get("column"):
                 seed["facet_col"] = facets.get("col", facets.get("column"))
+    if chart_kind in builder.METRIC_OWNED_VALUE_CHARTS:
+        seed.pop("y", None)
+        seed.pop("value", None)
+    if chart_kind == "waterfall":
+        for field_name in ("color", "facet_row", "facet_col", "facet_column", "facets"):
+            seed.pop(field_name, None)
+    if chart_kind in builder.METRIC_OWNED_VALUES_CHARTS:
+        seed.pop("values", None)
+        seed.pop("value", None)
+        seed.pop("y", None)
+    if chart_kind == "heatmap":
+        seed.pop("value", None)
+        seed.pop("color", None)
+        seed.pop("date", None)
+    if chart_kind == "combo":
+        seed["y2"] = builder.combo_secondary_metric_default(
+            catalog,
+            str(base_tile["metric"]),
+            seed.get("y2", seed.get("line_y")),
+        )
+        seed.pop("line_y", None)
     return seed
 
 
@@ -2292,11 +2339,30 @@ def _advanced_tile_from_fields(
 ) -> dict[str, Any]:
     out = dict(base_tile)
     out["chart"] = chart_kind
+    if chart_kind != "kpi_card":
+        # KPI placement/comparison settings are invalid on every other chart
+        # and must not survive an advanced-editor chart conversion.
+        out.pop("placement", None)
+        out.pop("kpi", None)
     for key in ADVANCED_FIELD_KEYS:
         out.pop(key, None)
     for key, value in fields.items():
+        if key in {"value", "y"} and chart_kind in builder.METRIC_OWNED_VALUE_CHARTS:
+            continue
+        if chart_kind == "waterfall" and key in {
+            "color",
+            "facet_row",
+            "facet_col",
+            "facet_column",
+            "facets",
+        }:
+            continue
+        if key in {"values", "value", "y"} and chart_kind in builder.METRIC_OWNED_VALUES_CHARTS:
+            continue
+        if key in {"value", "color"} and chart_kind == "heatmap":
+            continue
         _set_optional_field(out, key, value)
-    return out
+    return builder.canonicalize_heatmap_tile(out)
 
 
 def _set_optional_field(tile: dict[str, Any], key: str, value: Any) -> None:
@@ -2328,6 +2394,18 @@ def _clear_advanced_tile_state(prefix: str, state_key: str) -> None:
         if str(key).startswith(prefix):
             st.session_state.pop(key, None)
     st.session_state.pop(state_key, None)
+
+
+def _reset_advanced_tile_state(
+    prefix: str,
+    state_key: str,
+    revision_key: str,
+) -> None:
+    """Restore a tile draft and rotate its widget identities before rerender."""
+
+    revision = int(st.session_state.get(revision_key, 0) or 0)
+    _clear_advanced_tile_state(prefix, state_key)
+    st.session_state[revision_key] = revision + 1
 
 
 def _widget_option_index(key: str, value: str, options: list[str]) -> int:
@@ -2432,7 +2510,9 @@ def _percent_column_config(tile_dict: dict[str, Any], rows: pl.DataFrame) -> dic
 
 def _tile_value_columns(tile_dict: dict[str, Any], rows: pl.DataFrame) -> list[str]:
     columns: list[str] = []
-    for key in ("y", "value"):
+    metric_owned_value = tile_dict.get("chart") in builder.METRIC_OWNED_VALUE_CHARTS
+    field_keys = ("y",) if metric_owned_value else ("y", "value")
+    for key in field_keys:
         value = tile_dict.get(key)
         if isinstance(value, str):
             columns.append(value)

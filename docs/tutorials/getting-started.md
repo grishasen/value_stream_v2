@@ -80,7 +80,9 @@ uv run valuestream run examples/demo ih
 ```
 
 The first run processes all chunks. A second run with no input changes skips
-them — ingestion is idempotent. Use `--force` to reprocess anyway.
+them — ingestion is idempotent. The Data Load result reports successful,
+skipped, and failed chunk counts separately, so a no-op rerun remains visible
+instead of looking empty. Use `--force` to reprocess anyway.
 
 ## Query
 

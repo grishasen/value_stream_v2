@@ -114,6 +114,17 @@ metrics:
       direction: lower_is_better
     state: ResponseTime_tdigest
     quantile: 0.95
+  VS_ResponseTime_Median:
+    source: ih_response_time
+    kind: tdigest_quantile
+    description: Median response time in seconds.
+    display:
+      label: Median response time
+      unit: seconds
+      value_format: number
+      direction: lower_is_better
+    state: ResponseTime_tdigest
+    quantile: 0.5
   VS_ModelControl_Engagement_Compare:
     source: ih_engagement
     kind: variant_compare

@@ -927,7 +927,6 @@ class TestErrorPaths:
                                             "title": "Broken",
                                             "metric": "Count",
                                             "chart": "line",
-                                            "x": "Day",
                                         }
                                     ],
                                 }
@@ -942,8 +941,8 @@ class TestErrorPaths:
 
         assert not result.ok
         assert any(
-            issue.location.endswith("tiles[broken_line].y")
-            and "chart 'line' requires 'y'" in issue.message
+            issue.location.endswith("tiles[broken_line].x")
+            and "chart 'line' requires 'x'" in issue.message
             for issue in result.issues
         )
 

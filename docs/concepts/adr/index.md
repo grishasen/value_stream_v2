@@ -11,6 +11,7 @@ new decisions get a new numbered file in this folder.
 | [0002](0002-yaml-catalog-as-source-of-behavior.md) | Declarative YAML catalog as the source of behavior | Accepted |
 | [0003](0003-closed-expression-ast.md) | Closed expression AST instead of embedded code | Accepted |
 | [0004](0004-chunk-ledger-idempotency.md) | Chunk ledger with computation hashes for idempotent ingestion | Accepted |
+| [0005](0005-unified-metric-owned-heatmaps.md) | One metric-owned adaptive heatmap with legacy aliases | Accepted |
 
 ## Writing a New ADR
 

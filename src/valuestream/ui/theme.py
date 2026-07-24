@@ -9,6 +9,28 @@ import plotly.graph_objects as go  # type: ignore[import-untyped]
 import plotly.io as pio  # type: ignore[import-untyped]
 import streamlit as st
 
+APP_FONT_FAMILY = (
+    '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, '
+    '"Helvetica Neue", Arial, sans-serif'
+)
+APP_DISPLAY_FONT_FAMILY = (
+    '"Inter Display", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", '
+    'Roboto, "Helvetica Neue", Arial, sans-serif'
+)
+PLOTLY_FONT_FAMILY = (
+    'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, '
+    '"Helvetica Neue", Arial, sans-serif'
+)
+PLOTLY_DISPLAY_FONT_FAMILY = (
+    '"Inter Display", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", '
+    'Roboto, "Helvetica Neue", Arial, sans-serif'
+)
+PLOTLY_BODY_SIZE = 13
+PLOTLY_COMPACT_SIZE = 12
+PLOTLY_AXIS_TICK_SIZE = 13
+PLOTLY_AXIS_TITLE_SIZE = 14
+PLOTLY_TITLE_SIZE = 16
+
 _CHROME_TOKENS: dict[str, dict[str, str]] = {
     "light": {
         "cream": "#f7f9fc",
@@ -174,7 +196,7 @@ def _active_theme_base() -> str:
 
 _DARK_CHROME_OVERRIDES = """
         .stApp {
-            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--vs-font-family);
         }
 
         div[data-testid="stHeader"] {
@@ -198,7 +220,7 @@ _DARK_CHROME_OVERRIDES = """
 
         .block-container h1,
         .block-container h2 {
-            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--vs-display-font-family);
             font-weight: 700;
             letter-spacing: -0.035em;
         }
@@ -206,7 +228,7 @@ _DARK_CHROME_OVERRIDES = """
         .block-container h3,
         .block-container h4,
         .block-container h5 {
-            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--vs-font-family);
             letter-spacing: -0.02em;
         }
 
@@ -217,7 +239,7 @@ _DARK_CHROME_OVERRIDES = """
         }
 
         section[data-testid="stSidebar"] div[class*="st-key-vs_brand"] p {
-            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--vs-display-font-family);
             font-weight: 750;
             font-size: 1.45rem;
             letter-spacing: -0.035em;
@@ -303,7 +325,7 @@ _DARK_CHROME_OVERRIDES = """
         }
 
         div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-            font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--vs-font-family);
             font-weight: 650;
         }
 
@@ -387,6 +409,30 @@ def apply_app_chrome_tuning() -> None:
     st.markdown(
         """
         <style>
+        @font-face {
+            font-family: "Inter";
+            src: url("app/static/fonts/InterVariable.woff2") format("woff2");
+            font-style: normal;
+            font-weight: 100 900;
+            font-display: swap;
+        }
+
+        @font-face {
+            font-family: "Inter";
+            src: url("app/static/fonts/InterVariable-Italic.woff2") format("woff2");
+            font-style: italic;
+            font-weight: 100 900;
+            font-display: swap;
+        }
+
+        @font-face {
+            font-family: "Inter Display";
+            src: url("app/static/fonts/InterDisplay-SemiBold.woff2") format("woff2");
+            font-style: normal;
+            font-weight: 600;
+            font-display: swap;
+        }
+
         :root {
 __VS_ACTIVE_CSS_VARS__
         }
@@ -395,6 +441,7 @@ __VS_ACTIVE_CSS_VARS__
             background: var(--vs-cream);
             color: var(--vs-ink);
             color-scheme: var(--vs-color-scheme);
+            font-family: var(--vs-font-family);
         }
 
         div[data-testid="stAppViewContainer"],
@@ -426,7 +473,7 @@ __VS_ACTIVE_CSS_VARS__
         .block-container h1,
         .block-container h2 {
             color: var(--vs-ink);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--vs-display-font-family);
             font-weight: 650;
             letter-spacing: -0.025em;
             padding-top: 0;
@@ -451,7 +498,7 @@ __VS_ACTIVE_CSS_VARS__
         .block-container h4,
         .block-container h5 {
             color: var(--vs-ink);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--vs-font-family);
             font-weight: 650;
             letter-spacing: -0.01em;
         }
@@ -523,7 +570,7 @@ __VS_ACTIVE_CSS_VARS__
 
         section[data-testid="stSidebar"] div[class*="st-key-vs_brand"] p {
             color: var(--vs-ink);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--vs-display-font-family);
             font-weight: 700;
             font-size: 1.4rem;
             letter-spacing: -0.025em;
@@ -557,8 +604,16 @@ __VS_ACTIVE_CSS_VARS__
 
         div[data-testid="stMetric"] [data-testid="stMetricValue"] {
             color: var(--vs-ink);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: var(--vs-font-family);
             font-weight: 600;
+        }
+
+        .js-plotly-plot text,
+        div[data-testid="stMetric"] [data-testid="stMetricValue"],
+        div[data-testid="stDataFrame"],
+        div[data-testid="stTable"] {
+            font-variant-numeric: tabular-nums slashed-zero;
+            font-feature-settings: "tnum" 1, "zero" 1;
         }
 
         div[data-testid="stMetric"] [data-testid="stMetricDelta"] {
@@ -835,7 +890,12 @@ __VS_DARK_CHROME_OVERRIDES__
 
 
 def _css_variables(tokens: dict[str, str]) -> str:
-    return "\n".join(f"            --vs-{name}: {value};" for name, value in tokens.items())
+    values = {
+        **tokens,
+        "font-family": APP_FONT_FAMILY,
+        "display-font-family": APP_DISPLAY_FONT_FAMILY,
+    }
+    return "\n".join(f"            --vs-{name}: {value};" for name, value in values.items())
 
 
 @lru_cache(maxsize=1)
@@ -852,23 +912,71 @@ def init_plotly_theme() -> None:
         source_name = "plotly_dark" if base == "dark" else "plotly_white"
         grid_color = tokens["border"] if base == "dark" else tokens["soft"]
         chart_background = tokens["card"]
-        font_family = (
-            "Avenir Next, Avenir, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-            if base == "dark"
-            else "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-        )
         template = go.layout.Template(pio.templates[source_name])
         template.layout.update(
             colorway=colorway,
-            font={"family": font_family},
+            font={"family": PLOTLY_FONT_FAMILY, "size": PLOTLY_BODY_SIZE},
+            title={
+                "font": {
+                    "family": PLOTLY_DISPLAY_FONT_FAMILY,
+                    "size": PLOTLY_TITLE_SIZE,
+                    "weight": 600,
+                }
+            },
             margin={"l": 40, "r": 18, "t": 18, "b": 76},
             hovermode="x unified",
             hoverlabel=_hoverlabel(tokens),
             paper_bgcolor=chart_background,
             plot_bgcolor=chart_background,
             font_color=tokens["ink"],
-            xaxis={"gridcolor": grid_color, "zerolinecolor": grid_color},
-            yaxis={"gridcolor": grid_color, "zerolinecolor": grid_color},
+            legend={
+                "font": {"family": PLOTLY_FONT_FAMILY, "size": PLOTLY_COMPACT_SIZE},
+                "title": {
+                    "font": {
+                        "family": PLOTLY_FONT_FAMILY,
+                        "size": PLOTLY_BODY_SIZE,
+                        "weight": 600,
+                    }
+                },
+            },
+            xaxis={
+                "gridcolor": grid_color,
+                "zerolinecolor": grid_color,
+                "automargin": True,
+                "ticklabelstandoff": 6,
+                "tickfont": {
+                    "family": PLOTLY_FONT_FAMILY,
+                    "size": PLOTLY_AXIS_TICK_SIZE,
+                    "weight": 450,
+                },
+                "title": {
+                    "font": {
+                        "family": PLOTLY_FONT_FAMILY,
+                        "size": PLOTLY_AXIS_TITLE_SIZE,
+                        "weight": 600,
+                    },
+                    "standoff": 12,
+                },
+            },
+            yaxis={
+                "gridcolor": grid_color,
+                "zerolinecolor": grid_color,
+                "automargin": True,
+                "ticklabelstandoff": 6,
+                "tickfont": {
+                    "family": PLOTLY_FONT_FAMILY,
+                    "size": PLOTLY_AXIS_TICK_SIZE,
+                    "weight": 450,
+                },
+                "title": {
+                    "font": {
+                        "family": PLOTLY_FONT_FAMILY,
+                        "size": PLOTLY_AXIS_TITLE_SIZE,
+                        "weight": 600,
+                    },
+                    "standoff": 12,
+                },
+            },
         )
         pio.templates[f"valuestream_{base}"] = template
     # Alias kept for catalogs that persisted the pre-split template name; the
@@ -882,7 +990,11 @@ def _hoverlabel(tokens: dict[str, str]) -> dict[str, object]:
     return {
         "bgcolor": tokens["card"],
         "bordercolor": tokens["border"],
-        "font": {"color": tokens["ink"]},
+        "font": {
+            "color": tokens["ink"],
+            "family": PLOTLY_FONT_FAMILY,
+            "size": PLOTLY_COMPACT_SIZE,
+        },
     }
 
 
@@ -907,7 +1019,11 @@ def dashboard_theme(*overrides: Mapping[str, object] | None) -> dict[str, object
         "colorway": chart_palette(base),
         "paper_bgcolor": background,
         "plot_bgcolor": background,
-        "font": {"color": tokens["ink"]},
+        "font": {
+            "color": tokens["ink"],
+            "family": PLOTLY_FONT_FAMILY,
+            "size": PLOTLY_BODY_SIZE,
+        },
         "hoverlabel": _hoverlabel(tokens),
         "margins": {"l": 40, "r": 18, "t": 18, "b": 76},
         "legend": {
@@ -916,6 +1032,14 @@ def dashboard_theme(*overrides: Mapping[str, object] | None) -> dict[str, object
             "y": -0.16,
             "xanchor": "center",
             "x": 0.5,
+            "font": {"family": PLOTLY_FONT_FAMILY, "size": PLOTLY_COMPACT_SIZE},
+            "title": {
+                "font": {
+                    "family": PLOTLY_FONT_FAMILY,
+                    "size": PLOTLY_BODY_SIZE,
+                    "weight": 600,
+                }
+            },
         },
     }
     resolved.update(configured)

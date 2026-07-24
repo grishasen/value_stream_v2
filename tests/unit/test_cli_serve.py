@@ -19,10 +19,13 @@ def test_serve_accepts_missing_workspace(monkeypatch: pytest.MonkeyPatch, tmp_pa
     class Completed:
         returncode = 0
 
-    def fake_run(args: list[str], *, check: bool, env: dict[str, str]) -> Completed:
+    def fake_run(
+        args: list[str], *, check: bool, env: dict[str, str], cwd: Path
+    ) -> Completed:
         captured["args"] = args
         captured["check"] = check
         captured["env"] = env
+        captured["cwd"] = cwd
         return Completed()
 
     monkeypatch.setattr("valuestream.cli.subprocess.run", fake_run)
@@ -33,6 +36,9 @@ def test_serve_accepts_missing_workspace(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert result.exit_code == 0, result.output
     assert captured["check"] is False
     assert str(workspace) in captured["args"]
+    static_flag = captured["args"].index("--server.enableStaticServing")
+    assert captured["args"][static_flag + 1] == "true"
+    assert captured["cwd"].name == "ui"
     # Arrow's bundled mimalloc segfaults in per-thread heap init under
     # Streamlit's thread-per-rerun model; serve must default to the OS pool.
     assert captured["env"]["ARROW_DEFAULT_MEMORY_POOL"] == "system"
@@ -47,7 +53,9 @@ def test_serve_preserves_operator_memory_pool_override(
     class Completed:
         returncode = 0
 
-    def fake_run(args: list[str], *, check: bool, env: dict[str, str]) -> Completed:
+    def fake_run(
+        args: list[str], *, check: bool, env: dict[str, str], cwd: Path
+    ) -> Completed:
         captured["env"] = env
         return Completed()
 

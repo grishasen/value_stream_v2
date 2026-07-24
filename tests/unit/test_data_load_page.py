@@ -30,14 +30,14 @@ def test_render_without_sources_shows_actionable_empty_state() -> None:
     assert not rendered.exception
     assert [message.value for message in rendered.info] == [
         "No data sources are configured for this workspace. Add a source in "
-        "AI Configuration Studio before loading or rebuilding data."
+        "Configuration Builder before loading or rebuilding data."
     ]
     add_source = next(
         item
         for item in rendered.get("link_button")
-        if item.label == "Add source in AI Configuration Studio"
+        if item.label == "Add source in Configuration Builder"
     )
-    assert add_source.url == "/ai_configuration_studio"
+    assert add_source.url == "/configuration_builder?builder_step=sources"
     assert not rendered.get("tab")
     assert not rendered.toggle
     assert not rendered.button
@@ -54,6 +54,21 @@ def test_ordered_sources_reverses_without_mutating_catalog_order() -> None:
 
     assert [source.id for source in ordered] == ["product_holdings", "interaction_history"]
     assert [source.id for source in sources] == ["interaction_history", "product_holdings"]
+
+
+@pytest.mark.unit
+def test_run_summary_reports_idempotently_skipped_chunks() -> None:
+    result = SimpleNamespace(
+        status="ok",
+        chunks_ok=0,
+        chunks_skipped=75,
+        chunks_failed=0,
+        rows_kept=0,
+    )
+
+    assert data_load._run_summary(result) == (
+        "ok: 0 chunk(s) ok, 75 skipped, 0 failed, 0 rows kept"
+    )
 
 
 @pytest.mark.unit

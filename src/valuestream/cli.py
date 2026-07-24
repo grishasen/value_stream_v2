@@ -379,6 +379,7 @@ def export_duckdb(
 def serve(workspace_dir: str, *, port: int, browser: bool) -> None:
     """Start the Phase 4 Streamlit dashboard UI for a workspace."""
     app_path = Path(__file__).parent / "ui" / "app.py"
+    workspace_path = Path(workspace_dir).expanduser().resolve(strict=False)
     args = [
         sys.executable,
         "-m",
@@ -389,16 +390,23 @@ def serve(workspace_dir: str, *, port: int, browser: bool) -> None:
         str(port),
         "--server.headless",
         str(not browser).lower(),
+        "--server.enableStaticServing",
+        "true",
         "--",
         "--workspace",
-        workspace_dir,
+        str(workspace_path),
     ]
     env = dict(os.environ)
     # Keep Arrow off its bundled mimalloc: it segfaults in per-thread heap
     # init on macOS arm64 under Streamlit's thread-per-rerun model. app.py
     # sets the same default for direct `streamlit run` launches.
     env.setdefault("ARROW_DEFAULT_MEMORY_POOL", "system")
-    raise SystemExit(subprocess.run(args, check=False, env=env).returncode)
+    # Streamlit discovers project configuration from its working directory.
+    # Run beside app.py so the packaged .streamlit theme and static webfonts
+    # are active even when `valuestream serve` is invoked elsewhere.
+    raise SystemExit(
+        subprocess.run(args, check=False, env=env, cwd=app_path.parent).returncode
+    )
 
 
 @main.command("serve-mcp")

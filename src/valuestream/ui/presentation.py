@@ -63,7 +63,12 @@ def resolve_tile_presentation(  # noqa: PLR0912
         out.setdefault("x_axis_title", labels.get(x, humanize_identifier(x)))
     if isinstance(y, str):
         y_label = labels.get(y, humanize_identifier(y))
-        if display is not None and display.unit:
+        if (
+            display is not None
+            and display.unit
+            and str(out.get("chart", ""))
+            not in {"experiment_z_score", "experiment_odds_ratio"}
+        ):
             y_label = _label_with_unit(y_label, display.unit)
         out.setdefault("y_axis_title", y_label)
     if isinstance(color, str):

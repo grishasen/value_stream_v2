@@ -17,6 +17,13 @@ import polars as pl
 from plotly.subplots import make_subplots  # type: ignore[import-untyped]
 
 from valuestream.charts import lttb
+from valuestream.charts.recipes import (
+    HEATMAP_CHARTS,
+    METRIC_OWNED_COLOR_CHARTS,
+    METRIC_OWNED_RADIAL_CHARTS,
+    METRIC_OWNED_VALUES_CHARTS,
+    METRIC_OWNED_Y_CHARTS,
+)
 from valuestream.states import kll, tdigest
 from valuestream.utils.timer import timed
 
@@ -126,6 +133,23 @@ def render_chart(  # noqa: PLR0912, PLR0915
 ) -> go.Figure:
     """Render a tile's aggregate rows as a Plotly figure."""
     tile = dict(tile)
+    kind = str(tile["chart"])
+    if kind in METRIC_OWNED_Y_CHARTS:
+        # Y is an internal runtime binding for these charts, derived from the
+        # selected metric rather than authored as another selectable field.
+        tile["y"] = _metric_value_column(rows, tile)
+    if kind in METRIC_OWNED_RADIAL_CHARTS:
+        # Polar radius is the selected metric's primary numeric output.
+        tile["r"] = _metric_value_column(rows, tile)
+    if kind in METRIC_OWNED_COLOR_CHARTS:
+        # Treemap color intensity is the selected metric's primary output.
+        tile["color"] = _metric_value_column(rows, tile)
+    if kind in METRIC_OWNED_VALUES_CHARTS:
+        # Donut slice values are the selected metric's primary output.
+        tile["values"] = _metric_value_column(rows, tile)
+    if kind == "sankey":
+        # Sankey link values are the selected metric's primary output.
+        tile["value"] = _metric_value_column(rows, tile)
     rows = _apply_scale_mode(rows, tile)
     if tile.get("scale_mode") == "percent_change" and not tile.get("value_format"):
         tile["value_format"] = "percent"
@@ -134,7 +158,6 @@ def render_chart(  # noqa: PLR0912, PLR0915
         tile["y_axis_title"] = (
             f"{tile.get('y_axis_title') or tile.get('y', 'Value')} (index, first = 100)"
         )
-    kind = str(tile["chart"])
     if kind == "line":
         fig = _line(rows, tile, max_points=max_points)
     elif kind == "stacked_area":
@@ -149,10 +172,8 @@ def render_chart(  # noqa: PLR0912, PLR0915
         fig = _pareto(rows, tile)
     elif kind == "treemap":
         fig = _treemap(rows, tile, theme or {})
-    elif kind == "heatmap":
-        fig = _heatmap(rows, tile, theme or {})
-    elif kind == "cohort_heatmap":
-        fig = _cohort_heatmap(rows, tile, theme or {})
+    elif kind in HEATMAP_CHARTS:
+        fig = _unified_heatmap(rows, tile, theme or {})
     elif kind == "scatter":
         fig = _scatter(rows, tile, max_points=max_points)
     elif kind == "combo":
@@ -165,8 +186,6 @@ def render_chart(  # noqa: PLR0912, PLR0915
         fig = _geo_map(rows, tile)
     elif kind == "table":
         fig = _table(rows, tile, theme or {})
-    elif kind == "calendar_heatmap":
-        fig = _calendar_heatmap(rows, tile)
     elif kind == "bar_polar":
         fig = _bar_polar(rows, tile)
     elif kind == "sankey":
@@ -178,7 +197,7 @@ def render_chart(  # noqa: PLR0912, PLR0915
     elif kind == "boxplot":
         fig = _boxplot(rows, tile, theme or {})
     elif kind == "histogram":
-        fig = _histogram(rows, tile)
+        fig = _histogram(rows, tile, theme or {})
     elif kind == "calibration_curve":
         fig = _calibration_curve(rows, tile, theme or {})
     elif kind == "roc_curve":
@@ -340,9 +359,9 @@ def _bar(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
 
 
 def _kpi_card(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
-    value_col = str(tile.get("value") or tile.get("y") or tile.get("metric") or "")
-    if value_col not in rows.columns:
-        value_col = _first_numeric_column(rows) or (rows.columns[-1] if rows.columns else "")
+    # A KPI card is bound to its selected metric. Legacy value/y overrides are
+    # ignored so a card cannot be redirected to a dimension or processor state.
+    value_col = _metric_value_column(rows, tile)
     value = _as_float(rows[value_col][0]) if value_col in rows.columns and rows.height else 0.0
     reference = _kpi_reference(rows, tile)
     mode = "number+delta" if reference is not None else "number"
@@ -356,6 +375,15 @@ def _kpi_card(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
     fig = go.Figure(go.Indicator(**indicator))
     fig.update_layout(height=int(tile.get("height", 260)))
     return fig
+
+
+def _metric_value_column(rows: pl.DataFrame, tile: Mapping[str, Any]) -> str:
+    """Resolve the selected metric's primary numeric output for scalar displays."""
+
+    metric_name = str(tile.get("metric") or "")
+    if metric_name in rows.columns and rows.schema[metric_name].is_numeric():
+        return metric_name
+    return _first_numeric_column(rows) or (rows.columns[-1] if rows.columns else "")
 
 
 def _waterfall(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
@@ -503,6 +531,68 @@ def _heatmap(rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, An
     return fig
 
 
+def _unified_heatmap(
+    rows: pl.DataFrame,
+    tile: Mapping[str, Any],
+    theme: Mapping[str, Any],
+) -> go.Figure:
+    """Render one metric-owned heatmap as a matrix, calendar, or one-row strip."""
+
+    authored_kind = str(tile.get("chart") or "heatmap")
+    plotted = rows
+    value_col = _metric_value_column(plotted, tile)
+    property_name = str(tile.get("property") or "")
+    score = str(tile.get("score") or "")
+    if property_name and score:
+        plotted, value_col = _with_descriptive_metric_column(
+            plotted,
+            property_name,
+            score,
+        )
+
+    x = str(tile.get("x") or tile.get("date") or "Day")
+    normalized = {**tile, "chart": "heatmap", "x": x, "color": value_col}
+    y = str(tile.get("y") or "")
+    if y:
+        normalized["y"] = y
+        return _heatmap(plotted, normalized, theme)
+    if authored_kind == "calendar_heatmap" or x in {"Day", "day", "as_of_date"}:
+        return _calendar_heatmap(
+            plotted,
+            {**normalized, "date": x, "_metric_value": value_col},
+            theme,
+        )
+    return _single_axis_heatmap(plotted, normalized, theme)
+
+
+def _single_axis_heatmap(
+    rows: pl.DataFrame,
+    tile: Mapping[str, Any],
+    theme: Mapping[str, Any],
+) -> go.Figure:
+    """Render an aggregate intensity strip when a heatmap has no Y axis."""
+
+    x = _field(tile, "x")
+    value = _field(tile, "color")
+    if x not in rows.columns:
+        raise ValueError(f"heatmap x column {x!r} not present")
+    if value not in rows.columns:
+        raise ValueError(f"heatmap metric column {value!r} not present")
+    plotted = rows.group_by(x, maintain_order=True).agg(
+        pl.col(value).cast(pl.Float64, strict=False).mean().alias(value)
+    )
+    fig = go.Figure(
+        go.Heatmap(
+            z=[plotted[value].to_list()],
+            x=plotted[x].to_list(),
+            y=[str(tile.get("title") or tile.get("metric") or "Value")],
+            colorscale=_heatmap_color_scale(tile, theme),
+        )
+    )
+    fig.update_layout(title=str(tile.get("title", "")))
+    return fig
+
+
 def _cohort_heatmap(
     rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, Any]
 ) -> go.Figure:
@@ -601,9 +691,12 @@ def _interval(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
     if lower and upper and y in plotted.columns:
         error_y = "__interval_error_plus"
         error_y_minus = "__interval_error_minus"
+        upper_value = pl.col(upper).cast(pl.Float64, strict=False)
+        y_value = pl.col(y).cast(pl.Float64, strict=False)
+        lower_value = pl.col(lower).cast(pl.Float64, strict=False)
         plotted = plotted.with_columns(
-            (pl.col(upper) - pl.col(y)).clip(lower_bound=0).alias(error_y),
-            (pl.col(y) - pl.col(lower)).clip(lower_bound=0).alias(error_y_minus),
+            (upper_value - y_value).clip(lower_bound=0).alias(error_y),
+            (y_value - lower_value).clip(lower_bound=0).alias(error_y_minus),
         )
     fig = px.scatter(
         plotted,
@@ -738,11 +831,15 @@ def _table_font(theme: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(raw_font, Mapping)
         else {}
     )
-    font.setdefault("family", "DM Sans, Inter, Segoe UI, system-ui, sans-serif")
+    fallback = (
+        'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, '
+        '"Helvetica Neue", Arial, sans-serif'
+    )
+    font.setdefault("family", fallback)
     font.setdefault("size", 13)
     family = str(font["family"])
     if "sans-serif" not in family.casefold() and "serif" not in family.casefold():
-        font["family"] = f"{family}, DM Sans, Segoe UI, system-ui, sans-serif"
+        font["family"] = f"{family}, {fallback.removeprefix('Inter, ')}"
     return font
 
 
@@ -868,9 +965,13 @@ def _json_safe_table_value(value: Any) -> Any:
     return str(value)
 
 
-def _calendar_heatmap(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
+def _calendar_heatmap(
+    rows: pl.DataFrame,
+    tile: Mapping[str, Any],
+    theme: Mapping[str, Any] | None = None,
+) -> go.Figure:
     date_col = str(tile.get("date") or tile.get("x") or "Day")
-    value_col = str(tile.get("value") or tile.get("y") or tile.get("metric") or "")
+    value_col = str(tile.get("_metric_value") or _metric_value_column(rows, tile))
     if date_col not in rows.columns:
         raise ValueError(f"calendar_heatmap date column {date_col!r} not present")
     if value_col not in rows.columns:
@@ -883,7 +984,7 @@ def _calendar_heatmap(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
             z=matrix,
             x=weeks,
             y=weekdays,
-            colorscale=str(tile.get("color_continuous_scale", "Viridis")),
+            colorscale=_heatmap_color_scale(tile, theme or {}),
             hovertemplate="%{y}<br>%{x}<br>%{z}<extra></extra>",
         )
     )
@@ -929,7 +1030,9 @@ def _sankey(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
 
 
 def _gauge(rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, Any]) -> go.Figure:
-    value_col = _field(tile, "value")
+    # Gauge values are owned by the selected metric. Facets remain configurable,
+    # but legacy value/y overrides must not redirect the indicator.
+    value_col = _metric_value_column(rows, tile)
     dimension_fields = _gauge_dimension_fields(rows, tile, value_col)
     if len(dimension_fields) > 2:
         raise ValueError("Gauge plot type does not support more than two grouping columns.")
@@ -1287,8 +1390,14 @@ def _infer_quantile_property(rows: pl.DataFrame) -> str | None:
     return None
 
 
-def _histogram(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
+def _histogram(
+    rows: pl.DataFrame,
+    tile: Mapping[str, Any],
+    theme: Mapping[str, Any] | None = None,
+) -> go.Figure:
     column = str(tile.get("property", tile.get("x", tile.get("y", rows.columns[-1]))))
+    if f"{column}_tdigest" in rows.columns:
+        return _histogram_from_digest(rows, tile, theme)
     return px.histogram(
         rows,
         x=column,
@@ -1483,6 +1592,11 @@ def _model(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
         x="frequency",
         y="predicted_purchases",
         color="rfm_segment" if "rfm_segment" in modeled.columns else None,
+        labels={
+            "frequency": "Historical purchase frequency",
+            "predicted_purchases": f"Projected purchases ({horizon:g}-day horizon)",
+            "rfm_segment": "RFM segment",
+        },
         title=str(tile.get("title", "")),
     )
 
@@ -1495,20 +1609,6 @@ def _descriptive(
     rows, metric_col = _with_descriptive_metric_column(rows, prop, str(tile.get("score", "Mean")))
     if kind == "descriptive_line":
         return _line(rows, {**tile, "y": metric_col}, max_points=MAX_POINTS)
-    if kind == "descriptive_histogram":
-        return _descriptive_histogram(
-            rows,
-            {
-                **tile,
-                "property": prop,
-                "fallback_property": metric_col if metric_col in rows.columns else prop,
-            },
-            theme,
-        )
-    if kind == "descriptive_heatmap":
-        return _heatmap(rows, {**tile, "color": metric_col}, theme)
-    if kind == "descriptive_funnel":
-        return _funnel(rows, tile)
     raise ValueError(f"unsupported descriptive chart kind {kind!r}")
 
 
@@ -1545,7 +1645,20 @@ def _with_descriptive_metric_column(
 
 
 def _normalize_descriptive_score(score: str) -> str:
-    return "Median" if score == "p50" else score
+    normalized = score.strip()
+    folded = normalized.casefold()
+    if folded in {"median", "p50"}:
+        return "Median"
+    if folded in {"p25", "p75", "p90", "p95"}:
+        return folded
+    return {
+        "count": "Count",
+        "sum": "Sum",
+        "mean": "Mean",
+        "var": "Var",
+        "min": "Min",
+        "max": "Max",
+    }.get(folded, normalized)
 
 
 def _experiment_z_score(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
@@ -1570,6 +1683,7 @@ def _experiment_z_score(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figur
     )
     fig.update_layout(
         showlegend=False,
+        hovermode="closest",
         updatemenus=[
             {
                 "buttons": [
@@ -1775,13 +1889,11 @@ def _quantile_box(
     return fig
 
 
-def _descriptive_histogram(
+def _histogram_from_digest(
     rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, Any] | None = None
 ) -> go.Figure:
     prop = str(tile.get("property", "value"))
     digest_col = f"{prop}_tdigest"
-    if digest_col not in rows.columns:
-        return _histogram(rows, {**tile, "property": tile.get("fallback_property", prop)})
 
     facet_row = _optional_column(rows, _facet_row(tile))
     facet_col = _optional_column(rows, _facet_col(tile))
@@ -1842,7 +1954,6 @@ def _descriptive_histogram(
         facet_row=facet_row,
         facet_col=facet_col,
     )
-    fig.update_xaxes(tickfont={"size": 8})
     fig.update_yaxes(title_text="Probability mass")
     fig.update_layout(
         title=str(tile.get("title", "")),
@@ -2345,7 +2456,8 @@ def _apply_qualitative_colorway(
         color = colorway[color_index % len(colorway)]
         trace_type = str(getattr(trace, "type", ""))
         if trace_type == "pie":
-            labels = list(getattr(trace, "labels", None) or [])
+            raw_labels = getattr(trace, "labels", None)
+            labels = [] if raw_labels is None else list(raw_labels)
             if labels:
                 trace.update(
                     marker={
@@ -2358,7 +2470,8 @@ def _apply_qualitative_colorway(
                 color_index += len(labels)
             continue
         if trace_type == "funnel":
-            stages = list(getattr(trace, "y", None) or [])
+            raw_stages = getattr(trace, "y", None)
+            stages = [] if raw_stages is None else list(raw_stages)
             trace.update(
                 marker={
                     "color": [
@@ -2370,7 +2483,8 @@ def _apply_qualitative_colorway(
             color_index += max(1, len(stages))
             continue
         if trace_type == "sankey":
-            labels = list(getattr(trace.node, "label", None) or [])
+            raw_labels = getattr(trace.node, "label", None)
+            labels = [] if raw_labels is None else list(raw_labels)
             if labels:
                 trace.node.update(
                     color=[
@@ -2497,8 +2611,20 @@ def _apply_value_format(fig: go.Figure, tile: Mapping[str, Any]) -> None:
     value_format = _format_spec(tile)
     if value_format is None:
         return
-    if str(tile.get("chart", "")) in _COLOR_VALUE_CHARTS:
+    chart_kind = str(tile.get("chart", ""))
+    if chart_kind in _COLOR_VALUE_CHARTS:
         _apply_color_value_format(fig, value_format)
+        return
+    if chart_kind in {"experiment_z_score", "experiment_odds_ratio", "funnel"}:
+        # Horizontal statistical/funnel charts carry their numeric value on X
+        # and a categorical label on Y. Formatting Y as a number makes Plotly
+        # render category names as ``NaN`` in hover labels.
+        fig.update_xaxes(tickformat=value_format)
+        for trace in fig.data:
+            if hasattr(trace, "x"):
+                trace.update(
+                    hovertemplate=f"%{{y}}<br>%{{x:{value_format}}}<extra></extra>"
+                )
         return
     fig.update_coloraxes(colorbar_tickformat=value_format)
     fig.update_yaxes(tickformat=value_format)

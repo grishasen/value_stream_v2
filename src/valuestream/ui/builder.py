@@ -21,6 +21,14 @@ import yaml
 from valuestream.charts.recipes import (
     CHART_OPTIONAL_FIELDS,
     CHART_REQUIRED_FIELDS,
+    INTERVAL_METRIC_OUTPUT_FIELDS,
+    LEGACY_HEATMAP_CHARTS,
+    METRIC_OWNED_COLOR_CHARTS,
+    METRIC_OWNED_INTENSITY_CHARTS,
+    METRIC_OWNED_RADIAL_CHARTS,
+    METRIC_OWNED_VALUE_CHARTS,
+    METRIC_OWNED_VALUES_CHARTS,
+    METRIC_OWNED_Y_CHARTS,
     RECIPES,
 )
 from valuestream.charts.recipes import (
@@ -30,9 +38,13 @@ from valuestream.config import canonical as config_canonical
 from valuestream.config import model
 from valuestream.config.loader import CatalogLoadError, load
 from valuestream.config.report_fields import (
+    distribution_property_metrics as _distribution_property_metrics,
+)
+from valuestream.config.report_fields import (
     metric_output_columns as _report_metric_output_columns,
 )
 from valuestream.config.report_fields import (
+    report_axis_options,
     report_field_options,
 )
 from valuestream.config.validate import validate_catalog
@@ -461,9 +473,7 @@ CHART_DISPLAY_LABELS: dict[str, str] = {
     "cohort_heatmap": "Cohort heatmap",
     "combo": "Combo",
     "corr": "Correlation",
-    "descriptive_funnel": "Descriptive funnel",
     "descriptive_heatmap": "Descriptive heatmap",
-    "descriptive_histogram": "Descriptive histogram",
     "descriptive_line": "Descriptive line",
     "donut": "Donut",
     "experiment_odds_ratio": "Experiment odds ratio",
@@ -479,7 +489,7 @@ CHART_DISPLAY_LABELS: dict[str, str] = {
     "kpi_card": "KPI card",
     "lift_curve": "Lift curve",
     "line": "Line",
-    "model": "Model performance",
+    "model": "Purchase frequency projection",
     "pareto": "Pareto",
     "precision_recall_curve": "Precision-recall curve",
     "rfm_density": "RFM density",
@@ -502,9 +512,7 @@ CHART_DISPLAY_PURPOSES: dict[str, str] = {
     "cohort_heatmap": "Compare retention or behavior across cohort periods.",
     "combo": "Place two measures on coordinated bar and line axes.",
     "corr": "Scan the strength and direction of pairwise relationships.",
-    "descriptive_funnel": "Follow aggregate descriptive measures through ordered stages.",
     "descriptive_heatmap": "Compare an aggregate statistic across two dimensions.",
-    "descriptive_histogram": "Show the distribution of an aggregate numeric property.",
     "descriptive_line": "Track an aggregate statistic over time or ordered categories.",
     "donut": "Show a small set of parts as shares of a whole.",
     "experiment_odds_ratio": "Compare experiment effects with confidence intervals.",
@@ -514,13 +522,16 @@ CHART_DISPLAY_PURPOSES: dict[str, str] = {
     "gain_curve": "Show cumulative positives captured as coverage increases.",
     "gauge": "Show a current value against a reference or operating range.",
     "geo_map": "Compare a measure across geographic locations.",
-    "heatmap": "Compare intensity across two categorical dimensions.",
+    "heatmap": "Compare metric intensity as a matrix, cohort, descriptive grid, or calendar.",
     "histogram": "Show how numeric observations are distributed across bins.",
     "interval": "Compare estimates together with their uncertainty bounds.",
     "kpi_card": "Present one decision-ready value with optional comparison context.",
     "lift_curve": "Show improvement over random selection as coverage increases.",
     "line": "Track one or more measures across time or an ordered axis.",
-    "model": "Summarize model performance across thresholds or score bands.",
+    "model": (
+        "Project purchases over 30 days from historical purchase frequency and observed "
+        "tenure. This is a simple run-rate projection, not an ML model-quality report."
+    ),
     "pareto": "Rank contributors and show their cumulative share.",
     "precision_recall_curve": "Show the precision-recall tradeoff across thresholds.",
     "rfm_density": "Map customer density across recency and frequency/value space.",
@@ -1510,6 +1521,80 @@ def metric_to_dict(metric: model.Metric) -> dict[str, Any]:
     return data
 
 
+def automatic_distribution_metric_definitions(
+    processor: model.Processor,
+    metrics: Mapping[str, model.Metric],
+) -> dict[str, dict[str, Any]]:
+    """Return missing public distribution metrics for one processor's digest states.
+
+    A digest is persisted processor state, while a metric is the stable query
+    binding that exposes it to reports. Builder creates that binding
+    automatically for unconditioned t-digest and KLL states. Outcome-specific
+    positive/negative digests remain internal inputs to curve and calibration
+    metrics.
+    """
+
+    existing_distribution_states = {
+        metric.state
+        for metric in metrics.values()
+        if isinstance(metric, model.TdigestQuantileMetric)
+        and metric.source == processor.id
+        and "quantile" not in metric.model_fields_set
+    }
+    used_ids = set(metrics)
+    definitions: dict[str, dict[str, Any]] = {}
+    for state_name, state in model.effective_processor_states(processor).items():
+        if state.type not in DIGEST_STATE_TYPES or state_name in existing_distribution_states:
+            continue
+        state_settings = dict(state.model_extra or {})
+        outcome = str(state_settings.get("outcome", "") or "").casefold()
+        if outcome in {"positive", "negative"}:
+            continue
+
+        suffix = f"_{state.type}"
+        property_name = (
+            state_name[: -len(suffix)] if state_name.casefold().endswith(suffix) else state_name
+        )
+        metric_id = stable_catalog_id(
+            f"{property_name}_distribution",
+            fallback="metric",
+            parent_id=processor.id,
+            existing_ids=[*used_ids, *definitions],
+        )
+        definitions[metric_id] = {
+            "source": processor.id,
+            "kind": "tdigest_quantile",
+            "state": state_name,
+            "description": (
+                f"Distribution automatically exposed from the {state_name} digest state."
+            ),
+            "display": {"label": f"{property_name} distribution"},
+        }
+    return definitions
+
+
+def ensure_digest_distribution_metrics(
+    workspace: str | Path,
+    processor_id: str,
+) -> list[str]:
+    """Write any missing automatic distribution metrics for ``processor_id``."""
+
+    catalog = load(workspace)
+    processor = next(
+        (candidate for candidate in catalog.processors.processors if candidate.id == processor_id),
+        None,
+    )
+    if processor is None:
+        raise ValueError(f"processor {processor_id!r} was not found")
+    definitions = automatic_distribution_metric_definitions(
+        processor,
+        catalog.metrics.metrics,
+    )
+    for metric_id, definition in definitions.items():
+        write_metric_definition(workspace, metric_id, definition)
+    return list(definitions)
+
+
 def source_defaults(source: model.Source) -> dict[str, Any]:
     """Return effective source defaults from source-level and defaults transforms."""
     values = dict(source.defaults)
@@ -1903,11 +1988,14 @@ def chart_choices_for_metric(catalog: model.Catalog, metric_name: str) -> list[s
     """Return chart kinds compatible with the metric's processor."""
     processor = processor_for_metric(catalog, metric_name)
     if processor is None:
-        return sorted(RECIPES)
+        return sorted(name for name in RECIPES if name not in LEGACY_HEATMAP_CHARTS)
     metric = catalog.metrics.metrics[metric_name]
     choices = [
         name for name, recipe in RECIPES.items() if processor.kind in recipe.allowed_processor_kinds
     ]
+    # The old chart kinds remain loadable/renderable for catalog compatibility,
+    # but all new authoring goes through the single adaptive heatmap.
+    choices = [name for name in choices if name not in LEGACY_HEATMAP_CHARTS]
     if metric.kind != "calibration_from_digests":
         choices = [name for name in choices if name != "calibration_curve"]
     curve_charts = {"roc_curve", "precision_recall_curve", "gain_curve", "lift_curve"}
@@ -1915,7 +2003,10 @@ def chart_choices_for_metric(catalog: model.Catalog, metric_name: str) -> list[s
         choices = [name for name in choices if name not in curve_charts]
     # Quantile boxes read the digest behind a tdigest_quantile metric; other
     # metric kinds have no distribution to draw.
-    if metric.kind != "tdigest_quantile":
+    if metric.kind != "tdigest_quantile" or not _distribution_property_metrics(
+        catalog,
+        metric_name,
+    ):
         choices = [name for name in choices if name != "boxplot"]
     return sorted(choices)
 
@@ -1923,6 +2014,55 @@ def chart_choices_for_metric(catalog: model.Catalog, metric_name: str) -> list[s
 def metric_output_columns(metric_name: str, metric: model.Metric) -> list[str]:
     """Best-effort output column names for a metric."""
     return _report_metric_output_columns(metric_name, metric)
+
+
+def metric_output_options(catalog: model.Catalog, metric_name: str) -> list[str]:
+    """Return only columns produced by the selected metric."""
+
+    metric = catalog.metrics.metrics.get(metric_name)
+    return metric_output_columns(metric_name, metric) if metric is not None else []
+
+
+def combo_secondary_metric_options(catalog: model.Catalog, metric_name: str) -> list[str]:
+    """Return scalar metrics that can share a combo chart's secondary axis.
+
+    A combo query joins two independently derived metrics. Requiring the same
+    metric kind and processor keeps their dimensions, grains, and aggregation
+    semantics aligned. Only single-output metrics are offered because a metric
+    with several outputs would still require an ambiguous value selector.
+    """
+
+    primary = catalog.metrics.metrics.get(metric_name)
+    if primary is None or metric_output_columns(metric_name, primary) != [metric_name]:
+        return []
+    return [
+        candidate_name
+        for candidate_name, candidate in catalog.metrics.metrics.items()
+        if candidate_name != metric_name
+        and candidate.kind == primary.kind
+        and candidate.source == primary.source
+        and metric_output_columns(candidate_name, candidate) == [candidate_name]
+    ]
+
+
+def combo_secondary_metric_default(
+    catalog: model.Catalog,
+    metric_name: str,
+    current: Any,
+) -> str:
+    """Resolve a current or legacy combo Y2 value to a compatible metric ID."""
+
+    options = combo_secondary_metric_options(catalog, metric_name)
+    current_name = str(current or "")
+    if current_name in options:
+        return current_name
+    for candidate_name in options:
+        candidate = catalog.metrics.metrics[candidate_name]
+        payload = candidate.model_dump(mode="python", exclude_none=True)
+        expression = payload.get("expression")
+        if isinstance(expression, Mapping) and expression.get("col") == current_name:
+            return candidate_name
+    return options[0] if options else ""
 
 
 def _scalar_state_columns(processor: model.Processor | None) -> list[str]:
@@ -1956,6 +2096,27 @@ def chart_field_options(catalog: model.Catalog, metric_name: str) -> list[str]:
     return report_field_options(catalog, metric_name)
 
 
+def chart_axis_options(catalog: model.Catalog, metric_name: str) -> list[str]:
+    """Return only persisted time grains and processor dimensions."""
+
+    return report_axis_options(catalog, metric_name)
+
+
+def canonicalize_heatmap_tile(tile: Mapping[str, Any]) -> dict[str, Any]:
+    """Migrate legacy heatmap roles to the unified metric-owned contract."""
+
+    out = dict(tile)
+    chart_kind = str(out.get("chart") or "")
+    if chart_kind not in LEGACY_HEATMAP_CHARTS and chart_kind != "heatmap":
+        return out
+    if chart_kind == "calendar_heatmap" and not out.get("x"):
+        out["x"] = out.get("date")
+    out["chart"] = "heatmap"
+    for field_name in ("date", "value", "color"):
+        out.pop(field_name, None)
+    return out
+
+
 def descriptive_property_options(catalog: model.Catalog, metric_name: str) -> list[str]:
     """Return numeric distribution properties available to descriptive charts."""
     processor = processor_for_metric(catalog, metric_name)
@@ -1968,6 +2129,12 @@ def descriptive_property_options(catalog: model.Catalog, metric_name: str) -> li
         if prop and prop not in properties:
             properties.append(prop)
     return properties
+
+
+def distribution_property_options(catalog: model.Catalog, metric_name: str) -> list[str]:
+    """Return properties backed by queryable t-digest or KLL metrics."""
+
+    return list(_distribution_property_metrics(catalog, metric_name))
 
 
 def descriptive_score_options(
@@ -2035,21 +2202,29 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
 
     fields: dict[str, Any]
     if chart_kind == "line":
-        fields = {"x": time_x or first_dim or "Month", "y": first_output, "color": first_dim}
+        fields = {"x": time_x or first_dim or "Month", "color": first_dim}
     elif chart_kind == "stacked_area":
-        fields = {"x": time_x or "Month", "y": first_output, "color": first_dim}
+        fields = {"x": time_x or "Month", "color": first_dim}
     elif chart_kind == "bar":
-        fields = {"x": first_dim or "Month", "y": first_output}
+        fields = {"x": first_dim or "Month"}
     elif chart_kind == "kpi_card":
-        fields = {"value": first_output}
+        fields = {}
     elif chart_kind in {"waterfall", "pareto"}:
-        fields = {"x": first_dim or "Month", "y": first_output}
+        fields = {"x": first_dim or "Month"}
     elif chart_kind == "heatmap":
-        fields = {
-            "x": first_dim or "Month",
-            "y": second_dim or first_output,
-            "color": first_output,
-        }
+        x_axis = time_x or first_dim or "Month"
+        fields = {"x": x_axis}
+        y_axis = first_dim if time_x and first_dim else second_dim
+        if y_axis and y_axis != x_axis:
+            fields["y"] = y_axis
+        properties = descriptive_property_options(catalog, metric_name)
+        if properties:
+            prop = _default_descriptive_property(metric, properties)
+            fields["property"] = prop
+            fields["score"] = _default_descriptive_score(
+                metric,
+                descriptive_score_options(catalog, metric_name, prop),
+            )
     elif chart_kind == "cohort_heatmap":
         fields = {"x": time_x or "Month", "y": first_dim or "Cohort", "color": first_output}
     elif chart_kind == "scatter":
@@ -2058,11 +2233,14 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
         if size:
             fields["size"] = size
     elif chart_kind == "combo":
-        fields = {"x": time_x or first_dim or "Month", "y": first_output, "y2": second_output}
+        fields = {"x": time_x or first_dim or "Month"}
+        secondary_metrics = combo_secondary_metric_options(catalog, metric_name)
+        if secondary_metrics:
+            fields["y2"] = secondary_metrics[0]
     elif chart_kind == "interval":
         fields = {"x": first_dim or time_x or "Month", "y": first_output}
     elif chart_kind == "donut":
-        fields = {"names": first_dim or "Segment", "values": first_output}
+        fields = {"names": first_dim or "Segment"}
     elif chart_kind == "geo_map":
         fields = {"locations": first_dim or "Country", "value": first_output}
     elif chart_kind == "table":
@@ -2071,21 +2249,43 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
         fields = {"date": time_x or "Day", "value": first_output}
     elif chart_kind == "bar_polar":
         theta = first_dim or time_x or "Month"
-        fields = {"r": first_output, "theta": theta, "color": second_dim or theta}
+        fields = {"theta": theta, "color": second_dim or theta}
     elif chart_kind == "treemap":
-        fields = {"path": group_by[:3] or [first_output], "color": first_output}
+        fields = {"path": group_by[:3] or [first_output]}
     elif chart_kind == "sankey":
         fields = {
             "source": first_dim or "source",
             "target": second_dim or "target",
-            "value": first_output,
         }
+    elif chart_kind == "funnel":
+        stages = funnel_stage_names(processor) if processor is not None else []
+        fields = {"stages": stages, "color": second_dim or first_dim}
+        if not stages:
+            fields["x"] = first_dim or time_x or "Stage"
     elif chart_kind == "gauge":
-        fields = {"value": first_output}
+        fields = {}
         if first_dim:
             fields["facet_row"] = first_dim
         if len(group_by) > 1:
             fields["facet_col"] = group_by[1]
+    elif chart_kind == "boxplot":
+        properties = distribution_property_options(catalog, metric_name)
+        fields = (
+            {"property": _default_descriptive_property(metric, properties)} if properties else {}
+        )
+        # ``y`` is intentionally absent because scalar states are not
+        # distributions. Property selects another digest-backed metric.
+        if time_x or first_dim:
+            fields["x"] = time_x or first_dim
+    elif chart_kind == "histogram":
+        properties = distribution_property_options(catalog, metric_name)
+        fields = {
+            "property": (
+                _default_descriptive_property(metric, properties)
+                if properties
+                else first_output
+            )
+        }
     elif chart_kind.startswith("descriptive_"):
         properties = descriptive_property_options(catalog, metric_name)
         prop = _default_descriptive_property(metric, properties)
@@ -2095,8 +2295,6 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
             fields = {"x": time_x or first_dim or "Month", "property": prop, "score": score}
             if first_dim:
                 fields["color"] = first_dim
-        elif chart_kind == "descriptive_histogram":
-            fields = {"property": prop}
         elif chart_kind == "descriptive_heatmap":
             fields = {
                 "x": first_dim or time_x or "Month",
@@ -2104,8 +2302,6 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
                 "property": prop,
                 "score": score,
             }
-        elif chart_kind == "descriptive_funnel":
-            fields = {"x": first_dim or time_x or "Month", "color": second_dim or first_dim}
         else:
             fields = {"property": prop, "score": score}
     elif chart_kind == "calibration_curve":
@@ -2323,9 +2519,27 @@ def build_tile(
         "chart": chart_kind,
     }
     for key, value in fields.items():
+        if chart_kind == "waterfall" and key in {
+            "color",
+            "facet_row",
+            "facet_col",
+            "facet_column",
+            "facets",
+        }:
+            continue
+        if key in {"value", "y"} and chart_kind in METRIC_OWNED_VALUE_CHARTS:
+            continue
+        if key in {"values", "value", "y"} and chart_kind in METRIC_OWNED_VALUES_CHARTS:
+            continue
+        if key == "r" and chart_kind in METRIC_OWNED_RADIAL_CHARTS:
+            continue
+        if key == "color" and chart_kind in METRIC_OWNED_COLOR_CHARTS:
+            continue
+        if key in {"value", "color"} and chart_kind in METRIC_OWNED_INTENSITY_CHARTS:
+            continue
         if value not in (None, "", []):
             tile[key] = value
-    return tile
+    return canonicalize_heatmap_tile(tile)
 
 
 def generated_catalog_id(name: str, suffix: str, *, fallback: str) -> str:
@@ -2810,21 +3024,15 @@ def delete_report_page(
         dashboards = data.get("dashboards", [])
         if not isinstance(dashboards, list):
             raise ValueError("dashboards.yaml must contain a list at `dashboards`")
-        dashboard = next(
-            (entry for entry in dashboards if entry.get("id") == dashboard_id), None
-        )
+        dashboard = next((entry for entry in dashboards if entry.get("id") == dashboard_id), None)
         if dashboard is None:
             raise ValueError(f"dashboard {dashboard_id!r} was not found")
         pages = dashboard.get("pages", [])
-        if not isinstance(pages, list) or not any(
-            page.get("id") == page_id for page in pages
-        ):
+        if not isinstance(pages, list) or not any(page.get("id") == page_id for page in pages):
             raise ValueError(f"page {page_id!r} was not found in dashboard {dashboard_id!r}")
         dashboard["pages"] = [page for page in pages if page.get("id") != page_id]
         if not dashboard["pages"]:
-            data["dashboards"] = [
-                entry for entry in dashboards if entry.get("id") != dashboard_id
-            ]
+            data["dashboards"] = [entry for entry in dashboards if entry.get("id") != dashboard_id]
         model.Dashboards.model_validate(data)
         _write_yaml(dashboards_path, data)
         require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
@@ -2846,9 +3054,7 @@ def delete_dashboard(
             raise ValueError("dashboards.yaml must contain a list at `dashboards`")
         if not any(entry.get("id") == dashboard_id for entry in dashboards):
             raise ValueError(f"dashboard {dashboard_id!r} was not found")
-        data["dashboards"] = [
-            entry for entry in dashboards if entry.get("id") != dashboard_id
-        ]
+        data["dashboards"] = [entry for entry in dashboards if entry.get("id") != dashboard_id]
         model.Dashboards.model_validate(data)
         _write_yaml(dashboards_path, data)
         require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
@@ -3119,7 +3325,7 @@ def rename_processor_definition(
     processor_def: dict[str, Any],
     *,
     source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
-) -> None:
+) -> list[str]:
     """Rename one processor: rewrite it in place and retarget metric sources.
 
     Editing an ID previously wrote the definition under the new id and left
@@ -3133,7 +3339,7 @@ def rename_processor_definition(
         raise ValueError("processor definition must include `id`")
     if new_id == old_id:
         write_processor_definition(workspace, processor_def)
-        return
+        return ensure_digest_distribution_metrics(workspace, new_id)
 
     with workspace_configuration_transaction(workspace):
         processors_path = _catalog_file(workspace, "processors.yaml")
@@ -3143,8 +3349,7 @@ def rename_processor_definition(
             raise ValueError("processors.yaml must contain a list at `processors`")
         if any(entry.get("id") == new_id for entry in processor_defs):
             raise ValueError(
-                f"processor id {new_id!r} already exists; pick a different id to rename "
-                f"{old_id!r}"
+                f"processor id {new_id!r} already exists; pick a different id to rename {old_id!r}"
             )
         replaced = False
         for index, entry in enumerate(processor_defs):
@@ -3170,7 +3375,9 @@ def rename_processor_definition(
         _write_yaml(processors_path, processors)
         _write_yaml(metrics_path, metrics)
         _rename_processor_chat_description(workspace, old_id=old_id, new_id=new_id)
+        created_metrics = ensure_digest_distribution_metrics(workspace, new_id)
         require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
+    return created_metrics
 
 
 def write_pipelines_definition(
@@ -3282,6 +3489,17 @@ def write_tile_definition(
     tile: dict[str, Any],
 ) -> None:
     """Append or replace one tile in ``dashboards.yaml``."""
+    tile = dict(tile)
+    chart_kind = str(tile.get("chart") or "")
+    if chart_kind in METRIC_OWNED_VALUE_CHARTS:
+        tile.pop("value", None)
+        tile.pop("y", None)
+    if chart_kind == "waterfall":
+        for field_name in ("color", "facet_row", "facet_col", "facet_column", "facets"):
+            tile.pop(field_name, None)
+    if chart_kind in METRIC_OWNED_INTENSITY_CHARTS:
+        tile.pop("value", None)
+        tile.pop("color", None)
     path = _catalog_file(workspace, "dashboards.yaml")
     data = _read_yaml(path)
     dashboards = data.setdefault("dashboards", [])
@@ -3354,6 +3572,20 @@ def validate_report_candidate(
             "Tile YAML replaces the whole tile definition; required field(s) missing: "
             + ", ".join(f"`{name}`" for name in missing)
         ]
+    if tile.get("chart") == "boxplot" and tile.get("y") not in (None, ""):
+        return False, [
+            "Boxplot `y` is supplied by the selected distribution property. "
+            "Remove `y`; choose `property` and use `x`, `color`, or facets only "
+            "to group the distribution."
+        ]
+    if tile.get("chart") == "boxplot" and tile.get("property") not in (None, ""):
+        properties = distribution_property_options(catalog, str(tile.get("metric") or ""))
+        if tile["property"] not in properties:
+            available = ", ".join(properties) or "none"
+            return False, [
+                f"Boxplot property {tile['property']!r} is not backed by an unconditioned "
+                f"t-digest or KLL metric; choose one of: {available}."
+            ]
     try:
         payload = catalog.model_dump(mode="json", by_alias=True, exclude_none=True)
         dashboards_payload = cast(dict[str, Any], payload["dashboards"])
@@ -3486,8 +3718,7 @@ def require_valid_workspace(
         catalog = load(workspace)
     except CatalogLoadError as exc:
         raise ValueError(
-            "Workspace catalog validation failed; changes were rolled back:\n"
-            f"- {exc}"
+            f"Workspace catalog validation failed; changes were rolled back:\n- {exc}"
         ) from exc
     result = validate_catalog(catalog, source_columns_by_id=source_columns_by_id)
     if result.ok:
@@ -3980,14 +4211,19 @@ __all__ = [
     "CHART_REQUIRED_FIELDS",
     "CHART_SETTING_FIELDS",
     "FILTER_OPERATORS",
+    "INTERVAL_METRIC_OUTPUT_FIELDS",
     "METRIC_KIND_HELP",
     "METRIC_KIND_LABELS",
+    "METRIC_OWNED_VALUES_CHARTS",
+    "METRIC_OWNED_VALUE_CHARTS",
+    "METRIC_OWNED_Y_CHARTS",
     "SCALAR_STATE_TYPES",
     "STATE_TYPES",
     "VISUAL_CASE_MAX_BRANCHES",
     "BuilderApplyOutcome",
     "BuilderDraftStatus",
     "CalculatedExpressionValidation",
+    "automatic_distribution_metric_definitions",
     "blank_calculated_row",
     "blank_default_row",
     "blank_filter_row",
@@ -4014,9 +4250,11 @@ __all__ = [
     "calculated_rows_for_editor",
     "calculated_rows_from_source",
     "calculation_mode_from_expression",
+    "canonicalize_heatmap_tile",
     "case_value_expression",
     "case_value_from_expression",
     "catalog_id_is_safe",
+    "chart_axis_options",
     "chart_choices_for_metric",
     "chart_field_controls",
     "chart_field_options",
@@ -4024,6 +4262,8 @@ __all__ = [
     "chart_kind_purpose",
     "chart_kind_selector_label",
     "chart_recipe_summary",
+    "combo_secondary_metric_default",
+    "combo_secondary_metric_options",
     "compile_case_expression",
     "compile_condition_formula",
     "compile_condition_rows",
@@ -4047,8 +4287,10 @@ __all__ = [
     "digest_state_pair_options",
     "discard_builder_draft",
     "display_grain",
+    "distribution_property_options",
     "editor_frame",
     "editor_row_enabled",
+    "ensure_digest_distribution_metrics",
     "ensure_minimum_workspace",
     "expression_yaml",
     "filter_rows_from_expression",
@@ -4061,6 +4303,7 @@ __all__ = [
     "metric_kind_help",
     "metric_kind_label",
     "metric_kind_options",
+    "metric_output_options",
     "metric_to_dict",
     "metric_yaml",
     "normalize_editor_rows",

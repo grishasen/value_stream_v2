@@ -12,7 +12,7 @@ from click.testing import CliRunner
 
 from valuestream.cli import main
 from valuestream.config.loader import load
-from valuestream.config.migration import migrate_toml
+from valuestream.config.migration import _chart_for_report, migrate_toml
 from valuestream.config.validate import validate_catalog
 from valuestream.query import query_metric
 from valuestream.store.backfill import backfill_from_legacy_db
@@ -42,6 +42,11 @@ variant_column = "ModelControlGroup"
 title = "engagement overview"
 metric = "CTR"
 """
+
+
+@pytest.mark.integration
+def test_legacy_descriptive_histogram_migrates_to_unified_histogram() -> None:
+    assert _chart_for_report({"metric": "descriptive", "type": "histogram"}) == "histogram"
 
 
 @pytest.mark.integration

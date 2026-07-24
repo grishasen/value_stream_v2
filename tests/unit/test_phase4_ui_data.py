@@ -17,9 +17,14 @@ import valuestream.ui.freshness as freshness_module
 from valuestream.config import model
 from valuestream.config.canonical import processor_computation_hash
 from valuestream.config.validate import CatalogValidationResult
-from valuestream.engine.ledger import insert_chunk, insert_run
+from valuestream.engine.ledger import (
+    insert_chunk,
+    insert_lineage_records,
+    insert_run,
+)
 from valuestream.query import AggregateNotReadyError
-from valuestream.store.parquet import write_aggregate
+from valuestream.store.parquet import write_aggregate, write_aggregate_with_receipts
+from valuestream.ui import builder
 from valuestream.ui import data as ui_data
 from valuestream.ui.context import ValueStreamContext, load_context
 from valuestream.ui.data import (
@@ -48,6 +53,7 @@ from valuestream.ui.pages.reports import (
     REPORT_CHART_HEIGHT_FALLBACK_PX,
     REPORT_CHART_HEIGHT_HERO_PX,
     TILE_LAYOUT_HERO,
+    _advanced_field_options,
     _advanced_style_controls,
     _advanced_tile_from_fields,
     _advanced_tile_seed,
@@ -122,7 +128,7 @@ def test_tile_group_by_inference_ignores_metric_output_fields() -> None:
 
 
 @pytest.mark.unit
-def test_treemap_group_by_supports_legacy_x_y_shape() -> None:
+def test_treemap_group_by_ignores_legacy_metric_owned_color() -> None:
     result = group_by_for_tile(
         {
             "chart": "treemap",
@@ -132,7 +138,22 @@ def test_treemap_group_by_supports_legacy_x_y_shape() -> None:
         }
     )
 
-    assert result == ["CustomerSegment", "Channel"]
+    assert result == ["CustomerSegment"]
+
+
+@pytest.mark.unit
+def test_waterfall_group_by_ignores_legacy_noop_color_and_facets() -> None:
+    result = group_by_for_tile(
+        {
+            "chart": "waterfall",
+            "x": "Channel",
+            "color": "Placement",
+            "facet_row": "Issue",
+            "facets": {"column": "CustomerType"},
+        }
+    )
+
+    assert result == ["Channel"]
 
 
 @pytest.mark.unit
@@ -262,6 +283,38 @@ def test_query_tile_requests_state_columns_for_selected_metric_value(
 
 
 @pytest.mark.unit
+def test_query_tile_requests_lifecycle_states_for_purchase_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = _catalog(["Channel"])
+    tile = model.Tile.model_validate(
+        {
+            "id": "purchase_projection",
+            "title": "Purchase frequency projection",
+            "metric": "CTR",
+            "chart": "model",
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_query_metric(*args: object, **kwargs: object) -> pl.DataFrame:
+        captured["include_state_columns"] = kwargs["include_state_columns"]
+        return pl.DataFrame(
+            {
+                "frequency": [2],
+                "tenure": [20],
+                "rfm_segment": ["Repeat Customer"],
+            }
+        )
+
+    monkeypatch.setattr(ui_data, "query_metric", fake_query_metric)
+
+    query_tile("workspace", catalog, tile)
+
+    assert captured["include_state_columns"] is True
+
+
+@pytest.mark.unit
 def test_query_tile_requests_state_columns_for_descriptive_charts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -289,6 +342,133 @@ def test_query_tile_requests_state_columns_for_descriptive_charts(
     query_tile("workspace", catalog, tile)
 
     assert captured["include_state_columns"] is True
+
+
+@pytest.mark.unit
+def test_query_tile_requests_state_columns_for_unified_descriptive_heatmap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = _catalog(["Channel"])
+    tile = model.Tile.model_validate(
+        {
+            "id": "desc_heatmap",
+            "title": "Descriptive",
+            "metric": "CTR",
+            "chart": "heatmap",
+            "x": "Month",
+            "y": "Channel",
+            "property": "Propensity",
+            "score": "p50",
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_query_metric(*args: object, **kwargs: object) -> pl.DataFrame:
+        captured["include_state_columns"] = kwargs["include_state_columns"]
+        return pl.DataFrame({"Month": ["2026-01"], "Channel": ["Web"], "Propensity_Mean": [0.2]})
+
+    monkeypatch.setattr(ui_data, "query_metric", fake_query_metric)
+
+    query_tile("workspace", catalog, tile)
+
+    assert captured["include_state_columns"] is True
+
+
+@pytest.mark.unit
+def test_query_tile_joins_combo_secondary_metric_on_shared_dimensions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = _catalog(["Channel"])
+    catalog.metrics.metrics["Impressions"] = model.FormulaMetric.model_validate(
+        {
+            "source": "engagement",
+            "kind": "formula",
+            "expression": {"col": "Count"},
+        }
+    )
+    tile = model.Tile.model_validate(
+        {
+            "id": "ctr_and_impressions",
+            "title": "CTR and impressions",
+            "metric": "CTR",
+            "chart": "combo",
+            "x": "Day",
+            "y2": "Impressions",
+            "color": "Channel",
+        }
+    )
+    calls: list[str] = []
+
+    def fake_query_metric(*args: object, **kwargs: object) -> pl.DataFrame:
+        metric_name = str(args[1])
+        calls.append(metric_name)
+        values = [0.2, 0.3] if metric_name == "CTR" else [100, 150]
+        return pl.DataFrame(
+            {
+                "Day": [dt.date(2026, 1, 1), dt.date(2026, 1, 2)],
+                "Channel": ["Web", "Web"],
+                metric_name: values,
+            }
+        )
+
+    monkeypatch.setattr(ui_data, "query_metric", fake_query_metric)
+
+    rows = query_tile("workspace", catalog, tile)
+
+    assert calls == ["CTR", "Impressions"]
+    assert rows.columns == ["Day", "Channel", "CTR", "Impressions"]
+    assert rows.get_column("Impressions").to_list() == [100, 150]
+    assert ADVANCED_FIELD_CONTROLS["combo"] == (
+        "x",
+        "y2",
+        "color",
+        "facet_row",
+        "facet_col",
+    )
+    assert _advanced_field_options(
+        catalog,
+        "CTR",
+        "combo",
+        "y2",
+        {},
+        {},
+        ["", "Day", "Channel", "Count"],
+    ) == ["", "Impressions"]
+
+
+@pytest.mark.unit
+def test_reports_interval_value_and_error_controls_offer_only_metric_outputs() -> None:
+    catalog = _catalog(["Channel", "CustomerType"])
+    catalog.metrics.metrics["DefaultBannerLift"] = model.VariantCompareMetric.model_validate(
+        {
+            "source": "engagement",
+            "kind": "variant_compare",
+            "variant_column": "DefaultBannerControlGroup",
+            "test_role": "Test",
+            "control_role": "Control",
+        }
+    )
+    expected = ["", *builder.metric_output_options(catalog, "DefaultBannerLift")]
+    all_fields = ["", "Day", "Channel", "CustomerType", *expected[1:]]
+
+    for field_name in builder.INTERVAL_METRIC_OUTPUT_FIELDS:
+        assert (
+            _advanced_field_options(
+                catalog,
+                "DefaultBannerLift",
+                "interval",
+                field_name,
+                {},
+                {},
+                all_fields,
+            )
+            == expected
+        )
+
+    assert "Channel" not in expected
+    assert "AbsoluteRateDifference" in expected
+    assert "AbsoluteRateDifference_CI_Low" in expected
+    assert "AbsoluteRateDifference_CI_High" in expected
 
 
 @pytest.mark.unit
@@ -367,6 +547,32 @@ def test_presentation_resolver_applies_metric_display_defaults() -> None:
     assert resolved["labels"]["CTR"] == "Engagement rate"
     assert resolved["value_format"] == "percent"
     assert resolved["direction"] == "higher_is_better"
+
+
+@pytest.mark.unit
+def test_experiment_chart_does_not_apply_metric_unit_to_categorical_axis() -> None:
+    catalog = _catalog(["ExperimentName"])
+    catalog.metrics.metrics["CTR"].display = model.MetricDisplaySpec(
+        label="Experiment significance",
+        unit="probability",
+        value_format="number",
+    )
+
+    resolved = resolve_tile_presentation(
+        catalog,
+        {
+            "id": "experiment_z",
+            "title": "Experiments",
+            "metric": "CTR",
+            "chart": "experiment_z_score",
+            "x": "z_score",
+            "y": "ExperimentName",
+        },
+    )
+
+    assert resolved["x_axis_title"] == "Z score"
+    assert resolved["y_axis_title"] == "Experiment Name"
+    assert resolved["value_format"] == "number"
 
 
 @pytest.mark.unit
@@ -637,6 +843,30 @@ def test_percent_display_columns_use_tile_value_fields() -> None:
 
 
 @pytest.mark.unit
+def test_kpi_display_columns_ignore_legacy_value_override() -> None:
+    rows = pl.DataFrame({"Channel": ["Web"], "CTR": [0.25]})
+
+    columns = _tile_value_columns(
+        {"metric": "CTR", "chart": "kpi_card", "value": "Channel"},
+        rows,
+    )
+
+    assert columns == ["CTR"]
+
+
+@pytest.mark.unit
+def test_gauge_display_columns_ignore_legacy_value_override() -> None:
+    rows = pl.DataFrame({"Channel": ["Web"], "CTR": [0.25]})
+
+    columns = _tile_value_columns(
+        {"metric": "CTR", "chart": "gauge", "value": "Channel"},
+        rows,
+    )
+
+    assert columns == ["CTR"]
+
+
+@pytest.mark.unit
 def test_report_chart_height_respects_taller_figure_layout_heights() -> None:
     default_figure = Figure()
     tall_figure = Figure()
@@ -849,8 +1079,10 @@ def test_report_time_chip_names_preset_and_clears_via_callback() -> None:
 def test_report_status_banner_is_silent_when_page_is_fresh(monkeypatch: pytest.MonkeyPatch) -> None:
     infos: list[str] = []
     warnings: list[str] = []
+    captions: list[str] = []
     monkeypatch.setattr(st, "info", lambda message, *_, **__: infos.append(str(message)))
     monkeypatch.setattr(st, "warning", lambda message, *_, **__: warnings.append(str(message)))
+    monkeypatch.setattr(st, "caption", lambda message, *_, **__: captions.append(str(message)))
     page = model.DashboardPage.model_validate(
         {
             "id": "funnel_report_type_coverage",
@@ -884,6 +1116,10 @@ def test_report_status_banner_is_silent_when_page_is_fresh(monkeypatch: pytest.M
 
     assert infos == []
     assert warnings == []
+    assert captions == [
+        "Report type coverage | 1 tile(s) | presentation view | all time. "
+        "latest 2026-04 | run 2026-06-17 09:29 | aggregate status ok."
+    ]
 
 
 @pytest.mark.unit
@@ -1034,6 +1270,96 @@ def test_metric_freshness_uses_query_grain_fallback(
     fresh = metric_freshness(tmp_path, catalog, "CTR", grain="summary")
 
     assert collect_all_calls == 1
+    assert fresh.latest_period == "2024-09"
+    assert fresh.last_created_at == finished_at
+    assert fresh.last_run_finished_at == finished_at
+    assert fresh.status == "ok"
+
+
+@pytest.mark.unit
+def test_metric_freshness_selects_current_lineage_before_scanning_mixed_schemas(
+    tmp_path: Path,
+) -> None:
+    catalog = _daily_only_catalog()
+    processor = catalog.processors.processors[0]
+    config_hash = processor_computation_hash(catalog, processor)
+    run_id = "99999999-0000-0000-0000-000000000002"
+    chunk_id = "2024-09-19"
+    finished_at = dt.datetime(2026, 7, 24, 13, 7)
+    source_file = tmp_path / "ih_20240919.parquet"
+    source_file.write_text("placeholder", encoding="utf-8")
+
+    insert_run(
+        tmp_path,
+        run_id=run_id,
+        workspace="test",
+        source_id="ih",
+        config_hash=config_hash,
+        started_at=finished_at - dt.timedelta(minutes=5),
+        finished_at=finished_at,
+        status="ok",
+        rows_in=10,
+        rows_kept=10,
+        chunks_total=1,
+        chunks_ok=1,
+        chunks_failed=0,
+    )
+    insert_chunk(
+        tmp_path,
+        source_id="ih",
+        chunk_id=chunk_id,
+        files=[source_file],
+        rows_in=10,
+        rows_kept=10,
+        started_at=finished_at - dt.timedelta(minutes=5),
+        finished_at=finished_at,
+        status="ok",
+        error=None,
+        pipeline_run_id=run_id,
+    )
+    stale_receipts = write_aggregate_with_receipts(
+        pl.DataFrame(
+            {
+                "period": ["2024-08"],
+                "created_at": [finished_at - dt.timedelta(days=30)],
+                "config_hash": ["stale-processor-hash"],
+                "pipeline_run_id": ["00000000-0000-0000-0000-000000000001"],
+                "chunk_id": ["2024-08-19"],
+            }
+        ),
+        tmp_path,
+        source_id="ih",
+        processor_id="engagement",
+        grain="daily",
+        run_id="00000000-0000-0000-0000-000000000001",
+        chunk_id="2024-08-19",
+    )
+    current_receipts = write_aggregate_with_receipts(
+        pl.DataFrame(
+            {
+                "Count": [10],
+                "Positives": [2],
+                "period": ["2024-09"],
+                "created_at": [finished_at],
+                "config_hash": [config_hash],
+                "pipeline_run_id": [run_id],
+                "chunk_id": [chunk_id],
+            }
+        ),
+        tmp_path,
+        source_id="ih",
+        processor_id="engagement",
+        grain="daily",
+        run_id=run_id,
+        chunk_id=chunk_id,
+    )
+    insert_lineage_records(
+        tmp_path,
+        records=[*stale_receipts, *current_receipts],
+    )
+
+    fresh = metric_freshness(tmp_path, catalog, "CTR", grain="summary")
+
     assert fresh.latest_period == "2024-09"
     assert fresh.last_created_at == finished_at
     assert fresh.last_run_finished_at == finished_at
@@ -1333,7 +1659,7 @@ def test_kpi_bundle_uses_complete_latest_period_and_equal_previous_period(
             "title": "CTR",
             "metric": "CTR",
             "chart": "kpi_card",
-            "value": "CTR",
+            "value": "Channel",
             "placement": "kpi_strip",
             "kpi": {
                 "comparison": "previous_period",
@@ -1386,6 +1712,7 @@ def test_advanced_tile_from_fields_keeps_metric_locked_and_rebuilds_chart_fields
         "chart": "line",
         "x": "Day",
         "y": "CTR",
+        "value": "CTR",
         "color": "Channel",
         "filters": {"Channel": ["Web"]},
         "facets": {"row": "Placement"},
@@ -1396,7 +1723,7 @@ def test_advanced_tile_from_fields_keeps_metric_locked_and_rebuilds_chart_fields
         "bar",
         {
             "x": "Channel",
-            "y": "CTR",
+            "y": "Count",
             "color": "",
             "facet_row": "Placement",
         },
@@ -1405,7 +1732,8 @@ def test_advanced_tile_from_fields_keeps_metric_locked_and_rebuilds_chart_fields
     assert draft["metric"] == "CTR"
     assert draft["chart"] == "bar"
     assert draft["x"] == "Channel"
-    assert draft["y"] == "CTR"
+    assert "y" not in draft
+    assert "value" not in draft
     assert draft["facet_row"] == "Placement"
     assert draft["filters"] == {"Channel": ["Web"]}
     assert "color" not in draft
@@ -1422,6 +1750,7 @@ def test_advanced_tile_seed_merges_configured_and_current_session_values() -> No
         "chart": "line",
         "x": "Day",
         "y": "CTR",
+        "value": "CTR",
         "facets": {"row": "Placement", "col": "Channel"},
         "value_format": "percent",
     }
@@ -1436,7 +1765,8 @@ def test_advanced_tile_seed_merges_configured_and_current_session_values() -> No
     seed = _advanced_tile_seed(catalog, base_tile, current_tile, "bar")
 
     assert seed["x"] == "Channel"
-    assert seed["y"] == "CTR"
+    assert "y" not in seed
+    assert "value" not in seed
     assert seed["color"] == "Placement"
     assert seed["facet_row"] == "Placement"
     assert seed["facet_col"] == "Channel"
@@ -1484,7 +1814,7 @@ def test_reports_heatmap_style_controls_keep_default_color_scale(
 
 
 @pytest.mark.unit
-def test_reports_advanced_editor_exposes_polar_radius_field() -> None:
+def test_reports_advanced_editor_derives_polar_radius_from_metric() -> None:
     catalog = _catalog(["Channel", "Placement"])
     base_tile = {
         "id": "daily_ctr",
@@ -1497,8 +1827,8 @@ def test_reports_advanced_editor_exposes_polar_radius_field() -> None:
 
     seed = _advanced_tile_seed(catalog, base_tile, base_tile, "bar_polar")
 
-    assert ADVANCED_FIELD_CONTROLS["bar_polar"] == ("r", "theta", "color")
-    assert seed["r"] == "CTR"
+    assert ADVANCED_FIELD_CONTROLS["bar_polar"] == ("theta", "color")
+    assert "r" not in seed
     assert seed["theta"] == "Channel"
     assert seed["color"] == "Placement"
     assert "size" not in ADVANCED_FIELD_CONTROLS["line"]
@@ -1506,7 +1836,343 @@ def test_reports_advanced_editor_exposes_polar_radius_field() -> None:
     assert "animation_group" in ADVANCED_FIELD_CONTROLS["scatter"]
     assert "size" in ADVANCED_FIELD_CONTROLS["scatter"]
     assert "size" in ADVANCED_FIELD_CONTROLS["geo_map"]
-    assert ADVANCED_FIELD_CONTROLS["gauge"] == ("value", "facet_row", "facet_col")
+    assert ADVANCED_FIELD_CONTROLS["gauge"] == ("facet_row", "facet_col")
+    assert ADVANCED_FIELD_CONTROLS["kpi_card"] == ()
+    assert ADVANCED_FIELD_CONTROLS["treemap"] == ("path", "value")
+    assert ADVANCED_FIELD_CONTROLS["donut"] == ("names", "color")
+    assert ADVANCED_FIELD_CONTROLS["sankey"] == ("source", "target")
+    assert "y" not in ADVANCED_FIELD_CONTROLS["line"]
+    assert "y" not in ADVANCED_FIELD_CONTROLS["bar"]
+    assert "y" not in ADVANCED_FIELD_CONTROLS["stacked_area"]
+    assert "y" not in ADVANCED_FIELD_CONTROLS["pareto"]
+    assert ADVANCED_FIELD_CONTROLS["waterfall"] == ("x",)
+    assert ADVANCED_FIELD_CONTROLS["heatmap"] == ("x", "y", "property", "score")
+
+    heatmap_x = _advanced_field_options(
+        catalog,
+        "CTR",
+        "heatmap",
+        "x",
+        {},
+        {},
+        ["", *builder.chart_field_options(catalog, "CTR")],
+    )
+    assert heatmap_x == ["", "Day", "Month", "Quarter", "Year", "Channel", "Placement"]
+    assert "Count" not in heatmap_x
+    assert "CTR" not in heatmap_x
+
+
+@pytest.mark.unit
+def test_reports_kpi_editor_removes_legacy_value_override() -> None:
+    draft = _advanced_tile_from_fields(
+        {
+            "id": "ctr",
+            "title": "CTR",
+            "metric": "CTR",
+            "chart": "kpi_card",
+            "value": "Channel",
+        },
+        "kpi_card",
+        {},
+    )
+
+    assert "value" not in draft
+
+
+@pytest.mark.unit
+def test_reports_gauge_editor_removes_legacy_value_override() -> None:
+    draft = _advanced_tile_from_fields(
+        {
+            "id": "ctr_gauge",
+            "title": "CTR",
+            "metric": "CTR",
+            "chart": "gauge",
+            "value": "Channel",
+        },
+        "gauge",
+        {"facet_row": "Channel"},
+    )
+
+    assert "value" not in draft
+    assert draft["facet_row"] == "Channel"
+
+
+@pytest.mark.unit
+def test_reports_donut_editor_removes_legacy_values_override() -> None:
+    draft = _advanced_tile_from_fields(
+        {
+            "id": "ctr_mix",
+            "title": "CTR mix",
+            "metric": "CTR",
+            "chart": "donut",
+            "names": "Channel",
+            "values": "Count",
+        },
+        "donut",
+        {"names": "Channel", "color": "Placement"},
+    )
+
+    assert "values" not in draft
+    assert draft["names"] == "Channel"
+    assert draft["color"] == "Placement"
+
+
+@pytest.mark.unit
+def test_reports_sankey_editor_removes_legacy_value_override() -> None:
+    draft = _advanced_tile_from_fields(
+        {
+            "id": "customer_flow",
+            "title": "Customer flow",
+            "metric": "CTR",
+            "chart": "sankey",
+            "source": "Channel",
+            "target": "Placement",
+            "value": "Count",
+        },
+        "sankey",
+        {"source": "Channel", "target": "Placement"},
+    )
+
+    assert "value" not in draft
+    assert draft["source"] == "Channel"
+    assert draft["target"] == "Placement"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("chart_kind", ["line", "bar", "stacked_area", "gauge"])
+def test_reports_chart_conversion_removes_kpi_only_settings(chart_kind: str) -> None:
+    draft = _advanced_tile_from_fields(
+        {
+            "id": "ctr",
+            "title": "CTR",
+            "metric": "CTR",
+            "chart": "kpi_card",
+            "placement": "kpi_strip",
+            "kpi": {"comparison": "previous_period"},
+        },
+        chart_kind,
+        {"x": "Day", "color": "Channel"},
+    )
+
+    assert "placement" not in draft
+    assert "kpi" not in draft
+
+
+@pytest.mark.unit
+def test_reports_boxplot_editor_uses_digest_property_instead_of_scalar_y() -> None:
+    base_tile = {
+        "id": "propensity_distribution",
+        "title": "Propensity distribution",
+        "metric": "PropensityDistribution",
+        "chart": "boxplot",
+        "x": "Year",
+        "y": "Propensity_Count",
+        "color": "Issue",
+    }
+
+    assert ADVANCED_FIELD_CONTROLS["boxplot"] == (
+        "property",
+        "x",
+        "color",
+        "facet_row",
+        "facet_col",
+    )
+    draft = _advanced_tile_from_fields(
+        base_tile,
+        "boxplot",
+        {"property": "Propensity", "x": "Year", "color": "Issue"},
+    )
+    assert "y" not in draft
+    assert draft["property"] == "Propensity"
+
+
+@pytest.mark.unit
+def test_reports_advanced_reset_restores_base_tile_and_widgets() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 — test-only dependency
+
+    catalog = _distribution_catalog()
+    base_tile = {
+        "id": "propensity_box",
+        "title": "Propensity distribution",
+        "metric": "PropensityDistribution",
+        "chart": "boxplot",
+        "property": "Propensity",
+        "x": "Year",
+        "color": "Issue",
+    }
+
+    def app(catalog_payload: dict[str, object], configured_tile: dict[str, object]) -> None:
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        import streamlit as st  # noqa: PLC0415
+
+        from valuestream.config import model  # noqa: PLC0415
+        from valuestream.ui.pages import reports  # noqa: PLC0415
+
+        app_ctx = SimpleNamespace(catalog=model.Catalog.model_validate(catalog_payload))
+        draft = reports._advanced_tile_controls(
+            app_ctx,
+            dashboard_id="quality",
+            page_id="distributions",
+            base_tile=configured_tile,
+        )
+        st.write({"property": draft.get("property")})
+
+    rendered = AppTest.from_function(
+        app,
+        kwargs={
+            "catalog_payload": catalog.model_dump(mode="json", by_alias=True),
+            "configured_tile": base_tile,
+        },
+    ).run()
+    property_select = next(item for item in rendered.selectbox if item.label == "Property")
+
+    rendered = property_select.set_value("Priority").run()
+    property_select = next(item for item in rendered.selectbox if item.label == "Property")
+    assert property_select.value == "Priority"
+
+    reset = next(item for item in rendered.button if item.label == "Reset")
+    rendered = reset.click().run()
+    property_select = next(item for item in rendered.selectbox if item.label == "Property")
+    assert property_select.value == "Propensity"
+    assert any(caption.value == "Using the configured report tile." for caption in rendered.caption)
+    assert not rendered.exception
+
+
+@pytest.mark.unit
+def test_reports_boxplot_property_options_include_only_distribution_sketches() -> None:
+    catalog = _distribution_catalog()
+
+    options = _advanced_field_options(
+        catalog,
+        "PropensityDistribution",
+        "boxplot",
+        "property",
+        {},
+        {},
+        ["", *ui_data.distribution_property_metrics(catalog, "PropensityDistribution")],
+    )
+
+    assert options == ["Propensity", "Priority"]
+
+
+@pytest.mark.unit
+def test_reports_histogram_property_options_prefer_distribution_sketches() -> None:
+    catalog = _distribution_catalog()
+
+    options = _advanced_field_options(
+        catalog,
+        "PropensityDistribution",
+        "histogram",
+        "property",
+        {},
+        {},
+        ["Propensity_Count", "Propensity", "Priority"],
+    )
+
+    assert options == ["Propensity", "Priority"]
+
+
+@pytest.mark.unit
+def test_query_tile_resolves_selected_boxplot_property_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = _distribution_catalog()
+    tile = model.Tile.model_validate(
+        {
+            "id": "priority_box",
+            "title": "Priority distribution",
+            "metric": "PropensityDistribution",
+            "chart": "boxplot",
+            "property": "Priority",
+            "x": "Year",
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_query_metric(*args: object, **kwargs: object) -> pl.DataFrame:
+        captured["metric"] = args[1]
+        captured["include_quantile_suite"] = kwargs["include_quantile_suite"]
+        return pl.DataFrame(
+            {
+                "Year": [2026],
+                "PriorityDistribution": [0.5],
+                "Priority_Min": [0.0],
+                "Priority_p25": [0.25],
+                "Priority_Median": [0.5],
+                "Priority_p75": [0.75],
+                "Priority_Max": [1.0],
+            }
+        )
+
+    monkeypatch.setattr(ui_data, "query_metric", fake_query_metric)
+
+    query_tile("workspace", catalog, tile)
+
+    assert captured == {
+        "metric": "PriorityDistribution",
+        "include_quantile_suite": True,
+    }
+
+
+@pytest.mark.unit
+def test_query_tile_resolves_selected_histogram_property_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = _distribution_catalog()
+    tile = model.Tile.model_validate(
+        {
+            "id": "priority_histogram",
+            "title": "Priority distribution",
+            "metric": "PropensityDistribution",
+            "chart": "histogram",
+            "property": "Priority",
+            "x": "Year",
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_query_metric(*args: object, **kwargs: object) -> pl.DataFrame:
+        captured["metric"] = args[1]
+        captured["include_state_columns"] = kwargs["include_state_columns"]
+        captured["include_quantile_suite"] = kwargs["include_quantile_suite"]
+        return pl.DataFrame(
+            {
+                "Year": [2026],
+                "PriorityDistribution": [0.5],
+                "Priority_tdigest": [b"digest"],
+            }
+        )
+
+    monkeypatch.setattr(ui_data, "query_metric", fake_query_metric)
+
+    query_tile("workspace", catalog, tile)
+
+    assert captured == {
+        "metric": "PriorityDistribution",
+        "include_state_columns": True,
+        "include_quantile_suite": False,
+    }
+
+
+@pytest.mark.unit
+def test_query_tile_rejects_boxplot_property_without_distribution_metric() -> None:
+    catalog = _distribution_catalog()
+    tile = model.Tile.model_validate(
+        {
+            "id": "count_box",
+            "title": "Count is not a distribution",
+            "metric": "PropensityDistribution",
+            "chart": "boxplot",
+            "property": "Propensity_Count",
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Boxplot property 'Propensity_Count' is not backed",
+    ):
+        query_tile("workspace", catalog, tile)
 
 
 @pytest.mark.unit
@@ -1667,6 +2333,59 @@ def _catalog(group_by: list[str]) -> model.Catalog:
                     }
                 ]
             },
+        }
+    )
+
+
+def _distribution_catalog() -> model.Catalog:
+    return model.Catalog.model_validate(
+        {
+            "pipelines": {
+                "workspace": "test",
+                "sources": [
+                    {
+                        "id": "ih",
+                        "reader": {"kind": "parquet", "file_pattern": "*.parquet"},
+                    }
+                ],
+            },
+            "processors": {
+                "processors": [
+                    {
+                        "id": "distributions",
+                        "source": "ih",
+                        "kind": "numeric_distribution",
+                        "group_by": ["Issue"],
+                        "properties": ["Propensity", "Priority"],
+                    }
+                ]
+            },
+            "metrics": {
+                "metrics": {
+                    "PropensityDistribution": {
+                        "source": "distributions",
+                        "kind": "tdigest_quantile",
+                        "state": "Propensity_tdigest",
+                    },
+                    "PriorityP90": {
+                        "source": "distributions",
+                        "kind": "tdigest_quantile",
+                        "state": "Priority_tdigest",
+                        "quantile": 0.9,
+                    },
+                    "PriorityDistribution": {
+                        "source": "distributions",
+                        "kind": "tdigest_quantile",
+                        "state": "Priority_tdigest",
+                    },
+                    "PropensityCount": {
+                        "source": "distributions",
+                        "kind": "formula",
+                        "expression": {"col": "Propensity_Count"},
+                    },
+                }
+            },
+            "dashboards": {"dashboards": []},
         }
     )
 

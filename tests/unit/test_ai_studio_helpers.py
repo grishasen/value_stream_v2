@@ -2581,7 +2581,6 @@ def test_deterministic_report_refresh_builds_valid_dashboard_tiles() -> None:
             "metric": "CTR",
             "chart": "line",
             "x": "Day",
-            "y": "CTR",
             "color": "Channel",
         }
     ]

@@ -102,6 +102,21 @@ The 5 provenance columns are added by the engine wrapper, not by the processor i
 
 reference/algorithms.md gives the full algorithmic detail.
 
+Configuration Builder exposes these kind-specific state settings through a
+`Parameters YAML` mapping beside the state name, type, and source column. The
+mapping is preserved in `processors.yaml`; `type` and `source_column` remain
+dedicated fields. Empty mappings use the defaults shown above. The Builder
+accepts `lg_k` only for CPC/HLL/theta states, `k` only for t-digest/KLL states,
+and `lg_max_map_size` only for Top-K states.
+
+When Configuration Builder applies a processor, each unconditioned t-digest or
+KLL state receives a `tdigest_quantile` metric with no explicit `quantile` if
+no such distribution binding exists. The state remains the mergeable binary
+storage contract; the metric is the public query/report binding. Explicit
+percentile metrics can coexist with it. States marked `outcome: positive` or
+`outcome: negative` are excluded because they are paired implementation inputs
+for curve and calibration metrics.
+
 ---
 
 ## 3. binary_outcome processor
@@ -455,6 +470,11 @@ Same shape as binary_outcome's: drop the appropriate calendar columns, then `mer
 | `Median(p)` | `tdigest_quantile` | `<p>_tdigest` | scalar |
 | `p25(p)`, `p75(p)`, `p90(p)`, `p95(p)`, `p99(p)` | `tdigest_quantile` | `<p>_tdigest` | scalar |
 | `Skew(p)` | `formula` | `p25, p50, p75` | Bowley skew = `(p75 + p25 − 2·p50) / (p75 − p25)` |
+
+The Builder-authored distribution form of `tdigest_quantile` omits
+`quantile`. It returns the median as the primary scalar and makes the complete
+quantile suite available to boxplots and other distribution charts. Named
+percentile rows in the table above are optional additional metrics.
 
 ### 4.9 Edge cases
 

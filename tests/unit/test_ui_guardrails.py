@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import tomllib
 from pathlib import Path
 
@@ -265,8 +266,16 @@ def test_light_theme_retains_pre_dark_settings() -> None:
         "linkColor": "#275DAD",
         "codeBackgroundColor": "#EEF3F8",
         "codeTextColor": "#17202A",
-        "font": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-        "headingFont": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+        "font": (
+            "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, "
+            "'Helvetica Neue', Arial, sans-serif"
+        ),
+        "headingFont": (
+            "'Inter Display', 'Inter', -apple-system, BlinkMacSystemFont, "
+            "'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+        ),
+        "headingFontWeights": 600,
+        "baseFontSize": 16,
         "baseRadius": "0.625rem",
         "buttonRadius": "0.5rem",
         "borderColor": "#7C8CA0",
@@ -309,6 +318,9 @@ def test_dark_chrome_overrides_are_not_emitted_in_light_mode(
     light_css = rendered[0]
     assert "padding-left: clamp(0.5rem, 0.8vw, 1rem) !important" in light_css
     assert "padding-left: clamp(0.75rem, 1.25vw, 1.5rem) !important" not in light_css
+    assert '@font-face {\n            font-family: "Inter";' in light_css
+    assert "app/static/fonts/InterVariable.woff2" in light_css
+    assert "font-family: var(--vs-display-font-family)" in light_css
     assert "Avenir Next" not in light_css
     assert "st-key-vs_nav_active_" not in light_css
 
@@ -318,7 +330,8 @@ def test_dark_chrome_overrides_are_not_emitted_in_light_mode(
 
     dark_css = rendered[0]
     assert "padding-left: clamp(0.75rem, 1.25vw, 1.5rem) !important" in dark_css
-    assert "Avenir Next" in dark_css
+    assert "font-family: var(--vs-display-font-family)" in dark_css
+    assert "Avenir Next" not in dark_css
     assert "st-key-vs_nav_active_" in dark_css
 
 
@@ -353,10 +366,26 @@ def test_plotly_template_uses_distinct_report_colorways() -> None:
     ]
     assert light_paper_bgcolor == "#ffffff"
     assert light_plot_bgcolor == "#ffffff"
-    assert light_layout.font.family == ("-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif")
+    assert light_layout.font.family == theme.PLOTLY_FONT_FAMILY
+    assert light_layout.font.size == theme.PLOTLY_BODY_SIZE
+    assert light_layout.title.font.family == theme.PLOTLY_DISPLAY_FONT_FAMILY
+    assert light_layout.title.font.size == theme.PLOTLY_TITLE_SIZE
+    assert light_layout.xaxis.tickfont.size == theme.PLOTLY_AXIS_TICK_SIZE
+    assert light_layout.xaxis.tickfont.weight == 450
+    assert light_layout.xaxis.ticklabelstandoff == 6
+    assert light_layout.xaxis.title.font.size == theme.PLOTLY_AXIS_TITLE_SIZE
+    assert light_layout.xaxis.title.standoff == 12
+    assert light_layout.xaxis.automargin is True
+    assert light_layout.yaxis.tickfont.size == theme.PLOTLY_AXIS_TICK_SIZE
+    assert light_layout.yaxis.tickfont.weight == 450
+    assert light_layout.yaxis.ticklabelstandoff == 6
+    assert light_layout.yaxis.title.font.size == theme.PLOTLY_AXIS_TITLE_SIZE
+    assert light_layout.yaxis.title.standoff == 12
+    assert light_layout.yaxis.automargin is True
+    assert light_layout.hoverlabel.font.family == theme.PLOTLY_FONT_FAMILY
     assert dark_paper_bgcolor == "#162438"
     assert dark_plot_bgcolor == "#162438"
-    assert str(dark_layout.font.family).startswith("Avenir Next")
+    assert dark_layout.font.family == theme.PLOTLY_FONT_FAMILY
 
 
 @pytest.mark.unit
@@ -372,6 +401,53 @@ def test_dashboard_theme_carries_app_background(monkeypatch: pytest.MonkeyPatch)
     assert dark["paper_bgcolor"] == "#162438"
     assert dark["plot_bgcolor"] == "#162438"
     assert dark["colorway"][:2] == ["#4B73F0", "#22C7F3"]
+    assert light["font"] == {
+        "color": "#17202a",
+        "family": theme.PLOTLY_FONT_FAMILY,
+        "size": theme.PLOTLY_BODY_SIZE,
+    }
+    assert dark["hoverlabel"]["font"]["size"] == theme.PLOTLY_COMPACT_SIZE
+
+
+@pytest.mark.unit
+def test_self_hosted_inter_webfonts_are_configured_and_packaged() -> None:
+    config = tomllib.loads((UI_ROOT / ".streamlit" / "config.toml").read_text())
+    assert config["server"]["enableStaticServing"] is True
+    assert config["theme"]["fontFaces"] == [
+        {
+            "family": "Inter",
+            "url": "app/static/fonts/InterVariable.woff2",
+            "style": "normal",
+            "weight": "100 900",
+        },
+        {
+            "family": "Inter",
+            "url": "app/static/fonts/InterVariable-Italic.woff2",
+            "style": "italic",
+            "weight": "100 900",
+        },
+        {
+            "family": "Inter Display",
+            "url": "app/static/fonts/InterDisplay-SemiBold.woff2",
+            "style": "normal",
+            "weight": 600,
+        },
+    ]
+
+    font_root = UI_ROOT / "static" / "fonts"
+    expected_hashes = {
+        "InterVariable.woff2": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+        "InterVariable-Italic.woff2": (
+            "e564f652916db6c139570fefb9524a77c4d48f30c92928de9db19b6b5c7a262a"
+        ),
+        "InterDisplay-SemiBold.woff2": (
+            "d9f63a82b826fb0117c92715c3a52a2d2247bc321bc39341420bf52d91e8277a"
+        ),
+    }
+    for filename, expected_hash in expected_hashes.items():
+        payload = (font_root / filename).read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == expected_hash
+    assert "SIL OPEN FONT LICENSE" in (font_root / "LICENSE.txt").read_text()
 
 
 @pytest.mark.unit

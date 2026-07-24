@@ -14,6 +14,10 @@ import streamlit as st
 
 from valuestream.config import model
 from valuestream.config.canonical import processor_computation_hash
+from valuestream.config.report_fields import (
+    distribution_property_metrics,
+    metric_output_columns,
+)
 from valuestream.processors import grain_levels
 from valuestream.query import query_metric
 from valuestream.store.meta import meta_dir
@@ -57,9 +61,9 @@ _CHART_DIMENSION_FIELDS = {
     "stacked_area": ("x", *_FACET_FIELDS, "color"),
     "bar": ("x", *_FACET_FIELDS, "color"),
     "kpi_card": ("group_by",),
-    "waterfall": ("x", *_FACET_FIELDS, "color"),
+    "waterfall": ("x",),
     "pareto": ("x", *_FACET_FIELDS, "color"),
-    "treemap": ("path", "x", "names", "color"),
+    "treemap": ("path", "x", "names"),
     "heatmap": ("x", "y"),
     "cohort_heatmap": ("x", "y"),
     "scatter": ("animation_frame", "animation_group", *_FACET_FIELDS, "color"),
@@ -72,7 +76,7 @@ _CHART_DIMENSION_FIELDS = {
     "bar_polar": ("theta", "color"),
     "sankey": ("source", "target"),
     "gauge": ("facet_row", "facet_col", "facet_column", "facets", "group_by"),
-    "funnel": (*_FACET_FIELDS, "color"),
+    "funnel": ("x", *_FACET_FIELDS, "color"),
     "boxplot": ("x", *_FACET_FIELDS, "color"),
     "histogram": (*_FACET_FIELDS, "color"),
     "calibration_curve": (*_FACET_FIELDS, "color"),
@@ -82,9 +86,7 @@ _CHART_DIMENSION_FIELDS = {
     "lift_curve": (*_FACET_FIELDS, "color"),
     "corr": ("color",),
     "descriptive_line": ("x", *_FACET_FIELDS, "color"),
-    "descriptive_histogram": (*_FACET_FIELDS, "color"),
     "descriptive_heatmap": ("x", "y"),
-    "descriptive_funnel": (*_FACET_FIELDS, "color"),
     "experiment_z_score": ("x", "y", *_FACET_FIELDS, "color"),
     "experiment_odds_ratio": ("x", "y", *_FACET_FIELDS, "color"),
 }
@@ -97,7 +99,7 @@ _DEFAULT_DIMENSION_FIELDS = (
     "animation_frame",
     "animation_group",
 )
-_STATEFUL_CHARTS = {"funnel"}
+_STATEFUL_CHARTS = {"funnel", "model"}
 
 
 @dataclass(frozen=True)
@@ -134,7 +136,20 @@ def query_tile(
 ) -> pl.DataFrame:
     """Query aggregate data for a dashboard tile."""
     tile_dict = tile_to_dict(tile)
-    dimension_aliases = _dimension_aliases(catalog, tile.metric, tile_dict)
+    query_metric_name = tile.metric
+    if tile.chart in {"boxplot", "histogram"} and tile_dict.get("property") not in (None, ""):
+        property_name = str(tile_dict["property"])
+        distribution_metric_name = distribution_property_metrics(catalog, tile.metric).get(
+            property_name,
+            "",
+        )
+        if tile.chart == "boxplot" and not distribution_metric_name:
+            raise ValueError(
+                f"Boxplot property {property_name!r} is not backed by an unconditioned "
+                "t-digest or KLL metric."
+            )
+        query_metric_name = distribution_metric_name or query_metric_name
+    dimension_aliases = _dimension_aliases(catalog, query_metric_name, tile_dict)
     canonical_tile = _canonicalize_tile_dimensions(tile_dict, dimension_aliases)
     tile_filters = dict(tile_dict.get("filters") or {})
     filter_columns = available_filter_columns_for_tile(catalog, tile)
@@ -147,13 +162,13 @@ def query_tile(
     grain = grain_for_tile(canonical_tile)
     group_by = _processor_group_columns(
         catalog,
-        tile.metric,
+        query_metric_name,
         group_by_for_tile(canonical_tile),
     )
     rows = _cached_query_metric(
         str(Path(workspace_path).resolve()),
-        _metric_query_cache_signature(catalog, workspace_path, tile.metric, grain),
-        tile.metric,
+        _metric_query_cache_signature(catalog, workspace_path, query_metric_name, grain),
+        query_metric_name,
         tuple(group_by),
         _stable_json(tile_filters),
         grain,
@@ -161,12 +176,97 @@ def query_tile(
         _date_cache_key(end),
         None,
         tile.chart in _STATEFUL_CHARTS
+        or tile.chart == "histogram"
         or tile.chart.startswith("descriptive_")
-        or _tile_references_scalar_state(catalog, tile.metric, canonical_tile),
+        or (
+            tile.chart == "heatmap"
+            and tile_dict.get("property") not in (None, "")
+            and tile_dict.get("score") not in (None, "")
+        )
+        or _tile_references_scalar_state(catalog, query_metric_name, canonical_tile),
         tile.chart in {"boxplot", "combo"},
         tile.chart in _CURVE_CHARTS,
     )
+    if tile.chart == "combo":
+        rows = _join_combo_secondary_metric(
+            workspace_path,
+            catalog,
+            tile,
+            canonical_tile,
+            tile_filters,
+            grain,
+            group_by,
+            start,
+            end,
+            rows,
+        )
     return _restore_dimension_aliases(_restore_time_columns(rows, tile_dict), dimension_aliases)
+
+
+def _join_combo_secondary_metric(
+    workspace_path: str | Path,
+    catalog: model.Catalog,
+    tile: model.Tile,
+    canonical_tile: Mapping[str, Any],
+    tile_filters: Mapping[str, Any],
+    grain: str,
+    group_by: list[str],
+    start: dt.date | None,
+    end: dt.date | None,
+    primary_rows: pl.DataFrame,
+) -> pl.DataFrame:
+    """Join the combo's compatible secondary metric onto primary metric rows."""
+
+    secondary_name = str(canonical_tile.get("y2") or canonical_tile.get("line_y") or "")
+    secondary_metric = catalog.metrics.metrics.get(secondary_name)
+    if secondary_metric is None:
+        # Keep legacy raw-column combo tiles renderable. Catalog validation and
+        # both authoring surfaces require a metric ID for all new definitions.
+        return primary_rows
+    secondary_outputs = metric_output_columns(secondary_name, secondary_metric)
+    if secondary_outputs != [secondary_name]:
+        raise ValueError(f"Combo Y2 metric {secondary_name!r} must expose one scalar output.")
+    secondary_rows = _cached_query_metric(
+        str(Path(workspace_path).resolve()),
+        _metric_query_cache_signature(catalog, workspace_path, secondary_name, grain),
+        secondary_name,
+        tuple(group_by),
+        _stable_json(tile_filters),
+        grain,
+        _date_cache_key(start),
+        _date_cache_key(end),
+        None,
+        False,
+        False,
+        False,
+    )
+    if secondary_name not in secondary_rows.columns:
+        raise ValueError(f"Combo Y2 metric {secondary_name!r} did not produce its scalar output.")
+
+    primary_metric = catalog.metrics.metrics[tile.metric]
+    value_columns = {
+        *metric_output_columns(tile.metric, primary_metric),
+        *secondary_outputs,
+    }
+    join_keys = [
+        column
+        for column in primary_rows.columns
+        if column in secondary_rows.columns and column not in value_columns
+    ]
+    if not join_keys:
+        if primary_rows.height <= 1 and secondary_rows.height <= 1:
+            value = (
+                secondary_rows.get_column(secondary_name).item() if secondary_rows.height else None
+            )
+            return primary_rows.with_columns(pl.lit(value).alias(secondary_name))
+        raise ValueError(
+            f"Combo metrics {tile.metric!r} and {secondary_name!r} have no shared dimensions."
+        )
+    return primary_rows.join(
+        secondary_rows.select([*join_keys, secondary_name]),
+        on=join_keys,
+        how="left",
+    )
 
 
 @st.cache_data(show_spinner=False, max_entries=256)

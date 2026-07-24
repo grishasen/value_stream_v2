@@ -75,10 +75,10 @@ The chart factory receives `(rows: pl.DataFrame, tile: dict, plan: PlanInfo)` an
 |---|---|---|---|
 | `x` | str | most | column name on x axis |
 | `y` | str / list[str] | most | column name(s) on y axis |
-| `y2` | str | combo | column name on the secondary y axis |
+| `y2` | str | combo | compatible secondary metric ID; it must have the same metric kind and backing processor as `metric` |
 | `x_axis_title` / `y_axis_title` | str | cartesian charts | explicit primary-axis labels |
 | `y2_axis_title` | str | combo | explicit secondary-axis label; otherwise the `y2` display label is used |
-| `color` | str | most | column name to map to color |
+| `color` | str | most | column name to map to color; treemap color comes from `metric` |
 | `size` | str | scatter | column name for marker size |
 | `path` | list[str] | treemap | hierarchy of group-by columns |
 | `value` | str | gauge | scalar column to display |
@@ -86,7 +86,7 @@ The chart factory receives `(rows: pl.DataFrame, tile: dict, plan: PlanInfo)` an
 | `placement` | str | kpi_card | `content` or explicit `kpi_strip` placement |
 | `kpi` | dict | kpi_card | comparison period, target, sparkline grain/points |
 | `scale_mode` | str | line, stacked_area | `absolute`, `index_100`, or `percent_change` |
-| `r` | str | bar_polar | radius column |
+| `r` | str | bar_polar | legacy radius override; Visual mode derives radius from `metric` |
 | `theta` | str | bar_polar | angle column |
 | `facet_row` | str | most | column for facet rows |
 | `facet_col` | str | most | column for facet columns |
@@ -110,6 +110,13 @@ The chart factory receives `(rows: pl.DataFrame, tile: dict, plan: PlanInfo)` an
 | `conditional_formatting` | list[dict] | bar, scatter | per-row colors when no explicit `color` field is set |
 | `error_y_lower` / `error_y_upper` | str | interval | absolute lower/upper confidence-bound columns |
 
+Interval confidence-bound columns are coerced to nullable numeric values before
+the renderer calculates positive and negative error lengths. A comparison group
+with no eligible rows can therefore render null bounds without raising a
+storage-type error. In both report editors, `y`, `error_y`,
+`error_y_lower`, and `error_y_upper` can select only outputs produced by the
+tile's selected metric; processor dimensions and time fields are excluded.
+
 ---
 
 ## 3. Chart catalog
@@ -118,8 +125,13 @@ For each chart: required Tile fields, expected metric output shape, and an outli
 
 ### 3.0 `kpi_card`
 
-Required: `value`. An ungrouped card becomes part of the responsive KPI strip
-only when `placement: kpi_strip` is explicit. The `kpi` mapping supports:
+Required chart fields: none. The displayed value is always derived from the
+selected metric's primary output; `value` and `y` are not configurable card
+roles. Existing overrides are ignored at runtime and removed when a card is
+saved through the visual or advanced editor. Converting a KPI card to another
+chart also removes KPI-only `placement` and `kpi` settings. An ungrouped card
+becomes part of the responsive KPI strip only when `placement: kpi_strip` is
+explicit. The `kpi` mapping supports:
 
 - `comparison`: `none` or `previous_period`;
 - `comparison_period`: `day`, `week`, `month`, `quarter`, or `year`;
@@ -135,16 +147,20 @@ rows or a non-numeric value displays `n/a`; report code never invents a reducer.
 
 ### 3.1 `line`
 
-Required: `x, y`. Optional: `color, facet_row, facet_col, log_x, log_y`.
+Required: `x`. Optional: `color, facet_row, facet_col, log_x, log_y`.
+The Y value is always the selected metric's primary output; neither `y` nor
+`value` is a configurable role. Existing overrides are ignored and removed on
+save.
 
-Metric shape: a Polars frame with `x, y` and the group-by columns referenced by `color/facets`.
+Metric shape: a Polars frame with `x`, the metric output, and the group-by
+columns referenced by `color/facets`.
 
 Construction:
 
 ```python
 fig = px.line(
     df.to_pandas(),
-    x=tile["x"], y=tile["y"],
+    x=tile["x"], y=tile["metric"],
     color=tile.get("color"),
     facet_row=tile.get("facet_row"),
     facet_col=tile.get("facet_col"),
@@ -158,9 +174,13 @@ return fig
 
 If `x` is categorical (a non-temporal string column) the factory falls back to `px.bar` with `barmode="group"`.
 
+`stacked_area` uses the same metric-owned Y contract and requires `x` plus
+`color`; the selected metric supplies the stacked values.
+
 ### 3.2 `bar`
 
-Same as `line` but always renders as bars. Optional: `barmode ∈ {group, stack, relative}`.
+Same metric-owned Y contract as `line`, but always renders as bars. Required:
+`x`. Optional: `color`, facets, and `barmode ∈ {group, stack, relative}`.
 
 For 100% stacked bars, set `barmode: percent` or `barmode: stacked_percent`.
 The chart factory renders a stacked bar chart with Plotly `barnorm="percent"`.
@@ -169,7 +189,6 @@ Bars can also be sorted and capped:
 ```yaml
 chart: bar
 x: Channel
-y: CTR
 sort_by: CTR
 sort_direction: desc
 top_n: 10
@@ -191,15 +210,17 @@ conditional_formatting:
 
 ### 3.3 `treemap`
 
-Required: `path: list[str], color: str`.
+Required: `path: list[str]`. Color is always the selected metric's primary
+output; `color` is not a configurable role.
 
-Metric shape: aggregated to `path[0], path[1], …, color`. Typically the metric's `summary` grain.
+Metric shape: aggregated to `path[0], path[1], …`. Typically the metric's
+`summary` grain.
 
 ```python
 fig = px.treemap(
     df.to_pandas(),
     path=[px.Constant("All")] + tile["path"],
-    color=tile["color"],
+    color=metric_value_column,
     color_continuous_scale="Viridis",
     title=tile["title"],
 )
@@ -207,10 +228,27 @@ fig = px.treemap(
 
 ### 3.4 `heatmap`
 
-Required: `x, y, color`. The frame is pivoted: `x` × `y` matrix with `color` as the value.
+Required: `x`. Optional: `y`, plus `property` and `score` for a
+`numeric_distribution` processor.
+
+The selected metric owns the cell intensity. `value` and `color` are not
+selectable roles and are removed when the tile is saved through an editor.
+Both axes are constrained to configured calendar grains or the metric
+processor's persisted `group_by` dimensions, so aggregate states such as
+`Count` cannot be selected as axes.
+
+The one chart adapts to the configured axes:
+
+- `x` plus `y` renders an `x` × `y` matrix. This covers ordinary comparison
+  and cohort layouts.
+- daily `x` without `y` renders the calendar layout.
+- another one-dimensional `x` without `y` renders a one-row intensity strip.
+- `property` plus `score` chooses a descriptive aggregate such as
+  `ResponseTime_p95`; otherwise the selected metric's primary output is used.
 
 ```python
-matrix = df.pivot(index=tile["y"], columns=tile["x"], values=tile["color"])
+value = selected_metric_output
+matrix = df.pivot(index=tile["y"], columns=tile["x"], values=value)
 fig = px.imshow(
     matrix,
     color_continuous_scale="Viridis",
@@ -218,6 +256,11 @@ fig = px.imshow(
     aspect="auto",
 )
 ```
+
+`calendar_heatmap`, `cohort_heatmap`, and `descriptive_heatmap` remain accepted
+as read/runtime compatibility aliases. They are no longer offered as separate
+Builder choices; editing one in Visual or Advanced mode migrates it to
+`chart: heatmap`.
 
 ### 3.5 `scatter`
 
@@ -240,12 +283,13 @@ fig = px.scatter(
 
 ### 3.6 `bar_polar`
 
-Required: `r, theta, color`.
+Required: `theta, color`. Radius is always the selected metric's primary
+output; `r` is not a configurable role.
 
 ```python
 fig = px.bar_polar(
     df.to_pandas(),
-    r=tile["r"], theta=tile["theta"],
+    r=metric_value_column, theta=tile["theta"],
     color=tile["color"],
     title=tile["title"],
 )
@@ -253,17 +297,19 @@ fig = px.bar_polar(
 
 ### 3.7 `gauge`
 
-Required: `value` (a scalar column from the metric).
+Required chart fields: none. The gauge value is always the selected metric's
+primary output; `value` and `y` are not configurable roles. Existing overrides
+are ignored at runtime and removed when the gauge is saved through an editor.
 
 Optional: `reference` (scalar reference for every gauge) or `references` (dict of `key -> reference_value`). The Tile uses the row whose `(facet_row, facet_col)` value matches a key in `references` for the threshold rings.
 
 ```python
 fig = go.Figure(go.Indicator(
     mode="gauge+number+delta",
-    value=row[tile["value"]],
+    value=row[tile["metric"]],
     delta={"reference": references.get(key, 0)},
     gauge={
-        "axis": {"range": [None, max(row[tile["value"]] * 1.5, references_max)]},
+        "axis": {"range": [None, max(row[tile["metric"]] * 1.5, references_max)]},
         "threshold": {"line": {"color": "red"}, "value": references.get(key, 0)},
     },
     title={"text": title},
@@ -276,7 +322,9 @@ A grid of gauges is rendered when there are multiple `(facet_row, facet_col)` ke
 
 Required: `stages: list[str], color`.
 
-Metric shape: one row per `(stage_name, color, …)` with `Count`.
+The chart accepts either configured Funnel-processor stage states such as
+`<stage>_Count`, or numeric-distribution count rows. For categorical count
+rows, set optional `x` to the stage dimension. Facet fields remain optional.
 
 ```python
 fig = px.funnel(
@@ -289,12 +337,18 @@ fig = px.funnel(
 
 ### 3.9 `boxplot`
 
-Required: a `tdigest_quantile` metric. Optional: `x, color, facet_row,
-facet_col`. Without `x`, the renderer produces one overall distribution box;
-set `x` to compare the distribution across time or another persisted
-dimension.
+Required: a `tdigest_quantile` metric. Optional: `property, x, color,
+facet_row, facet_col`. `property` is a constrained selector containing only
+properties backed by an unconditioned t-digest or KLL metric on the same
+processor. Changing it transparently queries that property's distribution
+metric. Without `x`, the renderer produces one overall distribution box; set
+`x` to compare the distribution across time or another persisted dimension.
 
-Boxplots are reconstructed from `<prop>_p25, <prop>_Median, <prop>_p75, <prop>_Min, <prop>_Max` (or t-digest quantiles) — the metric output already exposes those.
+There is no `y` field: the selected distribution property owns the sketch and
+supplies the quantile values. Scalar processor outputs such as `<prop>_Count`
+are therefore not offered. Boxplots are reconstructed from
+`<prop>_p25, <prop>_Median, <prop>_p75, <prop>_Min, <prop>_Max` (or t-digest
+quantiles) already exposed by that metric.
 
 ```python
 fig = go.Figure()
@@ -394,29 +448,30 @@ fig = px.scatter(df.to_pandas(), x=tile["x"], y=tile["y"], trendline="ols")
 
 ### 3.16 `model`
 
-CLV prediction overlay using `lifetimes` (or equivalent) BG/NBD or Pareto/NBD models fit at query time.
+User-facing name: **Purchase frequency projection**. This
+`entity_lifecycle` chart extrapolates each customer's observed purchase rate
+over a configurable horizon (30 days by default):
 
 ```python
-import lifetimes
-bgnbd = lifetimes.BetaGeoFitter()
-bgnbd.fit(df["frequency"], df["recency"], df["tenure"])
-df = df.with_columns(predicted_purchases = bgnbd.conditional_expected_number_of_purchases_up_to_time(
-    horizon, df["frequency"], df["recency"], df["tenure"]))
+predicted_purchases = (frequency / max(tenure, 1)) * horizon
 fig = px.scatter(df.to_pandas(), x="frequency", y="predicted_purchases", color="rfm_segment")
 ```
 
-### 3.17 `descriptive_line` / `descriptive_histogram` / `descriptive_heatmap` / `descriptive_funnel`
+This is a simple run-rate projection. It does not fit a BG/NBD, Pareto/NBD, or
+machine-learning model and must not be interpreted as a model-quality report.
+The rendered axes explicitly identify historical frequency and the configured
+projection horizon.
 
-Specializations for `numeric_distribution` metrics. Required Tile fields differ:
+### 3.17 `descriptive_line`
 
-| Variant | Required |
-|---|---|
-| `descriptive_line` | `x, property, score` (e.g. `score: Mean`) |
-| `descriptive_histogram` | `property` |
-| `descriptive_heatmap` | `x, y, property, score` |
-| `descriptive_funnel` | `x, color, stages` |
+Specialization for `numeric_distribution` metrics. Required Tile fields are
+`x, property, score` (for example, `score: Mean`).
 
-The chart factory pulls `<property>_<score>` from the metric output; see reference/processors.md §4 for the column naming convention.
+The chart factory pulls `<property>_<score>` from the metric output; see
+reference/processors.md §4 for the column naming convention. Score names are
+case-insensitive (`P95` and `p95` both resolve to the canonical `_p95` column).
+Use `histogram` for a digest-backed distribution and the unified `heatmap` with
+`property` and `score` for a descriptive matrix.
 
 ### 3.18 `experiment_z_score` / `experiment_odds_ratio`
 
@@ -426,6 +481,10 @@ Specializations for `experiment` metrics. The Tile picks which experiment statis
 |---|---|---|---|
 | `experiment_z_score` | `y` | `ExperimentName` | `z_score` |
 | `experiment_odds_ratio` | `x, y` | `ExperimentName` | one of `g_odds_ratio_stat`, `chi2_odds_ratio_stat` |
+
+These are horizontal charts: `value_format` applies to the numeric x axis and
+hover value only. The categorical experiment-name y axis is never numerically
+formatted.
 
 ### 3.19 `clv_treemap`
 
@@ -444,18 +503,17 @@ primitives except for the native Streamlit table on the Reports surface:
 
 | Chart kind | Required fields | Primary use |
 |---|---|---|
-| `kpi_card` | `value` | Executive scorecard metric with optional delta reference |
-| `stacked_area` | `x, y, color` | Channel/campaign mix over time |
-| `waterfall` | `x, y` | Contribution or change decomposition |
-| `pareto` | `x, y` | Top campaigns/offers plus cumulative share |
-| `cohort_heatmap` | `x, y, color` | Cohort or retention matrix |
-| `sankey` | `source, target, value` | Journey/path flow between stages or channels |
-| `combo` | `x, y, y2` | Bar + line dual-axis comparisons, e.g. spend vs revenue; use `y2_axis_title` to override the secondary-axis label |
-| `interval` | `x, y` plus optional `error_y` | Lift/estimate with uncertainty interval |
-| `donut` | `names, values` | Simple share-of-total for small category sets |
+| `kpi_card` | none; value comes from `metric` | Executive scorecard metric with optional delta reference |
+| `stacked_area` | `x, color`; Y comes from `metric` | Channel/campaign mix over time |
+| `waterfall` | `x`; Y comes from `metric` | Single-trace contribution or change decomposition; no color grouping or facets |
+| `pareto` | `x`; Y comes from `metric` | Top campaigns/offers plus cumulative share |
+| `heatmap` | `x` and optional `y`; intensity comes from `metric` | Matrix, cohort, descriptive, or daily calendar intensity |
+| `sankey` | `source, target`; value comes from `metric` | Journey/path flow between stages or channels |
+| `combo` | `x, y2`; Y comes from `metric` | Bar + line dual-axis comparison of two compatible scalar metrics; use `y2_axis_title` to override the secondary-axis label |
+| `interval` | `x, y` plus optional error fields; Y/error roles use metric outputs only | Lift/estimate with uncertainty interval |
+| `donut` | `names`; values come from `metric` | Simple share-of-total for small category sets |
 | `geo_map` | `locations, value` or `lat, lon, value` | Country/region/city performance |
 | `table` | optional `columns` | Native sortable and scrollable report table with optional conditional formatting; a selected `topk_items` list is expanded into rank, item, estimate, and lower/upper-bound columns |
-| `calendar_heatmap` | `date, value` | Daily seasonality and campaign activity |
 
 ```yaml
 - id: campaign_pareto
@@ -463,7 +521,6 @@ primitives except for the native Streamlit table on the Reports surface:
   metric: Revenue
   chart: pareto
   x: Campaign
-  y: Revenue
   top_n: 12
 ```
 
@@ -475,28 +532,26 @@ The Builder UI uses the following metadata table to filter chart kinds by the me
 
 | Chart kind | Allowed processor kinds | Default x | Default y |
 |---|---|---|---|
-| `line` | binary_outcome, score_distribution, conversion, snapshot | first time-grain dim | metric.outputs[0] |
-| `stacked_area` | binary_outcome, score_distribution, snapshot | first time-grain dim | metric.outputs[0] |
-| `bar` | binary_outcome, snapshot | first non-time dim | metric.outputs[0] |
-| `kpi_card` | aggregate metrics | — | metric.outputs[0] |
-| `waterfall` | aggregate metrics | first non-time dim | metric.outputs[0] |
-| `pareto` | aggregate metrics | first non-time dim | metric.outputs[0] |
-| `treemap` | binary_outcome, score_distribution | — | — |
-| `heatmap` | binary_outcome, score_distribution | first dim | second dim |
-| `cohort_heatmap` | binary_outcome, snapshot | time/cohort dim | metric.outputs[0] |
+| `line` | binary_outcome, score_distribution, conversion, snapshot | first time-grain dim | selected metric's primary output |
+| `stacked_area` | binary_outcome, score_distribution, snapshot | first time-grain dim | selected metric's primary output |
+| `bar` | binary_outcome, snapshot | first non-time dim | selected metric's primary output |
+| `kpi_card` | aggregate metrics | — | selected metric's primary output |
+| `waterfall` | aggregate metrics | first non-time dim | selected metric's primary output |
+| `pareto` | aggregate metrics | first non-time dim | selected metric's primary output |
+| `treemap` | binary_outcome, score_distribution | path: processor dimensions | color: selected metric's primary output |
+| `heatmap` | aggregate metrics | first time grain, else first dimension | first compatible dimension when available; intensity is the selected metric |
 | `scatter` | binary_outcome, score_distribution | metric.outputs[0] | metric.outputs[1] |
-| `combo` | aggregate metrics | first time-grain dim | metric.outputs[0] + metric.outputs[1] |
+| `combo` | aggregate metrics | first time-grain dim | selected metric + first compatible same-kind metric on the same processor |
 | `interval` | aggregate metrics | first dim | metric.outputs[0] |
-| `donut` | aggregate metrics | first dim | metric.outputs[0] |
+| `donut` | aggregate metrics | first dim | selected metric's primary output |
 | `geo_map` | binary_outcome, score_distribution, snapshot | location dim | metric.outputs[0] |
 | `table` | aggregate metrics | — | — |
-| `calendar_heatmap` | binary_outcome, score_distribution, snapshot | date dim | metric.outputs[0] |
-| `bar_polar` | binary_outcome | — | — |
-| `sankey` | aggregate metrics | source/target dims | metric.outputs[0] |
-| `gauge` | binary_outcome, snapshot | — | — |
-| `funnel` | funnel | — | — |
-| `boxplot` | numeric_distribution | optional first time-grain dim | property |
-| `histogram` | numeric_distribution | — | — |
+| `bar_polar` | binary_outcome | theta: first dimension | radius: selected metric's primary output |
+| `sankey` | aggregate metrics | source/target dims | selected metric's primary output |
+| `gauge` | binary_outcome, snapshot | — | selected metric's primary output |
+| `funnel` | funnel, numeric_distribution | optional first dimension | stage counts |
+| `boxplot` | numeric_distribution | optional first time-grain dim | digest/KLL-backed `property` (no `y`) |
+| `histogram` | numeric_distribution, entity_lifecycle | — | — |
 | `calibration_curve` | score_distribution (Calibration metric) | — | — |
 | `roc_curve` | score_distribution (`curve_from_digests`) | — | — |
 | `precision_recall_curve` | score_distribution (`curve_from_digests`) | — | — |
@@ -522,7 +577,6 @@ theme:
   template: "valuestream"           # app-matching default; any Plotly template name
   paper_bgcolor: "#162438"           # defaults to the app chart-card surface
   plot_bgcolor: "#162438"            # defaults to the app chart-card surface
-  font: { family: "Avenir Next", size: 14 }
   margins: { l: 32, r: 16, t: 48, b: 32 }
   legend: { orientation: "h", y: -0.2 }
   colorway: ["#4B73F0", "#22C7F3", "#45D6A5", "#F2C14E"]
@@ -537,6 +591,17 @@ theme:
 The application initializes a built-in `valuestream` Plotly template before
 dashboard rendering. Its qualitative sequence starts with the app's royal blue,
 cyan, verified green, attention amber, danger coral, and violet tokens. Its
+typography uses the self-hosted Inter variable webfont at 13px for chart text
+and medium-weight axis ticks, 14px SemiBold axis titles, 12px legends and hover
+labels, and Inter Display SemiBold at 16px for chart titles. Axis ticks have 6px
+of label spacing, axis titles have a 12px standoff, and automatic margins keep
+long labels visible. Legend titles use Inter SemiBold at 13px. The font files
+are served by Streamlit from the packaged `ui/static/fonts` directory, with
+native system sans-serif fallbacks when a webfont cannot load. Workspaces
+normally omit `theme.font`; defining it remains supported as an intentional
+per-workspace override.
+
+The template's
 `paper_bgcolor` and `plot_bgcolor` match the chart-card surface (`#ffffff` in
 light mode and `#162438` in dark mode), so Plotly figures blend into the
 Streamlit report cards instead of rendering a separate panel. The Configuration

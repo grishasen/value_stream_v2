@@ -1288,13 +1288,13 @@ AI Configuration Studio remains a separate guided workflow because it starts fro
 
 | Chart kind | Required tile fields | Notes |
 |---|---|---|
-| `line` | `x, y, color?, facets?` | drops to bar if `x` is categorical |
-| `bar` | `x, y, color?, facets?` | |
+| `line` | `x, color?, facets?` | Y is the selected metric; drops to bar if `x` is categorical |
+| `bar` | `x, color?, facets?` | Y is the selected metric |
 | `bar_polar` | `r, theta, color` | |
 | `treemap` | `path, color` | |
-| `heatmap` | `x, y, color` | |
+| `heatmap` | `x, y?, property?, score?` | selected metric owns intensity; no Y renders a daily calendar or one-axis strip |
 | `scatter` | `x, y, size?, color?, animation_frame?, animation_group?` | |
-| `gauge` | `value, references?` | |
+| `gauge` | `references?, facets?` | value is the selected metric |
 | `funnel` | `stages, color` | from `funnel` processor |
 | `boxplot` | `x, y, color?` | from `numeric_distribution` quantile states |
 | `histogram` | `property, color?, facets?` | reconstructed from t-digest bins |

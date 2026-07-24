@@ -66,8 +66,12 @@ ENTITY_SUBJECT_PROCESSOR_KINDS = frozenset(
 )
 METRIC_ACTION_CREATE = "Create Metric"
 METRIC_ACTION_EDIT = "Edit Existing Metric"
+SOURCE_ACTION_CREATE = "Create New Source"
+SOURCE_ACTION_EDIT = "Edit Existing Source"
 
 _MODE_BUTTON_ICONS = {
+    SOURCE_ACTION_CREATE: ":material/add_circle:",
+    SOURCE_ACTION_EDIT: ":material/edit:",
     "Create New Processor": ":material/add_circle:",
     "Edit Existing Processor": ":material/edit:",
     METRIC_ACTION_CREATE: ":material/add_circle:",
@@ -115,10 +119,6 @@ def _mode_button_selector(
 
 METRIC_CREATE_LIBRARY = "From Recipe Library"
 METRIC_CREATE_SCRATCH = "From Scratch"
-BUILDER_ADD_SOURCE_URL = (
-    "/ai_configuration_studio?mode=deterministic&from=configuration_builder"
-    "&intent=add_source&return_to=configuration_builder"
-)
 NEW_TILE_KEY = "__new_tile_draft__"
 NEW_TILE_LABEL = "New tile draft"
 NEW_DASHBOARD_KEY = "__new_dashboard__"
@@ -188,6 +188,8 @@ BUILDER_LAST_OUTCOME_KEY = "builder_last_apply_outcome"
 BUILDER_PENDING_TILE_DELETE_KEY = "builder_tile_delete_draft"
 BUILDER_POST_APPLY_CLEANUP_KEY = "builder_post_apply_cleanup"
 BUILDER_SOURCE_INSPECTION_SCOPE_KEY = "builder_source_inspection_scope"
+VS_SOURCE_CREATE_TOKEN_KEY = "vs_source_create_token"
+VS_SOURCE_LAST_MODE_KEY = "vs_source_last_mode"
 BUILDER_CHECKPOINT_CONTEXT_KEY = "builder_checkpoint_context"
 BUILDER_CHECKPOINT_LOADED_WORKSPACE_KEY = "builder_checkpoint_loaded_workspace"
 BUILDER_CHECKPOINT_PENDING_KEY = "builder_checkpoint_pending"
@@ -256,7 +258,7 @@ REPORT_LIBRARY_GROUPS = {
             "line",
             "stacked_area",
             "combo",
-            "calendar_heatmap",
+            "heatmap",
             "descriptive_line",
         ),
     ),
@@ -275,39 +277,41 @@ REPORT_LIBRARY_GROUPS = {
         ),
     ),
     "explore": ReportLibraryGroup(
-        label="Distributions & models",
+        label="Distributions & model quality",
         icon=":material/query_stats:",
-        description="Relationships, distributions, diagnostic curves, and model quality.",
+        description="Relationships, distributions, and diagnostic curves for model quality.",
         chart_types=(
             "scatter",
-            "heatmap",
-            "cohort_heatmap",
             "boxplot",
             "histogram",
-            "corr",
-            "rfm_density",
-            "descriptive_histogram",
-            "descriptive_heatmap",
             "calibration_curve",
             "roc_curve",
             "precision_recall_curve",
             "gain_curve",
             "lift_curve",
-            "model",
         ),
     ),
     "flow": ReportLibraryGroup(
         label="Flow & composition",
         icon=":material/account_tree:",
-        description="Mix, hierarchy, geography, journeys, and lifecycle progression.",
+        description="Mix, hierarchy, geography, and journey progression.",
         chart_types=(
             "treemap",
-            "clv_treemap",
             "donut",
             "geo_map",
             "sankey",
             "funnel",
-            "descriptive_funnel",
+        ),
+    ),
+    "lifecycle": ReportLibraryGroup(
+        label="Customer lifecycle & CLV",
+        icon=":material/loyalty:",
+        description="RFM segmentation, customer value, exposure, and purchase projections.",
+        chart_types=(
+            "rfm_density",
+            "corr",
+            "model",
+            "clv_treemap",
             "exposure",
         ),
     ),
@@ -745,6 +749,10 @@ class _ApplyActionSlot:
 def _claim_fragment_action_slots(save_slot: Any, draft_slot: Any) -> None:
     """Reserve external action regions during every fragment's initial run."""
 
+    # A discard button callback only stages cleanup. Consume it here, before
+    # this fragment creates any editor widgets, so their state can be safely
+    # removed and rebuilt without invoking Streamlit commands from a callback.
+    _consume_builder_post_apply_cleanup()
     save_slot.empty()
     draft_slot.empty()
 
@@ -928,14 +936,32 @@ def _discard_registered_builder_draft(
     widget_prefixes: tuple[str, ...],
     preserve_widget_keys: tuple[str, ...] = (),
 ) -> None:
-    """Discard a registered proposal before the editor widgets rerender."""
-    builder.discard_builder_draft(
-        st.session_state,
-        key,
+    """Stage proposal cleanup for the fragment pass before widgets render."""
+    _queue_builder_widget_cleanup(
+        draft_key=key,
         widget_prefixes=widget_prefixes,
         preserve_widget_keys=preserve_widget_keys,
+        state_updates=(
+            {"builder_source_mode": SOURCE_ACTION_CREATE} if key == "source:new" else None
+        ),
     )
-    _persist_builder_checkpoint()
+
+
+def _queue_builder_widget_cleanup(
+    *,
+    draft_key: str,
+    widget_prefixes: tuple[str, ...] = (),
+    preserve_widget_keys: tuple[str, ...] = (),
+    state_updates: Mapping[str, Any] | None = None,
+) -> None:
+    """Queue a second cleanup before widgets render on the next full run."""
+
+    st.session_state[BUILDER_POST_APPLY_CLEANUP_KEY] = {
+        "draft_key": draft_key,
+        "widget_prefixes": tuple(widget_prefixes),
+        "preserve_widget_keys": tuple(preserve_widget_keys),
+        "state_updates": dict(state_updates or {}),
+    }
 
 
 def _queue_builder_post_apply_cleanup(
@@ -947,26 +973,32 @@ def _queue_builder_post_apply_cleanup(
 ) -> None:
     """Queue widget cleanup for the full rerun after a successful apply."""
 
-    st.session_state[BUILDER_POST_APPLY_CLEANUP_KEY] = {
-        "draft_key": status.key,
-        "widget_prefixes": tuple(widget_prefixes),
-        "preserve_widget_keys": tuple(preserve_widget_keys),
-        "state_updates": dict(state_updates or {}),
-    }
+    _queue_builder_widget_cleanup(
+        draft_key=status.key,
+        widget_prefixes=widget_prefixes,
+        preserve_widget_keys=preserve_widget_keys,
+        state_updates=state_updates,
+    )
 
 
 def _consume_builder_post_apply_cleanup() -> None:
-    """Re-baseline the next full render against the newly applied catalog."""
+    """Re-baseline the next full render after apply or explicit discard."""
 
     raw = st.session_state.pop(BUILDER_POST_APPLY_CLEANUP_KEY, None)
     if not isinstance(raw, Mapping):
         return
+    draft_key = str(raw.get("draft_key", ""))
     builder.discard_builder_draft(
         st.session_state,
-        str(raw.get("draft_key", "")),
+        draft_key,
         widget_prefixes=tuple(raw.get("widget_prefixes", ())),
         preserve_widget_keys=tuple(raw.get("preserve_widget_keys", ())),
     )
+    if draft_key == "source:new":
+        st.session_state.pop(VS_SOURCE_SAMPLE_SCHEMAS_KEY, None)
+        st.session_state[VS_SOURCE_CREATE_TOKEN_KEY] = (
+            int(st.session_state.get(VS_SOURCE_CREATE_TOKEN_KEY, 0)) + 1
+        )
     updates = raw.get("state_updates")
     if isinstance(updates, Mapping):
         st.session_state.update(updates)
@@ -2078,6 +2110,73 @@ def _render_state_rows_editor(
     editor_key: str,
     state_frame: Any,
 ) -> None:
+    with st.popover("Add state", icon=":material/add_circle:", width="stretch"):
+        with st.form(
+            f"{editor_key}_add_form",
+            border=False,
+            clear_on_submit=True,
+        ):
+            state_name = st.text_input(
+                "State",
+                key=f"{editor_key}_add_name",
+                help=config_help.field_help("state.name"),
+            )
+            state_type = st.selectbox(
+                "Type",
+                builder.STATE_TYPES,
+                key=f"{editor_key}_add_type",
+                help=config_help.field_help("state.type"),
+            )
+            source_column = st.text_input(
+                "Source Column",
+                key=f"{editor_key}_add_source_column",
+                help=config_help.field_help("state.source_column"),
+            )
+            parameters = st.text_area(
+                "Parameters YAML",
+                key=f"{editor_key}_add_parameters",
+                height=100,
+                placeholder="{lg_k: 11}",
+                help=config_help.field_help("state.parameters"),
+            )
+            add_state = st.form_submit_button(
+                "Add state",
+                icon=":material/add:",
+                type="primary",
+                width="stretch",
+            )
+        if add_state:
+            normalized_name = state_name.strip()
+            rows = builder.normalize_editor_rows(st.session_state.get(state_key, []))
+            existing_names = {str(row.get("State", "")).strip() for row in rows if row.get("State")}
+            if not normalized_name:
+                st.warning("State is required.")
+            elif normalized_name in existing_names:
+                st.warning(f"State `{normalized_name}` already exists.")
+            else:
+                try:
+                    _parse_state_parameters(
+                        parameters,
+                        state_name=normalized_name,
+                        state_type=state_type,
+                    )
+                except ValueError as exc:
+                    st.warning(str(exc))
+                else:
+                    rows.append(
+                        {
+                            "State": normalized_name,
+                            "Type": state_type,
+                            "Source Column": source_column.strip(),
+                            "Parameters": parameters.strip(),
+                            "Derived From": "custom state",
+                            "Enabled": True,
+                        }
+                    )
+                    st.session_state[state_key] = rows
+                    components.clear_pinned_editor(editor_key)
+                    st.rerun()
+
     edited_states = st.data_editor(
         components.pinned_editor_input(editor_key, state_frame),
         num_rows="dynamic",
@@ -2098,6 +2197,11 @@ def _render_state_rows_editor(
                 "Source Column",
                 width="medium",
                 help=config_help.field_help("state.source_column"),
+            ),
+            "Parameters": st.column_config.TextColumn(
+                "Parameters YAML",
+                width="large",
+                help=config_help.field_help("state.parameters"),
             ),
             "Derived From": st.column_config.TextColumn(
                 "Derived From",
@@ -2176,11 +2280,28 @@ def _delete_source_dialog(ctx: ValueStreamContext, source_id: str) -> None:
             logger.exception("Failed to delete source cascade: source=%s", plan.source_id)
             st.error(str(exc))
             return
+        _clear_deleted_source_editor_state(plan.source_id)
         st.session_state["builder_source_delete_notice"] = (
             f"Deleted source `{deleted.source_id}`, {len(deleted.processor_ids)} processor(s), "
             f"{len(deleted.metric_ids)} metric(s), and {len(deleted.tile_locations)} tile(s)."
         )
         st.rerun()
+
+
+def _clear_deleted_source_editor_state(source_id: str) -> None:
+    """Remove widget and inspection state that belonged to a deleted source."""
+
+    builder.discard_builder_draft(
+        st.session_state,
+        f"source:{source_id}",
+        widget_prefixes=("builder_source_",),
+    )
+    for state_key in (VS_SOURCE_SAMPLE_SCHEMAS_KEY, VS_OBSERVED_SOURCE_COLUMNS_KEY):
+        stored = st.session_state.get(state_key)
+        if isinstance(stored, dict):
+            stored.pop(source_id, None)
+    st.session_state.pop(f"vs_source_load_sample_{source_id}", None)
+    _persist_builder_checkpoint()
 
 
 @st.dialog(
@@ -2373,76 +2494,80 @@ def _source_builder(  # noqa: PLR0912, PLR0915
     if delete_notice:
         st.session_state.pop("builder_source_select", None)
         st.toast(str(delete_notice), icon=":material/delete_sweep:")
-    if not ctx.catalog.pipelines.sources:
-        st.info("No sources configured.")
-        st.link_button(
-            "Add source",
-            BUILDER_ADD_SOURCE_URL,
-            icon=":material/add_circle:",
-            type="primary",
-            help=(
-                "Open the deterministic, sample-first Studio for this active workspace. "
-                "The Studio provides a direct return here after apply or cancel."
-            ),
-        )
-        _render_continue_primary(save_slot)
-        return
+    sources = ctx.catalog.pipelines.sources
+    mode_options = [SOURCE_ACTION_CREATE]
+    if sources:
+        mode_options.append(SOURCE_ACTION_EDIT)
+    mode = _mode_button_selector(
+        "builder_source_mode",
+        mode_options,
+        default=mode_options[-1],
+        help_key="source.mode",
+    )
+    creating = mode == SOURCE_ACTION_CREATE
+    previous_mode = st.session_state.get(VS_SOURCE_LAST_MODE_KEY)
+    if previous_mode != mode:
+        st.session_state[VS_SOURCE_LAST_MODE_KEY] = mode
+        if creating:
+            st.session_state[VS_SOURCE_CREATE_TOKEN_KEY] = (
+                int(st.session_state.get(VS_SOURCE_CREATE_TOKEN_KEY, 0)) + 1
+            )
+            st.session_state.pop(VS_SOURCE_SAMPLE_SCHEMAS_KEY, None)
 
-    with st.container(key="vs_source_picker"):
-        source_col, add_col, delete_col = st.columns([6, 2, 2], vertical_alignment="bottom")
-        with source_col:
-            source = st.selectbox(
+    if creating:
+        source = _new_source_template(ctx)
+        st.caption(
+            "Configure the source here, then apply it to the workspace. "
+            "Data loading remains a separate step."
+        )
+    else:
+        with st.container(key="vs_source_picker"):
+            source_col, delete_col = st.columns([8, 2], vertical_alignment="bottom")
+            source = source_col.selectbox(
                 "Source",
-                ctx.catalog.pipelines.sources,
+                sources,
                 format_func=_source_choice_label_edit,
                 key="builder_source_select",
                 help=config_help.field_help("source.selector"),
             )
-        add_col.link_button(
-            "Add source",
-            BUILDER_ADD_SOURCE_URL,
-            icon=":material/add_circle:",
-            width="stretch",
-            help=(
-                "Open the deterministic, sample-first Studio for this active workspace. "
-                "The Studio provides a direct return here after apply or cancel."
-            ),
-        )
-        if delete_col.button(
-            "Delete source",
-            icon=":material/delete_forever:",
-            width="stretch",
-            key="builder_delete_source",
-            help="Preview and remove this Source together with its dependent catalog definitions.",
-        ):
-            st.session_state[f"builder_delete_source_confirm_{source.id}"] = False
-            _delete_source_dialog(ctx, source.id)
-    rename_key = f"builder_source_rename_capitalize_{source.id}"
+            if delete_col.button(
+                "Delete source",
+                icon=":material/delete_forever:",
+                width="stretch",
+                key="builder_delete_source",
+                help=(
+                    "Preview and remove this Source together with its dependent "
+                    "catalog definitions."
+                ),
+            ):
+                st.session_state[f"builder_delete_source_confirm_{source.id}"] = False
+                _delete_source_dialog(ctx, source.id)
+    widget_source_id = (
+        f"{source.id}_{int(st.session_state.get(VS_SOURCE_CREATE_TOKEN_KEY, 0))}"
+        if creating
+        else source.id
+    )
+    rename_key = f"builder_source_rename_capitalize_{widget_source_id}"
     if rename_key not in st.session_state:
         st.session_state[rename_key] = _source_has_transform(
             source,
             "rename_capitalize",
         )
     use_rename_capitalize = bool(st.session_state[rename_key])
-    _sync_source_rename_capitalize_state(ctx, source, use_rename_capitalize)
-    field_mapping = _source_rename_mapping(ctx, source, True) if use_rename_capitalize else {}
-    field_options = _source_field_options(ctx, source, rename_capitalize=use_rename_capitalize)
     source_dict = builder.source_to_dict(source)
     reader_dict = dict(source_dict.get("reader", {}))
 
-    with components.bordered_panel(
-        "Runtime Settings", "Edit file loading, grouping, and source schema settings."
-    ):
+    with components.bordered_panel("Runtime Settings", "Edit file loading and grouping settings."):
         source_id = st.text_input(
             "Source ID",
             value=source.id,
-            key=f"builder_source_id_{source.id}",
+            key=f"builder_source_id_{widget_source_id}",
             help=config_help.field_help("source.id"),
         )
         description = st.text_area(
             "Description",
             value=source.description,
-            key=f"builder_source_desc_{source.id}",
+            key=f"builder_source_desc_{widget_source_id}",
             height=80,
             help=config_help.field_help("source.description"),
         )
@@ -2451,51 +2576,113 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             "Reader",
             ["pega_ds_export", "parquet", "csv", "xlsx"],
             index=["pega_ds_export", "parquet", "csv", "xlsx"].index(source.reader.kind),
-            key=f"builder_source_reader_{source.id}",
+            key=f"builder_source_reader_{widget_source_id}",
             help=config_help.field_help("source.reader"),
         )
         file_pattern = c2.text_input(
             "File Pattern",
             value=source.reader.file_pattern,
-            key=f"builder_source_pattern_{source.id}",
+            key=f"builder_source_pattern_{widget_source_id}",
             help=config_help.field_help("source.file_pattern"),
         )
         group_by_filename = c3.text_input(
             "Group Pattern",
             value=source.reader.group_by_filename or "",
-            key=f"builder_source_group_{source.id}",
+            key=f"builder_source_group_{widget_source_id}",
             help=config_help.field_help("source.group_pattern"),
         )
         c4, c5, c6 = st.columns(3)
         root = c4.text_input(
             "Root",
             value=str(reader_dict.get("root", reader_dict.get("base_dir", ""))),
-            key=f"builder_source_root_{source.id}",
+            key=f"builder_source_root_{widget_source_id}",
             help=config_help.field_help("source.root"),
         )
         streaming = c5.checkbox(
             "Streaming",
             value=bool(source.reader.streaming),
-            key=f"builder_source_streaming_{source.id}",
+            key=f"builder_source_streaming_{widget_source_id}",
             help=config_help.field_help("source.streaming"),
         )
         hive_partitioning = c6.checkbox(
             "Hive Partitioning",
             value=bool(reader_dict.get("hive_partitioning", False)),
-            key=f"builder_source_hive_{source.id}",
+            key=f"builder_source_hive_{widget_source_id}",
             help=config_help.field_help("source.hive_partitioning"),
         )
-        use_rename_capitalize = st.toggle(
+        use_rename_capitalize_col, materialize = st.columns([2, 1])
+        use_rename_capitalize = use_rename_capitalize_col.toggle(
             "Use Rename / Capitalize Transform",
             key=rename_key,
             help=config_help.field_help("source.rename_capitalize"),
         )
         if use_rename_capitalize:
-            st.caption(
+            use_rename_capitalize_col.caption(
                 "`rename_capitalize` converts source columns to the legacy Pega-aware "
                 "capitalized schema, for example `pyName` to `Name`."
             )
-        ts_key = f"builder_source_ts_{source.id}"
+        materialize_key = f"builder_source_materialize_{widget_source_id}"
+        materialize_kwargs: dict[str, Any] = {"key": materialize_key}
+        if materialize_key not in st.session_state:
+            materialize_kwargs["value"] = bool(source.materialize_transforms)
+        materialize_transforms = materialize.toggle(
+            "Materialize Transforms",
+            help=config_help.field_help("source.materialize_transforms"),
+            **materialize_kwargs,
+        )
+
+    sample_columns: list[str] | None = None
+    if creating:
+        sample_candidate = _source_inspection_candidate(
+            source=source,
+            reader_kind=reader_kind,
+            file_pattern=file_pattern.strip(),
+            group_by_filename=group_by_filename.strip() or None,
+            root=root.strip(),
+            streaming=streaming,
+            hive_partitioning=hive_partitioning,
+        )
+        sample_columns = _render_source_sample_schema_step(
+            ctx,
+            source,
+            sample_candidate,
+            rename_capitalize=use_rename_capitalize,
+        )
+
+    _sync_source_rename_capitalize_state(
+        ctx,
+        source,
+        use_rename_capitalize,
+        sample_columns=sample_columns,
+        widget_source_id=widget_source_id,
+    )
+    field_mapping = (
+        _source_rename_mapping(
+            ctx,
+            source,
+            True,
+            sample_columns=sample_columns,
+        )
+        if use_rename_capitalize
+        else {}
+    )
+    field_options = _source_field_options(
+        ctx,
+        source,
+        rename_capitalize=use_rename_capitalize,
+        sample_columns=(
+            _rename_capitalize_fields(sample_columns, use_rename_capitalize)
+            if sample_columns is not None
+            else None
+        ),
+        include_processor_fields=not creating,
+    )
+
+    with components.bordered_panel(
+        "Schema",
+        "Choose identity, time, and excluded fields from the loaded sample or enter them manually.",
+    ):
+        ts_key = f"builder_source_ts_{widget_source_id}"
         ts_kwargs: dict[str, Any] = {"key": ts_key}
         if ts_key not in st.session_state:
             ts_kwargs["value"] = field_remap.remap_field_name(
@@ -2507,7 +2694,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             help=config_help.field_help("source.timestamp_column"),
             **ts_kwargs,
         )
-        natural_key_key = f"builder_source_natural_{source.id}"
+        natural_key_key = f"builder_source_natural_{widget_source_id}"
         natural_key_kwargs: dict[str, Any] = {
             "accept_new_options": True,
             "key": natural_key_key,
@@ -2524,7 +2711,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             help=config_help.field_help("source.natural_key"),
             **natural_key_kwargs,
         )
-        drop_columns_key = f"builder_source_drop_{source.id}"
+        drop_columns_key = f"builder_source_drop_{widget_source_id}"
         drop_columns_kwargs: dict[str, Any] = {
             "accept_new_options": True,
             "key": drop_columns_key,
@@ -2544,7 +2731,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             **drop_columns_kwargs,
         )
 
-    defaults_key = f"builder_source_defaults_{source.id}"
+    defaults_key = f"builder_source_defaults_{widget_source_id}"
     if defaults_key not in st.session_state:
         default_values = field_remap.remap_default_values(
             builder.source_defaults(source), field_mapping
@@ -2555,7 +2742,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
     ):
         _render_default_values_editor(
             defaults_key,
-            f"builder_source_defaults_editor_{source.id}",
+            f"builder_source_defaults_editor_{widget_source_id}",
             field_options,
         )
 
@@ -2563,12 +2750,13 @@ def _source_builder(  # noqa: PLR0912, PLR0915
     if filter_expression and field_mapping:
         filter_expression = field_remap.remap_expression_fields(filter_expression, field_mapping)
     filter_state = builder.condition_state_from_expression(filter_expression)
-    filter_mode_key = f"builder_source_filter_mode_{source.id}"
+    filter_mode_key = f"builder_source_filter_mode_{widget_source_id}"
     if filter_mode_key not in st.session_state:
         st.session_state[filter_mode_key] = "Rules" if filter_state is not None else "Raw AST"
     with components.bordered_panel(
         "Source Filter", "Define dataset-level filters with rule rows or raw AST YAML."
     ):
+        filter_valid = True
         mode = st.segmented_control(
             "Filter Mode",
             ["Rules", "Raw AST"],
@@ -2578,7 +2766,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         ) or str(st.session_state[filter_mode_key])
         st.session_state[filter_mode_key] = mode
         if mode == "Rules":
-            rows_key = f"builder_source_filter_rows_{source.id}"
+            rows_key = f"builder_source_filter_rows_{widget_source_id}"
             _seed_filter_editor_state(rows_key, filter_state)
             filter_frame = builder.editor_frame(
                 st.session_state[rows_key],
@@ -2587,27 +2775,48 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             )
             _render_filter_rows_editor(
                 rows_key,
-                f"builder_source_filter_editor_{source.id}",
+                f"builder_source_filter_editor_{widget_source_id}",
                 filter_frame,
                 field_options,
             )
             try:
                 compiled_filter = _compiled_filter_expression(rows_key)
-            except ValueError:
+            except ValueError as exc:
                 logger.exception("Failed to compile source filter rows: source=%s", source.id)
                 compiled_filter = None
+                filter_valid = False
+                st.error(str(exc))
         else:
-            raw_default = builder.expression_yaml(filter_expression)
-            compiled_filter = (
-                builder.parse_expression_yaml(raw_default) if raw_default.strip() else None
+            raw_key = f"builder_source_raw_filter_{widget_source_id}"
+            editor_key = f"{raw_key}_editor"
+            if raw_key not in st.session_state:
+                st.session_state[raw_key] = builder.expression_yaml(filter_expression)
+            raw_kwargs: dict[str, Any] = {
+                "height": 220,
+                "key": editor_key,
+            }
+            if editor_key not in st.session_state:
+                raw_kwargs["value"] = str(st.session_state[raw_key])
+            raw_filter = st.text_area(
+                "Filter AST YAML",
+                help=config_help.field_help("source.filter_ast"),
+                **raw_kwargs,
             )
-            st.code(builder.expression_yaml(compiled_filter) or "{}", language="yaml")
+            st.session_state[raw_key] = raw_filter
+            try:
+                compiled_filter = (
+                    builder.parse_expression_yaml(raw_filter) if raw_filter.strip() else None
+                )
+            except ValueError as exc:
+                compiled_filter = None
+                filter_valid = False
+                st.error(f"Filter AST YAML is invalid: {exc}")
 
     with components.bordered_panel(
         "Calculated Fields",
         "Create `derive_column` transforms with builder rows, AST YAML, or Polars.",
     ):
-        calc_key = f"builder_source_calcs_{source.id}"
+        calc_key = f"builder_source_calcs_{widget_source_id}"
         if calc_key not in st.session_state:
             st.session_state[calc_key] = field_remap.remap_calculation_row_values(
                 builder.calculated_rows_from_source(source),
@@ -2636,7 +2845,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             )
         calculated_rows_valid = _render_calculated_rows_editor(
             calc_key,
-            f"builder_source_calcs_editor_{source.id}",
+            f"builder_source_calcs_editor_{widget_source_id}",
             calculation_frame,
             field_options,
         )
@@ -2654,6 +2863,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         root=root.strip(),
         streaming=streaming,
         hive_partitioning=hive_partitioning,
+        materialize_transforms=materialize_transforms,
         timestamp_column=timestamp_column.strip() or None,
         natural_key=natural_key,
         drop_columns=drop_columns,
@@ -2661,6 +2871,8 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         use_rename_capitalize=use_rename_capitalize,
         filter_expression=compiled_filter,
         calculated_rows=st.session_state[calc_key] if calculated_rows_valid else [],
+        automatic_outcome_transforms=creating,
+        available_fields=field_options,
     )
     with components.bordered_panel(
         "Generated configuration",
@@ -2669,37 +2881,79 @@ def _source_builder(  # noqa: PLR0912, PLR0915
             "Generated source YAML",
             yaml.safe_dump({"sources": [source_def]}, sort_keys=False),
         )
-    draft_status = builder.builder_draft_status(
-        f"source:{source.id}",
-        builder.source_to_dict(source),
-        source_def,
-    )
+    if creating:
+        draft_status = builder.builder_template_draft_status(
+            st.session_state,
+            "source:new",
+            f"builder_source_template_baseline_{widget_source_id}",
+            source_def,
+        )
+    else:
+        draft_status = builder.builder_draft_status(
+            f"source:{source.id}",
+            builder.source_to_dict(source),
+            source_def,
+        )
+    proposed_source_id = source_id.strip()
+    conflicting_source_ids = {
+        candidate.id for candidate in sources if creating or candidate.id != source.id
+    }
+    source_id_changed = creating or proposed_source_id != source.id
+    invalid_reason: str | None = None
+    if not proposed_source_id:
+        invalid_reason = "Enter a Source ID before applying."
+    elif source_id_changed and not builder.catalog_id_is_safe(proposed_source_id):
+        invalid_reason = (
+            "Source ID must start with a letter and contain only ASCII letters, "
+            "numbers, and underscores."
+        )
+    elif proposed_source_id in conflicting_source_ids:
+        invalid_reason = (
+            f"Source ID {proposed_source_id!r} already exists. Choose a unique Source ID."
+        )
+    elif not file_pattern.strip():
+        invalid_reason = "Enter a File Pattern before applying."
+    elif not filter_valid:
+        invalid_reason = "Resolve the source-filter issue before applying."
+    elif not calculated_rows_valid or calculated_expression_pending:
+        invalid_reason = "Resolve the calculated-field issue before applying."
     if _render_editor_primary_action(
         save_slot=save_slot,
         draft_slot=draft_slot,
         status=draft_status,
-        valid=(
-            bool(source_id.strip()) and calculated_rows_valid and not calculated_expression_pending
-        ),
+        valid=invalid_reason is None,
         widget_prefixes=("builder_source_",),
-        help_text=f"Validate and apply source {source.id!r} to the active workspace.",
+        preserve_widget_keys=("builder_source_mode",),
+        help_text=f"Validate and apply source {proposed_source_id!r} to the active workspace.",
+        invalid_reason=invalid_reason,
     ):
         try:
+            if proposed_source_id in conflicting_source_ids:
+                raise ValueError(
+                    f"Source ID {proposed_source_id!r} already exists. Choose a unique Source ID."
+                )
+            source_columns_by_id = _source_columns_for_apply(ctx, source_def)
             with builder.validated_catalog_transaction(
-                ctx.workspace, source_columns_by_id=_observed_source_columns()
+                ctx.workspace, source_columns_by_id=source_columns_by_id
             ):
                 builder.write_source_definition(ctx.workspace, source_def)
+            if creating:
+                sample_schemas = st.session_state.get(VS_SOURCE_SAMPLE_SCHEMAS_KEY)
+                if isinstance(sample_schemas, dict):
+                    sample_schemas.pop(source.id, None)
             _complete_builder_apply(
                 status=draft_status,
                 scope="source",
-                label=description.strip() or humanize_identifier(source_id.strip()),
-                source_ids=[source_id.strip()],
-                message="Source applied to the workspace.",
+                label=description.strip() or humanize_identifier(proposed_source_id),
+                source_ids=[proposed_source_id],
+                message="Source created." if creating else "Source applied to the workspace.",
                 widget_prefixes=("builder_source_",),
+                preserve_widget_keys=("builder_source_mode",),
+                state_updates={"builder_source_mode": SOURCE_ACTION_EDIT},
             )
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
-            logger.exception("Failed to write source definition: source=%s", source_id.strip())
+            logger.exception("Failed to write source definition: source=%s", proposed_source_id)
             st.error(str(exc))
 
 
@@ -3736,7 +3990,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         st.session_state[state_key] = _state_rows(states_baseline, field_mapping)
     state_frame = builder.editor_frame(
         st.session_state[state_key],
-        ["State", "Type", "Source Column", "Derived From", "Enabled"],
+        ["State", "Type", "Source Column", "Parameters", "Derived From", "Enabled"],
         _blank_state_row,
     )
     with components.bordered_panel(
@@ -3752,11 +4006,15 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         st.caption(
             "Sketch parameters omitted from the YAML use these effective defaults: "
             + "; ".join(
-                f"{sketch_type}: "
-                + ", ".join(f"{name}={value}" for name, value in params.items())
+                f"{sketch_type}: " + ", ".join(f"{name}={value}" for name, value in params.items())
                 for sketch_type, params in model.DEFAULT_STATE_PARAMETERS.items()
             )
             + "."
+        )
+        st.caption(
+            "Applying a public t-digest or KLL state also creates its distribution "
+            "metric automatically. Positive/negative outcome digests remain inputs "
+            "for curve and calibration metrics."
         )
 
     filter_expression = builder.first_filter_expression(processor)
@@ -3843,10 +4101,19 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         processor_def.pop(managed_key, None)
     processor_def.update(kind_settings)
     processor_def.pop("group_by", None)
-    processor_def["states"] = _build_state_defs(
-        states_baseline,
-        st.session_state.get(state_key, _state_rows(states_baseline, field_mapping)),
-    )
+    state_rows_valid = True
+    try:
+        processor_def["states"] = _build_state_defs(
+            states_baseline,
+            st.session_state.get(state_key, _state_rows(states_baseline, field_mapping)),
+        )
+    except ValueError as exc:
+        state_rows_valid = False
+        st.warning(str(exc))
+        processor_def["states"] = {
+            name: spec.model_dump(mode="json", exclude_none=True)
+            for name, spec in model.effective_processor_states(states_baseline).items()
+        }
     if compiled_filter:
         processor_def["filter"] = compiled_filter
     else:
@@ -3874,7 +4141,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         save_slot=save_slot,
         draft_slot=draft_slot,
         status=draft_status,
-        valid=bool(processor_id.strip()),
+        valid=bool(processor_id.strip()) and state_rows_valid,
         widget_prefixes=("builder_processor_", "builder_proc_"),
         preserve_widget_keys=("builder_processor_mode",),
         help_text=(
@@ -3884,10 +4151,11 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     ):
         try:
             renamed = not creating and processor_id.strip() != processor.id
+            created_metric_ids: list[str]
             if renamed:
                 # An edited ID is a rename: keep one definition and retarget
                 # metric sources instead of leaving the old id behind as a copy.
-                builder.rename_processor_definition(
+                created_metric_ids = builder.rename_processor_definition(
                     ctx.workspace,
                     processor.id,
                     processor_def,
@@ -3898,12 +4166,19 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
                     ctx.workspace, source_columns_by_id=_observed_source_columns()
                 ):
                     builder.write_processor_definition(ctx.workspace, processor_def)
+                    created_metric_ids = builder.ensure_digest_distribution_metrics(
+                        ctx.workspace,
+                        processor_id.strip(),
+                    )
             if creating:
                 message = "Processor created."
             elif renamed:
                 message = f"Processor renamed from `{processor.id}` to `{processor_id.strip()}`."
             else:
                 message = "Processor written."
+            if created_metric_ids:
+                metric_list = ", ".join(f"`{metric_id}`" for metric_id in created_metric_ids)
+                message += f" Added distribution metrics automatically: {metric_list}."
             _complete_builder_apply(
                 status=draft_status,
                 scope="processor",
@@ -4698,7 +4973,7 @@ def _report_library_options(
             for tile in page.tiles:
                 if metric_filter not in ("All", tile.metric):
                     continue
-                if chart_filter not in ("All", tile.chart):
+                if chart_filter not in ("All", _library_chart_kind(tile.chart)):
                     continue
                 searchable = " ".join(
                     (
@@ -4728,6 +5003,13 @@ def _report_library_options(
                     )
                 )
     return options
+
+
+def _library_chart_kind(chart_kind: Any) -> str:
+    """Group legacy heatmaps under the single Heatmap authoring choice."""
+
+    value = str(chart_kind or "")
+    return "heatmap" if value in builder.LEGACY_HEATMAP_CHARTS else value
 
 
 def _tile_option_key(option: TileOption) -> str:
@@ -4860,7 +5142,9 @@ def _render_report_library_browser(
         st.session_state.get("builder_selected_tile_key"),
     )
     selected_group = (
-        REPORT_LIBRARY_GROUP_BY_CHART.get(str(selected_before_grouping[3].get("chart")))
+        REPORT_LIBRARY_GROUP_BY_CHART.get(
+            _library_chart_kind(selected_before_grouping[3].get("chart"))
+        )
         if selected_before_grouping is not None
         else None
     )
@@ -4885,7 +5169,9 @@ def _render_report_library_browser(
     st.caption(group.description)
 
     visible_options = [
-        option for option in filtered_options if option[3].get("chart") in group.chart_types
+        option
+        for option in filtered_options
+        if _library_chart_kind(option[3].get("chart")) in group.chart_types
     ]
     visible_keys = [_tile_option_key(option) for option in visible_options]
     selected_tile_key = str(st.session_state.get("builder_selected_tile_key", ""))
@@ -4902,11 +5188,16 @@ def _render_report_library_browser(
         visible_chart_types = [
             chart_type
             for chart_type in visible_chart_types
-            if any(option[3].get("chart") == chart_type for option in visible_options)
+            if any(
+                _library_chart_kind(option[3].get("chart")) == chart_type
+                for option in visible_options
+            )
         ]
     for chart_type in visible_chart_types:
         chart_options = [
-            option for option in visible_options if option[3].get("chart") == chart_type
+            option
+            for option in visible_options
+            if _library_chart_kind(option[3].get("chart")) == chart_type
         ]
         _render_report_library_chart_group(
             catalog,
@@ -4974,11 +5265,18 @@ def _render_report_library_chart_group(
                     else "No reports yet",
                     color="gray",
                 )
-                st.badge(
-                    chart_type,
-                    color="gray",
-                    help="Technical chart kind",
-                )
+                if chart_type == "model":
+                    st.badge(
+                        "customer lifecycle",
+                        color="gray",
+                        help="Requires entity-lifecycle aggregates. Technical chart kind: model.",
+                    )
+                else:
+                    st.badge(
+                        chart_type,
+                        color="gray",
+                        help="Technical chart kind",
+                    )
             st.caption(
                 REPORT_LIBRARY_CHART_DESCRIPTIONS.get(
                     chart_type,
@@ -5175,11 +5473,23 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
                 marker={"size": [7, 11, 8, 14, 10, 13], "color": colors[0]},
             )
         )
+    elif chart_type == "model":
+        figure.add_trace(
+            go.Scatter(
+                x=[1, 2, 3, 4, 5],
+                y=[1.4, 2.2, 3.1, 4.5, 5.2],
+                mode="markers",
+                marker={
+                    "size": [8, 10, 9, 12, 11],
+                    "color": [colors[0], colors[1], colors[2], colors[0], colors[1]],
+                },
+            )
+        )
     elif chart_type == "boxplot":
         figure.add_trace(
             go.Box(y=[1.0, 1.5, 1.8, 2.1, 2.3, 3.8], marker_color=colors[0], boxpoints="outliers")
         )
-    elif chart_type in {"histogram", "descriptive_histogram"}:
+    elif chart_type == "histogram":
         figure.add_trace(
             go.Histogram(x=[1, 1, 2, 2, 2, 3, 3, 4, 5], marker_color=colors[0], nbinsx=5)
         )
@@ -5220,7 +5530,7 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
                 link={"source": [0, 0, 1], "target": [1, 2, 2], "value": [5, 2, 3]},
             )
         )
-    elif chart_type in {"funnel", "descriptive_funnel"}:
+    elif chart_type == "funnel":
         figure.add_trace(
             go.Funnel(y=["Visit", "Engage", "Convert"], x=[100, 62, 27], marker_color=colors[:3])
         )
@@ -5421,16 +5731,27 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         is_new_tile = selected_tile_key == NEW_TILE_KEY or str(editor_token).startswith("new_")
         if is_new_tile:
             st.caption(NEW_TILE_LABEL)
+        editing_mode_kwargs: dict[str, Any] = {
+            # Token-independent key: switching to a new draft keeps the chosen
+            # editing mode instead of silently flipping back to Visual.
+            "key": "builder_tile_editing_mode",
+            "help": config_help.field_help("report.editing_mode"),
+        }
+        if "builder_tile_editing_mode" not in st.session_state:
+            editing_mode_kwargs["default"] = "Visual"
         mode = st.segmented_control(
             "Editing Mode",
             ["Visual", "Raw YAML"],
-            default="Visual",
-            # Token-independent key: switching to a new draft keeps the chosen
-            # editing mode instead of silently flipping back to Visual.
-            key="builder_tile_editing_mode",
-            help=config_help.field_help("report.editing_mode"),
+            **editing_mode_kwargs,
         )
-        seed_metric = seed_tile.get("metric") if seed_tile.get("metric") in metric_names else None
+        visual_seed_tile = (
+            builder.canonicalize_heatmap_tile(seed_tile) if mode == "Visual" else seed_tile
+        )
+        seed_metric = (
+            visual_seed_tile.get("metric")
+            if visual_seed_tile.get("metric") in metric_names
+            else None
+        )
         if seed_metric is None and not is_new_tile:
             seed_metric = metric_names[0]
         metric_name = st.selectbox(
@@ -5445,7 +5766,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         chart_choices = (
             builder.chart_choices_for_metric(catalog, metric_name) if metric_name else []
         )
-        seed_chart_value = str(seed_tile.get("chart", "") or "")
+        seed_chart_value = str(visual_seed_tile.get("chart", "") or "")
         if (
             not is_new_tile
             and seed_chart_value
@@ -5454,10 +5775,16 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             and seed_chart_value in builder.CHART_DISPLAY_LABELS
         ):
             chart_choices = [*chart_choices, seed_chart_value]
-        seed_chart = seed_tile.get("chart") if seed_tile.get("chart") in chart_choices else None
+        seed_chart = (
+            visual_seed_tile.get("chart")
+            if visual_seed_tile.get("chart") in chart_choices
+            else None
+        )
         if seed_chart is None and chart_choices and not is_new_tile:
             seed_chart = chart_choices[0]
         chart_state_key = f"builder_tile_chart_{editor_token}"
+        if st.session_state.get(chart_state_key) in builder.LEGACY_HEATMAP_CHARTS:
+            st.session_state[chart_state_key] = "heatmap"
         if (
             seed_chart is not None
             and chart_state_key in st.session_state
@@ -5467,15 +5794,20 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             # chosen), so ``index`` no longer applies; honor the seeded chart
             # as long as the user has not picked one explicitly.
             st.session_state[chart_state_key] = seed_chart
+        chart_selectbox_kwargs: dict[str, Any] = {}
+        if chart_state_key not in st.session_state:
+            chart_selectbox_kwargs["index"] = (
+                chart_choices.index(seed_chart) if seed_chart is not None else None
+            )
         chart_kind = st.selectbox(
             "Chart",
             chart_choices,
-            index=chart_choices.index(seed_chart) if seed_chart is not None else None,
             placeholder="Select chart" if metric_name else "Select metric first",
             disabled=not metric_name,
-            key=f"builder_tile_chart_{editor_token}",
+            key=chart_state_key,
             format_func=builder.chart_kind_selector_label,
             help=config_help.field_help("report.chart"),
+            **chart_selectbox_kwargs,
         )
         if metric_name and chart_kind:
             st.caption(
@@ -5491,11 +5823,11 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             )
         selection_matches_seed = bool(
             not is_new_tile
-            and metric_name == seed_tile.get("metric")
-            and chart_kind == seed_tile.get("chart")
+            and metric_name == visual_seed_tile.get("metric")
+            and chart_kind == visual_seed_tile.get("chart")
         )
         if selection_matches_seed:
-            defaults = dict(seed_tile)
+            defaults = dict(visual_seed_tile)
         else:
             defaults = (
                 builder.default_tile_fields(catalog, metric_name, chart_kind)
@@ -5505,7 +5837,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             defaults.update(
                 {
                     key: value
-                    for key, value in seed_tile.items()
+                    for key, value in visual_seed_tile.items()
                     if key in builder.CHART_SETTING_FIELDS
                 }
             )
@@ -5575,19 +5907,24 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         first_page = (
             seed_page if seed_page in pages_by_id else next(iter(pages_by_id), NEW_PAGE_KEY)
         )
+        page_context_key = (
+            "new_dashboard"
+            if dashboard_choice == NEW_DASHBOARD_KEY
+            else builder.widget_key_fragment(str(dashboard_choice))
+        )
         page_choice = st.selectbox(
             "Page",
             page_choices,
             index=builder.option_index(page_choices, first_page),
             format_func=lambda value: _page_choice_label(value, pages_by_id),
-            key=f"builder_page_choice_{editor_token}_{dashboard_id}",
+            key=f"builder_page_choice_{editor_token}_{page_context_key}",
             help=config_help.field_help("report.page"),
         )
         if page_choice == NEW_PAGE_KEY:
             page_title = st.text_input(
                 "Page Name",
                 value=builder.title_from_identifier(seed_page) if seed_page else "",
-                key=f"builder_page_name_{editor_token}_{dashboard_id}",
+                key=f"builder_page_name_{editor_token}_{page_context_key}_new_page",
                 help=config_help.field_help("report.page_id"),
             )
             page_id = builder.stable_catalog_id(
@@ -5610,13 +5947,18 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
                 help=config_help.field_help("report.page_id"),
             )
 
+        page_settings_key = (
+            f"{editor_token}_{page_context_key}_new_page"
+            if page_choice == NEW_PAGE_KEY
+            else f"{editor_token}_{page_context_key}_{builder.widget_key_fragment(page_id)}"
+        )
         page_filters, page_time_filter, page_settings_ready = _page_settings_editor(
             dashboard_id=dashboard_id,
             dashboard_title=dashboard_title,
             page_id=page_id,
             page_title=page_title,
             page=pages_by_id.get(str(page_choice)),
-            key_suffix=f"{editor_token}_{dashboard_id}_{page_id}",
+            key_suffix=page_settings_key,
         )
         existing_page = pages_by_id.get(str(page_choice))
 
@@ -5888,9 +6230,7 @@ def _render_dashboard_manager(workspace: Path, catalog: model.Catalog) -> None:
         format_func=lambda value: f"{dashboard_titles.get(value, value)} (`{value}`)",
         key="builder_manage_dashboard_select",
     )
-    dashboard = next(
-        (entry for entry in dashboards if entry.id == selected_dashboard), None
-    )
+    dashboard = next((entry for entry in dashboards if entry.id == selected_dashboard), None)
     pages = list(dashboard.pages) if dashboard is not None else []
     page_ids = [page.id for page in pages]
     page_titles = {page.id: page.title for page in pages}
@@ -5977,6 +6317,27 @@ def _visual_tile_control_keys(chart_kind: str) -> set[str]:
     """Return fields Visual mode owns; all other authored fields pass through."""
 
     keys = set(builder.chart_field_controls(chart_kind))
+    if chart_kind in builder.METRIC_OWNED_VALUE_CHARTS:
+        # The selected metric supplies the plotted/displayed value; own both
+        # legacy aliases so Visual mode removes them instead of passing through.
+        keys.update({"value", "y"})
+    if chart_kind == "heatmap":
+        # Intensity is metric-owned. Own the retired fields and the calendar
+        # date alias so editing any legacy heatmap migrates it cleanly.
+        keys.update({"color", "value", "date"})
+    if chart_kind == "boxplot":
+        # A legacy/manual Y is meaningless for digest-backed boxes. Treat it as
+        # controlled so the visual editor removes it instead of passing it through.
+        keys.add("y")
+    # Own chart-specific metric bindings so Visual mode removes legacy overrides.
+    keys.update(
+        {
+            "bar_polar": {"r"},
+            "donut": {"values", "value", "y"},
+            "treemap": {"color"},
+            "waterfall": {"color", "facet_row", "facet_col", "facet_column", "facets"},
+        }.get(chart_kind, set())
+    )
     keys.update(
         {
             "description",
@@ -6001,9 +6362,17 @@ def _visual_tile_control_keys(chart_kind: str) -> set[str]:
     if chart_kind == "combo":
         keys.add("y2_axis_title")
     if chart_kind == "kpi_card":
+        # Own the retired value field so saving in Visual mode removes a legacy
+        # override instead of passing it through.
+        keys.update({"value", "placement", "kpi"})
+    else:
+        # Placement and comparison settings belong only to KPI cards. Owning
+        # them for every other target chart makes card conversions valid.
         keys.update({"placement", "kpi"})
     if chart_kind == "gauge":
-        keys.update({"reference", "references"})
+        # Remove both retired value roles and KPI-only settings when a card is
+        # converted to a gauge.
+        keys.update({"value", "y", "reference", "references"})
     if chart_kind in {"bar", "waterfall", "pareto", "donut"}:
         keys.update({"sort_by", "sort_direction", "top_n"})
     if chart_kind == "bar":
@@ -6059,10 +6428,37 @@ def _preserve_untouched_tile_definition(
         candidate = model.Tile.model_validate(built_tile)
     except ValueError:
         return built_tile
+    baseline_payload = baseline.model_dump(mode="json", by_alias=True, exclude_none=True)
+    candidate_payload = candidate.model_dump(mode="json", by_alias=True, exclude_none=True)
+    if baseline.chart == candidate.chart and baseline.chart in builder.METRIC_OWNED_VALUE_CHARTS:
+        # Legacy value/y overrides no longer affect metric-owned displays. Ignore
+        # them for clean/dirty detection so merely opening an existing tile does
+        # not create a draft; a subsequent real edit still saves without them.
+        for payload in (baseline_payload, candidate_payload):
+            payload.pop("value", None)
+            payload.pop("y", None)
+            if baseline.chart in builder.METRIC_OWNED_RADIAL_CHARTS:
+                payload.pop("r", None)
+    if baseline.chart == candidate.chart and baseline.chart in builder.METRIC_OWNED_COLOR_CHARTS:
+        # Preserve clean-on-open behavior for legacy treemap color overrides.
+        for payload in (baseline_payload, candidate_payload):
+            payload.pop("color", None)
+    if baseline.chart == candidate.chart == "waterfall":
+        # Color and facets were exposed by the generic editor but never had
+        # rendering semantics for the single-trace waterfall.
+        for payload in (baseline_payload, candidate_payload):
+            for field_name in ("color", "facet_row", "facet_col", "facet_column", "facets"):
+                payload.pop(field_name, None)
+    if baseline.chart == candidate.chart and baseline.chart in builder.METRIC_OWNED_VALUES_CHARTS:
+        # Preserve clean-on-open behavior for legacy donut value overrides.
+        for payload in (baseline_payload, candidate_payload):
+            payload.pop("values", None)
+            payload.pop("value", None)
+            payload.pop("y", None)
     status = builder.builder_draft_status(
         f"tile-editor:{baseline.id}",
-        baseline.model_dump(mode="json", by_alias=True, exclude_none=True),
-        candidate.model_dump(mode="json", by_alias=True, exclude_none=True),
+        baseline_payload,
+        candidate_payload,
     )
     return seed_tile if not status.dirty else built_tile
 
@@ -6180,8 +6576,23 @@ def _tile_field_controls(
     catalog: model.Catalog | None = None,
     metric_name: str | None = None,
 ) -> dict[str, Any]:
+    defaults = dict(defaults)
+    if chart_kind == "combo" and catalog is not None and metric_name:
+        defaults["y2"] = builder.combo_secondary_metric_default(
+            catalog,
+            metric_name,
+            defaults.get("y2", defaults.get("line_y")),
+        )
+    control_keys = builder.chart_field_controls(chart_kind)
+    if (
+        chart_kind == "heatmap"
+        and catalog is not None
+        and metric_name
+        and not builder.descriptive_property_options(catalog, metric_name)
+    ):
+        control_keys = tuple(key for key in control_keys if key not in {"property", "score"})
     fields = _field_controls_for_keys(
-        builder.chart_field_controls(chart_kind),
+        control_keys,
         chart_kind,
         defaults,
         field_options,
@@ -6227,7 +6638,7 @@ def _field_controls_for_keys(
                 metric_name,
             )
             fields[key] = st.selectbox(
-                _field_label(key),
+                "Y2 Metric" if chart_kind == "combo" and key == "y2" else _field_label(key),
                 options,
                 index=builder.option_index(options, _tile_field_default(defaults, key)),
                 key=f"builder_tile_{key}_{key_suffix}",
@@ -6246,7 +6657,7 @@ def _default_multiselect_values(value: Any) -> list[str]:
     return [str(item) for item in value if isinstance(item, str) and item]
 
 
-def _tile_field_options(
+def _tile_field_options(  # noqa: PLR0911
     chart_kind: str,
     key: str,
     defaults: dict[str, Any],
@@ -6255,14 +6666,49 @@ def _tile_field_options(
     catalog: model.Catalog | None,
     metric_name: str | None,
 ) -> list[str]:
-    if chart_kind.startswith("descriptive_") and key == "property":
+    if chart_kind == "interval" and key in builder.INTERVAL_METRIC_OUTPUT_FIELDS:
+        outputs = (
+            builder.metric_output_options(catalog, metric_name)
+            if catalog is not None and metric_name
+            else []
+        )
+        return ["", *outputs]
+    if chart_kind == "combo" and key == "y2":
+        metrics = (
+            builder.combo_secondary_metric_options(catalog, metric_name)
+            if catalog is not None and metric_name
+            else []
+        )
+        return ["", *metrics]
+    if chart_kind == "heatmap" and key in {"x", "y"}:
+        axes = (
+            builder.chart_axis_options(catalog, metric_name)
+            if catalog is not None and metric_name
+            else []
+        )
+        return _options_with_current(["", *axes], defaults.get(key))
+    if chart_kind == "boxplot" and key == "property":
+        properties = (
+            builder.distribution_property_options(catalog, metric_name)
+            if catalog is not None and metric_name
+            else []
+        )
+        return properties or [""]
+    if chart_kind == "histogram" and key == "property":
+        properties = (
+            builder.distribution_property_options(catalog, metric_name)
+            if catalog is not None and metric_name
+            else []
+        )
+        return _options_with_current(properties or field_options, defaults.get(key))
+    if (chart_kind.startswith("descriptive_") or chart_kind == "heatmap") and key == "property":
         properties = (
             builder.descriptive_property_options(catalog, metric_name)
             if catalog is not None and metric_name
             else []
         )
         return _options_with_current(properties or field_options, defaults.get(key))
-    if chart_kind.startswith("descriptive_") and key == "score":
+    if (chart_kind.startswith("descriptive_") or chart_kind == "heatmap") and key == "score":
         property_name = str(selected_fields.get("property") or defaults.get("property") or "")
         scores = (
             builder.descriptive_score_options(catalog, metric_name, property_name)
@@ -7561,9 +8007,78 @@ def _source_inspection_scope() -> dict[str, Any]:
     return st.session_state[BUILDER_SOURCE_INSPECTION_SCOPE_KEY]
 
 
-# Observed physical columns live outside the builder_* namespace so draft
-# registry snapshots and JSON checkpoints never capture them.
+# Observed physical columns and optional create-source schema previews live
+# outside the builder_* namespace so draft registry snapshots and JSON
+# checkpoints never capture them.
 VS_OBSERVED_SOURCE_COLUMNS_KEY = "vs_observed_source_columns"
+VS_SOURCE_SAMPLE_SCHEMAS_KEY = "vs_source_sample_schemas"
+
+
+def _render_source_sample_schema_step(
+    ctx: ValueStreamContext,
+    source: model.Source,
+    candidate: model.Source,
+    *,
+    rename_capitalize: bool,
+) -> list[str]:
+    """Offer an explicit bounded inspection that seeds create-source field controls."""
+
+    candidate_hash = config_canonical.config_hash(candidate)
+    stored_by_source = st.session_state.get(VS_SOURCE_SAMPLE_SCHEMAS_KEY)
+    if not isinstance(stored_by_source, dict):
+        stored_by_source = {}
+        st.session_state[VS_SOURCE_SAMPLE_SCHEMAS_KEY] = stored_by_source
+    stored = stored_by_source.get(source.id)
+    loaded_schema: list[list[str]] = []
+    if isinstance(stored, dict) and stored.get("source_hash") == candidate_hash:
+        raw_schema = stored.get("raw_schema")
+        if isinstance(raw_schema, list):
+            loaded_schema = [
+                [str(item[0]), str(item[1])]
+                for item in raw_schema
+                if isinstance(item, list) and len(item) == 2
+            ]
+
+    with components.bordered_panel(
+        "Sample Schema (optional)",
+        "Read one bounded matching sample to populate field controls before you apply the source.",
+    ):
+        st.caption(
+            "This preview reads no more than the inspection limit. The editor keeps only field "
+            "names and types in session state, and it does not ingest data."
+        )
+        load_label = "Reload sample" if loaded_schema else "Load sample"
+        if st.button(
+            load_label,
+            icon=":material/database_search:",
+            key=f"vs_source_load_sample_{source.id}",
+        ):
+            result = _source_inspection(ctx, candidate)
+            if not result.error_kind and result.raw_schema:
+                loaded_schema = [[name, dtype] for name, dtype in result.raw_schema]
+                stored_by_source[source.id] = {
+                    "source_hash": candidate_hash,
+                    "raw_schema": loaded_schema,
+                }
+            else:
+                stored_by_source.pop(source.id, None)
+                loaded_schema = []
+
+        if loaded_schema:
+            raw_columns = [name for name, _dtype in loaded_schema]
+            effective_columns = _rename_capitalize_fields(raw_columns, rename_capitalize)
+            preview = ", ".join(f"`{field}`" for field in effective_columns[:8])
+            if len(effective_columns) > 8:
+                preview = f"{preview}, +{len(effective_columns) - 8} more"
+            st.success(
+                f"Loaded {len(effective_columns)} fields from `{_source_path_pattern(candidate)}`."
+            )
+            st.caption(f"Available fields: {preview}")
+            return raw_columns
+
+        if isinstance(stored, dict) and stored.get("source_hash") != candidate_hash:
+            st.info("Reader, Root, File Pattern, or grouping settings changed. Reload sample.")
+        return []
 
 
 def _record_observed_source_columns(source_id: str, result: SourceInspectionResult) -> None:
@@ -7590,6 +8105,22 @@ def _observed_source_columns() -> dict[str, list[str]]:
         for source_id, columns in raw.items()
         if isinstance(columns, list)
     }
+
+
+def _source_columns_for_apply(
+    ctx: ValueStreamContext,
+    source_def: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Inspect the current source draft and bind its raw schema to its draft ID."""
+
+    candidate = model.Source.model_validate(source_def)
+    result = _source_inspection(ctx, candidate)
+    columns_by_id = _observed_source_columns()
+    if result.error_kind or not result.raw_schema:
+        columns_by_id.pop(candidate.id, None)
+    else:
+        columns_by_id[candidate.id] = [name for name, _dtype in result.raw_schema]
+    return columns_by_id
 
 
 def _source_inspection(
@@ -7818,8 +8349,12 @@ def _sync_source_rename_capitalize_state(
     ctx: ValueStreamContext,
     source: model.Source,
     enabled: bool,
+    *,
+    sample_columns: list[str] | None = None,
+    widget_source_id: str | None = None,
 ) -> None:
-    state_key = f"builder_source_rename_capitalize_applied_{source.id}"
+    widget_id = widget_source_id or source.id
+    state_key = f"builder_source_rename_capitalize_applied_{widget_id}"
     previous = st.session_state.get(state_key)
     if previous is None:
         st.session_state[state_key] = enabled
@@ -7827,21 +8362,26 @@ def _sync_source_rename_capitalize_state(
     if bool(previous) == enabled:
         return
 
-    mapping = _source_rename_mapping(ctx, source, enabled)
+    mapping = _source_rename_mapping(
+        ctx,
+        source,
+        enabled,
+        sample_columns=sample_columns,
+    )
     if mapping:
-        field_remap.remap_state_field(f"builder_source_ts_{source.id}", mapping)
-        field_remap.remap_state_field_list(f"builder_source_natural_{source.id}", mapping)
-        field_remap.remap_state_field_list(f"builder_source_drop_{source.id}", mapping)
-        field_remap.remap_state_rows(f"builder_source_defaults_{source.id}", mapping, ("Field",))
-        field_remap.remap_state_rows(f"builder_source_filter_rows_{source.id}", mapping, ("Field",))
-        field_remap.remap_state_raw_expression(f"builder_source_raw_filter_{source.id}", mapping)
-        field_remap.remap_state_calculation_rows(f"builder_source_calcs_{source.id}", mapping)
+        field_remap.remap_state_field(f"builder_source_ts_{widget_id}", mapping)
+        field_remap.remap_state_field_list(f"builder_source_natural_{widget_id}", mapping)
+        field_remap.remap_state_field_list(f"builder_source_drop_{widget_id}", mapping)
+        field_remap.remap_state_rows(f"builder_source_defaults_{widget_id}", mapping, ("Field",))
+        field_remap.remap_state_rows(f"builder_source_filter_rows_{widget_id}", mapping, ("Field",))
+        field_remap.remap_state_raw_expression(f"builder_source_raw_filter_{widget_id}", mapping)
+        field_remap.remap_state_calculation_rows(f"builder_source_calcs_{widget_id}", mapping)
 
     for editor_key in (
-        f"builder_source_defaults_editor_{source.id}",
-        f"builder_source_filter_editor_{source.id}",
-        f"builder_source_raw_filter_{source.id}_editor",
-        f"builder_source_calcs_editor_{source.id}",
+        f"builder_source_defaults_editor_{widget_id}",
+        f"builder_source_filter_editor_{widget_id}",
+        f"builder_source_raw_filter_{widget_id}_editor",
+        f"builder_source_calcs_editor_{widget_id}",
     ):
         st.session_state.pop(editor_key, None)
     st.session_state[state_key] = enabled
@@ -7851,8 +8391,15 @@ def _source_rename_mapping(
     ctx: ValueStreamContext,
     source: model.Source,
     enabled: bool,
+    *,
+    sample_columns: list[str] | None = None,
 ) -> dict[str, str]:
-    raw_fields = _source_field_options(ctx, source, rename_capitalize=False)
+    raw_fields = _source_field_options(
+        ctx,
+        source,
+        rename_capitalize=False,
+        sample_columns=sample_columns,
+    )
     forward = {
         field: renamed
         for field, renamed in zip(raw_fields, capitalize_fields(raw_fields), strict=False)
@@ -7974,32 +8521,56 @@ def _next_processor_id(ctx: ValueStreamContext, source_id: str) -> str:
     return f"{base}_{index}"
 
 
+def _new_source_template(ctx: ValueStreamContext) -> model.Source:
+    """Return a valid, catalog-independent starting point for source creation."""
+
+    return model.Source.model_validate(
+        {
+            "id": _next_source_id(ctx),
+            "description": "",
+            "reader": {
+                "kind": "parquet",
+                "file_pattern": "**/*.parquet",
+                "root": "data",
+                "streaming": True,
+            },
+            "schema": {
+                "timestamp_column": None,
+                "natural_key": [],
+                "drop_columns": [],
+            },
+            "transforms": [],
+            "defaults": {},
+        }
+    )
+
+
+def _next_source_id(ctx: ValueStreamContext) -> str:
+    existing = {source.id for source in ctx.catalog.pipelines.sources}
+    if "source" not in existing:
+        return "source"
+    index = 2
+    while f"source_{index}" in existing:
+        index += 1
+    return f"source_{index}"
+
+
 def _first_matching_field(fields: list[str], target: str) -> str:
     folded = target.casefold()
     return next((field for field in fields if field.casefold() == folded), "")
 
 
-def _build_source_definition(
-    *,
+def _source_reader_definition(
     source: model.Source,
-    source_id: str,
-    description: str,
+    *,
     reader_kind: str,
     file_pattern: str,
     group_by_filename: str | None,
     root: str,
     streaming: bool,
     hive_partitioning: bool,
-    timestamp_column: str | None,
-    natural_key: list[str],
-    drop_columns: list[str],
-    default_rows: list[dict[str, Any]],
-    use_rename_capitalize: bool,
-    filter_expression: dict[str, Any] | None,
-    calculated_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    source_def = builder.source_to_dict(source)
-    reader_def = dict(source_def.get("reader", {}))
+    reader_def = dict(builder.source_to_dict(source).get("reader", {}))
     reader_def.update(
         {
             "kind": reader_kind,
@@ -8020,6 +8591,68 @@ def _build_source_definition(
         reader_def["hive_partitioning"] = True
     else:
         reader_def.pop("hive_partitioning", None)
+    return reader_def
+
+
+def _source_inspection_candidate(
+    *,
+    source: model.Source,
+    reader_kind: str,
+    file_pattern: str,
+    group_by_filename: str | None,
+    root: str,
+    streaming: bool,
+    hive_partitioning: bool,
+) -> model.Source:
+    """Build the reader-only source used by the optional sample-schema step."""
+
+    source_def = builder.source_to_dict(source)
+    source_def["reader"] = _source_reader_definition(
+        source,
+        reader_kind=reader_kind,
+        file_pattern=file_pattern,
+        group_by_filename=group_by_filename,
+        root=root,
+        streaming=streaming,
+        hive_partitioning=hive_partitioning,
+    )
+    source_def["transforms"] = []
+    source_def["defaults"] = {}
+    return model.Source.model_validate(source_def)
+
+
+def _build_source_definition(
+    *,
+    source: model.Source,
+    source_id: str,
+    description: str,
+    reader_kind: str,
+    file_pattern: str,
+    group_by_filename: str | None,
+    root: str,
+    streaming: bool,
+    hive_partitioning: bool,
+    materialize_transforms: bool,
+    timestamp_column: str | None,
+    natural_key: list[str],
+    drop_columns: list[str],
+    default_rows: list[dict[str, Any]],
+    use_rename_capitalize: bool,
+    filter_expression: dict[str, Any] | None,
+    calculated_rows: list[dict[str, Any]],
+    automatic_outcome_transforms: bool = False,
+    available_fields: list[str] | tuple[str, ...] = (),
+) -> dict[str, Any]:
+    source_def = builder.source_to_dict(source)
+    reader_def = _source_reader_definition(
+        source,
+        reader_kind=reader_kind,
+        file_pattern=file_pattern,
+        group_by_filename=group_by_filename,
+        root=root,
+        streaming=streaming,
+        hive_partitioning=hive_partitioning,
+    )
 
     transforms = [
         transform
@@ -8029,8 +8662,18 @@ def _build_source_definition(
     default_values = builder.build_default_values(default_rows)
     if use_rename_capitalize:
         transforms.insert(0, {"kind": "rename_capitalize"})
-        if default_values:
-            transforms.append({"kind": "defaults", "values": default_values})
+    if automatic_outcome_transforms:
+        existing_transform_kinds = {str(transform.get("kind", "")) for transform in transforms}
+        transforms.extend(
+            transform
+            for transform in _automatic_outcome_transforms(
+                timestamp_column,
+                available_fields=available_fields,
+            )
+            if transform["kind"] not in existing_transform_kinds
+        )
+    if use_rename_capitalize and default_values:
+        transforms.append({"kind": "defaults", "values": default_values})
     if filter_expression:
         transforms.append({"kind": "filter", "expression": filter_expression})
     transforms.extend(builder.build_derive_column_transforms(calculated_rows))
@@ -8040,6 +8683,7 @@ def _build_source_definition(
             "id": source_id,
             "description": description,
             "reader": reader_def,
+            "materialize_transforms": materialize_transforms,
             "schema": {
                 "timestamp_column": timestamp_column,
                 "natural_key": natural_key,
@@ -8058,6 +8702,54 @@ def _build_source_definition(
     if not equivalent.dirty:
         return builder.source_to_dict(source)
     return source_def
+
+
+def _automatic_outcome_transforms(
+    timestamp_column: str | None,
+    *,
+    available_fields: list[str] | tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    """Return conventional Pega transforms for an outcome timestamp."""
+
+    timestamp = str(timestamp_column or "").strip()
+    if timestamp.casefold() not in {"outcomedate", "outcometime"}:
+        return []
+
+    known_fields = {str(field) for field in available_fields if str(field)}
+    fields_are_known = bool(known_fields)
+    parse_columns = [timestamp]
+    if not fields_are_known or "DecisionTime" in known_fields:
+        parse_columns.append("DecisionTime")
+
+    transforms: list[dict[str, Any]] = [
+        {
+            "kind": "parse_datetime",
+            "columns": parse_columns,
+            "format": "%Y%m%dT%H%M%S%.3f %Z",
+        },
+        {
+            "kind": "derive_calendar",
+            "from": timestamp,
+            "outputs": ["Day", "Month", "Quarter", "Year"],
+        },
+    ]
+    action_parts = ["Issue", "Group", "Name"]
+    if not fields_are_known or set(action_parts) <= known_fields:
+        transforms.append(
+            {
+                "kind": "derive_action_id",
+                "parts": action_parts,
+                "sep": "/",
+            }
+        )
+    float_columns = {
+        column: "Float64"
+        for column in ("Propensity", "FinalPropensity", "Priority", "Revenue")
+        if not fields_are_known or column in known_fields
+    }
+    if float_columns:
+        transforms.append({"kind": "cast", "columns": float_columns})
+    return transforms
 
 
 def _source_editor_projection(source: model.Source) -> dict[str, Any]:
@@ -8142,6 +8834,7 @@ def _state_rows(
                     str(extra.get("source_column", "") or ""),
                     mapping,
                 ),
+                "Parameters": _state_parameters_yaml(extra),
                 "Derived From": _state_derivation(processor, name, spec),
                 "Enabled": True,
             }
@@ -8151,6 +8844,7 @@ def _state_rows(
             "State": "Count",
             "Type": "count",
             "Source Column": "",
+            "Parameters": "",
             "Derived From": "included rows",
             "Enabled": True,
         }
@@ -8162,6 +8856,7 @@ def _blank_state_row() -> dict[str, Any]:
         "State": "Count",
         "Type": "count",
         "Source Column": "",
+        "Parameters": "",
         "Derived From": "included rows",
         "Enabled": True,
     }
@@ -8232,6 +8927,17 @@ def _build_state_defs(
             continue
         state_def = dict(existing.get(state_name, {}))
         state_def["type"] = state_type
+        if "Parameters" in row:
+            for key in list(state_def):
+                if key not in {"type", "source_column"}:
+                    state_def.pop(key)
+            state_def.update(
+                _parse_state_parameters(
+                    row.get("Parameters"),
+                    state_name=state_name,
+                    state_type=state_type,
+                )
+            )
         source_column = str(row.get("Source Column", "")).strip()
         if source_column:
             state_def["source_column"] = source_column
@@ -8239,6 +8945,60 @@ def _build_state_defs(
             state_def.pop("source_column", None)
         out[state_name] = state_def
     return out
+
+
+def _state_parameters_yaml(extra: Mapping[str, Any]) -> str:
+    parameters = {str(key): value for key, value in extra.items() if key != "source_column"}
+    if not parameters:
+        return ""
+    return yaml.safe_dump(
+        parameters,
+        sort_keys=True,
+        default_flow_style=True,
+    ).strip()
+
+
+def _parse_state_parameters(
+    value: Any,
+    *,
+    state_name: str,
+    state_type: str | None = None,
+) -> dict[str, Any]:
+    if value in (None, ""):
+        return {}
+    if isinstance(value, Mapping):
+        parameters = dict(value)
+    else:
+        try:
+            parameters = yaml.safe_load(str(value))
+        except yaml.YAMLError as exc:
+            raise ValueError(f"State `{state_name}` parameters are not valid YAML: {exc}") from exc
+    if parameters is None:
+        return {}
+    if not isinstance(parameters, Mapping):
+        raise ValueError(
+            f"State `{state_name}` parameters must be a YAML mapping, for example `{{lg_k: 11}}`."
+        )
+    reserved = {"type", "source_column"}.intersection(parameters)
+    if reserved:
+        names = ", ".join(sorted(reserved))
+        raise ValueError(
+            f"State `{state_name}` parameters cannot redefine {names}; use the "
+            "Type and Source Column fields."
+        )
+    sketch_parameter_types = {
+        "lg_k": {"cpc", "hll", "theta"},
+        "k": {"tdigest", "kll"},
+        "lg_max_map_size": {"topk"},
+    }
+    for parameter_name, allowed_types in sketch_parameter_types.items():
+        if parameter_name in parameters and state_type and state_type not in allowed_types:
+            expected = ", ".join(sorted(allowed_types))
+            raise ValueError(
+                f"State `{state_name}` parameter `{parameter_name}` is only valid "
+                f"for state type(s): {expected}; selected type is `{state_type}`."
+            )
+    return {str(key): parameter for key, parameter in parameters.items()}
 
 
 def _selected_tile(

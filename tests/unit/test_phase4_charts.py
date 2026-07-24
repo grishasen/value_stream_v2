@@ -17,17 +17,34 @@ from valuestream.states import tdigest
 from valuestream.ui import theme as ui_theme
 
 SUPPORTED_CHART_CASES = [
-    ({"chart": "line", "title": "Line", "x": "Day", "y": "CTR", "color": "Channel"}, None),
     (
-        {"chart": "stacked_area", "title": "Area", "x": "Day", "y": "CTR", "color": "Channel"},
+        {"chart": "line", "title": "Line", "metric": "CTR", "x": "Day", "color": "Channel"},
         None,
     ),
-    ({"chart": "bar", "title": "Bar", "x": "Channel", "y": "CTR"}, None),
-    ({"chart": "kpi_card", "title": "KPI", "value": "CTR", "reference": 0.25}, None),
-    ({"chart": "waterfall", "title": "Waterfall", "x": "Channel", "y": "Revenue"}, "marketing"),
+    (
+        {
+            "chart": "stacked_area",
+            "title": "Area",
+            "metric": "CTR",
+            "x": "Day",
+            "color": "Channel",
+        },
+        None,
+    ),
+    ({"chart": "bar", "title": "Bar", "metric": "CTR", "x": "Channel"}, None),
+    ({"chart": "kpi_card", "title": "KPI", "metric": "CTR", "reference": 0.25}, None),
+    (
+        {"chart": "waterfall", "title": "Waterfall", "metric": "Revenue", "x": "Channel"},
+        "marketing",
+    ),
     ({"chart": "pareto", "title": "Pareto", "x": "Campaign", "y": "Revenue"}, "marketing"),
     (
-        {"chart": "treemap", "title": "Tree", "path": ["Channel", "Placement"], "color": "CTR"},
+        {
+            "chart": "treemap",
+            "title": "Tree",
+            "metric": "CTR",
+            "path": ["Channel", "Placement"],
+        },
         None,
     ),
     (
@@ -56,7 +73,7 @@ SUPPORTED_CHART_CASES = [
         },
         "marketing",
     ),
-    ({"chart": "donut", "title": "Donut", "names": "Channel", "values": "Revenue"}, "marketing"),
+    ({"chart": "donut", "title": "Donut", "metric": "Revenue", "names": "Channel"}, "marketing"),
     (
         {
             "chart": "geo_map",
@@ -76,7 +93,7 @@ SUPPORTED_CHART_CASES = [
         {
             "chart": "bar_polar",
             "title": "Polar",
-            "r": "CTR",
+            "metric": "CTR",
             "theta": "Channel",
             "color": "Placement",
         },
@@ -86,13 +103,16 @@ SUPPORTED_CHART_CASES = [
         {
             "chart": "sankey",
             "title": "Sankey",
+            "metric": "FlowValue",
             "source": "SourceStage",
             "target": "TargetStage",
-            "value": "FlowValue",
         },
         "marketing",
     ),
-    ({"chart": "gauge", "title": "Gauge", "value": "CTR", "references": {"Web": 0.4}}, None),
+    (
+        {"chart": "gauge", "title": "Gauge", "metric": "CTR", "references": {"Web": 0.4}},
+        None,
+    ),
     (
         {
             "chart": "funnel",
@@ -125,15 +145,6 @@ SUPPORTED_CHART_CASES = [
     ),
     (
         {
-            "chart": "descriptive_histogram",
-            "title": "DHist",
-            "property": "ResponseTime",
-            "score": "Mean",
-        },
-        "descriptive",
-    ),
-    (
-        {
             "chart": "descriptive_heatmap",
             "title": "DHeat",
             "x": "Channel",
@@ -142,15 +153,6 @@ SUPPORTED_CHART_CASES = [
             "score": "Mean",
         },
         "descriptive",
-    ),
-    (
-        {
-            "chart": "descriptive_funnel",
-            "title": "DFunnel",
-            "stages": ["Impression", "Clicked"],
-            "color": "Channel",
-        },
-        None,
     ),
     (
         {"chart": "experiment_z_score", "title": "Z", "x": "z_score", "y": "ExperimentName"},
@@ -189,6 +191,130 @@ def test_supported_charts_validate_plotly_6_json(
 
 
 @pytest.mark.unit
+def test_purchase_frequency_projection_uses_run_rate_and_clear_axis_labels() -> None:
+    figure = render_chart(
+        _base_frame(),
+        {
+            "id": "purchase_projection",
+            "title": "Purchase frequency projection",
+            "metric": "CLV",
+            "chart": "model",
+            "horizon": 20,
+        },
+    )
+
+    projected = sorted(float(value) for trace in figure.data for value in trace.y)
+    assert projected == pytest.approx([2.0, 4.0, 6.0])
+    assert figure.layout.xaxis.title.text == "Historical purchase frequency"
+    assert figure.layout.yaxis.title.text == "Projected purchases (20-day horizon)"
+    assert figure.layout.legend.title.text == "RFM segment"
+
+
+@pytest.mark.unit
+def test_kpi_card_ignores_legacy_dimension_value_override() -> None:
+    figure = render_chart(
+        pl.DataFrame({"Channel": ["Web"], "CTR": [0.25]}),
+        {
+            "id": "ctr",
+            "title": "CTR",
+            "metric": "CTR",
+            "chart": "kpi_card",
+            "value": "Channel",
+        },
+    )
+
+    assert figure.data[0].value == pytest.approx(0.25)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("chart_kind", "x", "extra"),
+    [
+        ("line", "Day", {}),
+        ("bar", "Channel", {}),
+        ("stacked_area", "Day", {"color": "Channel"}),
+        ("waterfall", "Channel", {"color": "Channel"}),
+    ],
+)
+def test_metric_owned_y_charts_ignore_legacy_y_override(
+    chart_kind: str,
+    x: str,
+    extra: dict[str, str],
+) -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Day": [dt.date(2024, 1, 1), dt.date(2024, 1, 2)],
+                "Channel": ["Web", "Mobile"],
+                "CTR": [0.2, 0.4],
+                "Count": [20, 40],
+            }
+        ),
+        {
+            "id": f"ctr_{chart_kind}",
+            "title": "CTR",
+            "metric": "CTR",
+            "chart": chart_kind,
+            "x": x,
+            "y": "Count",
+            **extra,
+        },
+    )
+
+    plotted = sorted(float(value) for trace in figure.data for value in trace.y)
+    assert plotted == pytest.approx([0.2, 0.4])
+
+
+@pytest.mark.unit
+def test_pareto_uses_metric_output_instead_of_legacy_y_override() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Channel": ["Web", "Mobile"],
+                "CTR": [0.2, 0.4],
+                "Count": [20, 40],
+            }
+        ),
+        {
+            "id": "ctr_pareto",
+            "title": "CTR",
+            "metric": "CTR",
+            "chart": "pareto",
+            "x": "Channel",
+            "y": "Count",
+        },
+    )
+
+    plotted = sorted(float(value) for value in figure.data[0].y)
+    assert plotted == pytest.approx([0.2, 0.4])
+
+
+@pytest.mark.unit
+def test_polar_bar_uses_metric_output_instead_of_legacy_radius_override() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Channel": ["Web", "Mobile"],
+                "CTR": [0.2, 0.4],
+                "Count": [20, 40],
+            }
+        ),
+        {
+            "id": "ctr_polar",
+            "title": "CTR",
+            "metric": "CTR",
+            "chart": "bar_polar",
+            "r": "Count",
+            "theta": "Channel",
+            "color": "Channel",
+        },
+    )
+
+    plotted = sorted(float(value) for trace in figure.data for value in trace.r)
+    assert plotted == pytest.approx([0.2, 0.4])
+
+
+@pytest.mark.unit
 def test_combo_chart_preserves_secondary_axis_semantics() -> None:
     figure = render_chart(
         pl.DataFrame(
@@ -203,7 +329,7 @@ def test_combo_chart_preserves_secondary_axis_semantics() -> None:
             "metric": "FunnelClicks",
             "chart": "combo",
             "x": "Day",
-            "y": "Clicked_Count",
+            "y": "DimensionThatMustBeIgnored",
             "y2": "Impression_Count",
             "labels": {
                 "Clicked_Count": "Clicked Count",
@@ -216,6 +342,8 @@ def test_combo_chart_preserves_secondary_axis_semantics() -> None:
 
     assert figure.layout.yaxis.title.text == "Clicked Count (clicks)"
     assert figure.layout.yaxis2.title.text == "Impressions"
+    assert list(figure.data[0].y) == [12, 15]
+    assert list(figure.data[1].y) == [120, 150]
 
 
 @pytest.mark.unit
@@ -270,7 +398,10 @@ def test_table_chart_expands_topk_items_into_ranked_rows() -> None:
     assert list(table.cells.values[4]) == [12, 7]
     assert list(table.cells.values[5]) == [11, 7]
     assert list(table.cells.values[6]) == [13, 8]
-    expected_font = "Inter, DM Sans, Segoe UI, system-ui, sans-serif"
+    expected_font = (
+        'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, '
+        '"Helvetica Neue", Arial, sans-serif'
+    )
     assert table.header.font.family == expected_font
     assert table.cells.font.family == expected_font
     assert table.header.font.size == 14
@@ -307,6 +438,25 @@ def test_theme_background_overrides_builtin_plotly_template_background() -> None
     assert list(figure.layout.colorway) == ["#4B73F0", "#22C7F3"]
     assert figure.layout.paper_bgcolor == "#f5f3ee"
     assert figure.layout.plot_bgcolor == "#f5f3ee"
+
+
+@pytest.mark.unit
+def test_funnel_qualitative_palette_handles_plotly_array_stages() -> None:
+    figure = render_chart(
+        _marketing_frame(),
+        {
+            "id": "funnel",
+            "metric": "Interactions",
+            "chart": "funnel",
+            "title": "Funnel",
+            "stages": ["Impression", "Clicked", "Conversion"],
+            "color": "Channel",
+        },
+        theme={"colorway": ["#4B73F0", "#22C7F3"]},
+    )
+
+    assert {trace.type for trace in figure.data} == {"funnel"}
+    assert all(len(trace.marker.color) == max(1, len(trace.y)) for trace in figure.data)
 
 
 @pytest.mark.unit
@@ -594,7 +744,8 @@ def test_gauge_renders_faceted_indicator_grid() -> None:
             "metric": "CTR",
             "chart": "gauge",
             "title": "Gauge",
-            "value": "CTR",
+            # Legacy overrides must not redirect the gauge away from its metric.
+            "value": "Channel",
             "facet_row": "Channel",
             "facet_col": "Placement",
             "reference": {
@@ -636,7 +787,6 @@ def test_gauge_defaults_reference_line_to_average_value() -> None:
             "metric": "CTR",
             "chart": "gauge",
             "title": "Gauge",
-            "value": "CTR",
             "facet_row": "Channel",
             "facet_col": "Placement",
         },
@@ -774,7 +924,7 @@ def test_sankey_chart_maps_source_target_labels_to_link_indices() -> None:
             "title": "Sankey",
             "source": "SourceStage",
             "target": "TargetStage",
-            "value": "FlowValue",
+            "value": "Revenue",
         },
     )
 
@@ -782,6 +932,7 @@ def test_sankey_chart_maps_source_target_labels_to_link_indices() -> None:
 
     assert {"Email", "Landing", "Signup"} <= set(labels)
     assert len(figure.data[0]["link"]["source"]) == _marketing_frame().height
+    assert list(figure.data[0]["link"]["value"]) == pytest.approx([80.0, 30.0, 50.0])
 
 
 @pytest.mark.unit
@@ -897,6 +1048,54 @@ def test_treemap_supports_legacy_x_y_tile_shape() -> None:
 
 
 @pytest.mark.unit
+def test_treemap_uses_metric_output_instead_of_legacy_color_override() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Channel": ["Web", "Mobile"],
+                "CTR": [0.2, 0.4],
+                "Count": [20, 40],
+            }
+        ),
+        {
+            "id": "ctr_treemap",
+            "title": "CTR",
+            "metric": "CTR",
+            "chart": "treemap",
+            "path": ["Channel"],
+            "color": "Count",
+        },
+    )
+
+    colors = [float(value) for value in figure.data[0].marker.colors]
+    assert min(colors) == pytest.approx(0.2)
+    assert max(colors) == pytest.approx(0.4)
+
+
+@pytest.mark.unit
+def test_donut_uses_metric_output_instead_of_legacy_values_override() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Channel": ["Web", "Mobile"],
+                "CTR": [0.2, 0.4],
+                "Count": [20, 40],
+            }
+        ),
+        {
+            "id": "ctr_mix",
+            "title": "CTR mix",
+            "metric": "CTR",
+            "chart": "donut",
+            "names": "Channel",
+            "values": "Count",
+        },
+    )
+
+    assert sorted(float(value) for value in figure.data[0].values) == pytest.approx([0.2, 0.4])
+
+
+@pytest.mark.unit
 def test_treemap_uses_theme_aware_default_colorscales() -> None:
     rows = pl.DataFrame(
         {
@@ -999,6 +1198,67 @@ def test_heatmap_uses_theme_aware_hot_cold_colorscales() -> None:
     assert light.data[0].colorscale[-1][1] == "#DC2626"
     assert dark.data[0].colorscale[0][1] == "#5598E7"
     assert dark.data[0].colorscale[-1][1] == "#FCA5A5"
+
+
+@pytest.mark.unit
+def test_heatmap_intensity_is_derived_from_metric_not_color_override() -> None:
+    rows = pl.DataFrame(
+        {
+            "Channel": ["Web", "Email"],
+            "Placement": ["Hero", "Flex"],
+            "CTR": [0.1, 0.2],
+            "Count": [100, 200],
+        }
+    )
+
+    figure = render_chart(
+        rows,
+        {
+            "id": "heatmap",
+            "metric": "CTR",
+            "chart": "heatmap",
+            "title": "CTR Heatmap",
+            "x": "Channel",
+            "y": "Placement",
+            "color": "Count",
+            "value": "Count",
+        },
+    )
+
+    assert {
+        value
+        for row in figure.data[0].z
+        for value in row
+        if value is not None and not math.isnan(value)
+    } == {0.1, 0.2}
+
+
+@pytest.mark.unit
+def test_unified_heatmap_without_y_uses_daily_calendar_layout() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Day": [dt.date(2024, 1, 1), dt.date(2024, 1, 2)],
+                "CTR": [0.02, 0.1],
+                "Count": [20, 100],
+            }
+        ),
+        {
+            "id": "calendar",
+            "metric": "CTR",
+            "chart": "heatmap",
+            "title": "CTR Calendar",
+            "x": "Day",
+            "value": "Count",
+        },
+    )
+
+    assert "Mon" in figure.data[0]["y"]
+    assert "2024-01-01" in figure.data[0]["x"]
+    assert {value for row in figure.data[0].z for value in row if value is not None} == {
+        0.02,
+        0.1,
+    }
 
 
 @pytest.mark.unit
@@ -1149,6 +1409,29 @@ def test_descriptive_line_can_render_p50_from_digest_state() -> None:
 
 
 @pytest.mark.unit
+def test_descriptive_line_normalizes_uppercase_quantile_score() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Month": ["2026-01", "2026-02"],
+                "ResponseTime_p95": [1.2, 1.8],
+            }
+        ),
+        {
+            "id": "response_time",
+            "metric": "ResponseTimeP95",
+            "chart": "descriptive_line",
+            "title": "P95 response time",
+            "x": "Month",
+            "property": "ResponseTime",
+            "score": "P95",
+        },
+    )
+
+    assert list(figure.data[0]["y"]) == [1.2, 1.8]
+
+
+@pytest.mark.unit
 def test_colored_boxplots_render_in_group_mode() -> None:
     figure = render_chart(
         pl.DataFrame(
@@ -1266,7 +1549,7 @@ def test_quantile_boxplots_render_faceted_grouped_subplots() -> None:
 
 
 @pytest.mark.unit
-def test_descriptive_histogram_renders_tdigest_bins_with_facets() -> None:
+def test_histogram_renders_tdigest_bins_with_facets() -> None:
     rows = pl.DataFrame(
         {
             "Issue": ["Acquisition", "Activation", "Acquisition", "Activation"],
@@ -1284,9 +1567,9 @@ def test_descriptive_histogram_renders_tdigest_bins_with_facets() -> None:
     figure = render_chart(
         rows,
         {
-            "id": "descriptive_hist",
+            "id": "digest_hist",
             "metric": "Propensity",
-            "chart": "descriptive_histogram",
+            "chart": "histogram",
             "title": "Distribution",
             "property": "Propensity",
             "color": "Issue",
@@ -1312,7 +1595,7 @@ def test_descriptive_histogram_renders_tdigest_bins_with_facets() -> None:
 
 
 @pytest.mark.unit
-def test_descriptive_funnel_uses_x_count_rows_with_facets() -> None:
+def test_funnel_uses_categorical_count_rows_with_facets() -> None:
     rows = pl.DataFrame(
         {
             "Outcome": [
@@ -1340,9 +1623,9 @@ def test_descriptive_funnel_uses_x_count_rows_with_facets() -> None:
     figure = render_chart(
         rows,
         {
-            "id": "describe_outcome_funnel",
+            "id": "outcome_funnel",
             "metric": "Outcome_Mean",
-            "chart": "descriptive_funnel",
+            "chart": "funnel",
             "title": "Outcome Funnel",
             "stages": ["Impression", "Clicked", "Conversion"],
             "x": "Outcome",
@@ -1370,11 +1653,17 @@ def test_experiment_z_score_renders_horizontal_bar_with_significance_band() -> N
             "x": "z_score",
             "y": "ExperimentName",
             "facet_col": "Channel",
+            "value_format": "number",
         },
     )
 
     assert {trace.orientation for trace in figure.data} == {"h"}
     assert not figure.layout.showlegend
+    assert figure.layout.hovermode == "closest"
+    assert figure.layout.xaxis.tickformat == ",.2f"
+    assert figure.layout.yaxis.tickformat is None
+    assert all("%{x:,.2f}" in str(trace.hovertemplate) for trace in figure.data)
+    assert all("%{y:" not in str(trace.hovertemplate) for trace in figure.data)
     assert figure.layout.updatemenus[0].buttons[0].label == "Bar"
     assert figure.layout.updatemenus[0].buttons[1].label == "Line"
     assert any(shape.x0 == -1.96 and shape.x1 == 1.96 for shape in figure.layout.shapes)
@@ -1533,6 +1822,32 @@ def test_interval_chart_accepts_absolute_confidence_bounds() -> None:
 
     assert list(figure.data[0].error_y.array) == pytest.approx([0.15])
     assert list(figure.data[0].error_y.arrayminus) == pytest.approx([0.15])
+
+
+@pytest.mark.unit
+def test_interval_chart_accepts_null_confidence_bounds() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Channel": ["Web"],
+                "Effect": [None],
+                "Low": [None],
+                "High": [None],
+            }
+        ),
+        {
+            "metric": "Effect",
+            "chart": "interval",
+            "x": "Channel",
+            "y": "Effect",
+            "error_y_lower": "Low",
+            "error_y_upper": "High",
+        },
+    )
+
+    assert len(figure.data) == 1
+    assert math.isnan(float(figure.data[0].error_y.array[0]))
+    assert math.isnan(float(figure.data[0].error_y.arrayminus[0]))
 
 
 def _calibration_frame() -> pl.DataFrame:

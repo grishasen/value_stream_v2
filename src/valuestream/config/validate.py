@@ -27,12 +27,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from valuestream.charts.recipes import (
+    HEATMAP_CHARTS,
     RECIPES,
     SUPPORTED_TILE_FIELDS,
     TILE_REQUIRED_ALTERNATIVES,
 )
 from valuestream.config import model
-from valuestream.config.report_fields import report_field_options
+from valuestream.config.report_fields import (
+    metric_output_columns,
+    report_axis_options,
+    report_field_options,
+)
 from valuestream.expr import ast as expr_ast
 from valuestream.expr.parser import ParseError
 from valuestream.expr.parser import parse as parse_expr
@@ -114,6 +119,9 @@ def validate_catalog(  # noqa: PLR0915
     }
     report_fields_by_metric = {
         name: frozenset(report_field_options(catalog, name)) for name in catalog.metrics.metrics
+    }
+    report_axes_by_metric = {
+        name: frozenset(report_axis_options(catalog, name)) for name in catalog.metrics.metrics
     }
 
     seed_columns_by_source: dict[str, set[str]] = {}
@@ -199,6 +207,8 @@ def validate_catalog(  # noqa: PLR0915
                     metric_kinds,
                     metric_processor_kinds,
                     report_fields_by_metric.get(tile.metric),
+                    report_axes_by_metric.get(tile.metric),
+                    catalog.metrics.metrics,
                 )
             _validate_page_filters(
                 dashboard.id,
@@ -309,6 +319,8 @@ def _validate_tile_config(
     metric_kinds: Mapping[str, str] | None = None,
     metric_processor_kinds: Mapping[str, str] | None = None,
     report_fields: frozenset[str] | None = None,
+    report_axes: frozenset[str] | None = None,
+    metrics: Mapping[str, model.Metric] | None = None,
 ) -> None:
     values = tile.model_dump(by_alias=True, exclude_none=True)
     location = f"dashboards[{dashboard_id}].pages[{page_id}].tiles[{tile.id}]"
@@ -372,7 +384,33 @@ def _validate_tile_config(
             )
         )
     _validate_tile_field_shapes(values, location, issues)
-    _validate_tile_field_references(values, location, tile.metric, report_fields, issues)
+    field_references = dict(values)
+    if tile.chart == "combo":
+        # Combo Y is metric-owned and Y2 is a metric reference, not a column
+        # reference in the primary metric result.
+        for field_name in ("y", "y2", "line_y"):
+            field_references.pop(field_name, None)
+    _validate_tile_field_references(
+        field_references,
+        location,
+        tile.metric,
+        report_fields,
+        issues,
+    )
+    if tile.chart in HEATMAP_CHARTS and report_axes is not None:
+        for field_name in ("x", "y", "date"):
+            selected = values.get(field_name)
+            if not isinstance(selected, str) or not selected or selected in report_axes:
+                continue
+            issues.append(
+                CatalogIssue(
+                    location=f"{location}.{field_name}",
+                    message=(
+                        f"heatmap {field_name} must reference a configured time grain "
+                        f"or processor dimension, got {selected!r}"
+                    ),
+                )
+            )
     if tile.placement == "kpi_strip" and tile.chart != "kpi_card":
         issues.append(
             CatalogIssue(
@@ -405,18 +443,87 @@ def _validate_tile_config(
                 severity="warning",
             )
         )
-    if tile.chart == "combo" and values.get("y") == values.get("y2"):
-        issues.append(
-            CatalogIssue(
-                location=f"{location}.y2",
-                message="combo y and y2 must reference different values",
-            )
-        )
+    if tile.chart == "combo":
+        _validate_combo_metrics(tile, values, location, metrics or {}, issues)
     if tile.scale_mode != "absolute" and tile.chart not in {"line", "stacked_area"}:
         issues.append(
             CatalogIssue(
                 location=f"{location}.scale_mode",
                 message="index_100 and percent_change scale modes require a time-series chart",
+            )
+        )
+
+
+def _validate_combo_metrics(
+    tile: model.Tile,
+    values: Mapping[str, Any],
+    location: str,
+    metrics: Mapping[str, model.Metric],
+    issues: list[CatalogIssue],
+) -> None:
+    primary = metrics.get(tile.metric)
+    secondary_name = str(values.get("y2") or values.get("line_y") or "")
+    secondary = metrics.get(secondary_name)
+    if values.get("y") not in (None, ""):
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.y",
+                message="combo y is derived from the selected metric; the authored y is ignored",
+                severity="warning",
+            )
+        )
+    if not secondary_name:
+        return
+    if secondary is None:
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.y2",
+                message=(
+                    f"legacy combo y2 column {secondary_name!r} should be replaced with "
+                    "a compatible metric ID"
+                ),
+                severity="warning",
+            )
+        )
+        return
+    if secondary_name == tile.metric:
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.y2",
+                message="combo y2 must reference a different metric",
+            )
+        )
+    if primary is None:
+        return
+    if secondary.kind != primary.kind:
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.y2",
+                message=(
+                    f"combo y2 metric kind {secondary.kind!r} must match primary "
+                    f"metric kind {primary.kind!r}"
+                ),
+            )
+        )
+    if secondary.source != primary.source:
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.y2",
+                message="combo y2 must use the same backing processor as the primary metric",
+            )
+        )
+    if metric_output_columns(tile.metric, primary) != [tile.metric]:
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.metric",
+                message="combo primary metric must expose one scalar output",
+            )
+        )
+    if metric_output_columns(secondary_name, secondary) != [secondary_name]:
+        issues.append(
+            CatalogIssue(
+                location=f"{location}.y2",
+                message="combo y2 metric must expose one scalar output",
             )
         )
 

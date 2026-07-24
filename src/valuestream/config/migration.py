@@ -1044,9 +1044,8 @@ def _chart_for_report(cfg: dict[str, Any]) -> str:
         mapped = {
             "line": "descriptive_line",
             "boxplot": "boxplot",
-            "histogram": "descriptive_histogram",
+            "histogram": "histogram",
             "heatmap": "descriptive_heatmap",
-            "funnel": "descriptive_funnel",
         }
         return mapped.get(legacy, legacy)
     if family == "experiment":

@@ -19,6 +19,7 @@ from streamlit.testing.v1 import AppTest
 from valuestream.charts.recipes import RECIPES
 from valuestream.config import model
 from valuestream.config.loader import load
+from valuestream.config.validate import validate_catalog
 from valuestream.expr import parser as expr_parser
 from valuestream.query import executor
 from valuestream.states import kll, topk
@@ -155,6 +156,7 @@ def test_discarded_create_draft_continues_on_the_first_click() -> None:
         st.session_state.setdefault("builder_processor_mode", "Create New Processor")
         save_slot = st.empty()
         draft_slot = st.empty()
+        page._claim_fragment_action_slots(save_slot, draft_slot)
         description = st.text_input(
             "Description",
             value="",
@@ -762,8 +764,61 @@ def test_builder_edit_selectors_lead_with_stable_id_and_keep_human_context(
 
 
 @pytest.mark.unit
-def test_sources_offer_one_click_deterministic_studio_handoff(tmp_path: Path) -> None:
+def test_new_source_is_created_from_configuration_builder(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Sources").run()
+    rendered = (
+        next(button for button in rendered.button if button.label == "Create New Source")
+        .click()
+        .run()
+    )
+
+    assert not rendered.exception
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+
+    source_id = next(item for item in rendered.text_input if item.label == "Source ID")
+    rendered = source_id.set_value("ih").run()
+    apply = next(button for button in rendered.button if button.label == "Apply to workspace")
+    assert apply.disabled
+    assert any("already exists" in str(item.value) for item in rendered.caption)
+
+    source_id = next(item for item in rendered.text_input if item.label == "Source ID")
+    rendered = source_id.set_value("qa_source").run()
+    description = next(item for item in rendered.text_area if item.label == "Description")
+    rendered = description.set_value("QA source").run()
+    materialize = next(item for item in rendered.toggle if item.label == "Materialize Transforms")
+    rendered = materialize.set_value(True).run()
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert rendered.session_state["builder_source_mode"] == "Edit Existing Source"
+    assert rendered.session_state[builder.BUILDER_DRAFTS_KEY] == {}
+    created = next(
+        source for source in load(tmp_path).pipelines.sources if source.id == "qa_source"
+    )
+    assert created.description == "QA source"
+    assert created.materialize_transforms is True
+    assert created.reader.kind == "parquet"
+    assert created.reader.file_pattern == "**/*.parquet"
+
+
+@pytest.mark.unit
+def test_empty_workspace_sources_step_opens_create_editor(tmp_path: Path) -> None:
+    builder.ensure_minimum_workspace(tmp_path)
 
     def app(workspace: str) -> None:
         from valuestream.ui.context import load_context  # noqa: PLC0415
@@ -776,11 +831,157 @@ def test_sources_offer_one_click_deterministic_studio_handoff(tmp_path: Path) ->
     rendered = jump.set_value("Sources").run()
 
     assert not rendered.exception
-    add_source = next(item for item in rendered.get("link_button") if item.label == "Add source")
-    assert add_source.url == config_builder.BUILDER_ADD_SOURCE_URL
-    assert "mode=deterministic" in add_source.url
-    assert "intent=add_source" in add_source.url
-    assert "return_to=configuration_builder" in add_source.url
+    assert any(button.label == "Create New Source" for button in rendered.button)
+    source_id = next(item for item in rendered.text_input if item.label == "Source ID")
+    assert source_id.value == "source"
+    reader = next(item for item in rendered.selectbox if item.label == "Reader")
+    assert reader.value == "parquet"
+    assert any(button.label == "Load sample" for button in rendered.button)
+    assert not any(item.label == "Add source" for item in rendered.get("link_button"))
+
+
+@pytest.mark.unit
+def test_create_source_load_sample_populates_schema_controls(tmp_path: Path) -> None:
+    builder.ensure_minimum_workspace(tmp_path)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    pl.DataFrame(
+        {
+            "pyCustomerID": ["customer-1"],
+            "pxOutcomeTime": ["2026-07-24T00:00:00Z"],
+            "pyChannel": ["Web"],
+        }
+    ).write_parquet(data_dir / "sample.parquet")
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Sources").run()
+
+    natural_key = next(item for item in rendered.multiselect if item.label == "Natural Key")
+    assert natural_key.options == []
+    assert not any("Loaded 3 fields" in str(item.value) for item in rendered.success)
+
+    rendered = (
+        next(button for button in rendered.button if button.label == "Load sample")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    natural_key = next(item for item in rendered.multiselect if item.label == "Natural Key")
+    assert set(natural_key.options) == {"pyCustomerID", "pxOutcomeTime", "pyChannel"}
+    assert any("Loaded 3 fields" in str(item.value) for item in rendered.success)
+
+    rename = next(
+        item for item in rendered.toggle if item.label == "Use Rename / Capitalize Transform"
+    )
+    rendered = rename.set_value(True).run(timeout=15)
+
+    assert not rendered.exception
+    natural_key = next(item for item in rendered.multiselect if item.label == "Natural Key")
+    assert set(natural_key.options) == {"CustomerID", "OutcomeTime", "Channel"}
+    assert not any(button.label == "Load sample" for button in rendered.button)
+    assert any(button.label == "Reload sample" for button in rendered.button)
+
+    description = next(item for item in rendered.text_area if item.label == "Description")
+    rendered = description.set_value("Temporary description").run()
+    timestamp = next(item for item in rendered.text_input if item.label == "Timestamp Column")
+    rendered = timestamp.set_value("OutcomeTime").run()
+    materialize = next(item for item in rendered.toggle if item.label == "Materialize Transforms")
+    rendered = materialize.set_value(True).run()
+
+    rendered = (
+        next(button for button in rendered.button if button.label == "Discard draft").click().run()
+    )
+
+    assert not rendered.exception
+    assert any(button.label == "Load sample" for button in rendered.button)
+    description = next(item for item in rendered.text_area if item.label == "Description")
+    timestamp = next(item for item in rendered.text_input if item.label == "Timestamp Column")
+    materialize = next(item for item in rendered.toggle if item.label == "Materialize Transforms")
+    rename = next(
+        item for item in rendered.toggle if item.label == "Use Rename / Capitalize Transform"
+    )
+    assert description.value == ""
+    assert timestamp.value == ""
+    assert materialize.value is False
+    assert rename.value is False
+    natural_key = next(item for item in rendered.multiselect if item.label == "Natural Key")
+    assert natural_key.options == []
+    assert rendered.session_state[config_builder.VS_SOURCE_SAMPLE_SCHEMAS_KEY] == {}
+
+
+@pytest.mark.unit
+def test_deleted_source_editor_state_is_cleared_before_create_mode() -> None:
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui import builder  # noqa: PLC0415
+        from valuestream.ui.pages import config_builder  # noqa: PLC0415
+
+        st.session_state[builder.BUILDER_DRAFTS_KEY] = {
+            "source:ih": {"widget_state": {"builder_source_desc_ih": "Deleted"}},
+            "metric:keep": {"widget_state": {}},
+        }
+        st.session_state["builder_source_mode"] = "Edit Existing Source"
+        st.session_state["builder_source_desc_ih"] = "Deleted"
+        st.session_state["builder_source_streaming_ih"] = True
+        st.session_state[config_builder.VS_SOURCE_SAMPLE_SCHEMAS_KEY] = {
+            "ih": {"raw_schema": [["Channel", "String"]]}
+        }
+        st.session_state[config_builder.VS_OBSERVED_SOURCE_COLUMNS_KEY] = {"ih": ["Channel"]}
+
+        config_builder._clear_deleted_source_editor_state("ih")
+
+    rendered = AppTest.from_function(app).run()
+
+    assert not rendered.exception
+    assert "builder_source_mode" not in rendered.session_state
+    assert "builder_source_desc_ih" not in rendered.session_state
+    assert "builder_source_streaming_ih" not in rendered.session_state
+    assert rendered.session_state[config_builder.VS_SOURCE_SAMPLE_SCHEMAS_KEY] == {}
+    assert rendered.session_state[config_builder.VS_OBSERVED_SOURCE_COLUMNS_KEY] == {}
+    assert set(rendered.session_state[builder.BUILDER_DRAFTS_KEY]) == {"metric:keep"}
+
+
+@pytest.mark.unit
+def test_source_raw_ast_mode_has_editable_validated_yaml(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        st.session_state.setdefault("builder_step", "Sources")
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    filter_mode = next(item for item in rendered.segmented_control if item.label == "Filter Mode")
+    rendered = filter_mode.set_value("Raw AST").run()
+
+    raw_filter = next(item for item in rendered.text_area if item.label == "Filter AST YAML")
+    rendered = raw_filter.set_value("op: eq\ncolumn: Channel\nvalue: Web").run()
+
+    assert not rendered.exception
+    raw_filter = next(item for item in rendered.text_area if item.label == "Filter AST YAML")
+    assert raw_filter.value == "op: eq\ncolumn: Channel\nvalue: Web"
+    assert not any("Filter AST YAML is invalid" in str(item.value) for item in rendered.error)
+
+    rendered = raw_filter.set_value("op: definitely_not_supported").run()
+
+    assert not rendered.exception
+    assert any("Filter AST YAML is invalid" in str(item.value) for item in rendered.error)
+    assert not any(
+        button.label == "Apply to workspace" and not button.disabled for button in rendered.button
+    )
 
 
 @pytest.mark.unit
@@ -1562,7 +1763,7 @@ def test_default_tile_fields_use_processor_group_by_columns(tmp_path: Path) -> N
 
     fields = builder.default_tile_fields(catalog, "CTR", "line")
 
-    assert fields == {"x": "Day", "y": "CTR", "color": "Channel"}
+    assert fields == {"x": "Day", "color": "Channel"}
 
 
 @pytest.mark.unit
@@ -1626,37 +1827,41 @@ def test_marketing_chart_defaults_cover_supported_plotly_shapes(tmp_path: Path) 
     _write_builder_catalog(tmp_path)
     catalog = load(tmp_path)
 
-    assert builder.default_tile_fields(catalog, "CTR", "kpi_card") == {"value": "CTR"}
+    assert builder.default_tile_fields(catalog, "CTR", "kpi_card") == {}
     assert builder.default_tile_fields(catalog, "CTR", "gauge") == {
-        "value": "CTR",
         "facet_row": "Channel",
     }
     assert builder.default_tile_fields(catalog, "CTR", "pareto") == {
         "x": "Channel",
-        "y": "CTR",
+    }
+    assert builder.default_tile_fields(catalog, "CTR", "treemap") == {
+        "path": ["Channel"],
     }
     assert builder.default_tile_fields(catalog, "CTR", "stacked_area") == {
         "x": "Day",
-        "y": "CTR",
         "color": "Channel",
     }
     assert builder.default_tile_fields(catalog, "CTR", "donut") == {
         "names": "Channel",
-        "values": "CTR",
     }
     assert builder.default_tile_fields(catalog, "CTR", "calendar_heatmap") == {
         "date": "Day",
         "value": "CTR",
     }
     assert builder.default_tile_fields(catalog, "CTR", "bar_polar") == {
-        "r": "CTR",
         "theta": "Channel",
         "color": "Channel",
+    }
+    assert builder.default_tile_fields(catalog, "CTR", "sankey") == {
+        "source": "Channel",
+        "target": "Channel",
     }
 
 
 @pytest.mark.unit
-def test_tile_field_controls_show_polar_radius_selector(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tile_field_controls_derive_polar_radius_from_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[dict[str, object]] = []
 
     def fake_selectbox(
@@ -1680,13 +1885,108 @@ def test_tile_field_controls_show_polar_radius_selector(monkeypatch: pytest.Monk
         key_suffix="polar",
     )
 
-    assert fields == {"r": "CTR", "theta": "Channel", "color": "Placement"}
-    assert [call["label"] for call in calls] == ["R", "Theta", "Color"]
+    assert fields == {"theta": "Channel", "color": "Placement"}
+    assert [call["label"] for call in calls] == ["Theta", "Color"]
     assert [call["key"] for call in calls] == [
-        "builder_tile_r_polar",
         "builder_tile_theta_polar",
         "builder_tile_color_polar",
     ]
+
+
+@pytest.mark.unit
+def test_metric_owned_polar_tile_removes_manual_radius_role() -> None:
+    tile = builder.build_tile(
+        tile_id="ctr_polar",
+        title="CTR polar",
+        metric_name="CTR",
+        chart_kind="bar_polar",
+        fields={
+            "r": "Count",
+            "theta": "Channel",
+            "color": "Channel",
+        },
+    )
+
+    assert tile == {
+        "id": "ctr_polar",
+        "title": "CTR polar",
+        "metric": "CTR",
+        "chart": "bar_polar",
+        "theta": "Channel",
+        "color": "Channel",
+    }
+
+
+@pytest.mark.unit
+def test_metric_owned_treemap_tile_removes_manual_color_role() -> None:
+    tile = builder.build_tile(
+        tile_id="ctr_treemap",
+        title="CTR treemap",
+        metric_name="CTR",
+        chart_kind="treemap",
+        fields={
+            "path": ["Channel"],
+            "value": "Count",
+            "color": "Count",
+        },
+    )
+
+    assert tile == {
+        "id": "ctr_treemap",
+        "title": "CTR treemap",
+        "metric": "CTR",
+        "chart": "treemap",
+        "path": ["Channel"],
+        "value": "Count",
+    }
+
+
+@pytest.mark.unit
+def test_metric_owned_donut_tile_removes_manual_value_roles() -> None:
+    tile = builder.build_tile(
+        tile_id="ctr_mix",
+        title="CTR mix",
+        metric_name="CTR",
+        chart_kind="donut",
+        fields={
+            "names": "Channel",
+            "values": "Count",
+            "value": "Count",
+            "y": "Count",
+        },
+    )
+
+    assert tile == {
+        "id": "ctr_mix",
+        "title": "CTR mix",
+        "metric": "CTR",
+        "chart": "donut",
+        "names": "Channel",
+    }
+
+
+@pytest.mark.unit
+def test_metric_owned_sankey_tile_removes_manual_value_role() -> None:
+    tile = builder.build_tile(
+        tile_id="customer_flow",
+        title="Customer flow",
+        metric_name="CTR",
+        chart_kind="sankey",
+        fields={
+            "source": "Channel",
+            "target": "Placement",
+            "value": "Count",
+        },
+    )
+
+    assert tile == {
+        "id": "customer_flow",
+        "title": "Customer flow",
+        "metric": "CTR",
+        "chart": "sankey",
+        "source": "Channel",
+        "target": "Placement",
+    }
 
 
 @pytest.mark.unit
@@ -1714,13 +2014,77 @@ def test_tile_field_controls_show_gauge_facet_selectors(monkeypatch: pytest.Monk
         key_suffix="gauge",
     )
 
-    assert fields == {"value": "CTR", "facet_row": "Channel", "facet_col": "Placement"}
-    assert [call["label"] for call in calls] == ["Value", "Facet_Row", "Facet_Col"]
+    assert fields == {"facet_row": "Channel", "facet_col": "Placement"}
+    assert [call["label"] for call in calls] == ["Facet_Row", "Facet_Col"]
     assert [call["key"] for call in calls] == [
-        "builder_tile_value_gauge",
         "builder_tile_facet_row_gauge",
         "builder_tile_facet_col_gauge",
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("chart_kind", "defaults", "expected_fields", "expected_labels"),
+    [
+        (
+            "line",
+            {"x": "Day", "y": "Count", "color": "Channel"},
+            {"x": "Day", "color": "Channel"},
+            ["X", "Color", "Facet_Row", "Facet_Col"],
+        ),
+        (
+            "bar",
+            {"x": "Channel", "y": "Count"},
+            {"x": "Channel"},
+            ["X", "Color", "Facet_Row", "Facet_Col"],
+        ),
+        (
+            "stacked_area",
+            {"x": "Day", "y": "Count", "color": "Channel"},
+            {"x": "Day", "color": "Channel"},
+            ["X", "Color", "Facet_Row", "Facet_Col"],
+        ),
+        (
+            "pareto",
+            {"x": "Channel", "y": "Count"},
+            {"x": "Channel"},
+            ["X", "Color", "Facet_Row", "Facet_Col"],
+        ),
+    ],
+)
+def test_metric_owned_y_charts_do_not_render_y_selector(
+    monkeypatch: pytest.MonkeyPatch,
+    chart_kind: str,
+    defaults: dict[str, str],
+    expected_fields: dict[str, str],
+    expected_labels: list[str],
+) -> None:
+    calls: list[str] = []
+
+    def fake_selectbox(
+        label: str,
+        options: list[str],
+        *,
+        index: int = 0,
+        **_: object,
+    ) -> str:
+        calls.append(label)
+        return options[index]
+
+    monkeypatch.setattr(st, "selectbox", fake_selectbox)
+    monkeypatch.setattr(config_builder, "_chart_setting_controls", lambda *_, **__: {})
+
+    fields = config_builder._tile_field_controls(
+        chart_kind,
+        defaults,
+        ["", "Day", "Channel", "Count", "CTR"],
+        key_suffix=chart_kind,
+    )
+
+    assert "y" not in fields
+    assert {key: fields[key] for key in expected_fields} == expected_fields
+    assert calls == expected_labels
+    assert "Y" not in calls
 
 
 @pytest.mark.unit
@@ -1778,10 +2142,232 @@ def test_chart_field_controls_start_with_required_metadata() -> None:
 
         assert controls[: len(required_fields)] == required_fields
         assert set(required_fields) <= set(controls)
+    assert builder.chart_field_controls("treemap") == ("path",)
+    assert builder.chart_field_controls("donut") == ("names", "color")
+    assert builder.chart_field_controls("sankey") == ("source", "target")
+    assert builder.chart_field_controls("waterfall") == ("x",)
+
+
+def _combo_catalog() -> model.Catalog:
+    return model.Catalog.model_validate(
+        {
+            "pipelines": {
+                "workspace": "combo",
+                "sources": [
+                    {
+                        "id": "ih",
+                        "reader": {"kind": "parquet", "file_pattern": "*.parquet"},
+                    }
+                ],
+            },
+            "processors": {
+                "processors": [
+                    {
+                        "id": "engagement",
+                        "source": "ih",
+                        "kind": "binary_outcome",
+                        "group_by": ["Channel"],
+                        "states": {
+                            "Clicked_Count": {"type": "count"},
+                            "Impression_Count": {"type": "count"},
+                            "Visitors": {"type": "cpc"},
+                        },
+                    },
+                    {
+                        "id": "other_engagement",
+                        "source": "ih",
+                        "kind": "binary_outcome",
+                        "group_by": ["Channel"],
+                        "states": {"Clicked_Count": {"type": "count"}},
+                    },
+                ]
+            },
+            "metrics": {
+                "metrics": {
+                    "FunnelClicks": {
+                        "source": "engagement",
+                        "kind": "formula",
+                        "expression": {"col": "Clicked_Count"},
+                    },
+                    "FunnelImpressions": {
+                        "source": "engagement",
+                        "kind": "formula",
+                        "expression": {"col": "Impression_Count"},
+                    },
+                    "DistinctVisitors": {
+                        "source": "engagement",
+                        "kind": "approx_distinct_count",
+                        "state": "Visitors",
+                    },
+                    "OtherClicks": {
+                        "source": "other_engagement",
+                        "kind": "formula",
+                        "expression": {"col": "Clicked_Count"},
+                    },
+                }
+            },
+            "dashboards": {"dashboards": []},
+        }
+    )
 
 
 @pytest.mark.unit
-def test_tile_field_controls_render_descriptive_funnel_required_fields(
+def test_combo_uses_primary_metric_and_filters_y2_to_compatible_metrics() -> None:
+    catalog = _combo_catalog()
+
+    assert builder.chart_field_controls("combo") == (
+        "x",
+        "y2",
+        "color",
+        "facet_row",
+        "facet_col",
+    )
+    assert builder.combo_secondary_metric_options(catalog, "FunnelClicks") == ["FunnelImpressions"]
+    assert (
+        builder.combo_secondary_metric_default(
+            catalog,
+            "FunnelClicks",
+            "Impression_Count",
+        )
+        == "FunnelImpressions"
+    )
+    assert builder.default_tile_fields(catalog, "FunnelClicks", "combo") == {
+        "x": "Day",
+        "y2": "FunnelImpressions",
+    }
+    assert config_builder._tile_field_options(
+        "combo",
+        "y2",
+        {"y2": "Impression_Count"},
+        ["", "Channel", "Clicked_Count", "Impression_Count"],
+        {},
+        catalog,
+        "FunnelClicks",
+    ) == ["", "FunnelImpressions"]
+
+    tile = builder.build_tile(
+        tile_id="clicks_and_impressions",
+        title="Clicks and impressions",
+        metric_name="FunnelClicks",
+        chart_kind="combo",
+        fields={
+            "x": "Month",
+            "y": "Clicked_Count",
+            "y2": "FunnelImpressions",
+        },
+    )
+    assert tile == {
+        "id": "clicks_and_impressions",
+        "title": "Clicks and impressions",
+        "metric": "FunnelClicks",
+        "chart": "combo",
+        "x": "Month",
+        "y2": "FunnelImpressions",
+    }
+
+
+@pytest.mark.unit
+def test_interval_value_and_error_controls_offer_only_metric_outputs() -> None:
+    catalog = _combo_catalog()
+    catalog.metrics.metrics["DefaultBannerLift"] = model.VariantCompareMetric.model_validate(
+        {
+            "source": "engagement",
+            "kind": "variant_compare",
+            "variant_column": "DefaultBannerControlGroup",
+            "test_role": "Test",
+            "control_role": "Control",
+        }
+    )
+    expected = ["", *builder.metric_output_options(catalog, "DefaultBannerLift")]
+
+    for field_name in builder.INTERVAL_METRIC_OUTPUT_FIELDS:
+        assert (
+            config_builder._tile_field_options(
+                "interval",
+                field_name,
+                {field_name: "Channel"},
+                ["", "Day", "Channel", "CustomerType", *expected[1:]],
+                {},
+                catalog,
+                "DefaultBannerLift",
+            )
+            == expected
+        )
+
+    assert "Channel" not in expected
+    assert "AbsoluteRateDifference" in expected
+    assert "AbsoluteRateDifference_CI_Low" in expected
+    assert "AbsoluteRateDifference_CI_High" in expected
+
+
+@pytest.mark.unit
+def test_combo_validation_rejects_wrong_kind_or_processor_for_y2() -> None:
+    catalog = _combo_catalog()
+    base = {
+        "id": "combo",
+        "title": "Combo",
+        "metric": "FunnelClicks",
+        "chart": "combo",
+        "x": "Month",
+    }
+
+    valid = validate_catalog(
+        catalog.model_copy(
+            update={
+                "dashboards": model.Dashboards.model_validate(
+                    {
+                        "dashboards": [
+                            {
+                                "id": "overview",
+                                "title": "Overview",
+                                "pages": [
+                                    {
+                                        "id": "page",
+                                        "title": "Page",
+                                        "tiles": [{**base, "y2": "FunnelImpressions"}],
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                )
+            }
+        )
+    )
+    assert valid.ok, valid.issues
+
+    for secondary, message in (
+        ("DistinctVisitors", "must match primary metric kind"),
+        ("OtherClicks", "same backing processor"),
+    ):
+        candidate = catalog.model_copy(
+            update={
+                "dashboards": model.Dashboards.model_validate(
+                    {
+                        "dashboards": [
+                            {
+                                "id": "overview",
+                                "title": "Overview",
+                                "pages": [
+                                    {
+                                        "id": "page",
+                                        "title": "Page",
+                                        "tiles": [{**base, "y2": secondary}],
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                )
+            }
+        )
+        result = validate_catalog(candidate)
+        assert not result.ok
+        assert any(message in issue.message for issue in result.issues)
+
+
+@pytest.mark.unit
+def test_tile_field_controls_render_adaptive_funnel_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selectbox_calls: list[dict[str, object]] = []
@@ -1807,7 +2393,7 @@ def test_tile_field_controls_render_descriptive_funnel_required_fields(
     monkeypatch.setattr(config_builder, "_chart_setting_controls", lambda *_, **__: {})
 
     fields = config_builder._tile_field_controls(
-        "descriptive_funnel",
+        "funnel",
         {
             "x": "Outcome",
             "color": "Issue",
@@ -1815,7 +2401,7 @@ def test_tile_field_controls_render_descriptive_funnel_required_fields(
             "facet_col": "Channel",
         },
         ["", "Outcome", "Issue", "Channel", "Outcome_Count"],
-        key_suffix="desc_funnel",
+        key_suffix="funnel",
     )
 
     assert fields == {
@@ -1826,16 +2412,16 @@ def test_tile_field_controls_render_descriptive_funnel_required_fields(
         "facet_col": "Channel",
     }
     assert [call["key"] for call in selectbox_calls] == [
-        "builder_tile_x_desc_funnel",
-        "builder_tile_color_desc_funnel",
-        "builder_tile_facet_row_desc_funnel",
-        "builder_tile_facet_col_desc_funnel",
+        "builder_tile_color_funnel",
+        "builder_tile_x_funnel",
+        "builder_tile_facet_row_funnel",
+        "builder_tile_facet_col_funnel",
     ]
     assert text_calls == [
         {
             "label": "Stages",
             "value": "Impression, Clicked, Conversion",
-            "key": "builder_tile_stages_desc_funnel",
+            "key": "builder_tile_stages_funnel",
         }
     ]
 
@@ -2217,6 +2803,105 @@ def test_build_state_defs_uses_direct_editor_rows() -> None:
 
 
 @pytest.mark.unit
+def test_state_rows_round_trip_kind_specific_parameters() -> None:
+    processor = model.ScoreDistributionProcessor.model_validate(
+        {
+            "id": "model_ml_scores",
+            "source": "ih",
+            "kind": "score_distribution",
+            "states": {
+                "Propensity_tdigest": {
+                    "type": "tdigest",
+                    "source_column": "Propensity",
+                    "k": 500,
+                    "score_property": "Propensity",
+                    "outcome": "positive",
+                }
+            },
+        }
+    )
+
+    rows = config_builder._state_rows(processor)
+    definitions = config_builder._build_state_defs(processor, rows)
+
+    assert definitions["Propensity_tdigest"] == {
+        "type": "tdigest",
+        "source_column": "Propensity",
+        "k": 500,
+        "score_property": "Propensity",
+        "outcome": "positive",
+    }
+
+
+@pytest.mark.unit
+def test_build_state_defs_accepts_new_sketch_parameters() -> None:
+    processor = model.EntitySetProcessor.model_validate(
+        {"id": "audience", "source": "ih", "kind": "entity_set"}
+    )
+
+    definitions = config_builder._build_state_defs(
+        processor,
+        [
+            {
+                "State": "TopActions_topk",
+                "Type": "topk",
+                "Source Column": "Name",
+                "Parameters": "{lg_max_map_size: 10}",
+                "Enabled": True,
+            }
+        ],
+    )
+
+    assert definitions["TopActions_topk"] == {
+        "type": "topk",
+        "source_column": "Name",
+        "lg_max_map_size": 10,
+    }
+
+
+@pytest.mark.unit
+def test_build_state_defs_rejects_parameters_for_another_sketch_type() -> None:
+    processor = model.EntitySetProcessor.model_validate(
+        {"id": "audience", "source": "ih", "kind": "entity_set"}
+    )
+
+    with pytest.raises(ValueError, match=r"lg_max_map_size.*only valid.*topk"):
+        config_builder._build_state_defs(
+            processor,
+            [
+                {
+                    "State": "Customers_cpc",
+                    "Type": "cpc",
+                    "Source Column": "CustomerID",
+                    "Parameters": "{lg_max_map_size: 10}",
+                    "Enabled": True,
+                }
+            ],
+        )
+
+
+@pytest.mark.unit
+def test_build_state_defs_rejects_reserved_parameter_fields() -> None:
+    processor = model.EntitySetProcessor.model_validate(
+        {"id": "audience", "source": "ih", "kind": "entity_set"}
+    )
+
+    with pytest.raises(ValueError, match="cannot redefine type"):
+        config_builder._build_state_defs(
+            processor,
+            [
+                {
+                    "State": "Customers_cpc",
+                    "Type": "cpc",
+                    "Source Column": "CustomerID",
+                    "Parameters": "{type: theta, lg_k: 11}",
+                    "Enabled": True,
+                }
+            ],
+        )
+
+
+@pytest.mark.unit
 def test_default_rows_with_fields_appends_selected_fields_without_duplicates() -> None:
     rows = [
         {"Field": "", "Default Value": "", "Enabled": True},
@@ -2263,6 +2948,7 @@ def test_build_source_definition_can_add_rename_capitalize_defaults_transform() 
         root="",
         streaming=False,
         hive_partitioning=False,
+        materialize_transforms=False,
         timestamp_column="OutcomeTime",
         natural_key=["InteractionID"],
         drop_columns=[],
@@ -2278,6 +2964,72 @@ def test_build_source_definition_can_add_rename_capitalize_defaults_transform() 
         {"kind": "parse_datetime", "columns": ["OutcomeTime"], "format": "%Y-%m-%d"},
     ]
     assert source_def["transforms"][2] == {"kind": "defaults", "values": {"Revenue": 0.0}}
+
+
+@pytest.mark.unit
+def test_outcome_date_seeds_standard_transforms_and_materialization() -> None:
+    source = model.Source.model_validate(
+        {
+            "id": "ih",
+            "reader": {"kind": "parquet", "file_pattern": "**/*.parquet"},
+        }
+    )
+    fields = [
+        "OutcomeDate",
+        "DecisionTime",
+        "Issue",
+        "Group",
+        "Name",
+        "Propensity",
+        "FinalPropensity",
+        "Priority",
+        "Revenue",
+    ]
+
+    source_def = config_builder._build_source_definition(
+        source=source,
+        source_id="ih",
+        description="Interaction history",
+        reader_kind="parquet",
+        file_pattern="**/*.parquet",
+        group_by_filename=None,
+        root="data",
+        streaming=True,
+        hive_partitioning=False,
+        materialize_transforms=True,
+        timestamp_column="OutcomeDate",
+        natural_key=[],
+        drop_columns=[],
+        default_rows=[],
+        use_rename_capitalize=True,
+        filter_expression=None,
+        calculated_rows=[],
+        automatic_outcome_transforms=True,
+        available_fields=fields,
+    )
+
+    assert source_def["description"] == "Interaction history"
+    assert source_def["materialize_transforms"] is True
+    assert [transform["kind"] for transform in source_def["transforms"]] == [
+        "rename_capitalize",
+        "parse_datetime",
+        "derive_calendar",
+        "derive_action_id",
+        "cast",
+    ]
+    assert source_def["transforms"][1] == {
+        "kind": "parse_datetime",
+        "columns": ["OutcomeDate", "DecisionTime"],
+        "format": "%Y%m%dT%H%M%S%.3f %Z",
+    }
+    assert source_def["transforms"][2]["from"] == "OutcomeDate"
+    assert source_def["transforms"][3]["parts"] == ["Issue", "Group", "Name"]
+    assert source_def["transforms"][4]["columns"] == {
+        "Propensity": "Float64",
+        "FinalPropensity": "Float64",
+        "Priority": "Float64",
+        "Revenue": "Float64",
+    }
 
 
 @pytest.mark.unit
@@ -2372,6 +3124,7 @@ def test_source_row_add_edit_delete_operations_all_dirty_the_outer_draft() -> No
             root="",
             streaming=False,
             hive_partitioning=False,
+            materialize_transforms=False,
             timestamp_column=source.schema_.timestamp_column,
             natural_key=list(source.schema_.natural_key),
             drop_columns=list(source.schema_.drop_columns),
@@ -2455,6 +3208,7 @@ def test_build_source_definition_preserves_untouched_transform_order() -> None:
         root="data/studio",
         streaming=False,
         hive_partitioning=False,
+        materialize_transforms=False,
         timestamp_column=source.schema_.timestamp_column,
         natural_key=list(source.schema_.natural_key),
         drop_columns=list(source.schema_.drop_columns),
@@ -2587,6 +3341,84 @@ def test_source_field_options_apply_rename_capitalize_to_reader_columns(monkeypa
     assert "pyName" not in options
     assert "pxOutcomeTime" not in options
     assert "pyCustomerID" not in options
+
+
+@pytest.mark.unit
+def test_source_apply_inspects_current_draft_identity_for_effective_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    builder.ensure_minimum_workspace(tmp_path)
+    source_def = {
+        "id": "ih",
+        "description": "Draft source",
+        "reader": {
+            "kind": "parquet",
+            "file_pattern": "**/*.parquet",
+            "root": "data",
+            "streaming": True,
+        },
+        "schema": {
+            "timestamp_column": None,
+            "natural_key": [],
+            "drop_columns": [],
+        },
+        "transforms": [
+            {"kind": "rename_capitalize"},
+            {
+                "kind": "derive_column",
+                "output": "ChannelCopy",
+                "expression": {"col": "Channel"},
+            },
+        ],
+        "defaults": {},
+        "materialize_transforms": False,
+        "debugging": False,
+    }
+    inspected: list[model.Source] = []
+
+    def fake_inspection(
+        _ctx: SimpleNamespace,
+        candidate: model.Source,
+    ) -> SimpleNamespace:
+        inspected.append(candidate)
+        return SimpleNamespace(
+            error_kind=None,
+            raw_schema=(("pyChannel", "String"),),
+        )
+
+    monkeypatch.setattr(config_builder, "_source_inspection", fake_inspection)
+    monkeypatch.setattr(
+        config_builder,
+        "st",
+        SimpleNamespace(
+            session_state={
+                config_builder.VS_OBSERVED_SOURCE_COLUMNS_KEY: {
+                    "ih": ["StaleColumn"],
+                    "existing": ["ExistingColumn"],
+                }
+            }
+        ),
+    )
+    ctx = SimpleNamespace(workspace=tmp_path)
+
+    source_columns = config_builder._source_columns_for_apply(ctx, source_def)
+
+    assert [source.id for source in inspected] == ["ih"]
+    assert inspected[0].reader.file_pattern == "**/*.parquet"
+    assert source_columns == {
+        "ih": ["pyChannel"],
+        "existing": ["ExistingColumn"],
+    }
+    with builder.validated_catalog_transaction(
+        tmp_path,
+        source_columns_by_id=source_columns,
+    ):
+        builder.write_source_definition(tmp_path, source_def)
+
+    created = load(tmp_path).pipelines.sources[0]
+    assert created.id == "ih"
+    assert created.transforms[1].output == "ChannelCopy"
 
 
 @pytest.mark.unit
@@ -3274,12 +4106,20 @@ def test_report_library_groups_every_supported_chart_once() -> None:
         for group in config_builder.REPORT_LIBRARY_GROUPS.values()
         for chart_type in group.chart_types
     ]
+    authorable = set(builder.CHART_REQUIRED_FIELDS) - set(builder.LEGACY_HEATMAP_CHARTS)
 
     assert len(categorized) == len(set(categorized))
-    assert set(categorized) == set(builder.CHART_REQUIRED_FIELDS)
+    assert set(categorized) == authorable
+    assert "heatmap" in categorized
+    assert not set(builder.LEGACY_HEATMAP_CHARTS) & set(categorized)
     assert set(config_builder.REPORT_LIBRARY_CHART_DESCRIPTIONS) == set(
         builder.CHART_REQUIRED_FIELDS
     )
+    assert "model" in config_builder.REPORT_LIBRARY_GROUPS["lifecycle"].chart_types
+    assert "model" not in config_builder.REPORT_LIBRARY_GROUPS["explore"].chart_types
+    assert builder.chart_kind_label("model") == "Purchase frequency projection"
+    assert "not an ML model-quality report" in builder.chart_kind_purpose("model")
+    assert list(config_builder.REPORT_LIBRARY_GROUPS)[-1] == "lifecycle"
 
 
 @pytest.mark.unit
@@ -3435,6 +4275,164 @@ def test_visual_tile_merge_allows_clearing_a_controlled_setting() -> None:
 
     assert "top_n" not in merged
     assert merged["axis_title_standoff"] == 18
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("chart_kind", ["kpi_card", "gauge"])
+def test_visual_metric_owned_value_merge_removes_legacy_override(chart_kind: str) -> None:
+    seed = {
+        "id": "ctr",
+        "title": "CTR",
+        "metric": "CTR",
+        "chart": chart_kind,
+        "value": "Channel",
+    }
+
+    rebuilt = {key: value for key, value in seed.items() if key != "value"}
+    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, chart_kind)
+
+    assert "value" not in merged
+    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("chart_kind", ["line", "bar", "stacked_area", "waterfall", "pareto"])
+def test_visual_metric_owned_y_merge_removes_legacy_override(chart_kind: str) -> None:
+    seed = {
+        "id": "ctr",
+        "title": "CTR",
+        "metric": "CTR",
+        "chart": chart_kind,
+        "x": "Day",
+        "y": "Count",
+        "value": "CTR",
+        **(
+            {
+                "color": "Channel",
+                "facet_row": "Issue",
+                "facets": {"column": "CustomerType"},
+            }
+            if chart_kind == "waterfall"
+            else {"color": "Channel"}
+            if chart_kind == "stacked_area"
+            else {}
+        ),
+    }
+
+    retired = {
+        "value",
+        "y",
+        *(["color", "facet_row", "facets"] if chart_kind == "waterfall" else []),
+    }
+    rebuilt = {key: value for key, value in seed.items() if key not in retired}
+    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, chart_kind)
+
+    assert "y" not in merged
+    assert "value" not in merged
+    if chart_kind == "waterfall":
+        assert "color" not in merged
+        assert "facet_row" not in merged
+        assert "facets" not in merged
+    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
+
+
+@pytest.mark.unit
+def test_visual_metric_owned_polar_merge_removes_legacy_radius_override() -> None:
+    seed = {
+        "id": "ctr_polar",
+        "title": "CTR polar",
+        "metric": "CTR",
+        "chart": "bar_polar",
+        "r": "Count",
+        "theta": "Channel",
+        "color": "Channel",
+    }
+    rebuilt = {key: value for key, value in seed.items() if key != "r"}
+
+    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "bar_polar")
+
+    assert "r" not in merged
+    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
+
+
+@pytest.mark.unit
+def test_visual_metric_owned_treemap_merge_removes_legacy_color_override() -> None:
+    seed = {
+        "id": "ctr_treemap",
+        "title": "CTR treemap",
+        "metric": "CTR",
+        "chart": "treemap",
+        "path": ["Channel"],
+        "color": "Count",
+    }
+    rebuilt = {key: value for key, value in seed.items() if key != "color"}
+
+    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "treemap")
+
+    assert "color" not in merged
+    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
+
+
+@pytest.mark.unit
+def test_visual_metric_owned_donut_merge_removes_legacy_values_override() -> None:
+    seed = {
+        "id": "ctr_mix",
+        "title": "CTR mix",
+        "metric": "CTR",
+        "chart": "donut",
+        "names": "Channel",
+        "values": "Count",
+    }
+    rebuilt = {key: value for key, value in seed.items() if key != "values"}
+
+    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "donut")
+
+    assert "values" not in merged
+    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
+
+
+@pytest.mark.unit
+def test_visual_metric_owned_sankey_merge_removes_legacy_value_override() -> None:
+    seed = {
+        "id": "customer_flow",
+        "title": "Customer flow",
+        "metric": "CTR",
+        "chart": "sankey",
+        "source": "Channel",
+        "target": "Placement",
+        "value": "Count",
+    }
+    rebuilt = {key: value for key, value in seed.items() if key != "value"}
+
+    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "sankey")
+
+    assert "value" not in merged
+    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
+
+
+@pytest.mark.parametrize("chart_kind", ["line", "bar", "stacked_area", "gauge"])
+def test_visual_chart_conversion_removes_kpi_only_settings(chart_kind: str) -> None:
+    seed = {
+        "id": "ctr",
+        "title": "CTR",
+        "metric": "CTR",
+        "chart": "kpi_card",
+        "placement": "kpi_strip",
+        "kpi": {"comparison": "previous_period"},
+    }
+    rebuilt = {
+        "id": "ctr",
+        "title": "CTR",
+        "metric": "CTR",
+        "chart": chart_kind,
+        **({"x": "Day"} if chart_kind != "gauge" else {}),
+        **({"color": "Channel"} if chart_kind == "stacked_area" else {}),
+    }
+
+    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, chart_kind)
+
+    assert "placement" not in merged
+    assert "kpi" not in merged
 
 
 @pytest.mark.unit
@@ -3674,8 +4672,14 @@ def test_new_report_tile_apply_reopens_the_written_tile_clean(tmp_path: Path) ->
     chart = [item for item in rendered.selectbox if item.label == "Chart"][-1]
     assert "KPI card" in chart.options
     assert "kpi_card" not in chart.options
+    rendered = chart.set_value("gauge").run(timeout=15)
+    assert not any(item.label == "Value" for item in rendered.selectbox)
+    assert not any("placement 'kpi_strip'" in item.value for item in rendered.error)
+    assert not any("kpi settings require" in item.value for item in rendered.error)
+    chart = [item for item in rendered.selectbox if item.label == "Chart"][-1]
     rendered = chart.set_value("kpi_card").run(timeout=15)
     assert any("Technical chart kind: `kpi_card`" in item.value for item in rendered.caption)
+    assert not any(item.label == "Value" for item in rendered.selectbox)
     title = next(item for item in rendered.text_input if item.label == "Tile Title")
     rendered = title.set_value("QA tile").run(timeout=15)
 
@@ -3693,6 +4697,49 @@ def test_new_report_tile_apply_reopens_the_written_tile_clean(tmp_path: Path) ->
     tiles = load(tmp_path).dashboards.dashboards[0].pages[0].tiles
     assert len(tiles) == 4
     assert any(tile.title == "QA tile" for tile in tiles)
+
+
+@pytest.mark.unit
+def test_new_report_page_name_survives_dashboard_name_change_and_persists(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    rendered = AppTest.from_function(
+        _render_reports_step,
+        kwargs={"workspace": str(tmp_path)},
+    ).run(timeout=15)
+    rendered = (
+        next(button for button in rendered.button if button.label == "New").click().run(timeout=15)
+    )
+    metric = [item for item in rendered.selectbox if item.label == "Metric"][-1]
+    rendered = metric.set_value("CTR").run(timeout=15)
+    chart = [item for item in rendered.selectbox if item.label == "Chart"][-1]
+    rendered = chart.set_value("kpi_card").run(timeout=15)
+    dashboard = next(item for item in rendered.selectbox if item.label == "Dashboard")
+    rendered = dashboard.set_value(config_builder.NEW_DASHBOARD_KEY).run(timeout=15)
+
+    page_name = next(item for item in rendered.text_input if item.label == "Page Name")
+    rendered = page_name.set_value("Business Value").run(timeout=15)
+    dashboard_name = next(item for item in rendered.text_input if item.label == "Dashboard Name")
+    rendered = dashboard_name.set_value("FAT Business Value").run(timeout=15)
+
+    page_name = next(item for item in rendered.text_input if item.label == "Page Name")
+    assert page_name.value == "Business Value"
+    title = next(item for item in rendered.text_input if item.label == "Tile Title")
+    rendered = title.set_value("Business Value KPI").run(timeout=15)
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    dashboard = next(
+        item for item in load(tmp_path).dashboards.dashboards if item.title == "FAT Business Value"
+    )
+    page = next(item for item in dashboard.pages if item.title == "Business Value")
+    assert [tile.title for tile in page.tiles] == ["Business Value KPI"]
 
 
 @pytest.mark.unit
@@ -4434,6 +5481,165 @@ def test_write_metric_definition_round_trips_valid_catalog(tmp_path: Path) -> No
 
 
 @pytest.mark.unit
+def test_automatic_distribution_metrics_cover_only_public_digest_states() -> None:
+    processor = model.Processors.model_validate(
+        {
+            "processors": [
+                {
+                    "id": "scores",
+                    "source": "events",
+                    "kind": "score_distribution",
+                    "states": {
+                        "Score_tdigest": {"type": "tdigest", "source_column": "Score"},
+                        "Priority_kll": {"type": "kll", "source_column": "Priority"},
+                        "Score_tdigest_positives": {
+                            "type": "tdigest",
+                            "source_column": "Score",
+                            "outcome": "positive",
+                        },
+                        "Score_tdigest_negatives": {
+                            "type": "tdigest",
+                            "source_column": "Score",
+                            "outcome": "negative",
+                        },
+                    },
+                }
+            ]
+        }
+    ).processors[0]
+    metrics = model.Metrics.model_validate(
+        {
+            "metrics": {
+                "ScoreP90": {
+                    "source": "scores",
+                    "kind": "tdigest_quantile",
+                    "state": "Score_tdigest",
+                    "quantile": 0.9,
+                }
+            }
+        }
+    ).metrics
+
+    definitions = builder.automatic_distribution_metric_definitions(processor, metrics)
+
+    assert list(definitions) == [
+        "scores_metric_score_distribution",
+        "scores_metric_priority_distribution",
+    ]
+    assert [definition["state"] for definition in definitions.values()] == [
+        "Score_tdigest",
+        "Priority_kll",
+    ]
+    assert all("quantile" not in definition for definition in definitions.values())
+
+    existing_distribution = model.Metrics.model_validate(
+        {
+            "metrics": {
+                **definitions,
+                "ScoreP90": {
+                    "source": "scores",
+                    "kind": "tdigest_quantile",
+                    "state": "Score_tdigest",
+                    "quantile": 0.9,
+                },
+            }
+        }
+    ).metrics
+    assert (
+        builder.automatic_distribution_metric_definitions(
+            processor,
+            existing_distribution,
+        )
+        == {}
+    )
+
+
+@pytest.mark.unit
+def test_ensure_digest_distribution_metrics_writes_idempotent_metric(
+    tmp_path: Path,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    processor_def = {
+        "id": "descriptive",
+        "source": "ih",
+        "kind": "numeric_distribution",
+        "properties": ["Value"],
+        "dimensions": ["Channel"],
+        "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+    }
+
+    with builder.validated_catalog_transaction(tmp_path):
+        builder.write_processor_definition(tmp_path, processor_def)
+        created = builder.ensure_digest_distribution_metrics(tmp_path, "descriptive")
+
+    assert created == ["descriptive_metric_value_distribution"]
+    metrics_yaml = yaml.safe_load(
+        (tmp_path / "catalog" / "metrics.yaml").read_text(encoding="utf-8")
+    )
+    definition = metrics_yaml["metrics"][created[0]]
+    assert definition["state"] == "Value_tdigest"
+    assert "quantile" not in definition
+    metric = load(tmp_path).metrics.metrics[created[0]]
+    assert metric.quantile == 0.5
+    assert "quantile" not in metric.model_fields_set
+    assert builder.ensure_digest_distribution_metrics(tmp_path, "descriptive") == []
+
+
+@pytest.mark.unit
+def test_processor_apply_creates_distribution_metric_through_builder_ui(
+    tmp_path: Path,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    (tmp_path / "catalog" / "processors.yaml").write_text(
+        """
+processors:
+  - id: descriptive
+    source: ih
+    kind: numeric_distribution
+    description: Initial description
+    properties: [Value]
+    dimensions: [Channel]
+    time:
+      column: OutcomeTime
+      grains: [Day, Summary]
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "catalog" / "metrics.yaml").write_text("metrics: {}\n", encoding="utf-8")
+
+    def app(workspace: str) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        st.session_state.setdefault("builder_step", "Processors")
+        st.session_state.setdefault("builder_processor_mode", "Edit Existing Processor")
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run(timeout=15)
+    description = next(item for item in rendered.text_input if item.label == "Description")
+    rendered = description.set_value("Updated description").run(timeout=15)
+    rendered = (
+        next(button for button in rendered.button if button.label == "Apply to workspace")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    metrics_yaml = yaml.safe_load(
+        (tmp_path / "catalog" / "metrics.yaml").read_text(encoding="utf-8")
+    )
+    assert metrics_yaml["metrics"]["descriptive_metric_value_distribution"] == {
+        "source": "descriptive",
+        "kind": "tdigest_quantile",
+        "state": "Value_tdigest",
+        "description": ("Distribution automatically exposed from the Value_tdigest digest state."),
+        "display": {"label": "Value distribution"},
+    }
+
+
+@pytest.mark.unit
 def test_write_tile_definition_replaces_existing_tile(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
     tile = builder.build_tile(
@@ -4467,6 +5673,244 @@ def test_write_tile_definition_replaces_existing_tile(tmp_path: Path) -> None:
     tiles = catalog.dashboards.dashboards[0].pages[0].tiles
     assert len(tiles) == 1
     assert tiles[0].title == "CTR Updated"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("chart_kind", ["kpi_card", "gauge"])
+def test_metric_owned_tile_build_and_write_remove_manual_value_roles(
+    tmp_path: Path,
+    chart_kind: str,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    tile = builder.build_tile(
+        tile_id="ctr_metric_owned",
+        title="CTR",
+        metric_name="CTR",
+        chart_kind=chart_kind,
+        fields={"value": "Channel", "y": "Count", "description": "Metric-owned value"},
+    )
+
+    assert tile == {
+        "id": "ctr_metric_owned",
+        "title": "CTR",
+        "metric": "CTR",
+        "chart": chart_kind,
+        "description": "Metric-owned value",
+    }
+
+    builder.write_tile_definition(
+        tmp_path,
+        dashboard_id="builder_overview",
+        dashboard_title="Builder Overview",
+        page_id="engagement",
+        page_title="Engagement",
+        tile={**tile, "value": "Channel", "y": "Count"},
+    )
+
+    written = next(
+        item
+        for item in load(tmp_path).dashboards.dashboards[0].pages[0].tiles
+        if item.id == "ctr_metric_owned"
+    )
+    payload = written.model_dump(mode="json", by_alias=True, exclude_none=True)
+    assert "value" not in payload
+    assert "y" not in payload
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("chart_kind", ["line", "bar", "stacked_area", "waterfall", "pareto"])
+def test_metric_owned_y_tile_build_and_write_remove_manual_y_role(
+    tmp_path: Path,
+    chart_kind: str,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    fields = {
+        "x": "Day",
+        "y": "Count",
+        "value": "CTR",
+        **(
+            {
+                "color": "Channel",
+                "facet_row": "Issue",
+                "facets": {"column": "CustomerType"},
+            }
+            if chart_kind == "waterfall"
+            else {"color": "Channel"}
+            if chart_kind == "stacked_area"
+            else {}
+        ),
+    }
+    tile = builder.build_tile(
+        tile_id=f"ctr_{chart_kind}",
+        title="CTR",
+        metric_name="CTR",
+        chart_kind=chart_kind,
+        fields=fields,
+    )
+
+    assert "y" not in tile
+    assert "value" not in tile
+    if chart_kind == "waterfall":
+        assert "color" not in tile
+        assert "facet_row" not in tile
+        assert "facets" not in tile
+
+    builder.write_tile_definition(
+        tmp_path,
+        dashboard_id="builder_overview",
+        dashboard_title="Builder Overview",
+        page_id="engagement",
+        page_title="Engagement",
+        tile={
+            **tile,
+            "value": "CTR",
+            "y": "Count",
+            **(
+                {
+                    "color": "Channel",
+                    "facet_col": "Placement",
+                    "facets": {"row": "Issue"},
+                }
+                if chart_kind == "waterfall"
+                else {}
+            ),
+        },
+    )
+
+    written = next(
+        item
+        for item in load(tmp_path).dashboards.dashboards[0].pages[0].tiles
+        if item.id == f"ctr_{chart_kind}"
+    )
+    payload = written.model_dump(mode="json", by_alias=True, exclude_none=True)
+    assert "y" not in payload
+    assert "value" not in payload
+    if chart_kind == "waterfall":
+        assert "color" not in payload
+        assert "facet_col" not in payload
+        assert "facets" not in payload
+
+
+@pytest.mark.unit
+def test_unified_heatmap_offering_axes_and_metric_owned_intensity(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    catalog = load(tmp_path)
+
+    choices = builder.chart_choices_for_metric(catalog, "CTR")
+    assert "heatmap" in choices
+    assert not set(builder.LEGACY_HEATMAP_CHARTS) & set(choices)
+    assert builder.chart_axis_options(catalog, "CTR") == [
+        "Day",
+        "Month",
+        "Quarter",
+        "Year",
+        "Channel",
+    ]
+    assert "Count" not in builder.chart_axis_options(catalog, "CTR")
+    assert "CTR" not in builder.chart_axis_options(catalog, "CTR")
+
+    defaults = builder.default_tile_fields(catalog, "CTR", "heatmap")
+    assert defaults == {"x": "Day", "y": "Channel"}
+    tile = builder.build_tile(
+        tile_id="ctr_heatmap",
+        title="CTR heatmap",
+        metric_name="CTR",
+        chart_kind="heatmap",
+        fields={"x": "Day", "y": "Channel", "color": "Count", "value": "Positives"},
+    )
+    assert tile == {
+        "id": "ctr_heatmap",
+        "title": "CTR heatmap",
+        "metric": "CTR",
+        "chart": "heatmap",
+        "x": "Day",
+        "y": "Channel",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("chart_kind", "fields", "expected_fields"),
+    [
+        (
+            "calendar_heatmap",
+            {"date": "Day", "value": "Count"},
+            {"x": "Day"},
+        ),
+        (
+            "cohort_heatmap",
+            {"x": "Month", "y": "Channel", "color": "Count"},
+            {"x": "Month", "y": "Channel"},
+        ),
+        (
+            "descriptive_heatmap",
+            {
+                "x": "Month",
+                "y": "Channel",
+                "property": "Propensity",
+                "score": "p95",
+                "color": "Count",
+            },
+            {
+                "x": "Month",
+                "y": "Channel",
+                "property": "Propensity",
+                "score": "p95",
+            },
+        ),
+    ],
+)
+def test_legacy_heatmap_build_migrates_to_unified_contract(
+    chart_kind: str,
+    fields: dict[str, str],
+    expected_fields: dict[str, str],
+) -> None:
+    tile = builder.build_tile(
+        tile_id="heat",
+        title="Heat",
+        metric_name="CTR",
+        chart_kind=chart_kind,
+        fields=fields,
+    )
+
+    assert tile == {
+        "id": "heat",
+        "title": "Heat",
+        "metric": "CTR",
+        "chart": "heatmap",
+        **expected_fields,
+    }
+
+
+@pytest.mark.unit
+def test_heatmap_validation_rejects_metric_outputs_as_axes(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    catalog = load(tmp_path)
+
+    ok, issues = builder.validate_report_candidate(
+        catalog,
+        dashboard_id="quality",
+        dashboard_title="Quality",
+        dashboard_layout="tabs",
+        page_id="heatmaps",
+        page_title="Heatmaps",
+        filters=[],
+        time_filter={},
+        tile={
+            "id": "invalid_heatmap",
+            "title": "Invalid heatmap",
+            "metric": "CTR",
+            "chart": "heatmap",
+            "x": "Count",
+            "y": "Channel",
+        },
+    )
+
+    assert not ok
+    assert any(
+        "heatmap x must reference a configured time grain or processor dimension" in issue
+        for issue in issues
+    )
 
 
 @pytest.mark.unit
@@ -6069,9 +7513,7 @@ def test_delete_metric_rolls_back_catalog_and_chat_on_validation_failure(
     monkeypatch.setattr(
         builder,
         "require_valid_workspace",
-        lambda _workspace, **_kwargs: (_ for _ in ()).throw(
-            ValueError("metric validation failed")
-        ),
+        lambda _workspace, **_kwargs: (_ for _ in ()).throw(ValueError("metric validation failed")),
     )
 
     with pytest.raises(ValueError, match="metric validation failed"):
@@ -7284,6 +8726,61 @@ def test_processor_mode_seeded_by_post_apply_renders_without_policy_warning(
     assert not capture.default_clash_messages
 
 
+@pytest.mark.unit
+def test_report_mode_seeded_by_post_apply_renders_without_policy_warning(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        st.session_state.setdefault("builder_step", "Reports / Tiles")
+        st.session_state.setdefault("builder_tile_editing_mode", "Visual")
+        _builder_steps(load_context(workspace))
+
+    with _PolicyWarningCapture() as capture:
+        rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+
+    assert not rendered.exception
+    editing_mode = next(item for item in rendered.segmented_control if item.label == "Editing Mode")
+    assert editing_mode.value == "Visual"
+    assert not capture.default_clash_messages
+
+
+@pytest.mark.unit
+def test_report_chart_preselection_after_metric_renders_without_policy_warning(
+    tmp_path: Path,
+) -> None:
+    _write_source_cascade_catalog(tmp_path)
+
+    with _PolicyWarningCapture() as capture:
+        rendered = AppTest.from_function(
+            _render_reports_step,
+            kwargs={"workspace": str(tmp_path)},
+        ).run(timeout=15)
+        purpose = next(item for item in rendered.segmented_control if item.label == "Purpose")
+        rendered = purpose.set_value("trend").run(timeout=15)
+        rendered = (
+            next(
+                button
+                for button in rendered.button
+                if button.key == "builder_report_library_create_line"
+            )
+            .click()
+            .run(timeout=15)
+        )
+        metric = [item for item in rendered.selectbox if item.label == "Metric"][-1]
+        rendered = metric.set_value("CTR").run(timeout=15)
+
+    chart = [item for item in rendered.selectbox if item.label == "Chart"][-1]
+    assert chart.value == "line"
+    assert not capture.default_clash_messages
+
+
 # ---------------------------------------------------------------------------
 # Distribution metrics: digest quantile without a stored quantile.
 # ---------------------------------------------------------------------------
@@ -7409,7 +8906,18 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
                         "id": "descriptive",
                         "source": "ih",
                         "kind": "numeric_distribution",
-                        "properties": ["Propensity"],
+                        "properties": ["Propensity", "Priority"],
+                        "states": {
+                            "Custom_kll": {
+                                "type": "kll",
+                                "source_column": "Custom",
+                            },
+                            "Conditional_tdigest": {
+                                "type": "tdigest",
+                                "source_column": "Conditional",
+                                "outcome": "positive",
+                            },
+                        },
                     }
                 ]
             },
@@ -7419,6 +8927,27 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
                         "source": "descriptive",
                         "kind": "tdigest_quantile",
                         "state": "Propensity_tdigest",
+                    },
+                    "PriorityP90": {
+                        "source": "descriptive",
+                        "kind": "tdigest_quantile",
+                        "state": "Priority_tdigest",
+                        "quantile": 0.9,
+                    },
+                    "PriorityDistribution": {
+                        "source": "descriptive",
+                        "kind": "tdigest_quantile",
+                        "state": "Priority_tdigest",
+                    },
+                    "CustomDistribution": {
+                        "source": "descriptive",
+                        "kind": "tdigest_quantile",
+                        "state": "Custom_kll",
+                    },
+                    "ConditionalDistribution": {
+                        "source": "descriptive",
+                        "kind": "tdigest_quantile",
+                        "state": "Conditional_tdigest",
                     },
                     "PropensityCount": {
                         "source": "descriptive",
@@ -7433,8 +8962,92 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
 
     assert "boxplot" in builder.chart_choices_for_metric(catalog, "PropensityDistribution")
     assert "boxplot" not in builder.chart_choices_for_metric(catalog, "PropensityCount")
-    # The axis is optional; the digest property comes from the metric.
-    assert builder.chart_field_controls("boxplot") == ("x", "color", "facet_row", "facet_col")
+    assert builder.distribution_property_options(catalog, "PropensityDistribution") == [
+        "Propensity",
+        "Priority",
+        "Custom",
+    ]
+    assert builder.chart_field_controls("boxplot") == (
+        "property",
+        "x",
+        "color",
+        "facet_row",
+        "facet_col",
+    )
+    defaults = builder.default_tile_fields(
+        catalog,
+        "PropensityDistribution",
+        "boxplot",
+    )
+    assert defaults["property"] == "Propensity"
+    assert "y" not in defaults
+
+    ok, issues = builder.validate_report_candidate(
+        catalog,
+        dashboard_id="quality",
+        dashboard_title="Quality",
+        dashboard_layout="tabs",
+        page_id="distributions",
+        page_title="Distributions",
+        filters=[],
+        time_filter={},
+        tile={
+            "id": "propensity_box",
+            "title": "Propensity",
+            "metric": "PropensityDistribution",
+            "chart": "boxplot",
+            "y": "Propensity_Count",
+        },
+    )
+    assert not ok
+    assert issues == [
+        "Boxplot `y` is supplied by the selected distribution property. "
+        "Remove `y`; choose `property` and use `x`, `color`, or facets only "
+        "to group the distribution."
+    ]
+
+    ok, issues = builder.validate_report_candidate(
+        catalog,
+        dashboard_id="quality",
+        dashboard_title="Quality",
+        dashboard_layout="tabs",
+        page_id="distributions",
+        page_title="Distributions",
+        filters=[],
+        time_filter={},
+        tile={
+            "id": "propensity_box",
+            "title": "Propensity",
+            "metric": "PropensityDistribution",
+            "chart": "boxplot",
+            "property": "Propensity_Count",
+        },
+    )
+    assert not ok
+    assert issues == [
+        "Boxplot property 'Propensity_Count' is not backed by an unconditioned "
+        "t-digest or KLL metric; choose one of: Propensity, Priority, Custom."
+    ]
+
+    merged = config_builder._merge_visual_tile_definition(
+        {
+            "id": "propensity_box",
+            "title": "Propensity",
+            "metric": "PropensityDistribution",
+            "chart": "boxplot",
+            "y": "Propensity_Count",
+        },
+        {
+            "id": "propensity_box",
+            "title": "Propensity",
+            "metric": "PropensityDistribution",
+            "chart": "boxplot",
+            "property": "Priority",
+        },
+        "boxplot",
+    )
+    assert "y" not in merged
+    assert merged["property"] == "Priority"
 
 
 @pytest.mark.unit
@@ -7443,7 +9056,9 @@ def test_descriptive_boxplot_is_retired_from_chart_offering() -> None:
     assert "boxplot" in RECIPES
     assert "descriptive_boxplot" not in builder.CHART_DISPLAY_LABELS
     assert set(RECIPES) == set(builder.CHART_REQUIRED_FIELDS)
-    assert set(RECIPES) == set(config_builder.REPORT_LIBRARY_GROUP_BY_CHART)
+    assert set(config_builder.REPORT_LIBRARY_GROUP_BY_CHART) == (
+        set(RECIPES) - set(builder.LEGACY_HEATMAP_CHARTS)
+    )
     assert set(model.Tile.model_json_schema()["properties"]["chart"]["enum"]) == set(RECIPES)
 
 

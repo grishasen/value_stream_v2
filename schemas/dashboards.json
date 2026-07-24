@@ -225,9 +225,7 @@
             "corr",
             "model",
             "descriptive_line",
-            "descriptive_histogram",
             "descriptive_heatmap",
-            "descriptive_funnel",
             "experiment_z_score",
             "experiment_odds_ratio",
             "clv_treemap"

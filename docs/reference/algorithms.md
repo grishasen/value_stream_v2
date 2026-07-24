@@ -154,7 +154,7 @@ sk = tdigest_double.deserialize(blob)
 return sk.get_quantile(q)
 ```
 
-**Histogram from digest** (used by descriptive_histogram chart):
+**Histogram from digest** (used by the `histogram` chart):
 ```text
 sk = tdigest_double.deserialize(blob)
 edges = linspace(value_range[0], value_range[1], bins + 1)

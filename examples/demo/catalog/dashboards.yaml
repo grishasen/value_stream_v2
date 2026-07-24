@@ -458,12 +458,6 @@ dashboards:
       property: ResponseTime
       x: Outcome
       color: Channel
-    - id: response_time_descriptive_histogram
-      title: Response Time Descriptive Histogram
-      metric: VS_ResponseTime_P95
-      chart: descriptive_histogram
-      property: VS_ResponseTime_P95
-      color: Outcome
     - id: response_time_descriptive_heatmap
       title: Response Time Descriptive Heatmap
       metric: VS_ResponseTime_P95
@@ -472,21 +466,12 @@ dashboards:
       y: Outcome
       property: VS_ResponseTime
       score: P95
-    - id: response_time_descriptive_funnel
-      title: Response Time Descriptive Funnel
-      metric: VS_ResponseTime_P95
-      chart: descriptive_funnel
-      x: Outcome
-      color: Channel
-      stages:
-      - VS_ResponseTime_P95
     - id: response_time_combo
       title: Response Time Combo
       metric: VS_ResponseTime_P95
       chart: combo
       x: Day
-      y: VS_ResponseTime_P95
-      y2: ResponseTime_Mean
+      y2: VS_ResponseTime_Median
       color: Channel
     - id: response_time_interval
       title: Response Time Interval
