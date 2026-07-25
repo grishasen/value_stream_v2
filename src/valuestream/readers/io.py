@@ -117,7 +117,7 @@ def cleanup_temporaries() -> None:
 
 
 def _extra(reader: model.Reader) -> dict[str, object]:
-    return dict(reader.model_extra or {})
+    return reader.model_dump(mode="python", exclude_none=True)
 
 
 def _int_extra(reader: model.Reader, key: str, default: int) -> int:

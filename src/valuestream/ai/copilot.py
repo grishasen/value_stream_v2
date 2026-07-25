@@ -67,45 +67,24 @@ _TILE_SINGLE_FIELD_KEYS = frozenset(
     {
         "x",
         "y",
-        "y2",
-        "line_y",
         "color",
-        "value",
-        "values",
         "names",
         "size",
-        "error_y",
-        "error_y_plus",
-        "error_y_minus",
-        "error_y_lower",
-        "error_y_upper",
-        "error_x",
-        "error_x_lower",
-        "error_x_upper",
-        "facet_row",
-        "facet_col",
-        "facet_column",
-        "animation_frame",
-        "animation_group",
-        "date",
-        "r",
-        "theta",
-        "source",
-        "target",
         "property",
+        "score",
+        "theta",
         "locations",
-        "location",
         "lat",
         "lon",
+        "facet_row",
+        "facet_col",
+        "animation_frame",
+        "animation_group",
         "sort_by",
         "text",
         "symbol",
         "hover_name",
-        "measure",
-        "z",
-        "fallback_property",
         "reference",
-        "delta_reference",
     }
 )
 _TILE_MULTI_FIELD_KEYS = frozenset({"path", "columns", "group_by", "custom_data"})
@@ -517,22 +496,19 @@ def _remap_processor_fields(  # noqa: PLR0912
     processor: dict[str, Any], mapping: Mapping[str, str]
 ) -> dict[str, Any]:
     updated = copy.deepcopy(processor)
-    for key in ("group_by", "dimensions", "dedup_keys", "properties", "score_properties"):
+    for key in ("group_by", "dedup_keys", "properties"):
         if key in updated:
             updated[key] = _remap_field_sequence(updated[key], mapping)
     for key in (
-        "outcome_column",
         "variant_column",
         "entity",
-        "recurring_period_column",
-        "recurring_cost_column",
+        "as_of_property",
     ):
         _remap_scalar_key(updated, key, mapping)
     for section, keys in (
-        ("time", ("column",)),
+        ("time", ("property",)),
         ("outcome", ("column",)),
         ("entities", ("subject",)),
-        ("touchpoint", ("customer_column", "event_column")),
     ):
         nested = updated.get(section)
         if isinstance(nested, dict):
@@ -541,27 +517,15 @@ def _remap_processor_fields(  # noqa: PLR0912
     keys = updated.get("keys")
     if isinstance(keys, dict):
         updated["keys"] = {key: _mapped_field(value, mapping) for key, value in keys.items()}
-    for key in ("score_columns", "scores"):
-        value = updated.get(key)
-        if isinstance(value, dict):
-            updated[key] = {
-                name: (
-                    _remap_processor_column_row(item, mapping)
-                    if isinstance(item, dict)
-                    else _mapped_field(item, mapping)
-                )
-                for name, item in value.items()
-            }
-        elif isinstance(value, list):
-            updated[key] = [
-                _remap_processor_column_row(item, mapping)
-                if isinstance(item, dict)
-                else _mapped_field(item, mapping)
-                for item in value
-            ]
-        elif isinstance(value, str):
-            updated[key] = _mapped_field(value, mapping)
-    for key in ("value_aggs", "milestones"):
+    score_properties = updated.get("score_properties")
+    if isinstance(score_properties, list):
+        updated["score_properties"] = [
+            _remap_processor_column_row(item, mapping)
+            if isinstance(item, dict)
+            else copy.deepcopy(item)
+            for item in score_properties
+        ]
+    for key in ("milestones",):
         rows = updated.get(key)
         if isinstance(rows, list):
             updated[key] = [
@@ -584,8 +548,6 @@ def _remap_processor_fields(  # noqa: PLR0912
             if not isinstance(state, dict):
                 continue
             _remap_scalar_key(state, "source_column", mapping)
-            if "where" in state:
-                state["where"] = _remap_expression_fields(state["where"], mapping)
     return updated
 
 
@@ -595,7 +557,7 @@ def _remap_processor_column_row(row: dict[str, Any], mapping: Mapping[str, str])
     return updated
 
 
-def _remap_tile_fields(  # noqa: PLR0912
+def _remap_tile_fields(
     tile: dict[str, Any], mapping: Mapping[str, str]
 ) -> dict[str, Any]:
     updated = copy.deepcopy(tile)
@@ -605,10 +567,6 @@ def _remap_tile_fields(  # noqa: PLR0912
     for key in _TILE_MULTI_FIELD_KEYS:
         if key in updated:
             updated[key] = _remap_field_sequence(updated[key], mapping)
-    facets = updated.get("facets")
-    if isinstance(facets, dict):
-        for key in ("row", "col", "column"):
-            _remap_scalar_key(facets, key, mapping)
     hover_data = updated.get("hover_data")
     if isinstance(hover_data, dict):
         updated["hover_data"] = {
@@ -690,8 +648,8 @@ def update_processor_definition(
         metrics = updated.get("metrics", {}).get("metrics", {})
         if isinstance(metrics, dict):
             for metric in metrics.values():
-                if isinstance(metric, dict) and metric.get("source") == old_id:
-                    metric["source"] = new_id
+                if isinstance(metric, dict) and metric.get("processor") == old_id:
+                    metric["processor"] = new_id
     return updated
 
 
@@ -1037,7 +995,7 @@ def _apply_install_recipe(draft: dict[str, Any], op: dict[str, Any]) -> tuple[di
             raise ValueError(
                 "install_recipe requires dashboard, page, and tile_id together when adding a tile"
             )
-        tile = instantiate_tile(recipe, metric_id, tile_id)
+        tile = instantiate_tile(recipe, processor, metric_id, tile_id, bindings)
         updated, _ = _apply_set_tile(
             updated,
             {"dashboard": dashboard_id, "page": page_id, "tile": tile},
@@ -1366,7 +1324,7 @@ def _tile_uses_processors(
     metric_name = str(tile.get("metric") or "").strip()
     metrics = draft.get("metrics", {}).get("metrics", {})
     metric = metrics.get(metric_name) if isinstance(metrics, dict) else None
-    return isinstance(metric, dict) and str(metric.get("source") or "") in processor_ids
+    return isinstance(metric, dict) and str(metric.get("processor") or "") in processor_ids
 
 
 def _operation_field_contract_issues(  # noqa: PLR0912, PLR0915
@@ -1454,7 +1412,7 @@ def _operation_field_contract_issues(  # noqa: PLR0912, PLR0915
             continue
         if kind == "set_metric":
             metric = operation.get("metric")
-            if isinstance(metric, dict) and str(metric.get("source") or "") in processor_ids:
+            if isinstance(metric, dict) and str(metric.get("processor") or "") in processor_ids:
                 issues.extend(
                     _field_reference_issues(
                         kind,
@@ -1564,6 +1522,7 @@ def validate_draft_field_contract(  # noqa: PLR0912
                 if baseline_processors.get(processor_id) == processor
                 else allowed_fields
             )
+            processor_fields.update(_processor_calendar_fields(processor))
             issues.extend(
                 _field_reference_issues(
                     f"processor {processor_id!r}",
@@ -1576,7 +1535,7 @@ def validate_draft_field_contract(  # noqa: PLR0912
     baseline_metrics = _metric_definitions_by_name(baseline_draft)
     if isinstance(metrics, dict):
         for metric_name, metric in metrics.items():
-            if not isinstance(metric, dict) or str(metric.get("source") or "") not in processor_ids:
+            if not isinstance(metric, dict) or str(metric.get("processor") or "") not in processor_ids:
                 continue
             if (
                 carry_unmodified_active_artifacts
@@ -1636,6 +1595,7 @@ def _inactive_scope_mutation_issues(
             baseline_processors.get(processor_id),
             current_processors.get(processor_id),
             source_ids,
+            parent_field="source",
         )
     }
     inactive_processor_ids = (
@@ -1659,6 +1619,7 @@ def _inactive_scope_mutation_issues(
             baseline_metrics.get(metric_name),
             current_metrics.get(metric_name),
             active_processor_ids,
+            parent_field="processor",
         )
     }
     inactive_metric_names = (set(current_metrics) | set(baseline_metrics)) - active_metric_names
@@ -1742,10 +1703,12 @@ def _artifact_stays_in_scope(
     before: dict[str, Any] | None,
     after: dict[str, Any] | None,
     parent_ids: set[str],
+    *,
+    parent_field: str,
 ) -> bool:
     definitions = [definition for definition in (before, after) if definition is not None]
     return bool(definitions) and all(
-        str(definition.get("source") or "") in parent_ids for definition in definitions
+        str(definition.get(parent_field) or "") in parent_ids for definition in definitions
     )
 
 
@@ -1941,54 +1904,30 @@ def _output_field_name_issues(
 
 def _processor_field_references(processor: dict[str, Any]) -> set[str]:  # noqa: PLR0912
     references: set[str] = set()
-    for key in (
-        "group_by",
-        "dimensions",
-        "dedup_keys",
-        "properties",
-        "score_properties",
-    ):
+    for key in ("group_by", "dedup_keys", "properties"):
         references.update(_string_field_values(processor.get(key)))
-    for key in (
-        "outcome_column",
-        "variant_column",
-        "entity",
-        "recurring_period_column",
-        "recurring_cost_column",
-    ):
+    for key in ("variant_column", "entity", "as_of_property"):
         references.update(_string_field_values(processor.get(key)))
 
     time_spec = processor.get("time")
     if isinstance(time_spec, dict):
-        references.update(_string_field_values(time_spec.get("column")))
+        references.update(_string_field_values(time_spec.get("property")))
     outcome = processor.get("outcome")
     if isinstance(outcome, dict):
         references.update(_string_field_values(outcome.get("column")))
     entities = processor.get("entities")
     if isinstance(entities, dict):
         references.update(_string_field_values(entities.get("subject")))
-    touchpoint = processor.get("touchpoint")
-    if isinstance(touchpoint, dict):
-        for key in ("customer_column", "event_column"):
-            references.update(_string_field_values(touchpoint.get(key)))
     lifecycle_keys = processor.get("keys")
     if isinstance(lifecycle_keys, dict):
         for value in lifecycle_keys.values():
             references.update(_string_field_values(value))
-    for key in ("score_columns", "scores"):
-        values = processor.get(key)
-        if isinstance(values, dict):
-            for value in values.values():
-                references.update(_string_field_values(value))
-        elif isinstance(values, list):
-            for value in values:
-                if isinstance(value, dict):
-                    references.update(_string_field_values(value.get("column")))
-                else:
-                    references.update(_string_field_values(value))
-        else:
-            references.update(_string_field_values(values))
-    for key in ("value_aggs", "milestones"):
+    score_properties = processor.get("score_properties")
+    if isinstance(score_properties, list):
+        for value in score_properties:
+            if isinstance(value, dict):
+                references.update(_string_field_values(value.get("column")))
+    for key in ("milestones",):
         rows = processor.get(key)
         if not isinstance(rows, list):
             continue
@@ -2009,13 +1948,32 @@ def _processor_field_references(processor: dict[str, Any]) -> set[str]:  # noqa:
             if not isinstance(spec, dict):
                 continue
             references.update(_string_field_values(spec.get("source_column")))
-            references.update(_expression_field_references(spec.get("where")))
     try:
-        typed = model.Processors.model_validate({"processors": [processor]}).processors[0]
+        typed = model.Processors.model_validate(
+            {"catalog_version": 2, "processors": [processor]}
+        ).processors[0]
     except (TypeError, ValueError):
         return references
     references.update(_processor_state_source_fields(typed))
     return references
+
+
+def _processor_calendar_fields(processor: dict[str, Any]) -> set[str]:
+    """Return canonical calendar dimensions generated at or above the base grain."""
+
+    time_spec = processor.get("time")
+    if not isinstance(time_spec, dict):
+        return set()
+    ordered = ("Hour", "Day", "Week", "Month", "Quarter", "Year")
+    start = {
+        "hourly": 0,
+        "daily": 1,
+        "weekly": 2,
+        "monthly": 3,
+        "quarterly": 4,
+        "yearly": 5,
+    }.get(str(time_spec.get("grain") or ""))
+    return set(ordered[start:]) if start is not None else set()
 
 
 def _processor_state_source_fields(processor: model.Processor) -> set[str]:
@@ -2023,19 +1981,25 @@ def _processor_state_source_fields(processor: model.Processor) -> set[str]:
 
     references: set[str] = set()
     sketch_state_types = {"cpc", "hll", "theta", "topk"}
-    source_state_types = {"value_sum", "min", "max", *sketch_state_types}
+    source_state_types = {
+        "value_sum",
+        "min",
+        "max",
+        "pooled_mean",
+        "pooled_variance",
+        "tdigest",
+        "kll",
+        *sketch_state_types,
+    }
     for name, state in model.effective_processor_states(processor).items():
-        extra = dict(state.model_extra or {})
-        if isinstance(processor, model.NumericDistributionProcessor) and extra.get("per_property"):
-            continue
-        source_column = extra.get("source_column")
+        source_column = getattr(state, "source_column", None)
         if source_column:
             references.add(str(source_column))
             continue
         if state.type not in source_state_types:
             continue
         if isinstance(processor, model.EntitySetProcessor) and state.type in sketch_state_types:
-            references.add(str((processor.model_extra or {}).get("entity", "CustomerID")))
+            references.add(processor.entity)
         elif isinstance(processor, model.ScoreDistributionProcessor) and state.type in {
             "cpc",
             "hll",
@@ -2043,7 +2007,7 @@ def _processor_state_source_fields(processor: model.Processor) -> set[str]:
         }:
             references.add("CustomerID")
         elif isinstance(processor, model.SnapshotProcessor) and state.type in sketch_state_types:
-            references.add(str((processor.model_extra or {}).get("entity", "CustomerID")))
+            references.add(processor.entity)
         elif not isinstance(processor, model.EntityLifecycleProcessor):
             references.add(name)
     return references
@@ -2067,33 +2031,15 @@ def _string_field_values(value: Any) -> set[str]:
     return set()
 
 
-def _mapping_field_values(value: Any, keys: set[str]) -> set[str]:
-    if not isinstance(value, dict):
-        return set()
-    return {
-        stripped
-        for key in keys
-        if isinstance(value.get(key), str) and (stripped := str(value[key]).strip())
-    }
-
-
 def _configured_funnel_stage_names(draft: dict[str, Any], metric_name: str) -> set[str]:
     processor = _processor_for_metric(draft, metric_name)
     if processor is None or str(processor.get("kind") or "") != "funnel":
         return set()
-    stages = processor.get("stages")
-    configured = {
-        str(stage.get("name") or "").strip()
-        for stage in (stages if isinstance(stages, list) else [])
-        if isinstance(stage, dict) and str(stage.get("name") or "").strip()
-    }
-    if configured:
-        return configured
     states = processor.get("states")
     return {
-        str(name).removesuffix("_Count")
+        str(name)
         for name, spec in (states.items() if isinstance(states, dict) else [])
-        if isinstance(spec, dict) and spec.get("type") == "count" and str(name).endswith("_Count")
+        if isinstance(spec, dict) and spec.get("type") == "count" and spec.get("stage")
     }
 
 
@@ -2123,7 +2069,7 @@ def _tile_stage_contract_issues(
         elif configured:
             issues.append(
                 f"{operation_name} references funnel stage {stage!r}, which is not one of "
-                f"the configured processor stages: {', '.join(sorted(configured))}."
+                f"the configured stage-count states: {', '.join(sorted(configured))}."
             )
     return issues
 
@@ -2139,18 +2085,11 @@ def _tile_field_contract_issues(
     allowed_fields.update(_metric_result_fields(draft, metric_name))
     allowed_fields.update(_processor_result_fields(draft, metric_name))
     references: set[str] = set()
-    for key in _TILE_SINGLE_FIELD_KEYS - {
-        "property",
-        "fallback_property",
-        "reference",
-        "delta_reference",
-    }:
+    for key in _TILE_SINGLE_FIELD_KEYS - {"property", "reference"}:
         references.update(_string_field_values(tile.get(key)))
-    for key in ("reference", "delta_reference"):
-        references.update(_non_numeric_field_values(tile.get(key)))
+    references.update(_non_numeric_field_values(tile.get("reference")))
     for key in _TILE_MULTI_FIELD_KEYS:
         references.update(_string_field_values(tile.get(key)))
-    references.update(_mapping_field_values(tile.get("facets"), {"row", "col", "column"}))
     hover_data = tile.get("hover_data")
     references.update(_string_field_values(hover_data))
     if isinstance(hover_data, dict):
@@ -2323,9 +2262,9 @@ def _metric_result_fields(  # noqa: PLR0912
     if not isinstance(metric, dict):
         return {metric_name}
     try:
-        typed = model.Metrics.model_validate({"metrics": {metric_name: metric}}).metrics[
-            metric_name
-        ]
+        typed = model.Metrics.model_validate(
+            {"catalog_version": 2, "metrics": {metric_name: metric}}
+        ).metrics[metric_name]
     except (TypeError, ValueError):
         typed = None
     kind = typed.kind if typed is not None else str(metric.get("kind") or "")
@@ -2347,13 +2286,14 @@ def _metric_result_fields(  # noqa: PLR0912
         fields.update(_CURVE_RESULT_FIELDS)
     elif kind == "calibration_from_digests":
         fields.update(_CALIBRATION_RESULT_FIELDS)
-    elif kind == "tdigest_quantile":
-        state = str(metric.get("state") or "")
-        property_name = state
-        for suffix in ("_tdigest", "_kll"):
-            if property_name.endswith(suffix):
-                property_name = property_name.removesuffix(suffix)
-                break
+    elif kind == "distribution":
+        state_name = str(metric.get("state") or "")
+        processor = _processor_for_metric(draft, metric_name)
+        states = processor.get("states") if isinstance(processor, dict) else None
+        state = states.get(state_name) if isinstance(states, dict) else None
+        property_name = (
+            str(state.get("source_column") or "").strip() if isinstance(state, dict) else ""
+        )
         if property_name:
             fields.update(f"{property_name}_{suffix}" for suffix in _QUANTILE_RESULT_SUFFIXES)
     fields.update(
@@ -2369,7 +2309,6 @@ def _processor_result_fields(draft: dict[str, Any], metric_name: str) -> set[str
     if processor is None:
         return set()
     fields = _string_field_values(processor.get("group_by"))
-    fields.update(_string_field_values(processor.get("dimensions")))
     metrics = draft.get("metrics", {}).get("metrics", {})
     metric = metrics.get(metric_name) if isinstance(metrics, dict) else None
     if isinstance(metric, dict) and metric.get("kind") == "lifecycle_summary":
@@ -2377,7 +2316,9 @@ def _processor_result_fields(draft: dict[str, Any], metric_name: str) -> set[str
         # aggregate states are not directly queryable by report tiles.
         return fields
     try:
-        typed = model.Processors.model_validate({"processors": [processor]}).processors[0]
+        typed = model.Processors.model_validate(
+            {"catalog_version": 2, "processors": [processor]}
+        ).processors[0]
     except (TypeError, ValueError):
         states = processor.get("states")
         if isinstance(states, dict):
@@ -2400,7 +2341,7 @@ def _processor_for_metric(draft: dict[str, Any], metric_name: str) -> dict[str, 
     metric = metrics.get(metric_name) if isinstance(metrics, dict) else None
     if not isinstance(metric, dict):
         return None
-    processor_id = str(metric.get("source") or "").strip()
+    processor_id = str(metric.get("processor") or "").strip()
     processors = draft.get("processors", {}).get("processors", [])
     if not isinstance(processors, list):
         return None
@@ -2418,9 +2359,7 @@ def _processor_group_fields(draft: dict[str, Any], metric_name: str) -> set[str]
     processor = _processor_for_metric(draft, metric_name)
     if processor is None:
         return set()
-    return _string_field_values(processor.get("group_by")) | _string_field_values(
-        processor.get("dimensions")
-    )
+    return _string_field_values(processor.get("group_by"))
 
 
 def _processor_property_fields(draft: dict[str, Any], metric_name: str) -> set[str]:
@@ -2528,9 +2467,6 @@ def _processor_definition(processor: model.Processor) -> dict[str, Any]:
         dict[str, Any],
         processor.model_dump(mode="json", by_alias=True, exclude_none=True),
     )
-    group_by = data.pop("group_by", None)
-    if group_by:
-        data["dimensions"] = group_by
     if not processor.states:
         data.pop("states", None)
     return data
@@ -3047,7 +2983,7 @@ def _connect_source_naming_dependencies(
             metric_id
             for definitions in metric_definitions
             for metric_id, definition in definitions.items()
-            if str(definition.get("source") or "") in processor_ids
+            if str(definition.get("processor") or "") in processor_ids
         }
         for processor_patch in processor_patches:
             if processor_patch.object_id in processor_ids or source_id in _patch_property_values(
@@ -3057,7 +2993,7 @@ def _connect_source_naming_dependencies(
         for metric_patch in metric_patches:
             if (
                 metric_patch.object_id in metric_ids
-                or _patch_property_values(metric_patch, "source") & processor_ids
+                or _patch_property_values(metric_patch, "processor") & processor_ids
             ):
                 connect(source_patch, metric_patch)
         for tile_patch in tile_patches:
@@ -3080,7 +3016,7 @@ def _connect_processor_metric_tile_dependencies(
 
     for processor_patch in processor_patches:
         for metric_patch in metric_patches:
-            if processor_patch.object_id in _patch_property_values(metric_patch, "source"):
+            if processor_patch.object_id in _patch_property_values(metric_patch, "processor"):
                 connect(processor_patch, metric_patch)
 
     for metric_patch in metric_patches:

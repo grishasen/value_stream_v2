@@ -15,7 +15,7 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Any, get_args
+from typing import Any
 
 import polars as pl
 import yaml
@@ -32,13 +32,14 @@ _SECTION_KEYS = ("processors", "metrics", "dashboards", "chat_with_data")
 _FENCED_BLOCK_RE = re.compile(r"```(?:yaml|yml)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _REPAIRABLE_MISSING_METRIC_FIELDS = {
     "approx_distinct_count": {"state"},
-    "tdigest_quantile": {"state", "quantile"},
+    "distribution": {"state"},
+    "quantile": {"state", "quantile"},
     "variant_compare": {"variant_column", "test_role", "control_role"},
     "curve_from_digests": {"positive_state", "negative_state"},
     "calibration_from_digests": {"positive_state", "negative_state"},
     "contingency_test": {"variant_column", "tests"},
-    "set_op": {"op"},
-    "funnel_dropoff": {"from_stage", "to_stage"},
+    "set_op": {"operation", "operands"},
+    "funnel_dropoff": {"from_state", "to_state"},
 }
 _REPAIRABLE_PROCESSOR_STATES_RE = re.compile(
     r"^processors\.processors\.\d+\.[^.]+\.states: Input should be a valid dictionary$"
@@ -77,15 +78,15 @@ _APPLICATION_STRUCTURE_DICTIONARY: dict[str, Any] = {
     },
     "reference_graph": [
         "processor.source -> pipelines.sources[].id",
-        "metric.source -> processors.processors[].id",
+        "metric.processor -> processors.processors[].id",
         "tile.metric -> metrics.metrics keys",
-        "metric formula expression columns -> effective state columns on metric.source plus depends_on metrics",
+        "metric formula expression columns -> effective state columns on metric.processor plus depends_on metrics",
     ],
 }
 
 _CATALOG_SCHEMA_DICTIONARY: dict[str, Any] = {
     "processors.yaml": {
-        "shape": {"processors": ["Processor"]},
+        "shape": {"catalog_version": 2, "processors": ["Processor"]},
         "state_type_enum": [
             "count",
             "value_sum",
@@ -105,14 +106,17 @@ _CATALOG_SCHEMA_DICTIONARY: dict[str, Any] = {
             "source": "existing pipelines source id",
             "kind": "one processor kind from processor_kind_dictionary",
             "description": "optional short business description",
-            "dimensions": "list of approved low-cardinality source fields; alias for group_by",
+            "group_by": (
+                "approved persisted dimensions, including derived calendar columns "
+                "available at or above the processor's base grain"
+            ),
             "time": {
-                "column": "approved timestamp field when time-based",
-                "grains": ["Day", "Month", "Quarter", "Year", "Summary"],
-                "aggregation_levels": "optional logical grain -> physical grain map",
+                "property": "approved timestamp field",
+                "grain": "hourly, daily, weekly, monthly, quarterly, yearly, or summary",
+                "calendar": "optional timezone/week-start/fiscal-year settings",
             },
             "states": (
-                "optional mapping of state_name -> {type, source_column?, ...}; not a list; "
+                "required mapping of state_name -> a strict state contract; not a list; "
                 "every type must be one of state_type_enum (value_sum not sum, "
                 "pooled_mean not mean, pooled_variance not var)"
             ),
@@ -120,9 +124,9 @@ _CATALOG_SCHEMA_DICTIONARY: dict[str, Any] = {
         },
     },
     "metrics.yaml": {
-        "shape": {"metrics": {"metric_id": "Metric"}},
+        "shape": {"catalog_version": 2, "metrics": {"metric_id": "Metric"}},
         "metric_fields": {
-            "source": "existing processor id",
+            "processor": "existing processor id",
             "kind": "one metric kind from metric_kind_dictionary",
             "description": "optional short business description",
             "depends_on": "optional list of existing metric ids used by formula expressions",
@@ -197,14 +201,12 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
     },
     "numeric_distribution": {
         "purpose": "descriptive distributions and percentiles for approved numeric properties",
-        "key_fields": ["properties", "quantile_engine", "sketch_build_mode"],
-        "defaults": {"sketch_build_mode": "bulk"},
+        "key_fields": ["properties", "quantile_engine", "states"],
         "authoring": (
-            "declare numeric source columns in properties and omit states; the engine "
-            "derives every state below automatically, so never author states such as "
-            "<Property>_Sum, <Property>_Mean, or <Property>_Var manually"
+            "declare numeric source columns in properties and explicitly declare every "
+            "state the processor emits"
         ),
-        "derived_states": [
+        "typical_states": [
             "<Property>_Count",
             "<Property>_Sum",
             "<Property>_Mean",
@@ -213,16 +215,13 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
             "<Property>_Max",
             "<Property>_tdigest or <Property>_kll",
         ],
-        "compatible_metrics": ["tdigest_quantile", "formula"],
+        "compatible_metrics": ["distribution", "quantile", "formula"],
     },
     "score_distribution": {
         "purpose": "model score quality, ROC/PR curves, calibration, and score summaries",
-        "key_fields": ["score_properties", "outcome", "sketch_build_mode"],
-        "defaults": {"sketch_build_mode": "bulk"},
+        "key_fields": ["score_properties", "outcome", "states"],
         "authoring": (
-            "declare score_properties and outcome and omit states; the default states "
-            "below are derived automatically, and explicit states would replace them "
-            "and break curve metrics"
+            "declare score_properties, outcome, and every digest/count state explicitly"
         ),
         "default_states": [
             "Count",
@@ -232,7 +231,8 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
         "compatible_metrics": [
             "curve_from_digests",
             "calibration_from_digests",
-            "tdigest_quantile",
+            "distribution",
+            "quantile",
             "formula",
         ],
     },
@@ -269,7 +269,12 @@ _METRIC_KIND_DICTIONARY: dict[str, Any] = {
         "state_type": "cpc, hll, or theta",
         "outputs": ["metric_id"],
     },
-    "tdigest_quantile": {
+    "distribution": {
+        "requires": ["state"],
+        "state_type": "tdigest or kll",
+        "outputs": ["Min", "p05", "p25", "Median", "p75", "p95", "Max"],
+    },
+    "quantile": {
         "requires": ["state", "quantile"],
         "state_type": "tdigest or kll",
         "quantile_range": "0 <= quantile <= 1",
@@ -345,13 +350,13 @@ _METRIC_KIND_DICTIONARY: dict[str, Any] = {
         ],
     },
     "set_op": {
-        "requires": ["op", "states or operands"],
-        "allowed_ops": ["union", "intersection", "a_not_b", "diff"],
+        "requires": ["operation", "operands"],
+        "allowed_ops": ["union", "intersection", "minus"],
         "state_type": "theta",
         "outputs": ["metric_id"],
     },
     "funnel_dropoff": {
-        "requires": ["from_stage", "to_stage"],
+        "requires": ["from_state", "to_state"],
         "output": "rate or count",
         "outputs": ["metric_id"],
     },
@@ -373,7 +378,7 @@ _CHART_REQUIRED_FIELD_DICTIONARY: dict[str, Any] = {
     ],
     "required_fields_by_chart": {
         chart: ["|".join(group) for group in TILE_REQUIRED_ALTERNATIVES.get(chart, ())]
-        for chart in get_args(model.Tile.model_fields["chart"].annotation)
+        for chart in TILE_REQUIRED_ALTERNATIVES
     },
     "tile_examples": {
         "kpi_card": {
@@ -382,7 +387,6 @@ _CHART_REQUIRED_FIELD_DICTIONARY: dict[str, Any] = {
             "metric": "engagement_ctr",
             "chart": "kpi_card",
             "placement": "kpi_strip",
-            "value": "engagement_ctr",
         },
         "line": {
             "id": "engagement_ctr_trend",
@@ -390,7 +394,6 @@ _CHART_REQUIRED_FIELD_DICTIONARY: dict[str, Any] = {
             "metric": "engagement_ctr",
             "chart": "line",
             "x": "Day",
-            "y": "engagement_ctr",
         },
         "bar": {
             "id": "conversion_rate_by_channel",
@@ -398,7 +401,6 @@ _CHART_REQUIRED_FIELD_DICTIONARY: dict[str, Any] = {
             "metric": "conversion_rate",
             "chart": "bar",
             "x": "Channel",
-            "y": "conversion_rate",
         },
         "kpi_card_from_variant_compare": {
             "id": "click_lift_kpi",
@@ -406,7 +408,7 @@ _CHART_REQUIRED_FIELD_DICTIONARY: dict[str, Any] = {
             "metric": "click_experiment_lift",
             "chart": "kpi_card",
             "placement": "kpi_strip",
-            "value": "Lift",
+            "metric_output": "Lift",
         },
     },
 }
@@ -947,7 +949,7 @@ def prompt_for_config_draft(
             "You may replace processors, metrics, and dashboards.",
             "You may add chat_with_data.agent_prompt and chat_with_data metric/dataset descriptions for Chat With Data guidance.",
             "Use only approved fields as source dimensions, filters, chart axes, or tile settings.",
-            "Every metric.source must reference a processor id in processors.yaml.",
+            "Every metric.processor must reference a processor id in processors.yaml.",
             "Every dashboard tile.metric must reference a metric id in metrics.yaml.",
             "Add metric display metadata when the business label, unit, format, or favorable direction is clear.",
             "Use explicit kpi_strip placement only for scalar kpi_card tiles; never infer KPI cards from arbitrary charts.",
@@ -1374,7 +1376,7 @@ def filter_draft_by_selection(
             for name, metric_def in metrics.items()
             if name in metric_names
             and isinstance(metric_def, dict)
-            and metric_def.get("source") in processor_ids
+            and metric_def.get("processor") in processor_ids
         }
         metric_names = set(filtered["metrics"]["metrics"])
 
@@ -2144,35 +2146,34 @@ def _hard_output_rules() -> tuple[str, ...]:
     return (
         "Keep pipelines.yaml source definitions unchanged unless the task explicitly asks for pipelines.",
         "Return only complete top-level sections named processors, metrics, dashboards, and/or chat_with_data.",
-        "Use dimensions as the authoring key for processor group_by fields; values must be approved fields.",
+        "Use group_by as the only processor grouping key; values must be approved fields.",
         "For time-based processors and dashboards, use available Day, Month, Quarter, and Year fields where relevant.",
-        "Use processor time.column only when the timestamp field is approved or already present in the current draft.",
+        "Use processor time.property only when the timestamp field is approved or already present in the current draft.",
         "Do not emit legacy TOML-only settings such as metrics.global_filters; this catalog has no metrics.global_filters.",
-        "Keep filters, tile facets, and processor dimensions limited to safe low-cardinality business dimensions.",
+        "Keep filters, tile facets, and non-time processor group_by fields limited to safe low-cardinality business dimensions.",
         "Do not use hidden fields, IDs, raw timestamps, free text, or high-cardinality fields as filters or chart facets.",
         "Every processor id, metric id, dashboard id, page id, and tile id must be stable, unique, and YAML-safe.",
         "Every processor source must reference an existing source id from the current draft pipelines.",
         "Every explicit processor state type must be one of count, value_sum, min, max, pooled_mean, "
         "pooled_variance, tdigest, kll, cpc, hll, theta, or topk; sum, mean, avg, var, and variance "
         "are invalid state types.",
-        "numeric_distribution and score_distribution processors derive per-property states from "
-        "properties/score_properties automatically; never author states such as <Property>_Sum, "
-        "<Property>_Mean, or <Property>_Var manually.",
-        "Never repeat a processor's variant_column in dimensions/group_by; the processor persists "
+        "Every processor must declare a non-empty states mapping; it is the exact persisted "
+        "output contract. Numeric and score processors must explicitly list every scalar and "
+        "sketch state their metrics use.",
+        "Never repeat a processor's variant_column in group_by; the processor persists "
         "the variant column automatically.",
-        "Every metric source must reference a processor id returned in processors or already present in current draft.",
-        "Every metric must use only states that exist on its source processor.",
+        "Every metric processor must reference a processor id returned in processors or already present in current draft.",
+        "Every metric must use only states that exist on its processor.",
         "Every formula metric expression must reference only scalar state columns or declared depends_on metrics.",
         "Every dashboard tile.metric must reference a metric id returned in metrics or already present in current draft.",
-        "Every tile must set the chart's required data fields from chart_required_field_dictionary "
-        "as top-level tile keys; kpi_card needs value, line and bar need x and y.",
+        "Every tile must set the chart's required dimension fields from chart_required_field_dictionary "
+        "as top-level tile keys; scalar values always come from metric or metric_output.",
         "Every chart field must be an approved field, a time field, or a known output of that tile's metric.",
         "Choose chart kinds compatible with the metric's processor and output shape.",
         "Keep metrics and dashboards internally consistent; remove tiles/pages that depend on missing fields.",
         "If experiment fields or variant roles are unavailable, omit experiment processors, metrics, and reports.",
         "If CLV/lifecycle fields are unavailable, omit entity_lifecycle processors, CLV metrics, and CLV reports.",
         "If numeric descriptive properties are unavailable, omit numeric_distribution processors and descriptive reports.",
-        "Set sketch_build_mode to bulk for every numeric_distribution and score_distribution processor; legacy is an explicit rollback escape hatch.",
         "Maximize useful processor coverage while keeping the catalog coherent; never add "
         "speculative or invalid objects merely to increase counts.",
     )
@@ -2180,17 +2181,17 @@ def _hard_output_rules() -> tuple[str, ...]:
 
 def _self_check_rules() -> tuple[str, ...]:
     return (
-        "Every processor dimensions/group_by field exists in approved fields.",
+        "Every processor group_by field exists in approved or explicitly derived calendar fields.",
         "Every processor filter, funnel stage condition, and metric expression uses valid expression AST structure.",
-        "Every metric source exists in processors.",
-        "Every metric state reference exists on the source processor with the required state type.",
-        "Every explicit processor state type is a valid state_type_enum value, and no "
-        "numeric_distribution or score_distribution processor hand-authors derived states.",
-        "No processor repeats its variant_column in dimensions/group_by.",
+        "Every metric processor exists in processors.",
+        "Every metric state reference exists on its processor with the required state type.",
+        "Every processor declares a non-empty explicit states output contract, and every state "
+        "uses a valid state_type_enum value.",
+        "No processor repeats its variant_column in group_by.",
         "Every metric depends_on value exists in metrics.",
         "Every report/dashboard tile metric exists in metrics.",
-        "Every tile defines its chart's required data fields as top-level tile keys: kpi_card and "
-        "gauge define value, line/bar/scatter define x and y, per chart_required_field_dictionary.",
+        "Every tile defines its chart-specific dimension fields as top-level tile keys. Scalar "
+        "measure roles come from metric or metric_output and are never authored as y/value/values/r.",
         "Every report/dashboard tile field exists in approved fields, time fields, or known metric output columns.",
         "No experiment, CLV, model-score, or descriptive object is present without the required approved fields.",
         "No legacy TOML-only keys are present.",
@@ -2289,27 +2290,31 @@ def _extract_yaml_payload(text: str) -> str:
 
 
 def _normalize_processors(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict) and isinstance(value.get("processors"), list):
-        return {"processors": value["processors"]}
-    if isinstance(value, list):
-        return {"processors": value}
-    raise ValueError("processors section must be a list or mapping with `processors`")
+    if not isinstance(value, dict) or value.get("catalog_version") != 2:
+        raise ValueError("processors section must declare catalog_version: 2")
+    if not isinstance(value.get("processors"), list):
+        raise ValueError("processors section must contain a `processors` list")
+    return {"catalog_version": 2, "processors": value["processors"]}
 
 
 def _normalize_metrics(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict) and isinstance(value.get("metrics"), dict):
-        return {"metrics": value["metrics"]}
-    if isinstance(value, dict):
-        return {"metrics": value}
-    raise ValueError("metrics section must be a mapping")
+    if not isinstance(value, dict) or value.get("catalog_version") != 2:
+        raise ValueError("metrics section must declare catalog_version: 2")
+    if not isinstance(value.get("metrics"), dict):
+        raise ValueError("metrics section must contain a `metrics` mapping")
+    return {"catalog_version": 2, "metrics": value["metrics"]}
 
 
 def _normalize_dashboards(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict) and isinstance(value.get("dashboards"), list):
-        return {"theme": value.get("theme", {}), "dashboards": value["dashboards"]}
-    if isinstance(value, list):
-        return {"theme": {}, "dashboards": value}
-    raise ValueError("dashboards section must be a list or mapping with `dashboards`")
+    if not isinstance(value, dict) or value.get("catalog_version") != 2:
+        raise ValueError("dashboards section must declare catalog_version: 2")
+    if not isinstance(value.get("dashboards"), list):
+        raise ValueError("dashboards section must contain a `dashboards` list")
+    return {
+        "catalog_version": 2,
+        "theme": value.get("theme", {}),
+        "dashboards": value["dashboards"],
+    }
 
 
 def _normalize_chat_with_data(value: Any) -> dict[str, Any]:

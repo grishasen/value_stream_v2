@@ -192,8 +192,8 @@ def _mutate_draft(base: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     processor = copy.deepcopy(base["processors"]["processors"][0])
     processor["states"] = {
         "Count": {"type": "count"},
-        "Positives": {"type": "count"},
-        "Negatives": {"type": "count"},
+        "Positives": {"type": "count", "outcome": "positive"},
+        "Negatives": {"type": "count", "outcome": "negative"},
         "UniqueSubjects_cpc": {
             "type": "cpc",
             "source_column": "SubjectID",
@@ -208,7 +208,6 @@ def _mutate_draft(base: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         "metric": "Studio_Count",
         "chart": "bar",
         "x": "Channel",
-        "y": "Studio_Count",
     }
     operations = [
         {
@@ -323,7 +322,7 @@ def _mutate_draft(base: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             "op": "set_metric",
             "name": "Scratch_Count",
             "metric": {
-                "source": processor["id"],
+                "processor": processor["id"],
                 "kind": "formula",
                 "expression": {"col": "Count"},
             },
@@ -332,7 +331,7 @@ def _mutate_draft(base: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             "op": "set_metric",
             "name": "Scratch_Count",
             "metric": {
-                "source": processor["id"],
+                "processor": processor["id"],
                 "kind": "formula",
                 "expression": {"col": "Positives"},
             },

@@ -28,7 +28,7 @@ recipes:
         require_preferred: true
     default_metric_id: VS_Engagement_Rate
     metric:
-      source: ${processor_id}
+      processor: ${processor_id}
       kind: formula
       description: Positive outcomes divided by positive plus negative outcomes.
       display:
@@ -74,7 +74,7 @@ recipes:
         require_preferred: true
     default_metric_id: VS_Positive_Outcomes
     metric:
-      source: ${processor_id}
+      processor: ${processor_id}
       kind: formula
       description: Count of outcomes classified as positive.
       display:
@@ -113,7 +113,7 @@ recipes:
         selection: field_algorithm
     default_metric_id: VS_Unique_Entities
     metric:
-      source: ${processor_id}
+      processor: ${processor_id}
       kind: approx_distinct_count
       description: Approximate distinct entity count from a persisted mergeable sketch.
       display:
@@ -148,8 +148,8 @@ recipes:
         selection: field_algorithm
     default_metric_id: VS_Median_Value
     metric:
-      source: ${processor_id}
-      kind: tdigest_quantile
+      processor: ${processor_id}
+      kind: quantile
       description: Median reconstructed from a persisted mergeable distribution sketch.
       display:
         label: Median value
@@ -185,8 +185,8 @@ recipes:
         selection: field_algorithm
     default_metric_id: VS_P95_Value
     metric:
-      source: ${processor_id}
-      kind: tdigest_quantile
+      processor: ${processor_id}
+      kind: quantile
       description: 95th percentile reconstructed from a persisted mergeable distribution sketch.
       display:
         label: 95th percentile
@@ -222,8 +222,8 @@ recipes:
         selection: field_algorithm
     default_metric_id: VS_Distribution
     metric:
-      source: ${processor_id}
-      kind: tdigest_quantile
+      processor: ${processor_id}
+      kind: distribution
       description: Distribution metric exposing the median and the full quantile suite from a persisted mergeable sketch.
       display:
         label: Distribution
@@ -236,7 +236,7 @@ recipes:
       accuracy: approximate
       algorithm: Quantile-suite queries over a t-digest or KLL state rendered as a boxplot.
       caveat: Approximation error depends on sketch configuration and the observed distribution.
-    report: { chart: boxplot, placement: content, property_from: digest_state }
+    report: { chart: boxplot, placement: content }
 
   - id: model_quality.roc_auc
     version: 1
@@ -266,7 +266,7 @@ recipes:
         match_attribute: score_property
     default_metric_id: VS_ROC_AUC
     metric:
-      source: ${processor_id}
+      processor: ${processor_id}
       kind: curve_from_digests
       description: Approximate ROC AUC reconstructed from positive and negative score digests.
       display:
@@ -308,7 +308,7 @@ recipes:
         different_from: start_count
     default_metric_id: VS_Funnel_Conversion_Rate
     metric:
-      source: ${processor_id}
+      processor: ${processor_id}
       kind: formula
       description: Completion-stage count divided by starting-stage count.
       display:
@@ -338,18 +338,18 @@ recipes:
     maturity: reviewed
     processor_kinds: [ funnel ]
     inputs:
-      - role: from_stage
-        label: Starting stage
+      - role: from_state
+        label: Starting stage-count state
         source: stage
-        preferred_names: [ Impression, Started ]
-      - role: to_stage
-        label: Ending stage
+        preferred_names: [ Impression_Count, Started_Count ]
+      - role: to_state
+        label: Ending stage-count state
         source: stage
-        preferred_names: [ Conversion, Completed ]
-        different_from: from_stage
+        preferred_names: [ Conversion_Count, Completed_Count ]
+        different_from: from_state
     default_metric_id: VS_Funnel_Dropoff
     metric:
-      source: ${processor_id}
+      processor: ${processor_id}
       kind: funnel_dropoff
       description: Aggregate funnel drop-off rate between the selected stages.
       display:
@@ -357,11 +357,11 @@ recipes:
         unit: percent
         value_format: percent
         direction: lower_is_better
-      from_stage: ${from_stage}
-      to_stage: ${to_stage}
+      from_state: ${from_state}
+      to_state: ${to_state}
       output: rate
     method:
-      calculation: 1 - (to_stage_count / from_stage_count)
+      calculation: 1 - (to_state / from_state)
       accuracy: exact
       algorithm: Funnel drop-off over persisted stage aggregates.
       caveat: Stage order and entity semantics are defined by the selected processor.
@@ -377,10 +377,31 @@ recipes:
     tags: [ entity, lifecycle, recurrence ]
     maturity: reviewed
     processor_kinds: [ entity_lifecycle ]
-    inputs: [ ]
+    inputs:
+      - role: holdings_state
+        label: Distinct holdings state
+        source: state
+        state_types: [ count ]
+        state_attributes: { distinct: "true" }
+        preferred_names: [ unique_holdings ]
+      - role: monetary_state
+        label: Monetary value state
+        source: state
+        state_types: [ value_sum ]
+        preferred_names: [ lifetime_value ]
+      - role: first_purchase_state
+        label: First purchase state
+        source: state
+        state_types: [ min ]
+        preferred_names: [ MinPurchasedDate ]
+      - role: last_purchase_state
+        label: Last purchase state
+        source: state
+        state_types: [ max ]
+        preferred_names: [ MaxPurchasedDate ]
     default_metric_id: VS_Lifecycle_Summary
     metric:
-      source: ${processor_id}
+      processor: ${processor_id}
       kind: lifecycle_summary
       description: Lifecycle measures derived from persisted entity lifecycle state.
       display:
@@ -388,6 +409,11 @@ recipes:
         unit: entities
         value_format: number
         direction: neutral
+      entity_column: ${entity_column}
+      holdings_state: ${holdings_state}
+      monetary_state: ${monetary_state}
+      first_purchase_state: ${first_purchase_state}
+      last_purchase_state: ${last_purchase_state}
     method:
       calculation: lifecycle outputs defined by the entity lifecycle metric implementation
       accuracy: exact
@@ -415,7 +441,7 @@ recipes:
         selection: field_algorithm
     default_metric_id: VS_Top_Categories
     metric:
-      source: ${processor_id}
+      processor: ${processor_id}
       kind: topk_items
       description: Top categories estimated from a persisted frequent-items sketch.
       display:

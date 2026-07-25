@@ -142,7 +142,7 @@ def test_variant_compare_uses_only_the_configured_test_and_control_roles() -> No
     )
     metric = model.VariantCompareMetric.model_validate(
         {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "variant_compare",
             "variant_column": "Arm",
             "test_role": "Test",
@@ -167,7 +167,7 @@ def test_proportion_test_executes_for_configured_roles() -> None:
     )
     metric = model.ProportionTestMetric.model_validate(
         {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "proportion_test",
             "variant_column": "Arm",
             "test_role": "Test",
@@ -181,3 +181,28 @@ def test_proportion_test_executes_for_configured_roles() -> None:
     assert out["Positives"][0] == 30
     assert out["z_score"][0] > 0
     assert 0 < out["z_p_val"][0] < 1
+
+
+@pytest.mark.unit
+def test_variant_compare_keeps_undefined_outputs_numeric() -> None:
+    frame = pl.DataFrame(
+        {
+            "Arm": ["Control"],
+            "Positives": [10],
+            "Negatives": [90],
+        }
+    )
+    metric = model.VariantCompareMetric.model_validate(
+        {
+            "processor": "engagement",
+            "kind": "variant_compare",
+            "variant_column": "Arm",
+            "test_role": "Test",
+            "control_role": "Control",
+        }
+    )
+
+    out = executor._derive_variant_compare(frame, metric, [])
+
+    assert out["AbsoluteRateDifference"].dtype == pl.Float64
+    assert out["AbsoluteRateDifference"][0] is None

@@ -208,13 +208,13 @@ processors:
 
 metrics:
   Lift:
-    source: engagement
+    processor: engagement
     kind: variant_compare
     variant_column: ModelControlGroup
     test_role: Test
     control_role: Control
   Lift_Significance:
-    source: engagement
+    processor: engagement
     kind: contingency_test
     tests: [chi2, g, z]
 ```
@@ -230,19 +230,22 @@ Each numeric property gets a t-digest state (`<prop>_tdigest`). Percentiles are 
 ```yaml
 metrics:
   Median_ResponseTime:
-    source: descriptive
-    kind: tdigest_quantile
+    processor: descriptive
+    kind: quantile
     state: ResponseTime_tdigest
     quantile: 0.5
   p95_ResponseTime:
-    source: descriptive
-    kind: tdigest_quantile
+    processor: descriptive
+    kind: quantile
     state: ResponseTime_tdigest
     quantile: 0.95
 ```
 
 **D9. How do I see ROC AUC over time?**
-A `score_distribution` processor at `Day` grain stores `Propensity_tdigest_positives` and `Propensity_tdigest_negatives` per day for the selected score property. The `ROC_AUC` metric (kind `curve_from_digests`) reconstructs AUC at query time. A `line` chart with `x: Day, y: ROC_AUC, color: Channel` plots the trend.
+A daily `score_distribution` processor stores
+`Propensity_tdigest_positives` and `Propensity_tdigest_negatives` per day. The
+`ROC_AUC` metric (kind `curve_from_digests`) reconstructs AUC at query time. A
+`line` chart with `x: Day, color: Channel` plots the metric-owned trend.
 
 For the actual model curves, use the same `curve_from_digests` metric with one
 of the curve chart kinds:
@@ -305,11 +308,11 @@ needed, and increase chunk-process parallelism only after measuring peak RSS.
 **E5. Can I run Value Stream against a remote object store?**
 Yes — the workspace path can be `s3://...` or `gs://...`. Polars and DuckDB read Parquet from object stores natively. The metadata DBs need to be local (DuckDB's WAL doesn't live well on S3) — typically mounted from a local volume.
 
-**E6. How do I migrate from the current app?**
-`valuestream migrate --from value_dashboard/config/<variant>.toml --to valuestream/<variant>/catalog/`. The migration tool translates legacy TOML, identifies expressions that need hand-conversion (and refuses to silently drop them), and emits a `migration_report.md`. Then `valuestream backfill` re-uses the existing DuckDB tables to populate the new aggregate store without recomputing from raw.
-
-**E7. Can the legacy app and Value Stream coexist during migration?**
-Yes — they read from disjoint locations (`db/pov_data_<variant>.duckdb` vs `<workspace>/aggregates/`). Run them side-by-side; pin a banner in the legacy UI pointing to Value Stream.
+**E6. Can I load an older catalog format?**
+No. Every catalog file must declare `catalog_version: 2` and satisfy the strict
+v2 schema. Re-author older configurations as v2 and populate aggregates from
+source data; the runtime does not translate aliases or import legacy aggregate
+stores.
 
 ---
 
@@ -404,8 +407,13 @@ processors:
     kind: binary_outcome
     group_by: [Channel, PlacementType, PropensitySource, Issue, Group]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
+      property: OutcomeTime
+      grain: daily
+      calendar:
+        timezone: UTC
+        week_start: monday
+        fiscal_year_start_month: 1
+    group_by: [Day, Month, Channel, PlacementType, PropensitySource, Issue, Group]
     outcome:
       column: Outcome
       positive_values: [Clicked]
@@ -414,12 +422,17 @@ processors:
     variant_role_map: {Test: Test, Control: Control}
     states:
       Count:     {type: count}
-      Positives: {type: count}
-      Negatives: {type: count}
+      Positives: {type: count, outcome: positive}
+      Negatives: {type: count, outcome: negative}
 
 metrics:
-  CTR:  {source: engagement, kind: formula, expression: {op: safe_div, num: {col: Positives}, den: {op: add, args: [{col: Positives}, {col: Negatives}]}}}
-  Lift: {source: engagement, kind: variant_compare}
+  CTR:  {processor: engagement, kind: formula, expression: {op: safe_div, num: {col: Positives}, den: {op: add, args: [{col: Positives}, {col: Negatives}]}}}
+  Lift:
+    processor: engagement
+    kind: variant_compare
+    variant_column: ModelControlGroup
+    test_role: Test
+    control_role: Control
 ```
 
 **I2. Translating a `pl.col(...).is_in(...)` filter to AST.**

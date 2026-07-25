@@ -155,27 +155,6 @@ schema from a real export sample.
 | `--compression S` | `zstd` | Parquet compression |
 | `--overwrite` | off | Replace existing generated files for the same days |
 
-## migrate
-
-```sh
-uv run valuestream migrate --from LEGACY.toml --to WORKSPACE/catalog
-```
-
-Translates a legacy TOML config into catalog YAML and writes a
-`migration_report.md` into the target directory. Prints generated files,
-mapped fields, and gaps; review the report before sign-off
-([migration guide](../guides/operations/migration.md)).
-
-## backfill
-
-```sh
-uv run valuestream backfill --workspace WORKSPACE --from-legacy-db LEGACY.duckdb
-```
-
-Imports legacy DuckDB aggregate tables into the partitioned parquet aggregate
-layout where they map to catalog targets. Prints per-table results and skipped
-targets.
-
 ## vacuum
 
 ```sh

@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
-from functools import partial
-from typing import Any
 
 import polars as pl
 
@@ -19,12 +16,6 @@ from valuestream.processors.context import SOURCE_ORDER_COLUMN, ChunkContext
 from valuestream.processors.outcomes import compatible_values, is_in_values, parse_outcome
 from valuestream.states import kll, tdigest
 from valuestream.utils.timer import timed
-
-
-@dataclass(frozen=True)
-class _Scores:
-    primary: str
-    calibrated: str
 
 
 class ScoreDistributionProcessor:
@@ -60,9 +51,7 @@ class ScoreDistributionProcessor:
     @timed
     def chunk_aggregate_lazy(self, frame: pl.LazyFrame, ctx: ChunkContext) -> pl.LazyFrame:
         """Return a lazy daily score aggregate plan for one source chunk."""
-        extra = p3.extra(self.config)
-        outcome = parse_outcome(extra)
-        scores = _scores(extra)
+        outcome = parse_outcome(self.config.outcome)
         source = frame
         if self.config.filter is not None:
             source = source.filter(translate(self.config.filter))
@@ -72,11 +61,7 @@ class ScoreDistributionProcessor:
         source = source.filter(
             is_in_values(outcome.column, [*positive_values, *negative_values])
         ).with_columns(is_in_values(outcome.column, positive_values).alias("__vs_positive"))
-        dedup_keys = [
-            key
-            for key in p3.list_extra(extra, "dedup_keys")
-            if key in source.collect_schema().names()
-        ]
+        dedup_keys = [key for key in self.config.dedup_keys if key in source.collect_schema().names()]
         if dedup_keys:
             source = source.filter(
                 pl.col("__vs_positive").cast(pl.Int8)
@@ -85,14 +70,15 @@ class ScoreDistributionProcessor:
 
         existing = set(source.collect_schema().names())
         time_columns = grain_levels.chunk_time_group_columns(existing, self.config)
-        group_keys = [
-            column
-            for column in [*self.group_by_columns, *time_columns]
-            if column and column in existing
-        ]
-        grouped = source.group_by(group_keys).agg(self._agg_exprs(existing, scores, schema))
-        if self.config.sketch_build_mode == "bulk":
-            grouped = p3.unnest_distribution_sketches(grouped)
+        group_keys = list(
+            dict.fromkeys(
+                column
+                for column in [*self.group_by_columns, *time_columns]
+                if column and column in existing
+            )
+        )
+        grouped = source.group_by(group_keys).agg(self._agg_exprs(existing, schema))
+        grouped = p3.unnest_distribution_sketches(grouped)
         frame_out = self._postprocess(grouped, existing)
         if "__PositiveCount" in frame_out.collect_schema().names():
             frame_out = frame_out.filter(pl.col("__PositiveCount") > 0).drop("__PositiveCount")
@@ -143,73 +129,100 @@ class ScoreDistributionProcessor:
         """Merge rows and preserve config hash for query-time metrics."""
         return p3.merge_for_query(self.merge, frame, group_columns, self.config_hash)
 
-    def _agg_exprs(
-        self, existing: set[str], scores: _Scores, source_schema: pl.Schema
+    def _agg_exprs(  # noqa: PLR0912, PLR0915
+        self, existing: set[str], source_schema: pl.Schema
     ) -> list[pl.Expr]:
-        exprs: list[pl.Expr] = [
-            pl.len().alias("Count"),
-            pl.col("__vs_positive").sum().alias("__PositiveCount"),
-        ]
+        exprs: list[pl.Expr] = [pl.col("__vs_positive").sum().alias("__PositiveCount")]
         distribution_sketches: list[p3.DistributionSketchSpec] = []
         for name, spec in self.state_specs.items():
-            extra = p3.spec_extra(spec)
-            if spec.type in {"tdigest", "kll"}:
-                score_column = _score_column(name, extra, scores)
+            if spec.type == "count":
+                if spec.outcome == "positive":
+                    exprs.append(pl.col("__vs_positive").sum().alias(name))
+                elif spec.outcome == "negative":
+                    exprs.append((~pl.col("__vs_positive")).sum().alias(name))
+                elif spec.source_column:
+                    if spec.source_column not in existing:
+                        raise ValueError(
+                            f"score_distribution processor {self.id!r} state {name!r} "
+                            f"requires missing source column {spec.source_column!r}"
+                        )
+                    count = (
+                        pl.col(spec.source_column).n_unique()
+                        if spec.distinct
+                        else pl.col(spec.source_column).count()
+                    )
+                    exprs.append(count.alias(name))
+                elif spec.stage:
+                    raise ValueError(
+                        f"score_distribution processor {self.id!r} state {name!r} "
+                        "cannot use a funnel stage selector"
+                    )
+                else:
+                    exprs.append(pl.len().alias(name))
+            elif spec.type in {"tdigest", "kll"}:
+                score_column = spec.source_column
                 if score_column not in existing:
                     raise ValueError(
                         f"score_distribution processor {self.id!r} state {name!r} "
                         f"requires missing score column {score_column!r}"
                     )
-                outcome_role = extra.get("outcome")
+                outcome_role = spec.outcome
                 values = pl.col(score_column)
                 if outcome_role in {"positive", "negative"}:
                     desired = outcome_role == "positive"
                     values = values.filter(pl.col("__vs_positive") == desired)
-                if self.config.sketch_build_mode == "bulk":
-                    distribution_sketches.append(
-                        (name, spec.type, _sketch_k(spec), values.drop_nulls())
-                    )
-                else:
-                    exprs.append(
-                        pl.map_groups(
-                            exprs=[values.drop_nulls()],
-                            function=partial(
-                                _build_distribution_group,
-                                state_type=spec.type,
-                                k=_sketch_k(spec),
-                            ),
-                            return_dtype=pl.Binary,
-                            returns_scalar=True,
-                        ).alias(name)
-                    )
+                distribution_sketches.append(
+                    (name, spec.type, _sketch_k(spec), values.drop_nulls())
+                )
             elif spec.type in {"cpc", "hll", "theta", "topk"}:
                 expression, _ = p3.sketch_build_expr(
                     name,
                     spec,
                     existing=existing,
-                    default_source_column="CustomerID",
                     source_dtypes=source_schema,
                 )
                 if expression is not None:
                     exprs.append(expression)
-        if {"CustomerID", "Name"} <= existing and "personalization" in self.state_specs:
-            exprs.append(
-                pl.map_groups(
-                    exprs=_source_order_inputs(existing, "CustomerID", "Name"),
-                    function=_personalization_group,
-                    return_dtype=pl.Float64,
-                    returns_scalar=True,
-                ).alias("personalization")
-            )
-        if {"CustomerID", "InteractionID", "Name"} <= existing and "novelty" in self.state_specs:
-            exprs.append(
-                pl.map_groups(
-                    exprs=_source_order_inputs(existing, "CustomerID", "InteractionID", "Name"),
-                    function=_novelty_group,
-                    return_dtype=pl.Float64,
-                    returns_scalar=True,
-                ).alias("novelty")
-            )
+            elif spec.type == "pooled_mean":
+                if spec.recipe == "personalization":
+                    required = {"CustomerID", "Name"}
+                    function = _personalization_group
+                    inputs = ("CustomerID", "Name")
+                elif spec.recipe == "novelty":
+                    required = {"CustomerID", "InteractionID", "Name"}
+                    function = _novelty_group
+                    inputs = ("CustomerID", "InteractionID", "Name")
+                elif spec.source_column:
+                    if spec.source_column not in existing:
+                        raise ValueError(
+                            f"score_distribution processor {self.id!r} state {name!r} "
+                            f"requires missing source column {spec.source_column!r}"
+                        )
+                    exprs.append(pl.col(spec.source_column).mean().alias(name))
+                    continue
+                else:  # pragma: no cover - rejected by the state model
+                    raise ValueError(f"pooled_mean state {name!r} has no computation")
+                if not required <= existing:
+                    missing = ", ".join(sorted(required - existing))
+                    raise ValueError(
+                        f"score_distribution processor {self.id!r} state {name!r} "
+                        f"requires missing recipe columns: {missing}"
+                    )
+                exprs.append(
+                    pl.map_groups(
+                        exprs=_source_order_inputs(existing, *inputs),
+                        function=function,
+                        return_dtype=pl.Float64,
+                        returns_scalar=True,
+                    ).alias(name)
+                )
+            elif spec.type == "pooled_variance":
+                if spec.source_column not in existing:
+                    raise ValueError(
+                        f"score_distribution processor {self.id!r} state {name!r} "
+                        f"requires missing source column {spec.source_column!r}"
+                    )
+                exprs.append(pl.col(spec.source_column).var().alias(name))
         if distribution_sketches:
             exprs.append(p3.distribution_sketch_expr(distribution_sketches))
         return exprs
@@ -227,12 +240,16 @@ class ScoreDistributionProcessor:
                 out = out.with_columns(pl.lit(tdigest.build([], k=_sketch_k(spec))).alias(name))
             elif spec.type == "kll":
                 out = out.with_columns(pl.lit(kll.build([], k=_sketch_k(spec))).alias(name))
-            elif spec.type in {"cpc", "hll", "theta", "topk"}:
+            elif spec.type in {
+                "cpc",
+                "hll",
+                "theta",
+                "topk",
+                "pooled_mean",
+                "pooled_variance",
+                "count",
+            }:
                 out = p3.ensure_state_columns(out, {name: spec})
-            elif spec.type == "pooled_mean":
-                out = out.with_columns(pl.lit(0.0).alias(name))
-            elif spec.type == "count":
-                out = out.with_columns(pl.lit(0).alias(name))
         return out
 
     def _sketch_columns(self, existing: set[str]) -> list[tuple[str, str, int]]:
@@ -244,55 +261,13 @@ class ScoreDistributionProcessor:
                 name,
                 spec,
                 existing=existing,
-                default_source_column="CustomerID",
             )
             columns.append(metadata)
         return columns
 
 
-def _scores(extra: dict[str, Any]) -> _Scores:
-    raw = extra.get("score_columns")
-    if isinstance(raw, dict):
-        return _Scores(
-            primary=str(raw.get("primary", "Propensity")),
-            calibrated=str(raw.get("calibrated", raw.get("primary", "FinalPropensity"))),
-        )
-    properties = extra.get("score_properties")
-    if isinstance(properties, list) and properties:
-        primary = str(properties[0])
-        calibrated = str(properties[1] if len(properties) > 1 else properties[0])
-        return _Scores(primary=primary, calibrated=calibrated)
-    return _Scores("Propensity", "FinalPropensity")
-
-
-def _score_column(name: str, extra: dict[str, Any], scores: _Scores) -> str:
-    source_column = extra.get("source_column")
-    if source_column:
-        return str(source_column)
-    for suffix in ("_tdigest", "_kll"):
-        if name.endswith(suffix):
-            inferred = name.removesuffix(suffix)
-            if inferred:
-                return inferred
-    score = str(extra.get("score", "primary"))
-    if score == "primary":
-        return scores.primary
-    if score == "calibrated":
-        return scores.calibrated
-    return score
-
-
 def _sketch_k(spec: model.StateSpec) -> int:
     return int(p3.spec_extra(spec).get("k", 500))
-
-
-def _build_distribution_group(
-    values: Sequence[pl.Series],
-    state_type: str,
-    k: int,
-) -> bytes:
-    build_fn = kll.build if state_type == "kll" else tdigest.build
-    return build_fn(values[0] if values else [], k=k)
 
 
 def _personalization_group(values: Sequence[pl.Series]) -> float:

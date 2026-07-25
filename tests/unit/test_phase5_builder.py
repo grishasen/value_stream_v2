@@ -1282,7 +1282,7 @@ def test_build_formula_metric_uses_safe_div_when_denominator_selected() -> None:
     metric = builder.build_formula_metric("engagement", "Positives", "Count")
 
     assert metric == {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "formula",
         "expression": {
             "op": "safe_div",
@@ -1299,8 +1299,33 @@ def test_metric_kind_options_prioritize_score_distribution_curve_metrics() -> No
             "id": "ih_ml",
             "source": "ih",
             "kind": "score_distribution",
-            "score_properties": ["final_propensity"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "score_properties": [{"column": "final_propensity", "role": "primary"}],
+            "states": {
+                "Count": {"type": "count"},
+                "UniqueCustomers_cpc": {
+                    "type": "cpc",
+                    "source_column": "CustomerID",
+                },
+                "final_propensity_tdigest_positives": {
+                    "type": "tdigest",
+                    "source_column": "final_propensity",
+                    "score_property": "final_propensity",
+                    "outcome": "positive",
+                },
+                "final_propensity_tdigest_negatives": {
+                    "type": "tdigest",
+                    "source_column": "final_propensity",
+                    "score_property": "final_propensity",
+                    "outcome": "negative",
+                },
+            },
             "entities": {"subject": "SubjectID"},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
         }
     )
 
@@ -1326,27 +1351,40 @@ def test_score_distribution_digest_pairs_use_source_column_metadata() -> None:
             "id": "ih_ml",
             "source": "ih",
             "kind": "score_distribution",
-            "score_properties": ["propensity", "final_propensity"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "score_properties": [
+                {"column": "propensity", "role": "primary"},
+                {"column": "final_propensity", "role": "calibrated"},
+            ],
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
             "states": {
                 "Count": {"type": "count"},
                 "primary_clicked": {
                     "type": "tdigest",
                     "source_column": "propensity",
+                    "score_property": "propensity",
                     "outcome": "positive",
                 },
                 "primary_impressed": {
                     "type": "tdigest",
                     "source_column": "propensity",
+                    "score_property": "propensity",
                     "outcome": "negative",
                 },
                 "calibrated_clicked": {
                     "type": "tdigest",
                     "source_column": "final_propensity",
+                    "score_property": "final_propensity",
                     "outcome": "positive",
                 },
                 "calibrated_impressed": {
                     "type": "tdigest",
                     "source_column": "final_propensity",
+                    "score_property": "final_propensity",
                     "outcome": "negative",
                 },
             },
@@ -1375,6 +1413,13 @@ def test_score_distribution_without_outcome_digest_pair_does_not_offer_curve_met
             "id": "ih_ml",
             "source": "ih",
             "kind": "score_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "score_properties": [{"column": "final_propensity", "role": "primary"}],
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
             "states": {
                 "Count": {"type": "count"},
                 "final_propensity_tdigest": {
@@ -1389,7 +1434,7 @@ def test_score_distribution_without_outcome_digest_pair_does_not_offer_curve_met
 
     assert "curve_from_digests" not in options
     assert "calibration_from_digests" not in options
-    assert "tdigest_quantile" in options
+    assert "quantile" in options
 
 
 @pytest.mark.unit
@@ -1400,6 +1445,13 @@ def test_metric_kind_options_cover_processor_specific_metric_shapes() -> None:
             "source": "ih",
             "kind": "numeric_distribution",
             "properties": ["final_propensity"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {
+                "final_propensity_tdigest": {
+                    "type": "tdigest",
+                    "source_column": "final_propensity",
+                }
+            },
         }
     )
     binary = model.BinaryOutcomeProcessor.model_validate(
@@ -1407,6 +1459,17 @@ def test_metric_kind_options_cover_processor_specific_metric_shapes() -> None:
             "id": "engagement",
             "source": "ih",
             "kind": "binary_outcome",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {
+                "Count": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "Negatives": {"type": "count", "outcome": "negative"},
+            },
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
             "variant_column": "ModelControlGroup",
             "entities": {"subject": "CustomerID"},
         }
@@ -1416,6 +1479,8 @@ def test_metric_kind_options_cover_processor_specific_metric_shapes() -> None:
             "id": "unique_users",
             "source": "ih",
             "kind": "entity_set",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "entity": "CustomerID",
             "states": {
                 "Visitors_theta": {"type": "theta", "source_column": "CustomerID"},
                 "Clickers_theta": {"type": "theta", "source_column": "CustomerID"},
@@ -1428,6 +1493,11 @@ def test_metric_kind_options_cover_processor_specific_metric_shapes() -> None:
             "id": "action_funnel",
             "source": "ih",
             "kind": "funnel",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {
+                "Impression_Count": {"type": "count", "stage": "Impression"},
+                "Clicked_Count": {"type": "count", "stage": "Clicked"},
+            },
             "stages": [
                 {"name": "Impression", "when": {"op": "eq", "column": "Outcome", "value": 0}},
                 {"name": "Clicked", "when": {"op": "eq", "column": "Outcome", "value": 1}},
@@ -1435,10 +1505,22 @@ def test_metric_kind_options_cover_processor_specific_metric_shapes() -> None:
         }
     )
     lifecycle = model.EntityLifecycleProcessor.model_validate(
-        {"id": "customer_lifecycle", "source": "orders", "kind": "entity_lifecycle"}
+        {
+            "id": "customer_lifecycle",
+            "source": "orders",
+            "kind": "entity_lifecycle",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "keys": {
+                "customer_id": "CustomerID",
+                "order_id": "OrderID",
+                "monetary": "Revenue",
+                "purchase_date": "OutcomeTime",
+            },
+            "states": {"Count": {"type": "count"}},
+        }
     )
 
-    assert builder.metric_kind_options(numeric)[0] == "tdigest_quantile"
+    assert builder.metric_kind_options(numeric)[:2] == ["distribution", "quantile"]
     assert {"variant_compare", "contingency_test"} <= set(builder.metric_kind_options(binary))
     assert "proportion_test" in builder.metric_kind_options(binary)
     assert {"set_op", "approx_distinct_count"} <= set(builder.metric_kind_options(entity_set))
@@ -1453,6 +1535,8 @@ def test_theta_only_processor_can_build_approx_distinct_metric() -> None:
             "id": "unique_users",
             "source": "ih",
             "kind": "entity_set",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "entity": "CustomerID",
             "states": {"Visitors_theta": {"type": "theta", "source_column": "CustomerID"}},
         }
     )
@@ -1462,85 +1546,14 @@ def test_theta_only_processor_can_build_approx_distinct_metric() -> None:
             "id": "descriptive",
             "source": "ih",
             "kind": "numeric_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "properties": ["CustomerID"],
             "states": {"Visitors_theta": {"type": "theta", "source_column": "CustomerID"}},
         }
     )
 
     assert "approx_distinct_count" in builder.metric_kind_options(processor)
     assert "approx_distinct_count" in builder.metric_kind_options(numeric)
-
-
-@pytest.mark.unit
-def test_config_builder_warns_when_funnel_has_no_stages() -> None:
-    catalog = model.Catalog.model_validate(
-        {
-            "pipelines": {
-                "workspace": "demo",
-                "sources": [
-                    {
-                        "id": "ih",
-                        "reader": {"kind": "parquet", "file_pattern": "*.parquet"},
-                    }
-                ],
-            },
-            "processors": {
-                "processors": [
-                    {"id": "action_funnel", "source": "ih", "kind": "funnel"},
-                ]
-            },
-            "metrics": {"metrics": {}},
-            "dashboards": {"dashboards": []},
-        }
-    )
-
-    warnings = config_builder._funnel_stage_warnings(catalog)
-
-    assert warnings == [
-        "`action_funnel` is a funnel processor but has no stages. "
-        "Add at least one `stages` entry with a name and Boolean `when` expression."
-    ]
-
-
-@pytest.mark.unit
-def test_config_builder_warns_when_funnel_stage_lacks_when_expression() -> None:
-    catalog = model.Catalog.model_validate(
-        {
-            "pipelines": {
-                "workspace": "demo",
-                "sources": [
-                    {
-                        "id": "ih",
-                        "reader": {"kind": "parquet", "file_pattern": "*.parquet"},
-                    }
-                ],
-            },
-            "processors": {
-                "processors": [
-                    {
-                        "id": "action_funnel",
-                        "source": "ih",
-                        "kind": "funnel",
-                        "stages": [
-                            {
-                                "name": "Impression",
-                                "when": {"op": "eq", "column": "Outcome", "value": "Impression"},
-                            },
-                            {"name": "Clicked"},
-                        ],
-                    },
-                ]
-            },
-            "metrics": {"metrics": {}},
-            "dashboards": {"dashboards": []},
-        }
-    )
-
-    warnings = config_builder._funnel_stage_warnings(catalog)
-
-    assert warnings == [
-        "`action_funnel` has funnel stage(s) without a `when` expression: "
-        "Clicked. Add a Boolean `when` expression to each stage."
-    ]
 
 
 @pytest.mark.unit
@@ -1660,6 +1673,8 @@ def test_metric_kind_options_offer_topk_items_for_topk_states() -> None:
             "id": "campaign_exploration",
             "source": "ih",
             "kind": "entity_set",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "entity": "CustomerID",
             "states": {
                 "TopCampaign_topk": {"type": "topk", "source_column": "Campaign"},
                 "Visitors_hll": {"type": "hll", "source_column": "CustomerID"},
@@ -1681,19 +1696,19 @@ def test_build_specialized_metric_definitions_are_concise_yaml_shapes() -> None:
         "Propensity_tdigest_negatives",
         "average_precision",
     ) == {
-        "source": "ih_ml",
+        "processor": "ih_ml",
         "kind": "curve_from_digests",
         "positive_state": "Propensity_tdigest_positives",
         "negative_state": "Propensity_tdigest_negatives",
         "output": "average_precision",
     }
     assert builder.build_approx_distinct_metric("ih_ml", "UniqueSubjects_hll") == {
-        "source": "ih_ml",
+        "processor": "ih_ml",
         "kind": "approx_distinct_count",
         "state": "UniqueSubjects_hll",
     }
     assert builder.build_topk_items_metric("explore", "TopCampaign_topk", limit=5) == {
-        "source": "explore",
+        "processor": "explore",
         "kind": "topk_items",
         "state": "TopCampaign_topk",
         "limit": 5,
@@ -1704,21 +1719,21 @@ def test_build_specialized_metric_definitions_are_concise_yaml_shapes() -> None:
         limit=5,
         error_type="NO_FALSE_NEGATIVES",
     ) == {
-        "source": "explore",
+        "processor": "explore",
         "kind": "topk_items",
         "state": "TopCampaign_topk",
         "limit": 5,
         "error_type": "NO_FALSE_NEGATIVES",
     }
     assert builder.build_funnel_dropoff_metric("funnel", "Impression", "Clicked") == {
-        "source": "funnel",
+        "processor": "funnel",
         "kind": "funnel_dropoff",
-        "from_stage": "Impression",
-        "to_stage": "Clicked",
+        "from_state": "Impression",
+        "to_state": "Clicked",
         "output": "rate",
     }
     assert builder.build_proportion_test_metric("engagement", outputs=["z_score"]) == {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "proportion_test",
         "variant_column": "ModelControlGroup",
         "test_role": "Test",
@@ -1731,7 +1746,7 @@ def test_build_specialized_metric_definitions_are_concise_yaml_shapes() -> None:
 def test_metric_output_columns_return_multi_column_defaults() -> None:
     metric = model.VariantCompareMetric.model_validate(
         {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "variant_compare",
             "variant_column": "ModelControlGroup",
             "test_role": "Test",
@@ -1757,13 +1772,13 @@ def test_chart_choices_filter_by_metric_processor_kind(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_default_tile_fields_use_processor_group_by_columns(tmp_path: Path) -> None:
+def test_default_tile_fields_use_base_time_grain_and_processor_dimensions(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
     catalog = load(tmp_path)
 
     fields = builder.default_tile_fields(catalog, "CTR", "line")
 
-    assert fields == {"x": "Day", "color": "Channel"}
+    assert fields == {"x": "Day", "color": "Channel", "metric_output": "CTR"}
 
 
 @pytest.mark.unit
@@ -1772,7 +1787,7 @@ def test_descriptive_tile_defaults_use_metric_property_and_score() -> None:
 
     fields = builder.default_tile_fields(catalog, "ResponseP50", "descriptive_line")
 
-    assert fields["x"] == "Month"
+    assert fields["x"] == "Day"
     assert fields["property"] == "ResponseTime"
     assert fields["score"] == "p50"
     assert fields["color"] == "Channel"
@@ -1786,19 +1801,7 @@ def test_descriptive_property_and_score_options_are_property_specific() -> None:
         "Propensity",
         "ResponseTime",
     ]
-    assert builder.descriptive_score_options(catalog, "ResponseP50", "Propensity") == [
-        "Count",
-        "Sum",
-        "Mean",
-        "Var",
-        "Min",
-        "Max",
-        "p25",
-        "p50",
-        "p75",
-        "p90",
-        "p95",
-    ]
+    assert builder.descriptive_score_options(catalog, "ResponseP50", "Propensity") == ["Mean"]
 
 
 @pytest.mark.unit
@@ -1827,41 +1830,53 @@ def test_marketing_chart_defaults_cover_supported_plotly_shapes(tmp_path: Path) 
     _write_builder_catalog(tmp_path)
     catalog = load(tmp_path)
 
-    assert builder.default_tile_fields(catalog, "CTR", "kpi_card") == {}
+    assert builder.default_tile_fields(catalog, "CTR", "kpi_card") == {
+        "metric_output": "CTR"
+    }
     assert builder.default_tile_fields(catalog, "CTR", "gauge") == {
         "facet_row": "Channel",
+        "metric_output": "CTR",
     }
     assert builder.default_tile_fields(catalog, "CTR", "pareto") == {
         "x": "Channel",
+        "metric_output": "CTR",
     }
     assert builder.default_tile_fields(catalog, "CTR", "treemap") == {
         "path": ["Channel"],
+        "metric_output": "CTR",
     }
     assert builder.default_tile_fields(catalog, "CTR", "stacked_area") == {
         "x": "Day",
         "color": "Channel",
+        "metric_output": "CTR",
     }
     assert builder.default_tile_fields(catalog, "CTR", "donut") == {
         "names": "Channel",
+        "metric_output": "CTR",
     }
-    assert builder.default_tile_fields(catalog, "CTR", "calendar_heatmap") == {
-        "date": "Day",
-        "value": "CTR",
+    assert builder.default_tile_fields(catalog, "CTR", "heatmap") == {
+        "x": "Day",
+        "y": "Channel",
+        "metric_output": "CTR",
     }
     assert builder.default_tile_fields(catalog, "CTR", "bar_polar") == {
         "theta": "Channel",
         "color": "Channel",
+        "metric_output": "CTR",
     }
     assert builder.default_tile_fields(catalog, "CTR", "sankey") == {
-        "source": "Channel",
-        "target": "Channel",
+        "path": ["Day", "Channel"],
+        "metric_output": "CTR",
     }
 
 
 @pytest.mark.unit
 def test_tile_field_controls_derive_polar_radius_from_metric(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _write_builder_catalog(tmp_path)
+    catalog = load(tmp_path)
     calls: list[dict[str, object]] = []
 
     def fake_selectbox(
@@ -1883,27 +1898,33 @@ def test_tile_field_controls_derive_polar_radius_from_metric(
         {"r": "CTR", "theta": "Channel", "color": "Placement"},
         ["", "Day", "Month", "Channel", "Placement", "CTR"],
         key_suffix="polar",
+        catalog=catalog,
+        metric_name="CTR",
     )
 
-    assert fields == {"theta": "Channel", "color": "Placement"}
-    assert [call["label"] for call in calls] == ["Theta", "Color"]
+    assert fields == {
+        "metric_output": "CTR",
+        "theta": "Channel",
+        "color": "Placement",
+    }
+    assert [call["label"] for call in calls] == ["R (Metric Output)", "Theta", "Color"]
     assert [call["key"] for call in calls] == [
+        "builder_tile_metric_output_polar",
         "builder_tile_theta_polar",
         "builder_tile_color_polar",
     ]
 
 
 @pytest.mark.unit
-def test_metric_owned_polar_tile_removes_manual_radius_role() -> None:
+def test_metric_owned_polar_tile_uses_selected_metric_output() -> None:
     tile = builder.build_tile(
         tile_id="ctr_polar",
         title="CTR polar",
         metric_name="CTR",
         chart_kind="bar_polar",
         fields={
-            "r": "Count",
+            "metric_output": "CTR",
             "theta": "Channel",
-            "color": "Channel",
         },
     )
 
@@ -1912,13 +1933,13 @@ def test_metric_owned_polar_tile_removes_manual_radius_role() -> None:
         "title": "CTR polar",
         "metric": "CTR",
         "chart": "bar_polar",
+        "metric_output": "CTR",
         "theta": "Channel",
-        "color": "Channel",
     }
 
 
 @pytest.mark.unit
-def test_metric_owned_treemap_tile_removes_manual_color_role() -> None:
+def test_metric_owned_treemap_tile_uses_selected_metric_output() -> None:
     tile = builder.build_tile(
         tile_id="ctr_treemap",
         title="CTR treemap",
@@ -1926,8 +1947,7 @@ def test_metric_owned_treemap_tile_removes_manual_color_role() -> None:
         chart_kind="treemap",
         fields={
             "path": ["Channel"],
-            "value": "Count",
-            "color": "Count",
+            "metric_output": "CTR",
         },
     )
 
@@ -1937,12 +1957,12 @@ def test_metric_owned_treemap_tile_removes_manual_color_role() -> None:
         "metric": "CTR",
         "chart": "treemap",
         "path": ["Channel"],
-        "value": "Count",
+        "metric_output": "CTR",
     }
 
 
 @pytest.mark.unit
-def test_metric_owned_donut_tile_removes_manual_value_roles() -> None:
+def test_metric_owned_donut_tile_uses_selected_metric_output() -> None:
     tile = builder.build_tile(
         tile_id="ctr_mix",
         title="CTR mix",
@@ -1950,9 +1970,7 @@ def test_metric_owned_donut_tile_removes_manual_value_roles() -> None:
         chart_kind="donut",
         fields={
             "names": "Channel",
-            "values": "Count",
-            "value": "Count",
-            "y": "Count",
+            "metric_output": "CTR",
         },
     )
 
@@ -1962,20 +1980,20 @@ def test_metric_owned_donut_tile_removes_manual_value_roles() -> None:
         "metric": "CTR",
         "chart": "donut",
         "names": "Channel",
+        "metric_output": "CTR",
     }
 
 
 @pytest.mark.unit
-def test_metric_owned_sankey_tile_removes_manual_value_role() -> None:
+def test_metric_owned_sankey_tile_uses_selected_metric_output() -> None:
     tile = builder.build_tile(
         tile_id="customer_flow",
         title="Customer flow",
         metric_name="CTR",
         chart_kind="sankey",
         fields={
-            "source": "Channel",
-            "target": "Placement",
-            "value": "Count",
+            "path": ["Channel", "CustomerType", "Placement"],
+            "metric_output": "CTR",
         },
     )
 
@@ -1984,13 +2002,44 @@ def test_metric_owned_sankey_tile_removes_manual_value_role() -> None:
         "title": "Customer flow",
         "metric": "CTR",
         "chart": "sankey",
-        "source": "Channel",
-        "target": "Placement",
+        "path": ["Channel", "CustomerType", "Placement"],
+        "metric_output": "CTR",
     }
 
 
 @pytest.mark.unit
-def test_tile_field_controls_show_gauge_facet_selectors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sankey_path_requires_two_axis_dimensions() -> None:
+    with pytest.raises(ValueError, match="at least 2 items"):
+        model.Dashboard.model_validate(
+            {
+                "id": "journey",
+                "title": "Journey",
+                "pages": [
+                    {
+                        "id": "flow",
+                        "title": "Flow",
+                        "tiles": [
+                            {
+                                "id": "customer_flow",
+                                "title": "Customer flow",
+                                "metric": "CTR",
+                                "chart": "sankey",
+                                "path": ["Count"],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+
+@pytest.mark.unit
+def test_tile_field_controls_show_gauge_facet_selectors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    catalog = load(tmp_path)
     calls: list[dict[str, object]] = []
 
     def fake_selectbox(
@@ -2009,14 +2058,25 @@ def test_tile_field_controls_show_gauge_facet_selectors(monkeypatch: pytest.Monk
 
     fields = config_builder._tile_field_controls(
         "gauge",
-        {"value": "CTR", "facet_row": "Channel", "facet_col": "Placement"},
+        {"metric_output": "CTR", "facet_row": "Channel", "facet_col": "Placement"},
         ["", "Day", "Month", "Channel", "Placement", "CTR"],
         key_suffix="gauge",
+        catalog=catalog,
+        metric_name="CTR",
     )
 
-    assert fields == {"facet_row": "Channel", "facet_col": "Placement"}
-    assert [call["label"] for call in calls] == ["Facet_Row", "Facet_Col"]
+    assert fields == {
+        "metric_output": "CTR",
+        "facet_row": "Channel",
+        "facet_col": "Placement",
+    }
+    assert [call["label"] for call in calls] == [
+        "Value (Metric Output)",
+        "Facet_Row",
+        "Facet_Col",
+    ]
     assert [call["key"] for call in calls] == [
+        "builder_tile_metric_output_gauge",
         "builder_tile_facet_row_gauge",
         "builder_tile_facet_col_gauge",
     ]
@@ -2028,37 +2088,40 @@ def test_tile_field_controls_show_gauge_facet_selectors(monkeypatch: pytest.Monk
     [
         (
             "line",
-            {"x": "Day", "y": "Count", "color": "Channel"},
-            {"x": "Day", "color": "Channel"},
-            ["X", "Color", "Facet_Row", "Facet_Col"],
+            {"x": "Day", "metric_output": "CTR", "color": "Channel"},
+            {"x": "Day", "metric_output": "CTR", "color": "Channel"},
+            ["Y (Metric Output)", "X", "Color", "Facet_Row", "Facet_Col"],
         ),
         (
             "bar",
-            {"x": "Channel", "y": "Count"},
-            {"x": "Channel"},
-            ["X", "Color", "Facet_Row", "Facet_Col"],
+            {"x": "Channel", "metric_output": "CTR"},
+            {"x": "Channel", "metric_output": "CTR"},
+            ["Y (Metric Output)", "X", "Color", "Facet_Row", "Facet_Col"],
         ),
         (
             "stacked_area",
-            {"x": "Day", "y": "Count", "color": "Channel"},
-            {"x": "Day", "color": "Channel"},
-            ["X", "Color", "Facet_Row", "Facet_Col"],
+            {"x": "Day", "metric_output": "CTR", "color": "Channel"},
+            {"x": "Day", "metric_output": "CTR", "color": "Channel"},
+            ["Y (Metric Output)", "X", "Color", "Facet_Row", "Facet_Col"],
         ),
         (
             "pareto",
-            {"x": "Channel", "y": "Count"},
-            {"x": "Channel"},
-            ["X", "Color", "Facet_Row", "Facet_Col"],
+            {"x": "Channel", "metric_output": "CTR"},
+            {"x": "Channel", "metric_output": "CTR"},
+            ["Y (Metric Output)", "X", "Color", "Facet_Row", "Facet_Col"],
         ),
     ],
 )
-def test_metric_owned_y_charts_do_not_render_y_selector(
+def test_metric_owned_y_charts_use_metric_output_selector_instead_of_free_y(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     chart_kind: str,
     defaults: dict[str, str],
     expected_fields: dict[str, str],
     expected_labels: list[str],
 ) -> None:
+    _write_builder_catalog(tmp_path)
+    catalog = load(tmp_path)
     calls: list[str] = []
 
     def fake_selectbox(
@@ -2079,6 +2142,8 @@ def test_metric_owned_y_charts_do_not_render_y_selector(
         defaults,
         ["", "Day", "Channel", "Count", "CTR"],
         key_suffix=chart_kind,
+        catalog=catalog,
+        metric_name="CTR",
     )
 
     assert "y" not in fields
@@ -2139,19 +2204,21 @@ def test_tile_field_controls_show_scatter_animation_selectors(
 def test_chart_field_controls_start_with_required_metadata() -> None:
     for chart_kind, required_fields in builder.CHART_REQUIRED_FIELDS.items():
         controls = builder.chart_field_controls(chart_kind)
+        offset = 1 if controls and controls[0] == "metric_output" else 0
 
-        assert controls[: len(required_fields)] == required_fields
+        assert controls[offset : offset + len(required_fields)] == required_fields
         assert set(required_fields) <= set(controls)
-    assert builder.chart_field_controls("treemap") == ("path",)
-    assert builder.chart_field_controls("donut") == ("names", "color")
-    assert builder.chart_field_controls("sankey") == ("source", "target")
-    assert builder.chart_field_controls("waterfall") == ("x",)
+    assert builder.chart_field_controls("treemap") == ("metric_output", "path")
+    assert builder.chart_field_controls("donut") == ("metric_output", "names", "color")
+    assert builder.chart_field_controls("sankey") == ("metric_output", "path")
+    assert builder.chart_field_controls("waterfall") == ("metric_output", "x")
 
 
 def _combo_catalog() -> model.Catalog:
     return model.Catalog.model_validate(
         {
             "pipelines": {
+                "catalog_version": 2,
                 "workspace": "combo",
                 "sources": [
                     {
@@ -2161,16 +2228,23 @@ def _combo_catalog() -> model.Catalog:
                 ],
             },
             "processors": {
+                "catalog_version": 2,
                 "processors": [
                     {
                         "id": "engagement",
                         "source": "ih",
                         "kind": "binary_outcome",
                         "group_by": ["Channel"],
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
                         "states": {
                             "Clicked_Count": {"type": "count"},
                             "Impression_Count": {"type": "count"},
-                            "Visitors": {"type": "cpc"},
+                            "Visitors": {"type": "cpc", "source_column": "CustomerID"},
+                        },
+                        "outcome": {
+                            "column": "Outcome",
+                            "positive_values": ["Clicked"],
+                            "negative_values": ["Impression"],
                         },
                     },
                     {
@@ -2178,35 +2252,42 @@ def _combo_catalog() -> model.Catalog:
                         "source": "ih",
                         "kind": "binary_outcome",
                         "group_by": ["Channel"],
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
                         "states": {"Clicked_Count": {"type": "count"}},
+                        "outcome": {
+                            "column": "Outcome",
+                            "positive_values": ["Clicked"],
+                            "negative_values": ["Impression"],
+                        },
                     },
                 ]
             },
             "metrics": {
+                "catalog_version": 2,
                 "metrics": {
                     "FunnelClicks": {
-                        "source": "engagement",
+                        "processor": "engagement",
                         "kind": "formula",
                         "expression": {"col": "Clicked_Count"},
                     },
                     "FunnelImpressions": {
-                        "source": "engagement",
+                        "processor": "engagement",
                         "kind": "formula",
                         "expression": {"col": "Impression_Count"},
                     },
                     "DistinctVisitors": {
-                        "source": "engagement",
+                        "processor": "engagement",
                         "kind": "approx_distinct_count",
                         "state": "Visitors",
                     },
                     "OtherClicks": {
-                        "source": "other_engagement",
+                        "processor": "other_engagement",
                         "kind": "formula",
                         "expression": {"col": "Clicked_Count"},
                     },
                 }
             },
-            "dashboards": {"dashboards": []},
+            "dashboards": {"catalog_version": 2, "dashboards": []},
         }
     )
 
@@ -2216,8 +2297,9 @@ def test_combo_uses_primary_metric_and_filters_y2_to_compatible_metrics() -> Non
     catalog = _combo_catalog()
 
     assert builder.chart_field_controls("combo") == (
+        "metric_output",
         "x",
-        "y2",
+        "secondary_metric",
         "color",
         "facet_row",
         "facet_col",
@@ -2233,12 +2315,13 @@ def test_combo_uses_primary_metric_and_filters_y2_to_compatible_metrics() -> Non
     )
     assert builder.default_tile_fields(catalog, "FunnelClicks", "combo") == {
         "x": "Day",
-        "y2": "FunnelImpressions",
+        "secondary_metric": "FunnelImpressions",
+        "metric_output": "FunnelClicks",
     }
     assert config_builder._tile_field_options(
         "combo",
-        "y2",
-        {"y2": "Impression_Count"},
+        "secondary_metric",
+        {"secondary_metric": "Impression_Count"},
         ["", "Channel", "Clicked_Count", "Impression_Count"],
         {},
         catalog,
@@ -2252,8 +2335,8 @@ def test_combo_uses_primary_metric_and_filters_y2_to_compatible_metrics() -> Non
         chart_kind="combo",
         fields={
             "x": "Month",
-            "y": "Clicked_Count",
-            "y2": "FunnelImpressions",
+            "metric_output": "FunnelClicks",
+            "secondary_metric": "FunnelImpressions",
         },
     )
     assert tile == {
@@ -2262,7 +2345,8 @@ def test_combo_uses_primary_metric_and_filters_y2_to_compatible_metrics() -> Non
         "metric": "FunnelClicks",
         "chart": "combo",
         "x": "Month",
-        "y2": "FunnelImpressions",
+        "metric_output": "FunnelClicks",
+        "secondary_metric": "FunnelImpressions",
     }
 
 
@@ -2271,27 +2355,28 @@ def test_interval_value_and_error_controls_offer_only_metric_outputs() -> None:
     catalog = _combo_catalog()
     catalog.metrics.metrics["DefaultBannerLift"] = model.VariantCompareMetric.model_validate(
         {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "variant_compare",
             "variant_column": "DefaultBannerControlGroup",
             "test_role": "Test",
             "control_role": "Control",
         }
     )
-    expected = ["", *builder.metric_output_options(catalog, "DefaultBannerLift")]
+    expected = builder.metric_output_options(catalog, "DefaultBannerLift")
 
     for field_name in builder.INTERVAL_METRIC_OUTPUT_FIELDS:
+        field_expected = expected if field_name == "metric_output" else ["", *expected]
         assert (
             config_builder._tile_field_options(
                 "interval",
                 field_name,
                 {field_name: "Channel"},
-                ["", "Day", "Channel", "CustomerType", *expected[1:]],
+                ["", "Day", "Channel", "CustomerType", *expected],
                 {},
                 catalog,
                 "DefaultBannerLift",
             )
-            == expected
+            == field_expected
         )
 
     assert "Channel" not in expected
@@ -2301,14 +2386,15 @@ def test_interval_value_and_error_controls_offer_only_metric_outputs() -> None:
 
 
 @pytest.mark.unit
-def test_combo_validation_rejects_wrong_kind_or_processor_for_y2() -> None:
+def test_combo_validation_rejects_wrong_kind_or_processor_for_secondary_metric() -> None:
     catalog = _combo_catalog()
     base = {
         "id": "combo",
         "title": "Combo",
         "metric": "FunnelClicks",
         "chart": "combo",
-        "x": "Month",
+        "x": "Channel",
+        "metric_output": "FunnelClicks",
     }
 
     valid = validate_catalog(
@@ -2316,6 +2402,7 @@ def test_combo_validation_rejects_wrong_kind_or_processor_for_y2() -> None:
             update={
                 "dashboards": model.Dashboards.model_validate(
                     {
+                        "catalog_version": 2,
                         "dashboards": [
                             {
                                 "id": "overview",
@@ -2324,7 +2411,12 @@ def test_combo_validation_rejects_wrong_kind_or_processor_for_y2() -> None:
                                     {
                                         "id": "page",
                                         "title": "Page",
-                                        "tiles": [{**base, "y2": "FunnelImpressions"}],
+                                        "tiles": [
+                                            {
+                                                **base,
+                                                "secondary_metric": "FunnelImpressions",
+                                            }
+                                        ],
                                     }
                                 ],
                             }
@@ -2344,6 +2436,7 @@ def test_combo_validation_rejects_wrong_kind_or_processor_for_y2() -> None:
             update={
                 "dashboards": model.Dashboards.model_validate(
                     {
+                        "catalog_version": 2,
                         "dashboards": [
                             {
                                 "id": "overview",
@@ -2352,7 +2445,7 @@ def test_combo_validation_rejects_wrong_kind_or_processor_for_y2() -> None:
                                     {
                                         "id": "page",
                                         "title": "Page",
-                                        "tiles": [{**base, "y2": secondary}],
+                                        "tiles": [{**base, "secondary_metric": secondary}],
                                     }
                                 ],
                             }
@@ -2406,13 +2499,11 @@ def test_tile_field_controls_render_adaptive_funnel_fields(
 
     assert fields == {
         "x": "Outcome",
-        "color": "Issue",
         "stages": ["Impression", "Clicked", "Conversion"],
         "facet_row": "",
         "facet_col": "Channel",
     }
     assert [call["key"] for call in selectbox_calls] == [
-        "builder_tile_color_funnel",
         "builder_tile_x_funnel",
         "builder_tile_facet_row_funnel",
         "builder_tile_facet_col_funnel",
@@ -2428,8 +2519,11 @@ def test_tile_field_controls_render_adaptive_funnel_fields(
 
 @pytest.mark.unit
 def test_tile_field_controls_show_size_only_for_supported_charts(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _write_builder_catalog(tmp_path)
+    catalog = load(tmp_path)
     calls: list[dict[str, object]] = []
 
     def fake_selectbox(
@@ -2448,15 +2542,19 @@ def test_tile_field_controls_show_size_only_for_supported_charts(
 
     line_fields = config_builder._tile_field_controls(
         "line",
-        {"x": "Month", "y": "CTR", "color": "Group", "size": "Count"},
+        {"x": "Month", "metric_output": "CTR", "color": "Group", "size": "Count"},
         ["", "Month", "Group", "CTR", "Count"],
         key_suffix="line",
+        catalog=catalog,
+        metric_name="CTR",
     )
     geo_fields = config_builder._tile_field_controls(
         "geo_map",
-        {"locations": "Country", "value": "CTR", "size": "Count"},
+        {"locations": "Country", "metric_output": "CTR", "size": "Count"},
         ["", "Country", "CTR", "Count"],
         key_suffix="geo",
+        catalog=catalog,
+        metric_name="CTR",
     )
 
     assert "size" not in line_fields
@@ -2497,6 +2595,7 @@ def test_default_tile_fields_leave_calibration_axes_empty() -> None:
     catalog = model.Catalog.model_validate(
         {
             "pipelines": {
+                "catalog_version": 2,
                 "workspace": "test",
                 "sources": [
                     {
@@ -2506,27 +2605,52 @@ def test_default_tile_fields_leave_calibration_axes_empty() -> None:
                 ],
             },
             "processors": {
+                "catalog_version": 2,
                 "processors": [
                     {
                         "id": "ih_ml",
                         "source": "ih",
                         "kind": "score_distribution",
                         "group_by": ["placement_type"],
-                        "score_properties": ["propensity", "final_propensity"],
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
+                        "score_properties": [
+                            {"column": "propensity", "role": "primary"},
+                            {"column": "final_propensity", "role": "calibrated"},
+                        ],
+                        "states": {
+                            "final_propensity_tdigest_positives": {
+                                "type": "tdigest",
+                                "source_column": "final_propensity",
+                                "score_property": "final_propensity",
+                                "outcome": "positive",
+                            },
+                            "final_propensity_tdigest_negatives": {
+                                "type": "tdigest",
+                                "source_column": "final_propensity",
+                                "score_property": "final_propensity",
+                                "outcome": "negative",
+                            },
+                        },
+                        "outcome": {
+                            "column": "Outcome",
+                            "positive_values": ["Clicked"],
+                            "negative_values": ["Impression"],
+                        },
                     }
                 ]
             },
             "metrics": {
+                "catalog_version": 2,
                 "metrics": {
                     "MIL_Calibration": {
-                        "source": "ih_ml",
+                        "processor": "ih_ml",
                         "kind": "calibration_from_digests",
                         "positive_state": "final_propensity_tdigest_positives",
                         "negative_state": "final_propensity_tdigest_negatives",
                     }
                 }
             },
-            "dashboards": {"dashboards": []},
+            "dashboards": {"catalog_version": 2, "dashboards": []},
         }
     )
 
@@ -2540,6 +2664,7 @@ def test_curve_metric_chart_choices_include_model_curves() -> None:
     catalog = model.Catalog.model_validate(
         {
             "pipelines": {
+                "catalog_version": 2,
                 "workspace": "test",
                 "sources": [
                     {
@@ -2549,20 +2674,42 @@ def test_curve_metric_chart_choices_include_model_curves() -> None:
                 ],
             },
             "processors": {
+                "catalog_version": 2,
                 "processors": [
                     {
                         "id": "ih_ml",
                         "source": "ih",
                         "kind": "score_distribution",
                         "group_by": ["placement_type"],
-                        "score_properties": ["propensity"],
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
+                        "score_properties": [{"column": "propensity", "role": "primary"}],
+                        "states": {
+                            "propensity_tdigest_positives": {
+                                "type": "tdigest",
+                                "source_column": "propensity",
+                                "score_property": "propensity",
+                                "outcome": "positive",
+                            },
+                            "propensity_tdigest_negatives": {
+                                "type": "tdigest",
+                                "source_column": "propensity",
+                                "score_property": "propensity",
+                                "outcome": "negative",
+                            },
+                        },
+                        "outcome": {
+                            "column": "Outcome",
+                            "positive_values": ["Clicked"],
+                            "negative_values": ["Impression"],
+                        },
                     }
                 ]
             },
             "metrics": {
+                "catalog_version": 2,
                 "metrics": {
                     "MIL_ROC_AUC": {
-                        "source": "ih_ml",
+                        "processor": "ih_ml",
                         "kind": "curve_from_digests",
                         "positive_state": "propensity_tdigest_positives",
                         "negative_state": "propensity_tdigest_negatives",
@@ -2570,7 +2717,7 @@ def test_curve_metric_chart_choices_include_model_curves() -> None:
                     }
                 }
             },
-            "dashboards": {"dashboards": []},
+            "dashboards": {"catalog_version": 2, "dashboards": []},
         }
     )
 
@@ -2582,93 +2729,35 @@ def test_curve_metric_chart_choices_include_model_curves() -> None:
 
 
 @pytest.mark.unit
-def test_tile_field_default_preserves_legacy_facet_defaults() -> None:
-    assert config_builder._tile_field_default({"facet_column": "placement_type"}, "facet_col") == (
-        "placement_type"
-    )
-    assert config_builder._tile_field_default({"facets": {"row": "region"}}, "facet_row") == (
-        "region"
-    )
-    assert config_builder._tile_field_default({"group_by": ["region"]}, "facet_row") == "region"
-
-
-@pytest.mark.unit
-def test_processor_to_dict_uses_authoring_dimensions() -> None:
+def test_processor_to_dict_uses_canonical_group_by() -> None:
     processor = model.BinaryOutcomeProcessor.model_validate(
         {
             "id": "engagement",
             "source": "ih",
             "kind": "binary_outcome",
             "group_by": ["Channel"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {"Count": {"type": "count"}},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
         }
     )
 
     data = builder.processor_to_dict(processor)
 
-    assert data["dimensions"] == ["Channel"]
-    assert "group_by" not in data
-    assert "states" not in data
-
-
-@pytest.mark.unit
-def test_processor_to_dict_materializes_bulk_sketch_default() -> None:
-    processor = model.NumericDistributionProcessor.model_validate(
-        {
-            "id": "descriptive",
-            "source": "ih",
-            "kind": "numeric_distribution",
-            "properties": ["Revenue"],
-        }
-    )
-
-    data = builder.processor_to_dict(processor)
-
-    assert data["sketch_build_mode"] == "bulk"
-    assert "sketch_build_mode" in forms.PROCESSOR_KIND_MANAGED_FIELDS
-
-
-@pytest.mark.unit
-def test_quantile_processor_editors_default_to_bulk_and_keep_legacy_escape_hatch() -> None:
-    app = AppTest.from_string(
-        """
-from valuestream.ui import forms
-
-forms.processor_kind_fields(
-    {"properties": ["Revenue"]},
-    "numeric_distribution",
-    field_options=["Revenue"],
-    numeric_field_options=["Revenue"],
-    key_prefix="numeric",
-)
-forms.processor_kind_fields(
-    {
-        "score_properties": ["Propensity"],
-        "sketch_build_mode": "legacy",
-        "outcome": {
-            "column": "Outcome",
-            "positive_values": ["Clicked"],
-            "negative_values": ["Impression"],
-        },
-    },
-    "score_distribution",
-    field_options=["CustomerID", "Outcome", "Propensity"],
-    numeric_field_options=["Propensity"],
-    key_prefix="score",
-)
-"""
-    ).run()
-
-    assert not app.exception
-    mode_selectors = [item for item in app.selectbox if item.label == "Sketch Build Mode"]
-    assert [item.value for item in mode_selectors] == ["bulk", "legacy"]
-    assert all(item.options == ["bulk", "legacy"] for item in mode_selectors)
+    assert data["group_by"] == ["Channel"]
+    assert "dimensions" not in data
+    assert data["states"] == {"Count": {"type": "count", "distinct": False}}
 
 
 @pytest.mark.unit
 def test_metric_to_dict_omits_empty_base_fields() -> None:
     metric = model.FormulaMetric.model_validate(
         {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "formula",
             "expression": {
                 "op": "safe_div",
@@ -2681,7 +2770,7 @@ def test_metric_to_dict_omits_empty_base_fields() -> None:
     data = builder.metric_to_dict(metric)
 
     assert data == {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "formula",
         "expression": {
             "op": "safe_div",
@@ -2695,7 +2784,7 @@ def test_metric_to_dict_omits_empty_base_fields() -> None:
 def test_metric_to_dict_keeps_sparse_authored_display_fields() -> None:
     metric = model.FormulaMetric.model_validate(
         {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "formula",
             "expression": {"col": "Count"},
             "display": {"label": "Interactions"},
@@ -2708,63 +2797,6 @@ def test_metric_to_dict_keeps_sparse_authored_display_fields() -> None:
 
 
 @pytest.mark.unit
-def test_lifecycle_metric_does_not_invent_outputs_for_existing_sparse_yaml() -> None:
-    app = AppTest.from_string(
-        """
-import streamlit as st
-from valuestream.ui import forms
-
-ctx = forms.MetricFormContext(state_options=lambda _types: [])
-st.session_state["result"] = forms.metric_kind_fields(
-    "lifecycle_summary",
-    {"source": "lifecycle", "kind": "lifecycle_summary"},
-    ctx,
-    key_prefix="lifecycle_sparse",
-)
-"""
-    ).run()
-
-    assert not app.exception
-    assert app.session_state["result"] == {}
-
-
-@pytest.mark.unit
-def test_set_op_editor_flags_unsupported_window_shapes() -> None:
-    """Legacy start/end windows are engine-invalid; the editor demands fixes.
-
-    The engine only accepts ``last`` and two-value ``between`` windows, so a
-    metric carrying another shape surfaces blank Between offsets plus
-    warnings instead of silently passing the broken window through.
-    """
-    app = AppTest.from_string(
-        """
-import streamlit as st
-from valuestream.ui import forms
-
-seed = {
-    "source": "audiences",
-    "kind": "set_op",
-    "op": "intersection",
-    "operands": [
-        {"state": "Active_theta", "time_window": {"start": "-30d", "end": "-1d"}},
-        {"state": "Active_theta", "time_window": {"start": "-1d", "end": "now"}},
-    ],
-}
-ctx = forms.MetricFormContext(
-    state_options=lambda _types: ["Active_theta", "Known_theta"],
-)
-st.session_state["result"] = forms.metric_kind_fields(
-    "set_op", seed, ctx, key_prefix="windowed_set"
-)
-"""
-    ).run()
-
-    assert not app.exception
-    assert app.session_state["result"] is None
-    assert any("anchor-relative offset" in item.value for item in app.warning)
-
-
-@pytest.mark.unit
 def test_build_state_defs_uses_direct_editor_rows() -> None:
     processor = model.NumericDistributionProcessor.model_validate(
         {
@@ -2772,6 +2804,13 @@ def test_build_state_defs_uses_direct_editor_rows() -> None:
             "source": "ih",
             "kind": "numeric_distribution",
             "properties": ["Revenue"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {
+                "Revenue_Count": {
+                    "type": "count",
+                    "source_column": "Revenue",
+                }
+            },
         }
     )
 
@@ -2796,7 +2835,6 @@ def test_build_state_defs_uses_direct_editor_rows() -> None:
     assert states == {
         "Revenue_Sum": {
             "type": "value_sum",
-            "per_property": True,
             "source_column": "NetRevenue",
         }
     }
@@ -2809,6 +2847,13 @@ def test_state_rows_round_trip_kind_specific_parameters() -> None:
             "id": "model_ml_scores",
             "source": "ih",
             "kind": "score_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "score_properties": [{"column": "Propensity", "role": "primary"}],
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
             "states": {
                 "Propensity_tdigest": {
                     "type": "tdigest",
@@ -2836,7 +2881,14 @@ def test_state_rows_round_trip_kind_specific_parameters() -> None:
 @pytest.mark.unit
 def test_build_state_defs_accepts_new_sketch_parameters() -> None:
     processor = model.EntitySetProcessor.model_validate(
-        {"id": "audience", "source": "ih", "kind": "entity_set"}
+        {
+            "id": "audience",
+            "source": "ih",
+            "kind": "entity_set",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "entity": "CustomerID",
+            "states": {"Customers_cpc": {"type": "cpc", "source_column": "CustomerID"}},
+        }
     )
 
     definitions = config_builder._build_state_defs(
@@ -2862,7 +2914,14 @@ def test_build_state_defs_accepts_new_sketch_parameters() -> None:
 @pytest.mark.unit
 def test_build_state_defs_rejects_parameters_for_another_sketch_type() -> None:
     processor = model.EntitySetProcessor.model_validate(
-        {"id": "audience", "source": "ih", "kind": "entity_set"}
+        {
+            "id": "audience",
+            "source": "ih",
+            "kind": "entity_set",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "entity": "CustomerID",
+            "states": {"Customers_cpc": {"type": "cpc", "source_column": "CustomerID"}},
+        }
     )
 
     with pytest.raises(ValueError, match=r"lg_max_map_size.*only valid.*topk"):
@@ -2883,7 +2942,14 @@ def test_build_state_defs_rejects_parameters_for_another_sketch_type() -> None:
 @pytest.mark.unit
 def test_build_state_defs_rejects_reserved_parameter_fields() -> None:
     processor = model.EntitySetProcessor.model_validate(
-        {"id": "audience", "source": "ih", "kind": "entity_set"}
+        {
+            "id": "audience",
+            "source": "ih",
+            "kind": "entity_set",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "entity": "CustomerID",
+            "states": {"Customers_cpc": {"type": "cpc", "source_column": "CustomerID"}},
+        }
     )
 
     with pytest.raises(ValueError, match="cannot redefine type"):
@@ -3225,66 +3291,31 @@ def test_build_source_definition_preserves_untouched_transform_order() -> None:
 
 
 @pytest.mark.unit
-def test_preserve_untouched_processor_definition_ignores_materialized_default_states() -> None:
-    processor = model.Processors.model_validate(
-        {
-            "processors": [
-                {
-                    "id": "sample_engagement",
-                    "source": "sample",
-                    "kind": "binary_outcome",
-                    "description": "Generated engagement processor.",
-                    "dimensions": ["Channel"],
-                    "time": {
-                        "column": "OutcomeTime",
-                        "grains": ["Day", "Month", "Summary"],
-                        "aggregation_levels": {"Month": "Day"},
-                    },
-                    "entities": {"subject": "SubjectID"},
-                    "outcome": {
-                        "column": "Outcome",
-                        "positive_values": ["Clicked", "Conversion"],
-                        "negative_values": ["Impression", "Pending"],
-                    },
-                }
-            ]
-        }
-    ).processors[0]
-    proposed = builder.processor_to_dict(processor)
-    proposed["states"] = {
-        name: spec.model_dump(mode="json", by_alias=True, exclude_none=True)
-        for name, spec in model.effective_processor_states(processor).items()
-    }
-
-    preserved = config_builder._preserve_untouched_processor_definition(
-        processor,
-        proposed,
-    )
-
-    assert preserved == builder.processor_to_dict(processor)
-    assert "states" not in preserved
-    assert preserved["time"]["aggregation_levels"] == {"Month": "Day"}
-
-
-@pytest.mark.unit
 def test_preserve_untouched_processor_definition_keeps_real_edits() -> None:
     processor = model.Processors.model_validate(
         {
+            "catalog_version": 2,
             "processors": [
                 {
                     "id": "engagement",
                     "source": "events",
                     "kind": "binary_outcome",
                     "description": "Original description",
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "states": {"Count": {"type": "count"}},
                     "entities": {"subject": "SubjectID"},
-                    "outcome": {"column": "Outcome"},
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked"],
+                        "negative_values": ["Impression"],
+                    },
                 }
             ]
         }
     ).processors[0]
     proposed = builder.processor_to_dict(processor)
     proposed["description"] = "Updated description"
-    proposed["time"] = {"column": None, "grains": ["Day", "Month", "Summary"]}
+    proposed["time"] = {"property": "OutcomeTime", "grain": "monthly"}
     proposed["states"] = {
         name: spec.model_dump(mode="json", by_alias=True, exclude_none=True)
         for name, spec in model.effective_processor_states(processor).items()
@@ -3635,7 +3666,8 @@ def test_source_field_options_include_entity_subject_and_are_ordered(monkeypatch
             "id": "engagement",
             "source": "ih",
             "kind": "binary_outcome",
-            "dimensions": ["Issue"],
+            "group_by": ["Issue"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "entities": {"subject": "SubjectID"},
             "outcome": {
                 "column": "Outcome",
@@ -3657,7 +3689,14 @@ def test_source_field_options_include_entity_subject_and_are_ordered(monkeypatch
 
     options = config_builder._source_field_options(ctx, source)
 
-    assert options == ["AppliedModel", "ExperimentName", "Issue", "Outcome", "SubjectID"]
+    assert options == [
+        "AppliedModel",
+        "ExperimentName",
+        "Issue",
+        "Outcome",
+        "OutcomeTime",
+        "SubjectID",
+    ]
 
 
 @pytest.mark.unit
@@ -3713,6 +3752,7 @@ def test_dimension_profile_classifies_group_by_candidates() -> None:
             "source": "ih",
             "kind": "binary_outcome",
             "group_by": ["Channel"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "outcome": {
                 "column": "Outcome",
                 "positive_values": ["Clicked"],
@@ -3936,7 +3976,14 @@ def test_sketch_state_rows_build_processor_sketch_grid_entries() -> None:
     assert all(row["Enabled"] for row in rows)
     # The rows compile into valid state definitions on the target processor.
     processor = model.EntitySetProcessor.model_validate(
-        {"id": "audience", "source": "ih", "kind": "entity_set"}
+        {
+            "id": "audience",
+            "source": "ih",
+            "kind": "entity_set",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "entity": "CustomerID",
+            "states": {"Customers_cpc": {"type": "cpc", "source_column": "CustomerID"}},
+        }
     )
     defs = config_builder._build_state_defs(processor, rows)
     assert {name: spec["type"] for name, spec in defs.items()} == {
@@ -3945,7 +3992,14 @@ def test_sketch_state_rows_build_processor_sketch_grid_entries() -> None:
         "AudienceCustomerid_theta": "theta",
     }
     model.EntitySetProcessor.model_validate(
-        {"id": "audience", "source": "ih", "kind": "entity_set", "states": defs}
+        {
+            "id": "audience",
+            "source": "ih",
+            "kind": "entity_set",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "entity": "CustomerID",
+            "states": defs,
+        }
     )
 
 
@@ -3976,7 +4030,7 @@ def test_topk_items_metric_derives_frequent_item_rows() -> None:
     )
     metric = model.TopKItemsMetric.model_validate(
         {
-            "source": "campaign_exploration",
+            "processor": "campaign_exploration",
             "kind": "topk_items",
             "state": "TopCampaign_topk",
             "limit": 1,
@@ -3996,16 +4050,16 @@ def test_topk_items_metric_derives_frequent_item_rows() -> None:
 @pytest.mark.unit
 def test_quantile_metric_uses_configured_state_type_not_state_name_suffix() -> None:
     frame = pl.DataFrame({"custom_quantile_state": [kll.build([1.0, 2.0, 100.0])]})
-    metric = model.TdigestQuantileMetric.model_validate(
+    metric = model.QuantileMetric.model_validate(
         {
-            "source": "distribution",
-            "kind": "tdigest_quantile",
+            "processor": "distribution",
+            "kind": "quantile",
             "state": "custom_quantile_state",
             "quantile": 0.5,
         }
     )
     state_specs = {
-        "custom_quantile_state": model.StateSpec.model_validate(
+        "custom_quantile_state": model.KllState.model_validate(
             {"type": "kll", "source_column": "Value", "k": 200}
         )
     }
@@ -4106,12 +4160,11 @@ def test_report_library_groups_every_supported_chart_once() -> None:
         for group in config_builder.REPORT_LIBRARY_GROUPS.values()
         for chart_type in group.chart_types
     ]
-    authorable = set(builder.CHART_REQUIRED_FIELDS) - set(builder.LEGACY_HEATMAP_CHARTS)
+    authorable = set(builder.CHART_REQUIRED_FIELDS)
 
     assert len(categorized) == len(set(categorized))
     assert set(categorized) == authorable
     assert "heatmap" in categorized
-    assert not set(builder.LEGACY_HEATMAP_CHARTS) & set(categorized)
     assert set(config_builder.REPORT_LIBRARY_CHART_DESCRIPTIONS) == set(
         builder.CHART_REQUIRED_FIELDS
     )
@@ -4193,61 +4246,13 @@ def test_report_library_searches_business_and_technical_tile_context(tmp_path: P
         "overview/portfolio/holdings_value",
         "overview/portfolio/holdings_rate",
     ]
-    assert set(options[0][3]) == {"id", "title", "metric", "chart", "value"}
-
-
-@pytest.mark.unit
-def test_report_tile_semantic_noop_preserves_exact_authored_defaults() -> None:
-    seed = {
-        "id": "trend",
-        "title": "Trend",
-        "metric": "CTR",
-        "chart": "line",
-        "x": "Day",
-        "y": "CTR",
-        "placement": "content",
+    assert set(options[0][3]) == {
+        "id",
+        "title",
+        "metric",
+        "chart",
+        "metric_output",
     }
-    rebuilt = {
-        "id": "trend",
-        "title": "Trend",
-        "metric": "CTR",
-        "chart": "line",
-        "x": "Day",
-        "y": "CTR",
-    }
-
-    preserved = config_builder._preserve_untouched_tile_definition(seed, rebuilt)
-
-    assert preserved == seed
-
-
-@pytest.mark.unit
-def test_visual_tile_merge_preserves_unowned_settings_and_legacy_facets() -> None:
-    seed = {
-        "id": "trend",
-        "title": "Trend",
-        "metric": "CTR",
-        "chart": "line",
-        "x": "Day",
-        "y": "CTR",
-        "facets": {"row": "Channel", "column": "Issue"},
-        "axis_title_standoff": 18,
-        "goal_lines": [{"value": 0.25, "label": "Target"}],
-    }
-    rebuilt = {
-        "id": "trend",
-        "title": "Trend",
-        "metric": "CTR",
-        "chart": "line",
-        "x": "Day",
-        "y": "CTR",
-        "facet_row": "Channel",
-        "facet_col": "Issue",
-    }
-
-    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "line")
-
-    assert merged == seed
 
 
 @pytest.mark.unit
@@ -4258,7 +4263,7 @@ def test_visual_tile_merge_allows_clearing_a_controlled_setting() -> None:
         "metric": "CTR",
         "chart": "bar",
         "x": "Channel",
-        "y": "CTR",
+        "metric_output": "CTR",
         "top_n": 5,
         "axis_title_standoff": 18,
     }
@@ -4268,146 +4273,13 @@ def test_visual_tile_merge_allows_clearing_a_controlled_setting() -> None:
         "metric": "CTR",
         "chart": "bar",
         "x": "Channel",
-        "y": "CTR",
+        "metric_output": "CTR",
     }
 
     merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "bar")
 
     assert "top_n" not in merged
     assert merged["axis_title_standoff"] == 18
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("chart_kind", ["kpi_card", "gauge"])
-def test_visual_metric_owned_value_merge_removes_legacy_override(chart_kind: str) -> None:
-    seed = {
-        "id": "ctr",
-        "title": "CTR",
-        "metric": "CTR",
-        "chart": chart_kind,
-        "value": "Channel",
-    }
-
-    rebuilt = {key: value for key, value in seed.items() if key != "value"}
-    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, chart_kind)
-
-    assert "value" not in merged
-    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("chart_kind", ["line", "bar", "stacked_area", "waterfall", "pareto"])
-def test_visual_metric_owned_y_merge_removes_legacy_override(chart_kind: str) -> None:
-    seed = {
-        "id": "ctr",
-        "title": "CTR",
-        "metric": "CTR",
-        "chart": chart_kind,
-        "x": "Day",
-        "y": "Count",
-        "value": "CTR",
-        **(
-            {
-                "color": "Channel",
-                "facet_row": "Issue",
-                "facets": {"column": "CustomerType"},
-            }
-            if chart_kind == "waterfall"
-            else {"color": "Channel"}
-            if chart_kind == "stacked_area"
-            else {}
-        ),
-    }
-
-    retired = {
-        "value",
-        "y",
-        *(["color", "facet_row", "facets"] if chart_kind == "waterfall" else []),
-    }
-    rebuilt = {key: value for key, value in seed.items() if key not in retired}
-    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, chart_kind)
-
-    assert "y" not in merged
-    assert "value" not in merged
-    if chart_kind == "waterfall":
-        assert "color" not in merged
-        assert "facet_row" not in merged
-        assert "facets" not in merged
-    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
-
-
-@pytest.mark.unit
-def test_visual_metric_owned_polar_merge_removes_legacy_radius_override() -> None:
-    seed = {
-        "id": "ctr_polar",
-        "title": "CTR polar",
-        "metric": "CTR",
-        "chart": "bar_polar",
-        "r": "Count",
-        "theta": "Channel",
-        "color": "Channel",
-    }
-    rebuilt = {key: value for key, value in seed.items() if key != "r"}
-
-    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "bar_polar")
-
-    assert "r" not in merged
-    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
-
-
-@pytest.mark.unit
-def test_visual_metric_owned_treemap_merge_removes_legacy_color_override() -> None:
-    seed = {
-        "id": "ctr_treemap",
-        "title": "CTR treemap",
-        "metric": "CTR",
-        "chart": "treemap",
-        "path": ["Channel"],
-        "color": "Count",
-    }
-    rebuilt = {key: value for key, value in seed.items() if key != "color"}
-
-    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "treemap")
-
-    assert "color" not in merged
-    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
-
-
-@pytest.mark.unit
-def test_visual_metric_owned_donut_merge_removes_legacy_values_override() -> None:
-    seed = {
-        "id": "ctr_mix",
-        "title": "CTR mix",
-        "metric": "CTR",
-        "chart": "donut",
-        "names": "Channel",
-        "values": "Count",
-    }
-    rebuilt = {key: value for key, value in seed.items() if key != "values"}
-
-    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "donut")
-
-    assert "values" not in merged
-    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
-
-
-@pytest.mark.unit
-def test_visual_metric_owned_sankey_merge_removes_legacy_value_override() -> None:
-    seed = {
-        "id": "customer_flow",
-        "title": "Customer flow",
-        "metric": "CTR",
-        "chart": "sankey",
-        "source": "Channel",
-        "target": "Placement",
-        "value": "Count",
-    }
-    rebuilt = {key: value for key, value in seed.items() if key != "value"}
-
-    merged = config_builder._merge_visual_tile_definition(seed, rebuilt, "sankey")
-
-    assert "value" not in merged
-    assert config_builder._preserve_untouched_tile_definition(seed, merged) == seed
 
 
 @pytest.mark.parametrize("chart_kind", ["line", "bar", "stacked_area", "gauge"])
@@ -4450,7 +4322,6 @@ def test_existing_report_tile_opens_clean_in_visual_editor(tmp_path: Path) -> No
     rendered = jump.set_value("Reports / Tiles").run(timeout=15)
 
     assert not rendered.exception
-    assert any(button.label == "Continue" for button in rendered.button)
     assert not any(button.label == "Apply to workspace" for button in rendered.button)
     assert not any("Editing draft" in item.value for item in rendered.markdown)
 
@@ -4854,7 +4725,7 @@ def test_large_report_type_group_uses_compact_selector() -> None:
                 "title": f"KPI {index}",
                 "metric": "CTR",
                 "chart": "kpi_card",
-                "value": "CTR",
+                "metric_output": "CTR",
             },
         )
         for index in range(config_builder.REPORT_LIBRARY_PILLS_MAX + 1)
@@ -4869,10 +4740,15 @@ def test_large_report_type_group_uses_compact_selector() -> None:
 
         catalog = config_model.Catalog.model_validate(
             {
-                "pipelines": {"version": 1, "workspace": "labels", "sources": []},
-                "processors": {"processors": []},
-                "metrics": {"metrics": {}},
+                "pipelines": {
+                    "catalog_version": 2,
+                    "workspace": "labels",
+                    "sources": [],
+                },
+                "processors": {"catalog_version": 2, "processors": []},
+                "metrics": {"catalog_version": 2, "metrics": {}},
                 "dashboards": {
+                    "catalog_version": 2,
                     "dashboards": [{"id": "overview", "title": "Overview", "pages": []}]
                 },
             }
@@ -4944,7 +4820,7 @@ def test_metric_mode_options_make_creation_and_editing_explicit() -> None:
 def test_pending_metric_refresh_opens_written_metric_after_catalog_reload() -> None:
     state: dict[str, object] = {}
     metric_def = {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "approx_distinct_count",
         "state": "Channel_cpc",
     }
@@ -4965,18 +4841,63 @@ def test_pending_metric_refresh_opens_written_metric_after_catalog_reload() -> N
     assert "builder_metric_pending_refresh" not in state
     assert state["builder_metric_mode"] == "Edit Existing Metric"
     assert state["builder_metric_processor_edit"] == "engagement"
+    assert state["builder_metric_kind_edit"] == "approx_distinct_count"
+    assert state["builder_metric_select"] == "UniqueChannels"
     assert state["builder_metric_kind_edit_engagement"] == "approx_distinct_count"
     assert state["builder_metric_select_engagement_approx_distinct_count"] == "UniqueChannels"
 
 
 @pytest.mark.unit
-def test_metric_filter_helpers_scope_metrics_by_source_and_kind(tmp_path: Path) -> None:
+def test_metric_edit_controls_sync_metric_and_filters_bidirectionally() -> None:
+    metric_defs = {
+        "CTR": {"processor": "engagement", "kind": "formula"},
+        "Reach": {"processor": "engagement", "kind": "approx_distinct_count"},
+        "Revenue": {"processor": "conversion", "kind": "formula"},
+    }
+    processor_ids = ["engagement", "conversion"]
+    state: dict[str, object] = {
+        "builder_metric_select": "Revenue",
+        "builder_metric_edit_sync": "metric",
+    }
+
+    options = config_builder._sync_metric_edit_controls(state, metric_defs, processor_ids)
+
+    assert options == ["CTR", "Reach", "Revenue"]
+    assert state["builder_metric_processor_edit"] == "conversion"
+    assert state["builder_metric_kind_edit"] == "formula"
+    assert state["builder_metric_selected_id"] == "Revenue"
+
+    state.update(
+        {
+            "builder_metric_processor_edit": "engagement",
+            "builder_metric_edit_sync": "processor",
+        }
+    )
+    config_builder._sync_metric_edit_controls(state, metric_defs, processor_ids)
+
+    assert state["builder_metric_kind_edit"] == "formula"
+    assert state["builder_metric_select"] == "CTR"
+
+    state.update(
+        {
+            "builder_metric_kind_edit": "approx_distinct_count",
+            "builder_metric_edit_sync": "kind",
+        }
+    )
+    config_builder._sync_metric_edit_controls(state, metric_defs, processor_ids)
+
+    assert state["builder_metric_select"] == "Reach"
+    assert state["builder_metric_selected_id"] == "Reach"
+
+
+@pytest.mark.unit
+def test_metric_filter_helpers_scope_metrics_by_processor_and_kind(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
     catalog = load(tmp_path)
     metric_defs = {
-        "CTR": {"source": "engagement", "kind": "formula"},
-        "Dropoff": {"source": "engagement", "kind": "formula"},
-        "Reach": {"source": "unknown_profile", "kind": "approx_distinct_count"},
+        "CTR": {"processor": "engagement", "kind": "formula"},
+        "Dropoff": {"processor": "engagement", "kind": "formula"},
+        "Reach": {"processor": "unknown_profile", "kind": "approx_distinct_count"},
     }
 
     assert [
@@ -5023,6 +4944,13 @@ def test_artifact_identity_formatters_switch_context_without_losing_identity() -
             "source": "ih",
             "kind": "binary_outcome",
             "description": "Customer engagement",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {"Count": {"type": "count"}},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
         }
     )
 
@@ -5159,7 +5087,7 @@ def test_new_processor_template_seeds_workspace_common_dimensions(
 
 
 @pytest.mark.unit
-def test_new_processor_template_defaults_to_day_and_month_grains(
+def test_new_processor_template_defaults_to_one_base_grain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     timed_source = model.Source.model_validate(
@@ -5194,7 +5122,7 @@ def test_new_processor_template_defaults_to_day_and_month_grains(
     timed = config_builder._new_processor_template(ctx, "events")
     untimed = config_builder._new_processor_template(ctx, "snapshots")
 
-    assert [builder.display_grain(grain) for grain in timed.grains] == ["Day", "Month"]
+    assert [builder.display_grain(grain) for grain in timed.grains] == ["Day"]
     assert [builder.display_grain(grain) for grain in untimed.grains] == ["Summary"]
 
 
@@ -5221,7 +5149,7 @@ def _render_processors_create_step(workspace: str) -> None:
 
 
 @pytest.mark.unit
-def test_kind_switch_reseeds_description_and_auto_outputs(tmp_path: Path) -> None:
+def test_kind_switch_reseeds_description_and_kind_specific_controls(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
 
     rendered = AppTest.from_function(
@@ -5232,14 +5160,12 @@ def test_kind_switch_reseeds_description_and_auto_outputs(tmp_path: Path) -> Non
     description = next(item for item in rendered.text_input if item.label == "Description")
     assert description.value == forms.PROCESSOR_KIND_GUIDE["binary_outcome"].summary
     assert any("Example KPIs:" in str(item.value) for item in rendered.caption)
-    # The editor mirrors the engine's default outputs, including the
-    # unique-subject sketch inferred from the natural key.
+    # The editor seeds only the explicit base outputs for the selected kind.
     state_rows = rendered.session_state["builder_proc_states_ih_processor"]
     assert [row["State"] for row in state_rows] == [
         "Count",
         "Positives",
         "Negatives",
-        "UniqueSubjects_cpc",
     ]
     assert any(item.label == "Dedup Keys" for item in rendered.multiselect)
 
@@ -5249,48 +5175,8 @@ def test_kind_switch_reseeds_description_and_auto_outputs(tmp_path: Path) -> Non
     assert not rendered.exception
     description = next(item for item in rendered.text_input if item.label == "Description")
     assert description.value == forms.PROCESSOR_KIND_GUIDE["entity_set"].summary
-    state_rows = rendered.session_state["builder_proc_states_ih_processor"]
-    assert [row["State"] for row in state_rows] == ["ActiveUsers_cpc", "ActiveUsers_theta"]
-    assert all(row["Source Column"] == "InteractionID" for row in state_rows)
     assert any(item.label == "Primary Entity Column" for item in rendered.selectbox)
     assert not any(item.label == "Dedup Keys" for item in rendered.multiselect)
-
-
-@pytest.mark.unit
-def test_kind_state_reseed_preserves_a_disabled_default_row(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    processor = model.Processors.model_validate(
-        {
-            "processors": [
-                {
-                    "id": "engagement",
-                    "source": "ih",
-                    "kind": "binary_outcome",
-                }
-            ]
-        }
-    ).processors[0]
-    state_key = "builder_proc_states_engagement"
-    defaults = config_builder._state_rows(processor)
-    current = copy.deepcopy(defaults)
-    next(row for row in current if row["State"] == "Count")["Enabled"] = False
-    state = {
-        state_key: current,
-        f"{state_key}_kind_defaults": defaults,
-        f"{state_key}_kind_signature": "previous-kind",
-    }
-    monkeypatch.setattr(config_builder.st, "session_state", state)
-
-    config_builder._reseed_state_rows_for_kind(
-        processor,
-        state_key,
-        processor.id,
-        {},
-    )
-
-    count_row = next(row for row in state[state_key] if row["State"] == "Count")
-    assert count_row["Enabled"] is False
 
 
 @pytest.mark.unit
@@ -5423,48 +5309,6 @@ def test_dimensions_step_extends_existing_processors_on_apply(tmp_path: Path) ->
 
 
 @pytest.mark.unit
-def test_dimensions_step_counts_variant_column_as_covered(tmp_path: Path) -> None:
-    """A common dimension persisted as variant_column must not be re-added.
-
-    Validation rejects the variant column inside group_by, so the automatic
-    extension counting it as missing produced an apply that always rolled back.
-    """
-    _write_builder_catalog(tmp_path)
-    processors_path = tmp_path / "catalog" / "processors.yaml"
-    processors_def = yaml.safe_load(processors_path.read_text(encoding="utf-8"))
-    processors_def["processors"][0]["variant_column"] = "InteractionID"
-    processors_path.write_text(yaml.safe_dump(processors_def, sort_keys=False), encoding="utf-8")
-
-    rendered = AppTest.from_function(
-        _render_dimensions_step, kwargs={"workspace": str(tmp_path)}
-    ).run()
-    common = next(item for item in rendered.multiselect if item.label == "Common Dimensions")
-    rendered = common.set_value(["Channel", "InteractionID"]).run()
-
-    assert not rendered.exception
-    extend = next(
-        item for item in rendered.toggle if item.label.startswith("Extend existing processors")
-    )
-    assert extend.disabled
-    assert any(
-        "Every existing processor already covers its applicable common dimensions" in item.value
-        for item in rendered.caption
-    )
-    rendered = (
-        next(button for button in rendered.button if button.label == "Apply to workspace")
-        .click()
-        .run(timeout=15)
-    )
-
-    assert not rendered.exception
-    assert not any("validation failed" in str(item.value) for item in rendered.error)
-    catalog = load(tmp_path)
-    assert catalog.pipelines.defaults.dimensions == ["Channel", "InteractionID"]
-    engagement = next(p for p in catalog.processors.processors if p.id == "engagement")
-    assert list(engagement.group_by) == ["Channel"]
-
-
-@pytest.mark.unit
 def test_write_metric_definition_round_trips_valid_catalog(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
 
@@ -5484,22 +5328,35 @@ def test_write_metric_definition_round_trips_valid_catalog(tmp_path: Path) -> No
 def test_automatic_distribution_metrics_cover_only_public_digest_states() -> None:
     processor = model.Processors.model_validate(
         {
+            "catalog_version": 2,
             "processors": [
                 {
                     "id": "scores",
                     "source": "events",
                     "kind": "score_distribution",
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "score_properties": [
+                        {"column": "Score", "role": "primary"},
+                        {"column": "Priority", "role": "auxiliary"},
+                    ],
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked"],
+                        "negative_values": ["Impression"],
+                    },
                     "states": {
                         "Score_tdigest": {"type": "tdigest", "source_column": "Score"},
                         "Priority_kll": {"type": "kll", "source_column": "Priority"},
                         "Score_tdigest_positives": {
                             "type": "tdigest",
                             "source_column": "Score",
+                            "score_property": "Score",
                             "outcome": "positive",
                         },
                         "Score_tdigest_negatives": {
                             "type": "tdigest",
                             "source_column": "Score",
+                            "score_property": "Score",
                             "outcome": "negative",
                         },
                     },
@@ -5509,10 +5366,11 @@ def test_automatic_distribution_metrics_cover_only_public_digest_states() -> Non
     ).processors[0]
     metrics = model.Metrics.model_validate(
         {
+            "catalog_version": 2,
             "metrics": {
                 "ScoreP90": {
-                    "source": "scores",
-                    "kind": "tdigest_quantile",
+                    "processor": "scores",
+                    "kind": "quantile",
                     "state": "Score_tdigest",
                     "quantile": 0.9,
                 }
@@ -5534,11 +5392,12 @@ def test_automatic_distribution_metrics_cover_only_public_digest_states() -> Non
 
     existing_distribution = model.Metrics.model_validate(
         {
+            "catalog_version": 2,
             "metrics": {
                 **definitions,
                 "ScoreP90": {
-                    "source": "scores",
-                    "kind": "tdigest_quantile",
+                    "processor": "scores",
+                    "kind": "quantile",
                     "state": "Score_tdigest",
                     "quantile": 0.9,
                 },
@@ -5564,12 +5423,24 @@ def test_ensure_digest_distribution_metrics_writes_idempotent_metric(
         "source": "ih",
         "kind": "numeric_distribution",
         "properties": ["Value"],
-        "dimensions": ["Channel"],
-        "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+        "group_by": ["Channel"],
+        "time": {"property": "OutcomeTime", "grain": "daily"},
+        "states": {
+            "Value_tdigest": {
+                "type": "tdigest",
+                "source_column": "Value",
+            }
+        },
     }
 
+    processors_path = tmp_path / "catalog" / "processors.yaml"
+    processors_yaml = yaml.safe_load(processors_path.read_text(encoding="utf-8"))
+    processors_yaml["processors"].append(processor_def)
+    processors_path.write_text(
+        yaml.safe_dump(processors_yaml, sort_keys=False),
+        encoding="utf-8",
+    )
     with builder.validated_catalog_transaction(tmp_path):
-        builder.write_processor_definition(tmp_path, processor_def)
         created = builder.ensure_digest_distribution_metrics(tmp_path, "descriptive")
 
     assert created == ["descriptive_metric_value_distribution"]
@@ -5580,8 +5451,7 @@ def test_ensure_digest_distribution_metrics_writes_idempotent_metric(
     assert definition["state"] == "Value_tdigest"
     assert "quantile" not in definition
     metric = load(tmp_path).metrics.metrics[created[0]]
-    assert metric.quantile == 0.5
-    assert "quantile" not in metric.model_fields_set
+    assert metric.kind == "distribution"
     assert builder.ensure_digest_distribution_metrics(tmp_path, "descriptive") == []
 
 
@@ -5592,20 +5462,26 @@ def test_processor_apply_creates_distribution_metric_through_builder_ui(
     _write_builder_catalog(tmp_path)
     (tmp_path / "catalog" / "processors.yaml").write_text(
         """
+catalog_version: 2
 processors:
   - id: descriptive
     source: ih
     kind: numeric_distribution
     description: Initial description
     properties: [Value]
-    dimensions: [Channel]
+    group_by: [Channel]
     time:
-      column: OutcomeTime
-      grains: [Day, Summary]
+      property: OutcomeTime
+      grain: daily
+    states:
+      Value_tdigest: {type: tdigest, source_column: Value}
 """,
         encoding="utf-8",
     )
-    (tmp_path / "catalog" / "metrics.yaml").write_text("metrics: {}\n", encoding="utf-8")
+    (tmp_path / "catalog" / "metrics.yaml").write_text(
+        "catalog_version: 2\nmetrics: {}\n",
+        encoding="utf-8",
+    )
 
     def app(workspace: str) -> None:
         import streamlit as st  # noqa: PLC0415 - isolated AppTest source
@@ -5631,8 +5507,8 @@ processors:
         (tmp_path / "catalog" / "metrics.yaml").read_text(encoding="utf-8")
     )
     assert metrics_yaml["metrics"]["descriptive_metric_value_distribution"] == {
-        "source": "descriptive",
-        "kind": "tdigest_quantile",
+        "processor": "descriptive",
+        "kind": "distribution",
         "state": "Value_tdigest",
         "description": ("Distribution automatically exposed from the Value_tdigest digest state."),
         "display": {"label": "Value distribution"},
@@ -5647,7 +5523,7 @@ def test_write_tile_definition_replaces_existing_tile(tmp_path: Path) -> None:
         title="CTR Line",
         metric_name="CTR",
         chart_kind="line",
-        fields={"x": "Day", "y": "CTR", "color": "Channel"},
+        fields={"x": "Day", "color": "Channel"},
     )
 
     builder.write_tile_definition(
@@ -5676,129 +5552,13 @@ def test_write_tile_definition_replaces_existing_tile(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("chart_kind", ["kpi_card", "gauge"])
-def test_metric_owned_tile_build_and_write_remove_manual_value_roles(
-    tmp_path: Path,
-    chart_kind: str,
-) -> None:
-    _write_builder_catalog(tmp_path)
-    tile = builder.build_tile(
-        tile_id="ctr_metric_owned",
-        title="CTR",
-        metric_name="CTR",
-        chart_kind=chart_kind,
-        fields={"value": "Channel", "y": "Count", "description": "Metric-owned value"},
-    )
-
-    assert tile == {
-        "id": "ctr_metric_owned",
-        "title": "CTR",
-        "metric": "CTR",
-        "chart": chart_kind,
-        "description": "Metric-owned value",
-    }
-
-    builder.write_tile_definition(
-        tmp_path,
-        dashboard_id="builder_overview",
-        dashboard_title="Builder Overview",
-        page_id="engagement",
-        page_title="Engagement",
-        tile={**tile, "value": "Channel", "y": "Count"},
-    )
-
-    written = next(
-        item
-        for item in load(tmp_path).dashboards.dashboards[0].pages[0].tiles
-        if item.id == "ctr_metric_owned"
-    )
-    payload = written.model_dump(mode="json", by_alias=True, exclude_none=True)
-    assert "value" not in payload
-    assert "y" not in payload
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("chart_kind", ["line", "bar", "stacked_area", "waterfall", "pareto"])
-def test_metric_owned_y_tile_build_and_write_remove_manual_y_role(
-    tmp_path: Path,
-    chart_kind: str,
-) -> None:
-    _write_builder_catalog(tmp_path)
-    fields = {
-        "x": "Day",
-        "y": "Count",
-        "value": "CTR",
-        **(
-            {
-                "color": "Channel",
-                "facet_row": "Issue",
-                "facets": {"column": "CustomerType"},
-            }
-            if chart_kind == "waterfall"
-            else {"color": "Channel"}
-            if chart_kind == "stacked_area"
-            else {}
-        ),
-    }
-    tile = builder.build_tile(
-        tile_id=f"ctr_{chart_kind}",
-        title="CTR",
-        metric_name="CTR",
-        chart_kind=chart_kind,
-        fields=fields,
-    )
-
-    assert "y" not in tile
-    assert "value" not in tile
-    if chart_kind == "waterfall":
-        assert "color" not in tile
-        assert "facet_row" not in tile
-        assert "facets" not in tile
-
-    builder.write_tile_definition(
-        tmp_path,
-        dashboard_id="builder_overview",
-        dashboard_title="Builder Overview",
-        page_id="engagement",
-        page_title="Engagement",
-        tile={
-            **tile,
-            "value": "CTR",
-            "y": "Count",
-            **(
-                {
-                    "color": "Channel",
-                    "facet_col": "Placement",
-                    "facets": {"row": "Issue"},
-                }
-                if chart_kind == "waterfall"
-                else {}
-            ),
-        },
-    )
-
-    written = next(
-        item
-        for item in load(tmp_path).dashboards.dashboards[0].pages[0].tiles
-        if item.id == f"ctr_{chart_kind}"
-    )
-    payload = written.model_dump(mode="json", by_alias=True, exclude_none=True)
-    assert "y" not in payload
-    assert "value" not in payload
-    if chart_kind == "waterfall":
-        assert "color" not in payload
-        assert "facet_col" not in payload
-        assert "facets" not in payload
-
-
-@pytest.mark.unit
 def test_unified_heatmap_offering_axes_and_metric_owned_intensity(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
     catalog = load(tmp_path)
 
     choices = builder.chart_choices_for_metric(catalog, "CTR")
     assert "heatmap" in choices
-    assert not set(builder.LEGACY_HEATMAP_CHARTS) & set(choices)
+    assert {"calendar_heatmap", "cohort_heatmap", "descriptive_heatmap"}.isdisjoint(choices)
     assert builder.chart_axis_options(catalog, "CTR") == [
         "Day",
         "Month",
@@ -5810,13 +5570,17 @@ def test_unified_heatmap_offering_axes_and_metric_owned_intensity(tmp_path: Path
     assert "CTR" not in builder.chart_axis_options(catalog, "CTR")
 
     defaults = builder.default_tile_fields(catalog, "CTR", "heatmap")
-    assert defaults == {"x": "Day", "y": "Channel"}
+    assert defaults == {"x": "Day", "y": "Channel", "metric_output": "CTR"}
     tile = builder.build_tile(
         tile_id="ctr_heatmap",
         title="CTR heatmap",
         metric_name="CTR",
         chart_kind="heatmap",
-        fields={"x": "Day", "y": "Channel", "color": "Count", "value": "Positives"},
+        fields={
+            "x": "Day",
+            "y": "Channel",
+            "metric_output": "CTR",
+        },
     )
     assert tile == {
         "id": "ctr_heatmap",
@@ -5825,60 +5589,7 @@ def test_unified_heatmap_offering_axes_and_metric_owned_intensity(tmp_path: Path
         "chart": "heatmap",
         "x": "Day",
         "y": "Channel",
-    }
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    ("chart_kind", "fields", "expected_fields"),
-    [
-        (
-            "calendar_heatmap",
-            {"date": "Day", "value": "Count"},
-            {"x": "Day"},
-        ),
-        (
-            "cohort_heatmap",
-            {"x": "Month", "y": "Channel", "color": "Count"},
-            {"x": "Month", "y": "Channel"},
-        ),
-        (
-            "descriptive_heatmap",
-            {
-                "x": "Month",
-                "y": "Channel",
-                "property": "Propensity",
-                "score": "p95",
-                "color": "Count",
-            },
-            {
-                "x": "Month",
-                "y": "Channel",
-                "property": "Propensity",
-                "score": "p95",
-            },
-        ),
-    ],
-)
-def test_legacy_heatmap_build_migrates_to_unified_contract(
-    chart_kind: str,
-    fields: dict[str, str],
-    expected_fields: dict[str, str],
-) -> None:
-    tile = builder.build_tile(
-        tile_id="heat",
-        title="Heat",
-        metric_name="CTR",
-        chart_kind=chart_kind,
-        fields=fields,
-    )
-
-    assert tile == {
-        "id": "heat",
-        "title": "Heat",
-        "metric": "CTR",
-        "chart": "heatmap",
-        **expected_fields,
+        "metric_output": "CTR",
     }
 
 
@@ -5923,7 +5634,7 @@ def test_write_tile_definition_updates_dashboard_layout_and_container_titles(
         title="CTR Line",
         metric_name="CTR",
         chart_kind="line",
-        fields={"x": "Day", "y": "CTR", "color": "Channel"},
+        fields={"x": "Day", "metric_output": "CTR", "color": "Channel"},
     )
     builder.write_tile_definition(
         tmp_path,
@@ -5962,7 +5673,7 @@ def test_validate_report_candidate_checks_complete_catalog_and_metric_fields(
         title="CTR Line",
         metric_name="CTR",
         chart_kind="line",
-        fields={"x": "Day", "y": "CTR", "color": "Channel"},
+        fields={"x": "Day", "metric_output": "CTR", "color": "Channel"},
     )
 
     ok, issues = builder.validate_report_candidate(
@@ -5987,10 +5698,23 @@ def test_validate_report_candidate_checks_complete_catalog_and_metric_fields(
         page_title="Engagement",
         filters=[],
         time_filter={"default": "all_time", "presets": ["all_time"]},
-        tile={**valid_tile, "y": "CTRR", "time_range": {"last": "30d"}},
+        tile={**valid_tile, "time_range": {"last": "30d"}},
     )
     assert not ok
-    assert any("unsupported tile field 'time_range'" in issue for issue in issues)
+    assert any("time_range" in issue for issue in issues)
+
+    ok, issues = builder.validate_report_candidate(
+        catalog,
+        dashboard_id="builder_overview",
+        dashboard_title="Builder Overview",
+        dashboard_layout="grid",
+        page_id="engagement",
+        page_title="Engagement",
+        filters=[],
+        time_filter={"default": "all_time", "presets": ["all_time"]},
+        tile={**valid_tile, "metric_output": "CTRR"},
+    )
+    assert not ok
     assert any("field 'CTRR' is not exposed by metric 'CTR'" in issue for issue in issues)
 
 
@@ -6129,10 +5853,15 @@ def test_write_definitions_bootstrap_nonexistent_workspace(tmp_path: Path) -> No
             "source": "ih",
             "kind": "binary_outcome",
             "group_by": ["Channel"],
-            "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "states": {
                 "Count": {"type": "count"},
-                "Positives": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+            },
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
             },
         },
     )
@@ -6152,7 +5881,7 @@ def test_write_definitions_bootstrap_nonexistent_workspace(tmp_path: Path) -> No
             title="CTR",
             metric_name="CTR",
             chart_kind="line",
-            fields={"x": "Day", "y": "CTR", "color": "Channel"},
+            fields={"x": "Day", "metric_output": "CTR", "color": "Channel"},
         ),
     )
 
@@ -6234,15 +5963,28 @@ def test_write_processor_definition_replaces_in_place_without_reordering(
     tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
+
+    def processor_definition(processor_id: str, *, group_by: list[str] | None = None) -> dict:
+        return {
+            "id": processor_id,
+            "source": "ih",
+            "kind": "binary_outcome",
+            "group_by": group_by or [],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {"Count": {"type": "count"}},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
+        }
+
     for processor_id in ("first", "second", "third"):
-        builder.write_processor_definition(
-            workspace,
-            {"id": processor_id, "source": "ih", "kind": "binary_outcome"},
-        )
+        builder.write_processor_definition(workspace, processor_definition(processor_id))
 
     builder.write_processor_definition(
         workspace,
-        {"id": "second", "source": "ih", "kind": "binary_outcome", "group_by": ["Channel"]},
+        processor_definition("second", group_by=["Channel"]),
     )
 
     raw = yaml.safe_load((workspace / "catalog" / "processors.yaml").read_text())
@@ -6265,12 +6007,24 @@ def test_catalog_transaction_restores_all_files_when_a_write_fails(tmp_path: Pat
     def _failing_two_file_install() -> None:
         builder.write_processor_definition(
             workspace,
-            {"id": "engagement", "source": "ih", "kind": "binary_outcome"},
+            {
+                "id": "engagement",
+                "source": "ih",
+                "kind": "binary_outcome",
+                "group_by": [],
+                "time": {"property": "OutcomeTime", "grain": "daily"},
+                "states": {"Count": {"type": "count"}},
+                "outcome": {
+                    "column": "Outcome",
+                    "positive_values": ["Clicked"],
+                    "negative_values": ["Impression"],
+                },
+            },
         )
         builder.write_metric_definition(
             workspace,
             "Reach",
-            {"source": "engagement", "kind": "approx_distinct_count", "state": "Reach_cpc"},
+            {"processor": "engagement", "kind": "approx_distinct_count", "state": "Reach_cpc"},
         )
         raise ValueError("boom")
 
@@ -6306,7 +6060,7 @@ def test_validated_catalog_transaction_rolls_back_all_post_write_changes(
                 tmp_path,
                 "BrokenReach",
                 {
-                    "source": "engagement",
+                    "processor": "engagement",
                     "kind": "approx_distinct_count",
                     "state": "Missing_theta",
                 },
@@ -7226,11 +6980,16 @@ def test_write_source_and_processor_definitions_round_trip(tmp_path: Path) -> No
             "source": "ih",
             "kind": "binary_outcome",
             "group_by": ["Channel", "ResponseTime"],
-            "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "states": {
                 "Count": {"type": "count"},
-                "Positives": {"type": "count"},
-                "Negatives": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "Negatives": {"type": "count", "outcome": "negative"},
+            },
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
             },
             "filter": {"op": "not_null", "column": "Channel"},
         },
@@ -7332,7 +7091,7 @@ def test_rename_processor_retargets_metrics_and_chat_description(tmp_path: Path)
         "engagement_v2",
         "holdings_lifecycle",
     ]
-    assert renamed.metrics.metrics["CTR"].source == "engagement_v2"
+    assert renamed.metrics.metrics["CTR"].processor == "engagement_v2"
     ai_config = yaml.safe_load((tmp_path / "ai.yaml").read_text(encoding="utf-8"))
     descriptions = ai_config["chat_with_data"]["metric_descriptions"]
     assert descriptions["engagement_v2"] == "Interaction processor"
@@ -7380,11 +7139,17 @@ def test_delete_processor_without_dependencies_is_valid(tmp_path: Path) -> None:
         {
             "id": "unused_processor",
             "source": "ih",
-            "kind": "binary_outcome",
-            "group_by": ["Channel"],
-            "states": {"Count": {"type": "count"}},
-        },
-    )
+                "kind": "binary_outcome",
+                "group_by": ["Channel"],
+                "time": {"property": "OutcomeTime", "grain": "daily"},
+                "states": {"Count": {"type": "count"}},
+                "outcome": {
+                    "column": "Outcome",
+                    "positive_values": ["Clicked"],
+                    "negative_values": ["Impression"],
+                },
+            },
+        )
     builder.require_valid_workspace(tmp_path)
 
     plan = builder.delete_processor_cascade(tmp_path, "unused_processor")
@@ -7485,7 +7250,7 @@ def test_delete_metric_without_report_dependencies_is_valid(tmp_path: Path) -> N
         tmp_path,
         "Unused",
         {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "formula",
             "expression": {"col": "Count"},
             "display": {"label": "Unused QA metric"},
@@ -7527,7 +7292,7 @@ def _write_builder_catalog(workspace: Path) -> None:
     catalog.mkdir(parents=True)
     (catalog / "pipelines.yaml").write_text(
         """
-version: 1
+catalog_version: 2
 workspace: builder_test
 sources:
   - id: ih
@@ -7542,26 +7307,32 @@ sources:
     )
     (catalog / "processors.yaml").write_text(
         """
+catalog_version: 2
 processors:
   - id: engagement
     source: ih
     kind: binary_outcome
     group_by: [Channel]
     time:
-      column: OutcomeTime
-      grains: [Day, Summary]
+      property: OutcomeTime
+      grain: daily
     states:
       Count: {type: count}
-      Positives: {type: count}
-      Negatives: {type: count}
+      Positives: {type: count, outcome: positive}
+      Negatives: {type: count, outcome: negative}
+    outcome:
+      column: Outcome
+      positive_values: [Clicked]
+      negative_values: [Impression]
 """,
         encoding="utf-8",
     )
     (catalog / "metrics.yaml").write_text(
         """
+catalog_version: 2
 metrics:
   CTR:
-    source: engagement
+    processor: engagement
     kind: formula
     expression:
       op: safe_div
@@ -7570,7 +7341,10 @@ metrics:
 """,
         encoding="utf-8",
     )
-    (catalog / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
+    (catalog / "dashboards.yaml").write_text(
+        "catalog_version: 2\ndashboards: []\n",
+        encoding="utf-8",
+    )
 
 
 def _write_source_cascade_catalog(workspace: Path) -> None:
@@ -7578,7 +7352,7 @@ def _write_source_cascade_catalog(workspace: Path) -> None:
     catalog.mkdir(parents=True)
     (catalog / "pipelines.yaml").write_text(
         """
-version: 1
+catalog_version: 2
 workspace: cascade_test
 sources:
   - id: ih
@@ -7590,35 +7364,47 @@ sources:
     )
     (catalog / "processors.yaml").write_text(
         """
+catalog_version: 2
 processors:
   - id: engagement
     source: ih
     kind: binary_outcome
     group_by: [Channel]
+    time: {property: OutcomeTime, grain: daily}
     states:
       Count: {type: count}
+    outcome:
+      column: Outcome
+      positive_values: [Clicked]
+      negative_values: [Impression]
   - id: holdings_lifecycle
     source: holdings
     kind: binary_outcome
     group_by: [HoldingType]
+    time: {property: OutcomeTime, grain: daily}
     states:
       Count: {type: count}
+    outcome:
+      column: Outcome
+      positive_values: [Active]
+      negative_values: [Inactive]
 """,
         encoding="utf-8",
     )
     (catalog / "metrics.yaml").write_text(
         """
+catalog_version: 2
 metrics:
   CTR:
-    source: engagement
+    processor: engagement
     kind: formula
     expression: {col: Count}
   HoldingsValue:
-    source: holdings_lifecycle
+    processor: holdings_lifecycle
     kind: formula
     expression: {col: Count}
   HoldingsRate:
-    source: holdings_lifecycle
+    processor: holdings_lifecycle
     kind: formula
     depends_on: [HoldingsValue]
     expression: {col: HoldingsValue}
@@ -7627,6 +7413,7 @@ metrics:
     )
     (catalog / "dashboards.yaml").write_text(
         """
+catalog_version: 2
 dashboards:
   - id: overview
     title: Overview
@@ -7637,9 +7424,9 @@ dashboards:
           - {field: Channel, scope: compatible_tiles}
           - {field: HoldingType, scope: compatible_tiles}
         tiles:
-          - {id: ctr, title: CTR, metric: CTR, chart: kpi_card, value: CTR}
-          - {id: holdings_value, title: Holdings value, metric: HoldingsValue, chart: kpi_card, value: HoldingsValue}
-          - {id: holdings_rate, title: Holdings rate, metric: HoldingsRate, chart: kpi_card, value: HoldingsRate}
+          - {id: ctr, title: CTR, metric: CTR, chart: kpi_card, metric_output: CTR}
+          - {id: holdings_value, title: Holdings value, metric: HoldingsValue, chart: kpi_card, metric_output: HoldingsValue}
+          - {id: holdings_rate, title: Holdings rate, metric: HoldingsRate, chart: kpi_card, metric_output: HoldingsRate}
 """,
         encoding="utf-8",
     )
@@ -7669,6 +7456,7 @@ def _numeric_distribution_catalog() -> model.Catalog:
     return model.Catalog.model_validate(
         {
             "pipelines": {
+                "catalog_version": 2,
                 "workspace": "test",
                 "sources": [
                     {
@@ -7678,28 +7466,36 @@ def _numeric_distribution_catalog() -> model.Catalog:
                 ],
             },
             "processors": {
+                "catalog_version": 2,
                 "processors": [
                     {
                         "id": "descriptive",
                         "source": "ih",
                         "kind": "numeric_distribution",
                         "group_by": ["Channel"],
-                        "time": {"grains": ["Month", "Summary"]},
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
                         "properties": ["Propensity", "ResponseTime"],
+                        "states": {
+                            "ResponseTime_tdigest": {
+                                "type": "tdigest",
+                                "source_column": "ResponseTime",
+                            }
+                        },
                     }
                 ]
             },
             "metrics": {
+                "catalog_version": 2,
                 "metrics": {
                     "ResponseP50": {
-                        "source": "descriptive",
-                        "kind": "tdigest_quantile",
+                        "processor": "descriptive",
+                        "kind": "quantile",
                         "state": "ResponseTime_tdigest",
                         "quantile": 0.5,
                     }
                 }
             },
-            "dashboards": {"dashboards": []},
+            "dashboards": {"catalog_version": 2, "dashboards": []},
         }
     )
 
@@ -7996,7 +7792,7 @@ def test_calculation_mode_recognition_rejects_inexact_shapes(label: str, express
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("workspace", ["demo", "fat", "new", "test_config_editor"])
+@pytest.mark.parametrize("workspace", ["demo", "fat", "new"])
 def test_example_catalog_calculated_rows_round_trip_identically(workspace: str) -> None:
     catalog = load(_EXAMPLES_DIR / workspace)
 
@@ -8235,7 +8031,7 @@ def test_label_condition_rows_renumbers_in_order() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("workspace", ["demo", "fat", "new", "test_config_editor"])
+@pytest.mark.parametrize("workspace", ["demo", "fat", "new"])
 def test_example_catalog_filters_stay_editable_and_round_trip(workspace: str) -> None:
     """Every example filter must decompile to rules and recompile identically.
 
@@ -8372,15 +8168,21 @@ def _dimension_catalog(processor_dimensions: list[list[str]]) -> model.Catalog:
             "id": f"p{index}",
             "source": "ih",
             "kind": "binary_outcome",
-            "dimensions": dimensions,
+            "group_by": dimensions,
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "states": {"Count": {"type": "count"}},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
         }
         for index, dimensions in enumerate(processor_dimensions)
     ]
     return model.Catalog.model_validate(
         {
             "pipelines": {
-                "version": 1,
+                "catalog_version": 2,
                 "workspace": "dims",
                 "sources": [
                     {
@@ -8390,9 +8192,9 @@ def _dimension_catalog(processor_dimensions: list[list[str]]) -> model.Catalog:
                     }
                 ],
             },
-            "processors": {"processors": processors},
-            "metrics": {"metrics": {}},
-            "dashboards": {"dashboards": []},
+            "processors": {"catalog_version": 2, "processors": processors},
+            "metrics": {"catalog_version": 2, "metrics": {}},
+            "dashboards": {"catalog_version": 2, "dashboards": []},
         }
     )
 
@@ -8407,10 +8209,9 @@ def test_workspace_dimensions_fall_back_to_shared_processor_group_by() -> None:
         ]
     )
 
-    # Intersection in first-processor order; matching is case-insensitive and
-    # the first processor's spelling wins.
+    # Intersection preserves the first processor's order and uses exact
+    # catalog-v2 dimension names.
     assert builder.workspace_dimension_defaults(catalog) == [
-        "Channel",
         "CustomerType",
         "Placement",
     ]
@@ -8464,9 +8265,9 @@ def test_fat_example_workspace_resolves_common_dimensions() -> None:
     if explicit:
         assert resolved == builder.dedupe(explicit)
     else:
-        shared = {field.casefold() for field in resolved}
+        shared = set(resolved)
         for processor in catalog.processors.processors:
-            group_by = {str(field).casefold() for field in processor.group_by}
+            group_by = {str(field) for field in processor.group_by}
             if group_by:
                 assert shared <= group_by
 
@@ -8476,10 +8277,9 @@ import streamlit as st
 from valuestream.ui import forms
 
 seed = {
-    "source": "audience",
+    "processor": "audience",
     "kind": "set_op",
-    "op": "intersection",
-    "output": "count",
+    "operation": "intersection",
     "operands": [
         {"state": "Customers_theta", "time_window": {"last": "1d"}},
         {"state": "Customers_theta", "time_window": {"between": ["-30d", "-1d"]}},
@@ -8506,12 +8306,11 @@ def test_windowed_set_op_is_editable_with_one_theta_state() -> None:
     assert not rendered.exception
     assert not rendered.warning
     assert rendered.session_state["result"] == {
-        "op": "intersection",
+        "operation": "intersection",
         "operands": [
             {"state": "Customers_theta", "time_window": {"last": "1d"}},
             {"state": "Customers_theta", "time_window": {"between": ["-30d", "-1d"]}},
         ],
-        "output": "count",
     }
     assert rendered.session_state["retained_set_set_operand_0_last"] == "1d"
     assert rendered.session_state["retained_set_set_operand_1_from"] == "-30d"
@@ -8546,7 +8345,7 @@ def _write_entity_set_catalog(workspace: Path) -> None:
     catalog.mkdir(parents=True)
     (catalog / "pipelines.yaml").write_text(
         """
-version: 1
+catalog_version: 2
 workspace: sketch_test
 sources:
   - id: ih
@@ -8561,18 +8360,27 @@ sources:
     )
     (catalog / "processors.yaml").write_text(
         """
+catalog_version: 2
 processors:
   - id: audience
     source: ih
     kind: entity_set
     description: Audience sets.
     entity: CustomerID
-    dimensions: [Channel]
+    group_by: [Channel]
+    time: {property: OutcomeTime, grain: daily}
+    states:
+      ActiveUsers_cpc: {type: cpc, source_column: CustomerID}
+      ActiveUsers_theta: {type: theta, source_column: CustomerID}
 """,
         encoding="utf-8",
     )
-    (catalog / "metrics.yaml").write_text("metrics: {}\n", encoding="utf-8")
-    (catalog / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
+    (catalog / "metrics.yaml").write_text(
+        "catalog_version: 2\nmetrics: {}\n", encoding="utf-8"
+    )
+    (catalog / "dashboards.yaml").write_text(
+        "catalog_version: 2\ndashboards: []\n", encoding="utf-8"
+    )
 
 
 @pytest.mark.unit
@@ -8618,32 +8426,7 @@ def test_sketch_helper_appends_states_to_processor_sketches_grid(tmp_path: Path)
 def test_set_op_picker_offers_minus_instead_of_diff_alias() -> None:
     assert "diff" not in forms.SET_OP_OPTIONS
     assert set(forms.SET_OP_LABELS) == set(forms.SET_OP_OPTIONS)
-    assert forms.SET_OP_LABELS["a_not_b"].startswith("Minus")
-
-
-@pytest.mark.unit
-def test_set_op_diff_seed_edits_as_minus_and_saves_canonically() -> None:
-    """`diff` is an engine alias of `a_not_b`; editing normalizes it."""
-    app = AppTest.from_string(
-        """
-import streamlit as st
-from valuestream.ui import forms
-
-seed = {
-    "source": "audience",
-    "kind": "set_op",
-    "op": "diff",
-    "states": ["A_theta", "B_theta"],
-}
-ctx = forms.MetricFormContext(state_options=lambda _types: ["A_theta", "B_theta"])
-st.session_state["result"] = forms.metric_kind_fields(
-    "set_op", seed, ctx, key_prefix="diff_set"
-)
-"""
-    ).run()
-
-    assert not app.exception
-    assert app.session_state["result"] == {"op": "a_not_b", "states": ["A_theta", "B_theta"]}
+    assert forms.SET_OP_LABELS["minus"].startswith("Minus")
 
 
 class _PolicyWarningCapture(logging.Handler):
@@ -8781,116 +8564,13 @@ def test_report_chart_preselection_after_metric_renders_without_policy_warning(
     assert not capture.default_clash_messages
 
 
-# ---------------------------------------------------------------------------
-# Distribution metrics: digest quantile without a stored quantile.
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_tdigest_quantile_model_defaults_to_median_and_bounds_quantile() -> None:
-    parsed = model.Metrics.model_validate(
-        {
-            "metrics": {
-                "dist": {
-                    "source": "descriptive",
-                    "kind": "tdigest_quantile",
-                    "state": "Propensity_tdigest",
-                }
-            }
-        }
-    ).metrics["dist"]
-    assert parsed.quantile == 0.5
-
-    with pytest.raises(ValueError, match="quantile"):
-        model.Metrics.model_validate(
-            {
-                "metrics": {
-                    "bad": {
-                        "source": "descriptive",
-                        "kind": "tdigest_quantile",
-                        "state": "Propensity_tdigest",
-                        "quantile": 1.5,
-                    }
-                }
-            }
-        )
-
-
-@pytest.mark.unit
-def test_quantile_metric_form_supports_distribution_without_quantile() -> None:
-    """A digest metric seeded without a quantile edits as a distribution metric."""
-    app = AppTest.from_string(
-        """
-import streamlit as st
-from valuestream.ui import forms
-
-ctx = forms.MetricFormContext(state_options=lambda _types: ["Propensity_tdigest"])
-st.session_state["result"] = forms.metric_kind_fields(
-    "tdigest_quantile",
-    {"source": "descriptive", "kind": "tdigest_quantile", "state": "Propensity_tdigest"},
-    ctx,
-    key_prefix="dist_quantile",
-)
-"""
-    ).run()
-
-    assert not app.exception
-    checkbox = next(
-        item for item in app.checkbox if item.key == "dist_quantile_quantile_distribution"
-    )
-    assert checkbox.value is True
-    assert app.session_state["result"] == {"state": "Propensity_tdigest"}
-
-    rendered = checkbox.uncheck().run()
-    assert rendered.session_state["result"] == {
-        "state": "Propensity_tdigest",
-        "quantile": 0.5,
-    }
-
-
-@pytest.mark.unit
-def test_quantile_metric_form_defaults_to_single_quantile_for_new_metrics() -> None:
-    app = AppTest.from_string(
-        """
-import streamlit as st
-from valuestream.ui import forms
-
-ctx = forms.MetricFormContext(state_options=lambda _types: ["Propensity_tdigest"])
-st.session_state["result"] = forms.metric_kind_fields(
-    "tdigest_quantile", {}, ctx, key_prefix="new_quantile"
-)
-"""
-    ).run()
-
-    assert not app.exception
-    checkbox = next(
-        item for item in app.checkbox if item.key == "new_quantile_quantile_distribution"
-    )
-    assert checkbox.value is False
-    # No state chosen yet: the form stays invalid instead of guessing.
-    assert app.session_state["result"] is None
-
-    state_select = next(item for item in app.selectbox if item.key == "new_quantile_quantile_state")
-    rendered = state_select.set_value("Propensity_tdigest").run()
-    assert rendered.session_state["result"] == {
-        "state": "Propensity_tdigest",
-        "quantile": 0.5,
-    }
-
-    checkbox = next(
-        item for item in rendered.checkbox if item.key == "new_quantile_quantile_distribution"
-    )
-    rendered = checkbox.check().run()
-    assert rendered.session_state["result"] == {"state": "Propensity_tdigest"}
-
-
 @pytest.mark.unit
 def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
     """The metric's digest defines the boxplot; scalar metrics get no box."""
     catalog = model.Catalog.model_validate(
         {
             "pipelines": {
-                "version": 1,
+                "catalog_version": 2,
                 "workspace": "box",
                 "sources": [
                     {
@@ -8901,62 +8581,64 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
                 ],
             },
             "processors": {
+                "catalog_version": 2,
                 "processors": [
                     {
                         "id": "descriptive",
                         "source": "ih",
                         "kind": "numeric_distribution",
-                        "properties": ["Propensity", "Priority"],
+                        "group_by": ["Year", "Issue"],
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
+                        "properties": ["Propensity", "Priority", "Custom"],
                         "states": {
+                            "Propensity_tdigest": {
+                                "type": "tdigest",
+                                "source_column": "Propensity",
+                            },
+                            "Priority_tdigest": {
+                                "type": "tdigest",
+                                "source_column": "Priority",
+                            },
                             "Custom_kll": {
                                 "type": "kll",
                                 "source_column": "Custom",
-                            },
-                            "Conditional_tdigest": {
-                                "type": "tdigest",
-                                "source_column": "Conditional",
-                                "outcome": "positive",
                             },
                         },
                     }
                 ]
             },
             "metrics": {
+                "catalog_version": 2,
                 "metrics": {
                     "PropensityDistribution": {
-                        "source": "descriptive",
-                        "kind": "tdigest_quantile",
+                        "processor": "descriptive",
+                        "kind": "distribution",
                         "state": "Propensity_tdigest",
                     },
                     "PriorityP90": {
-                        "source": "descriptive",
-                        "kind": "tdigest_quantile",
+                        "processor": "descriptive",
+                        "kind": "quantile",
                         "state": "Priority_tdigest",
                         "quantile": 0.9,
                     },
                     "PriorityDistribution": {
-                        "source": "descriptive",
-                        "kind": "tdigest_quantile",
+                        "processor": "descriptive",
+                        "kind": "distribution",
                         "state": "Priority_tdigest",
                     },
                     "CustomDistribution": {
-                        "source": "descriptive",
-                        "kind": "tdigest_quantile",
+                        "processor": "descriptive",
+                        "kind": "distribution",
                         "state": "Custom_kll",
                     },
-                    "ConditionalDistribution": {
-                        "source": "descriptive",
-                        "kind": "tdigest_quantile",
-                        "state": "Conditional_tdigest",
-                    },
                     "PropensityCount": {
-                        "source": "descriptive",
+                        "processor": "descriptive",
                         "kind": "formula",
                         "expression": {"col": "Propensity_Count"},
                     },
                 }
             },
-            "dashboards": {"dashboards": []},
+            "dashboards": {"catalog_version": 2, "dashboards": []},
         }
     )
 
@@ -8968,7 +8650,6 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
         "Custom",
     ]
     assert builder.chart_field_controls("boxplot") == (
-        "property",
         "x",
         "color",
         "facet_row",
@@ -8979,7 +8660,7 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
         "PropensityDistribution",
         "boxplot",
     )
-    assert defaults["property"] == "Propensity"
+    assert "property" not in defaults
     assert "y" not in defaults
 
     ok, issues = builder.validate_report_candidate(
@@ -9001,54 +8682,9 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
     )
     assert not ok
     assert issues == [
-        "Boxplot `y` is supplied by the selected distribution property. "
-        "Remove `y`; choose `property` and use `x`, `color`, or facets only "
-        "to group the distribution."
+        "Boxplot `y` is supplied by the selected distribution metric. "
+        "Remove `y`; use `x`, `color`, or facets only to group the distribution."
     ]
-
-    ok, issues = builder.validate_report_candidate(
-        catalog,
-        dashboard_id="quality",
-        dashboard_title="Quality",
-        dashboard_layout="tabs",
-        page_id="distributions",
-        page_title="Distributions",
-        filters=[],
-        time_filter={},
-        tile={
-            "id": "propensity_box",
-            "title": "Propensity",
-            "metric": "PropensityDistribution",
-            "chart": "boxplot",
-            "property": "Propensity_Count",
-        },
-    )
-    assert not ok
-    assert issues == [
-        "Boxplot property 'Propensity_Count' is not backed by an unconditioned "
-        "t-digest or KLL metric; choose one of: Propensity, Priority, Custom."
-    ]
-
-    merged = config_builder._merge_visual_tile_definition(
-        {
-            "id": "propensity_box",
-            "title": "Propensity",
-            "metric": "PropensityDistribution",
-            "chart": "boxplot",
-            "y": "Propensity_Count",
-        },
-        {
-            "id": "propensity_box",
-            "title": "Propensity",
-            "metric": "PropensityDistribution",
-            "chart": "boxplot",
-            "property": "Priority",
-        },
-        "boxplot",
-    )
-    assert "y" not in merged
-    assert merged["property"] == "Priority"
-
 
 @pytest.mark.unit
 def test_descriptive_boxplot_is_retired_from_chart_offering() -> None:
@@ -9056,10 +8692,7 @@ def test_descriptive_boxplot_is_retired_from_chart_offering() -> None:
     assert "boxplot" in RECIPES
     assert "descriptive_boxplot" not in builder.CHART_DISPLAY_LABELS
     assert set(RECIPES) == set(builder.CHART_REQUIRED_FIELDS)
-    assert set(config_builder.REPORT_LIBRARY_GROUP_BY_CHART) == (
-        set(RECIPES) - set(builder.LEGACY_HEATMAP_CHARTS)
-    )
-    assert set(model.Tile.model_json_schema()["properties"]["chart"]["enum"]) == set(RECIPES)
+    assert set(config_builder.REPORT_LIBRARY_GROUP_BY_CHART) == set(RECIPES)
 
 
 def _tile_option(dashboard_id: str, page_id: str, tile_id: str, title: str):
@@ -9069,18 +8702,19 @@ def _tile_option(dashboard_id: str, page_id: str, tile_id: str, title: str):
 @pytest.mark.unit
 def test_report_library_labels_disambiguate_duplicate_pages() -> None:
     catalog = model.Catalog.model_validate(
-        {
-            "pipelines": {
-                "version": 1,
-                "workspace": "labels",
+            {
+                "pipelines": {
+                    "catalog_version": 2,
+                    "workspace": "labels",
                 "sources": [
                     {"id": "ih", "reader": {"kind": "parquet", "file_pattern": "*.parquet"}}
                 ],
             },
-            "processors": {"processors": []},
-            "metrics": {"metrics": {}},
-            "dashboards": {
-                "dashboards": [
+                "processors": {"catalog_version": 2, "processors": []},
+                "metrics": {"catalog_version": 2, "metrics": {}},
+                "dashboards": {
+                    "catalog_version": 2,
+                    "dashboards": [
                     {"id": "model_quality", "title": "Model quality", "pages": []},
                     {"id": "experiments", "title": "Experiments", "pages": []},
                 ]

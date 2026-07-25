@@ -206,11 +206,11 @@ def query_metric(
         raise ValueError(f"unknown metric {metric_name!r}")
 
     processor_config = next(
-        (processor for processor in catalog.processors.processors if processor.id == metric.source),
+        (processor for processor in catalog.processors.processors if processor.id == metric.processor),
         None,
     )
     if processor_config is None:
-        raise ValueError(f"metric {metric_name!r} references unknown processor {metric.source!r}")
+        raise ValueError(f"metric {metric_name!r} references unknown processor {metric.processor!r}")
 
     processor = _make_processor(
         processor_config,
@@ -284,6 +284,7 @@ def query_metric(
                     metric_name,
                     metric,
                     derived,
+                    state_specs=processor.state_specs,
                     include_quantile_suite=include_quantile_suite,
                     include_curve_columns=include_curve_columns,
                 ),
@@ -868,6 +869,7 @@ def _metric_output_columns(  # noqa: PLR0911
     metric: model.Metric,
     frame: pl.DataFrame,
     *,
+    state_specs: dict[str, model.StateSpec],
     include_quantile_suite: bool,
     include_curve_columns: bool,
 ) -> list[str]:
@@ -882,10 +884,18 @@ def _metric_output_columns(  # noqa: PLR0911
         return _available_columns(frame, [*_CONTINGENCY_OUTPUT_COLUMNS, *metric.outputs])
     if isinstance(metric, model.ProportionTestMetric):
         return _available_columns(frame, [*_PROPORTION_OUTPUT_COLUMNS, *metric.outputs])
-    if isinstance(metric, model.TdigestQuantileMetric):
+    if isinstance(metric, model.QuantileMetric):
+        return [metric_name]
+    if isinstance(metric, model.DistributionMetric):
         if not include_quantile_suite:
             return [metric_name]
-        prop = _quantile_property(metric.state)
+        state_spec = state_specs.get(metric.state)
+        source_column = getattr(state_spec, "source_column", None)
+        if state_spec is None or not source_column:
+            raise ValueError(
+                f"distribution metric requires explicit source_column for {metric.state!r}"
+            )
+        prop = source_column
         suite = [
             metric_name,
             *(f"{prop}_{suffix}" for suffix in _QUANTILE_SUITE),
@@ -908,25 +918,15 @@ def _available_columns(frame: pl.DataFrame, columns: Iterable[str]) -> list[str]
     return out
 
 
-def _quantile_property(state: str) -> str:
-    for suffix in ("_tdigest", "_kll"):
-        if state.endswith(suffix):
-            return state.removesuffix(suffix)
-    return state
-
-
 def _cardinality_estimator(
     state: str,
     state_specs: dict[str, model.StateSpec] | None,
 ) -> Any:
-    state_type = state_specs[state].type if state_specs and state in state_specs else None
-    if state_type is None:
-        if state.endswith("_cpc"):
-            state_type = "cpc"
-        elif state.endswith("_hll"):
-            state_type = "hll"
-        elif state.endswith("_theta"):
-            state_type = "theta"
+    if state_specs is None or state not in state_specs:
+        raise ValueError(
+            f"approx_distinct_count requires an explicit state contract for {state!r}"
+        )
+    state_type = state_specs[state].type
     if state_type == "cpc":
         return cpc.estimate
     if state_type == "hll":
@@ -939,7 +939,7 @@ def _cardinality_estimator(
 
 
 @timed
-def _derive_metric(  # noqa: PLR0911, PLR0912
+def _derive_metric(  # noqa: PLR0911, PLR0912, PLR0915
     frame: pl.DataFrame,
     metric_name: str,
     metric: model.Metric,
@@ -988,22 +988,32 @@ def _derive_metric(  # noqa: PLR0911, PLR0912
             )
             .alias(metric_name)
         )
-    if isinstance(metric, model.TdigestQuantileMetric):
+    if isinstance(metric, model.DistributionMetric | model.QuantileMetric):
         if metric.state not in working.columns:
             raise ValueError(f"state {metric.state!r} not present for metric {metric_name!r}")
-        state_type = (
-            state_specs[metric.state].type
-            if state_specs is not None and metric.state in state_specs
-            else "kll"
-            if metric.state.endswith("_kll")
-            else "tdigest"
-        )
+        if state_specs is None or metric.state not in state_specs:
+            raise ValueError(
+                f"metric {metric_name!r} requires an explicit state contract for {metric.state!r}"
+            )
+        state_spec = state_specs[metric.state]
+        state_type = state_spec.type
+        if state_type not in {"tdigest", "kll"}:
+            raise ValueError(
+                f"metric {metric_name!r} requires a tdigest or kll state, got {state_type!r}"
+            )
         quantile_fn = kll.quantile if state_type == "kll" else tdigest.quantile
-        prop = _quantile_property(metric.state)
-        quantiles = {
-            metric_name: metric.quantile,
-            **{f"{prop}_{suffix}": quantile for suffix, quantile in _QUANTILE_SUITE.items()},
-        }
+        prop = getattr(state_spec, "source_column", None)
+        if not prop:
+            raise ValueError(
+                f"distribution state {metric.state!r} requires an explicit source_column"
+            )
+        if isinstance(metric, model.DistributionMetric):
+            quantiles = {
+                metric_name: 0.5,
+                **{f"{prop}_{suffix}": quantile for suffix, quantile in _QUANTILE_SUITE.items()},
+            }
+        else:
+            quantiles = {metric_name: metric.quantile}
         return working.with_columns(
             *[
                 pl.col(metric.state)
@@ -1057,8 +1067,8 @@ def _derive_metric(  # noqa: PLR0911, PLR0912
             .alias(metric_name)
         )
     if isinstance(metric, model.FunnelDropoffMetric):
-        from_col = f"{metric.from_stage}_Count"
-        to_col = f"{metric.to_stage}_Count"
+        from_col = metric.from_state
+        to_col = metric.to_state
         _ensure_columns(working, [from_col, to_col], metric_name)
         dropoff = pl.col(from_col) - pl.col(to_col)
         if metric.output == "count":
@@ -1070,7 +1080,11 @@ def _derive_metric(  # noqa: PLR0911, PLR0912
             .alias(metric_name)
         )
     if isinstance(metric, model.LifecycleSummaryMetric):
-        return _lifecycle_summary(working, metric)
+        if state_specs is None:
+            raise ValueError(
+                f"metric {metric_name!r} requires an explicit lifecycle state contract"
+            )
+        return _lifecycle_summary(working, metric, state_specs)
     if isinstance(metric, model.VariantCompareMetric):
         return _derive_variant_compare(working, metric, group_columns or [])
     if isinstance(metric, model.ContingencyTestMetric):
@@ -1102,7 +1116,7 @@ def _derive_variant_compare(
                 confidence_level=metric.confidence_level,
             )
         out.append({**groups, **values})
-    return pl.DataFrame(out) if out else _empty_metric_frame(group_columns, _VARIANT_OUTPUT_COLUMNS)
+    return _metric_output_frame(out, group_columns, _VARIANT_OUTPUT_COLUMNS)
 
 
 def _derive_contingency_test(
@@ -1131,11 +1145,7 @@ def _derive_contingency_test(
                 **tests,
             }
         )
-    return (
-        pl.DataFrame(out)
-        if out
-        else _empty_metric_frame(group_columns, _CONTINGENCY_OUTPUT_COLUMNS)
-    )
+    return _metric_output_frame(out, group_columns, _CONTINGENCY_OUTPUT_COLUMNS)
 
 
 def _derive_proportion_test(
@@ -1167,9 +1177,7 @@ def _derive_proportion_test(
                 ),
             }
         out.append({**groups, **values})
-    return (
-        pl.DataFrame(out) if out else _empty_metric_frame(group_columns, _PROPORTION_OUTPUT_COLUMNS)
-    )
+    return _metric_output_frame(out, group_columns, _PROPORTION_OUTPUT_COLUMNS)
 
 
 def _partition_groups(
@@ -1194,6 +1202,21 @@ def _sum_column(frame: pl.DataFrame, column: str) -> int:
 
 def _empty_metric_frame(group_columns: list[str], output_columns: list[str]) -> pl.DataFrame:
     return pl.DataFrame(schema=dict.fromkeys([*group_columns, *output_columns], pl.Float64))
+
+
+def _metric_output_frame(
+    rows: list[dict[str, Any]],
+    group_columns: list[str],
+    output_columns: list[str],
+) -> pl.DataFrame:
+    """Keep statistical outputs numeric even when every value is undefined."""
+
+    if not rows:
+        return _empty_metric_frame(group_columns, output_columns)
+    return pl.DataFrame(
+        rows,
+        schema_overrides=dict.fromkeys(output_columns, pl.Float64),
+    )
 
 
 def _quantile_metric(
@@ -1296,8 +1319,6 @@ def _topk_dtype() -> pl.DataType:
 
 
 def _set_op_states(metric: model.SetOpMetric) -> list[str]:
-    if metric.states:
-        return list(metric.states)
     return [operand.state for operand in metric.operands]
 
 
@@ -1338,7 +1359,7 @@ def _derive_windowed_set_op(
         alias = f"__set_operand_{index}"
         operand_columns.append(alias)
         spec = processor.state_specs.get(operand.state)
-        lg_k = int((spec.model_extra or {}).get("lg_k", 12)) if spec is not None else 12
+        lg_k = int(getattr(spec, "lg_k", None) or 12) if spec is not None else 12
         empty_payloads[alias] = theta.build([], lg_k=lg_k)
         selected = merged.select(
             *[column for column in group_columns if column in merged.columns],
@@ -1381,18 +1402,16 @@ def _apply_set_time_window(
     frame: pl.DataFrame,
     *,
     date_column: str,
-    window: dict[str, Any] | None,
+    window: model.SetOpTimeWindow,
     anchor: dt.date,
 ) -> pl.DataFrame:
-    if not window:
-        return frame
     dates = pl.col(date_column).cast(pl.Date)
-    if "last" in window:
-        days = _duration_days(window["last"], allow_negative=False)
+    if window.last is not None:
+        days = _duration_days(window.last, allow_negative=False)
         start = anchor - dt.timedelta(days=max(days - 1, 0))
         return frame.filter(dates.is_between(start, anchor, closed="both"))
-    between = window.get("between")
-    if isinstance(between, list | tuple) and len(between) == 2:
+    between = window.between
+    if between is not None:
         start_offset = _duration_days(between[0], allow_negative=True)
         end_offset = _duration_days(between[1], allow_negative=True)
         start = anchor + dt.timedelta(days=start_offset)
@@ -1418,56 +1437,49 @@ def _duration_days(value: object, *, allow_negative: bool) -> int:
 
 def _set_op_metric(row: dict[str, object], metric: model.SetOpMetric, states: list[str]) -> float:
     payloads = [cast(_SketchPayload, row[state]) for state in states]
-    if metric.op == "union":
+    if metric.operation == "union":
         return theta.estimate(theta.merge(payloads))
-    if metric.op == "intersection":
+    if metric.operation == "intersection":
         return theta.estimate(theta.intersect(payloads))
-    if metric.op in {"a_not_b", "diff"}:
+    if metric.operation == "minus":
         if len(payloads) != 2:
-            raise ValueError("set_op diff/a_not_b requires exactly two states")
+            raise ValueError("set_op minus requires exactly two operands")
         return theta.estimate(theta.a_not_b(payloads[0], payloads[1]))
-    raise ValueError(f"unsupported set_op {metric.op!r}")
+    raise ValueError(f"unsupported set_op {metric.operation!r}")
 
 
-def _lifecycle_summary(frame: pl.DataFrame, metric: model.LifecycleSummaryMetric) -> pl.DataFrame:
+def _lifecycle_summary(
+    frame: pl.DataFrame,
+    metric: model.LifecycleSummaryMetric,
+    state_specs: dict[str, model.StateSpec],
+) -> pl.DataFrame:
+    holdings_state = metric.holdings_state
+    monetary_state = metric.monetary_state
+    first_purchase_state = metric.first_purchase_state
+    last_purchase_state = metric.last_purchase_state
     _ensure_columns(
         frame,
-        ["unique_holdings", "lifetime_value", "MinPurchasedDate", "MaxPurchasedDate"],
+        [holdings_state, monetary_state, first_purchase_state, last_purchase_state],
         "lifecycle_summary",
     )
     group_columns = [
         column
         for column in frame.columns
-        if column
-        not in {
-            "unique_holdings",
-            "lifetime_value",
-            "MinPurchasedDate",
-            "MaxPurchasedDate",
-            "UniquePurchasers_cpc",
-            "UniquePurchasers_hll",
-            "config_hash",
-        }
+        if column not in {*state_specs, "config_hash"}
     ]
-    entity_column = _infer_lifecycle_entity_column(group_columns)
+    entity_column = metric.entity_column
+    if entity_column not in group_columns:
+        raise ValueError(
+            f"lifecycle metric requires entity column {entity_column!r} in processor group_by"
+        )
     summary = frame.group_by(group_columns).agg(
         pl.n_unique(entity_column).alias("customers_count"),
-        pl.col("unique_holdings").sum().alias("unique_holdings"),
-        pl.col("lifetime_value").sum().alias("lifetime_value"),
-        pl.col("MinPurchasedDate").min().alias("MinPurchasedDate"),
-        pl.col("MaxPurchasedDate").max().alias("MaxPurchasedDate"),
+        pl.col(holdings_state).sum().alias("unique_holdings"),
+        pl.col(monetary_state).sum().alias("lifetime_value"),
+        pl.col(first_purchase_state).min().alias("MinPurchasedDate"),
+        pl.col(last_purchase_state).max().alias("MaxPurchasedDate"),
     )
-    preset = str((metric.model_extra or {}).get("segment_preset", "default"))
-    return rfm.with_rfm(summary, segment_preset=cast(rfm.SegmentPreset, preset))
-
-
-def _infer_lifecycle_entity_column(group_columns: list[str]) -> str:
-    for candidate in ("CustomerID", "customer_id", "customer", "Customer"):
-        if candidate in group_columns:
-            return candidate
-    if group_columns:
-        return group_columns[-1]
-    return "__entity"
+    return rfm.with_rfm(summary, segment_preset=cast(rfm.SegmentPreset, metric.segment_preset))
 
 
 def _date_bound(value: dt.date | dt.datetime | str) -> dt.date:

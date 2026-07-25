@@ -22,7 +22,7 @@ from valuestream.charts.recipes import (
     CHART_OPTIONAL_FIELDS,
     CHART_REQUIRED_FIELDS,
     INTERVAL_METRIC_OUTPUT_FIELDS,
-    LEGACY_HEATMAP_CHARTS,
+    METRIC_OUTPUT_SELECTABLE_CHARTS,
     METRIC_OWNED_COLOR_CHARTS,
     METRIC_OWNED_INTENSITY_CHARTS,
     METRIC_OWNED_RADIAL_CHARTS,
@@ -375,7 +375,7 @@ def _processor_computation_projection(value: Any) -> Any:
     if not isinstance(value, dict):
         return config_canonical.canonicalize(value)
     payload = copy.deepcopy(value)
-    for key in ("description", "sketch_build_mode"):
+    for key in ("description",):
         payload.pop(key, None)
     return config_canonical.canonicalize(payload)
 
@@ -409,7 +409,8 @@ METRIC_KIND_LABELS = {
     "formula": "Formula / state passthrough",
     "approx_distinct_count": "Approx distinct count",
     "topk_items": "Top-K frequent items",
-    "tdigest_quantile": "Digest quantile / distribution",
+    "distribution": "Distribution",
+    "quantile": "Quantile",
     "variant_compare": "Variant comparison",
     "curve_from_digests": "ROC / average precision",
     "calibration_from_digests": "Calibration curve",
@@ -424,10 +425,8 @@ METRIC_KIND_HELP = {
     "formula": "Use scalar states such as Count, Positives, Mean, or MRR.",
     "approx_distinct_count": "Estimate the cardinality of a CPC, HLL, or Theta state.",
     "topk_items": "Return frequent values from a Top-K sketch state.",
-    "tdigest_quantile": (
-        "Read a percentile from a t-digest or KLL state, or omit the quantile "
-        "for a distribution metric that feeds boxplots."
-    ),
+    "distribution": "Expose a complete t-digest or KLL distribution to distribution charts.",
+    "quantile": "Read one required percentile from a t-digest or KLL state.",
     "variant_compare": "Compare test and control outcome rates by a variant column.",
     "curve_from_digests": "Compute ROC AUC or average precision from positive and negative score digests.",
     "calibration_from_digests": "Build calibration bins from one score property's positive and negative digests.",
@@ -441,7 +440,8 @@ METRIC_KIND_HELP = {
 _METRIC_KIND_ORDER = (
     "curve_from_digests",
     "calibration_from_digests",
-    "tdigest_quantile",
+    "distribution",
+    "quantile",
     "lifecycle_summary",
     "funnel_dropoff",
     "set_op",
@@ -453,27 +453,16 @@ _METRIC_KIND_ORDER = (
     "formula",
 )
 
-DESCRIPTIVE_SCALAR_SUFFIXES = ("Count", "Sum", "Mean", "Var", "Min", "Max")
 DESCRIPTIVE_QUANTILE_SCORES = ("p25", "p50", "p75", "p90", "p95")
-_DESCRIPTIVE_STATE_SUFFIXES = (
-    *DESCRIPTIVE_SCALAR_SUFFIXES,
-    "Median",
-    *DESCRIPTIVE_QUANTILE_SCORES,
-    "tdigest",
-    "kll",
-)
 
 CHART_DISPLAY_LABELS: dict[str, str] = {
     "bar": "Bar",
     "bar_polar": "Polar bar",
     "boxplot": "Box plot",
-    "calendar_heatmap": "Calendar heatmap",
     "calibration_curve": "Calibration curve",
     "clv_treemap": "CLV treemap",
-    "cohort_heatmap": "Cohort heatmap",
     "combo": "Combo",
     "corr": "Correlation",
-    "descriptive_heatmap": "Descriptive heatmap",
     "descriptive_line": "Descriptive line",
     "donut": "Donut",
     "experiment_odds_ratio": "Experiment odds ratio",
@@ -506,13 +495,10 @@ CHART_DISPLAY_PURPOSES: dict[str, str] = {
     "bar": "Compare magnitudes across discrete categories.",
     "bar_polar": "Compare cyclical or directional categories around a circle.",
     "boxplot": "Compare medians, spread, and outliers between groups.",
-    "calendar_heatmap": "Reveal daily activity and seasonality on a calendar grid.",
     "calibration_curve": "Compare predicted probabilities with observed outcomes.",
     "clv_treemap": "Show customer-value hierarchy through nested area.",
-    "cohort_heatmap": "Compare retention or behavior across cohort periods.",
     "combo": "Place two measures on coordinated bar and line axes.",
     "corr": "Scan the strength and direction of pairwise relationships.",
-    "descriptive_heatmap": "Compare an aggregate statistic across two dimensions.",
     "descriptive_line": "Track an aggregate statistic over time or ordered categories.",
     "donut": "Show a small set of parts as shares of a whole.",
     "experiment_odds_ratio": "Compare experiment effects with confidence intervals.",
@@ -1490,14 +1476,9 @@ def source_to_dict(source: model.Source) -> dict[str, Any]:
 
 
 def processor_to_dict(processor: model.Processor) -> dict[str, Any]:
-    """Serialize a processor model to user-facing YAML-ready dict."""
-    data = processor.model_dump(mode="json", by_alias=True, exclude_none=True)
-    group_by = data.pop("group_by", None)
-    if group_by:
-        data["dimensions"] = group_by
-    if not processor.states:
-        data.pop("states", None)
-    return data
+    """Serialize a processor using the canonical catalog-v2 field names."""
+
+    return processor.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
 def processor_supports_dedup(kind: str) -> bool:
@@ -1537,23 +1518,31 @@ def automatic_distribution_metric_definitions(
     existing_distribution_states = {
         metric.state
         for metric in metrics.values()
-        if isinstance(metric, model.TdigestQuantileMetric)
-        and metric.source == processor.id
-        and "quantile" not in metric.model_fields_set
+        if isinstance(metric, model.DistributionMetric)
+        and metric.processor == processor.id
     }
+    digest_property_counts: dict[str, int] = {}
+    for state in model.effective_processor_states(processor).values():
+        outcome = str(getattr(state, "outcome", None) or "").casefold()
+        if state.type in DIGEST_STATE_TYPES and outcome not in {"positive", "negative"}:
+            digest_property_counts[state.source_column] = (
+                digest_property_counts.get(state.source_column, 0) + 1
+            )
     used_ids = set(metrics)
     definitions: dict[str, dict[str, Any]] = {}
     for state_name, state in model.effective_processor_states(processor).items():
         if state.type not in DIGEST_STATE_TYPES or state_name in existing_distribution_states:
             continue
-        state_settings = dict(state.model_extra or {})
-        outcome = str(state_settings.get("outcome", "") or "").casefold()
+        outcome = str(getattr(state, "outcome", None) or "").casefold()
         if outcome in {"positive", "negative"}:
             continue
 
-        suffix = f"_{state.type}"
-        property_name = (
-            state_name[: -len(suffix)] if state_name.casefold().endswith(suffix) else state_name
+        property_name = state.source_column
+        algorithm = {"tdigest": "t-digest", "kll": "KLL"}[state.type]
+        label = (
+            f"{property_name} {algorithm} distribution"
+            if digest_property_counts[property_name] > 1
+            else f"{property_name} distribution"
         )
         metric_id = stable_catalog_id(
             f"{property_name}_distribution",
@@ -1562,13 +1551,13 @@ def automatic_distribution_metric_definitions(
             existing_ids=[*used_ids, *definitions],
         )
         definitions[metric_id] = {
-            "source": processor.id,
-            "kind": "tdigest_quantile",
+            "processor": processor.id,
+            "kind": "distribution",
             "state": state_name,
             "description": (
                 f"Distribution automatically exposed from the {state_name} digest state."
             ),
-            "display": {"label": f"{property_name} distribution"},
+            "display": {"label": label},
         }
     return definitions
 
@@ -1579,19 +1568,29 @@ def ensure_digest_distribution_metrics(
 ) -> list[str]:
     """Write any missing automatic distribution metrics for ``processor_id``."""
 
-    catalog = load(workspace)
+    processors = model.Processors.model_validate(
+        _read_yaml(_catalog_file(workspace, "processors.yaml"))
+    )
     processor = next(
-        (candidate for candidate in catalog.processors.processors if candidate.id == processor_id),
+        (candidate for candidate in processors.processors if candidate.id == processor_id),
         None,
     )
     if processor is None:
         raise ValueError(f"processor {processor_id!r} was not found")
+    metrics_path = _catalog_file(workspace, "metrics.yaml")
+    metrics_data = _read_yaml(metrics_path)
+    metrics = model.Metrics.model_validate(metrics_data)
     definitions = automatic_distribution_metric_definitions(
         processor,
-        catalog.metrics.metrics,
+        metrics.metrics,
     )
-    for metric_id, definition in definitions.items():
-        write_metric_definition(workspace, metric_id, definition)
+    if definitions:
+        metric_definitions = metrics_data.setdefault("metrics", {})
+        if not isinstance(metric_definitions, dict):
+            raise ValueError("metrics.yaml must contain a mapping at `metrics`")
+        metric_definitions.update(definitions)
+        model.Metrics.model_validate(metrics_data)
+        _write_yaml(metrics_path, metrics_data)
     return list(definitions)
 
 
@@ -1690,7 +1689,7 @@ def metric_kind_help(kind: str) -> str:
     return METRIC_KIND_HELP.get(kind, "")
 
 
-def metric_kind_options(processor: model.Processor) -> list[str]:
+def metric_kind_options(processor: model.Processor) -> list[str]:  # noqa: PLR0915
     """Return executable metric kinds that fit a processor's states and semantics."""
     states = model.effective_processor_states(processor)
     state_types = {name: spec.type for name, spec in states.items()}
@@ -1707,23 +1706,30 @@ def metric_kind_options(processor: model.Processor) -> list[str]:
         if enabled and kind not in kinds:
             kinds.append(kind)
 
-    extra = dict(processor.model_extra or {})
-    has_outcome_counts = {"Positives", "Negatives"} <= set(states)
+    extra = model.processor_settings(processor)
+    outcome_roles = {
+        state.outcome
+        for state in states.values()
+        if isinstance(state, model.CountState) and state.outcome
+    }
+    has_outcome_counts = {"positive", "negative"} <= outcome_roles
     # Variant metrics may name their column per metric (any group-by dimension
     # qualifies), so a processor-level variant_column is a default, not a gate.
     has_variant = has_outcome_counts and bool(
         extra.get("variant_column") or getattr(processor, "group_by", None)
     )
-    stages = funnel_stage_names(processor)
+    stages = funnel_count_states(processor)
 
     if processor.kind == "score_distribution":
         add("curve_from_digests", len(digest_states) >= 2)
         add("calibration_from_digests", len(digest_states) >= 2)
-        add("tdigest_quantile", bool(digest_states))
+        add("distribution", bool(digest_states))
+        add("quantile", bool(digest_states))
         add("approx_distinct_count", bool(cardinality_states))
         add("formula", bool(scalar_states))
     elif processor.kind == "numeric_distribution":
-        add("tdigest_quantile", bool(digest_states))
+        add("distribution", bool(digest_states))
+        add("quantile", bool(digest_states))
         add("approx_distinct_count", bool(cardinality_states))
         add("formula", bool(scalar_states))
     elif processor.kind == "binary_outcome":
@@ -1764,7 +1770,8 @@ def default_metric_name(processor: model.Processor, metric_kind: str) -> str:
         "formula": "metric",
         "approx_distinct_count": "unique",
         "topk_items": "topk",
-        "tdigest_quantile": "median",
+        "distribution": "distribution",
+        "quantile": "median",
         "variant_compare": "lift",
         "curve_from_digests": "roc_auc",
         "calibration_from_digests": "calibration",
@@ -1805,7 +1812,7 @@ def digest_state_pair_options(processor: model.Processor) -> list[tuple[str, str
         name: spec.model_dump(mode="json", exclude_none=True)
         for name, spec in model.effective_processor_states(processor).items()
     }
-    processor_def = {**dict(processor.model_extra or {}), "states": states}
+    processor_def = {**model.processor_settings(processor), "states": states}
     return digest_pair_options_from_definition(processor_def)
 
 
@@ -1869,49 +1876,35 @@ def state_spec_definitions(processor_def: dict[str, Any]) -> dict[str, dict[str,
 
 def score_properties_from_definition(processor_def: dict[str, Any]) -> list[str]:
     """Return score property names from a score-distribution definition dict."""
-    properties = string_list(processor_def.get("score_properties"))
-    if properties:
-        return _dedupe(properties)
-    score_columns = processor_def.get("score_columns")
-    if isinstance(score_columns, dict):
-        legacy = _dedupe([str(value) for value in score_columns.values() if value])
-        if legacy:
-            return legacy
-    if isinstance(score_columns, list):
-        columns = _dedupe(
-            [
-                str(item.get("column", "") or "")
-                for item in score_columns
-                if isinstance(item, dict) and item.get("column")
-            ]
-        )
-        if columns:
-            return columns
-    scores = processor_def.get("scores")
-    if isinstance(scores, dict):
-        legacy = _dedupe([str(value) for value in scores.values() if value])
-        if legacy:
-            return legacy
-    return ["Propensity"]
+    raw = processor_def.get("score_properties")
+    if not isinstance(raw, list):
+        return []
+    return _dedupe(
+        [
+            str(item.get("column", "") or "")
+            for item in raw
+            if isinstance(item, dict) and item.get("column")
+        ]
+    )
 
 
 def funnel_stage_names(processor: model.Processor) -> list[str]:
-    """Return configured or inferred stage names for a funnel processor."""
-    extra = dict(processor.model_extra or {})
-    raw_stages = extra.get("stages", [])
-    stages: list[str] = []
-    if isinstance(raw_stages, list):
-        for item in raw_stages:
-            if isinstance(item, dict) and item.get("name"):
-                stages.append(str(item["name"]))
-    if stages:
-        return _dedupe(stages)
-    suffix = "_Count"
-    return [
-        name[: -len(suffix)]
-        for name in state_columns_by_type(processor, "count")
-        if name.endswith(suffix)
-    ]
+    """Return explicitly configured funnel stages in catalog order."""
+
+    return model.funnel_stage_names(processor)
+
+
+def funnel_count_states(processor: model.Processor) -> list[str]:
+    """Return explicit stage-count state names in configured funnel order."""
+
+    if not isinstance(processor, model.FunnelProcessor):
+        return []
+    by_stage = {
+        state.stage: name
+        for name, state in processor.states.items()
+        if isinstance(state, model.CountState) and state.stage
+    }
+    return [by_stage[stage.name] for stage in processor.stages if stage.name in by_stage]
 
 
 def merge_stage_definitions(
@@ -1979,7 +1972,7 @@ def processor_for_metric(catalog: model.Catalog, metric_name: str) -> model.Proc
     if metric is None:
         return None
     return next(
-        (processor for processor in catalog.processors.processors if processor.id == metric.source),
+        (processor for processor in catalog.processors.processors if processor.id == metric.processor),
         None,
     )
 
@@ -1988,25 +1981,18 @@ def chart_choices_for_metric(catalog: model.Catalog, metric_name: str) -> list[s
     """Return chart kinds compatible with the metric's processor."""
     processor = processor_for_metric(catalog, metric_name)
     if processor is None:
-        return sorted(name for name in RECIPES if name not in LEGACY_HEATMAP_CHARTS)
+        return sorted(RECIPES)
     metric = catalog.metrics.metrics[metric_name]
     choices = [
         name for name, recipe in RECIPES.items() if processor.kind in recipe.allowed_processor_kinds
     ]
-    # The old chart kinds remain loadable/renderable for catalog compatibility,
-    # but all new authoring goes through the single adaptive heatmap.
-    choices = [name for name in choices if name not in LEGACY_HEATMAP_CHARTS]
     if metric.kind != "calibration_from_digests":
         choices = [name for name in choices if name != "calibration_curve"]
     curve_charts = {"roc_curve", "precision_recall_curve", "gain_curve", "lift_curve"}
     if metric.kind != "curve_from_digests":
         choices = [name for name in choices if name not in curve_charts]
-    # Quantile boxes read the digest behind a tdigest_quantile metric; other
-    # metric kinds have no distribution to draw.
-    if metric.kind != "tdigest_quantile" or not _distribution_property_metrics(
-        catalog,
-        metric_name,
-    ):
+    # Box plots require a complete distribution, never a scalar quantile.
+    if metric.kind != "distribution":
         choices = [name for name in choices if name != "boxplot"]
     return sorted(choices)
 
@@ -2021,6 +2007,13 @@ def metric_output_options(catalog: model.Catalog, metric_name: str) -> list[str]
 
     metric = catalog.metrics.metrics.get(metric_name)
     return metric_output_columns(metric_name, metric) if metric is not None else []
+
+
+def metric_outputs_from_definition(metric_name: str, definition: Mapping[str, Any]) -> list[str]:
+    """Return the read-only output contract for one draft metric definition."""
+
+    metric = model.validate_metric(dict(definition))
+    return metric_output_columns(metric_name, metric)
 
 
 def combo_secondary_metric_options(catalog: model.Catalog, metric_name: str) -> list[str]:
@@ -2040,7 +2033,7 @@ def combo_secondary_metric_options(catalog: model.Catalog, metric_name: str) -> 
         for candidate_name, candidate in catalog.metrics.metrics.items()
         if candidate_name != metric_name
         and candidate.kind == primary.kind
-        and candidate.source == primary.source
+        and candidate.processor == primary.processor
         and metric_output_columns(candidate_name, candidate) == [candidate_name]
     ]
 
@@ -2075,14 +2068,6 @@ def _scalar_state_columns(processor: model.Processor | None) -> list[str]:
     ]
 
 
-def _descriptive_property_from_state(state_name: str) -> str | None:
-    for suffix in _DESCRIPTIVE_STATE_SUFFIXES:
-        marker = f"_{suffix}"
-        if state_name.endswith(marker):
-            return state_name[: -len(marker)]
-    return None
-
-
 def _preferred_size_column(processor: model.Processor | None, outputs: list[str]) -> str | None:
     candidates = [*_scalar_state_columns(processor), *outputs]
     for name in ("Count", "Positives", "Negatives"):
@@ -2102,30 +2087,18 @@ def chart_axis_options(catalog: model.Catalog, metric_name: str) -> list[str]:
     return report_axis_options(catalog, metric_name)
 
 
-def canonicalize_heatmap_tile(tile: Mapping[str, Any]) -> dict[str, Any]:
-    """Migrate legacy heatmap roles to the unified metric-owned contract."""
-
-    out = dict(tile)
-    chart_kind = str(out.get("chart") or "")
-    if chart_kind not in LEGACY_HEATMAP_CHARTS and chart_kind != "heatmap":
-        return out
-    if chart_kind == "calendar_heatmap" and not out.get("x"):
-        out["x"] = out.get("date")
-    out["chart"] = "heatmap"
-    for field_name in ("date", "value", "color"):
-        out.pop(field_name, None)
-    return out
-
-
 def descriptive_property_options(catalog: model.Catalog, metric_name: str) -> list[str]:
     """Return numeric distribution properties available to descriptive charts."""
     processor = processor_for_metric(catalog, metric_name)
     if processor is None:
         return []
-    extra = dict(processor.model_extra or {})
-    properties = [str(item) for item in extra.get("properties", []) if item not in (None, "")]
-    for state_name in model.effective_processor_states(processor):
-        prop = _descriptive_property_from_state(state_name)
+    properties = (
+        list(processor.properties)
+        if isinstance(processor, model.NumericDistributionProcessor)
+        else []
+    )
+    for state in model.effective_processor_states(processor).values():
+        prop = state.model_dump().get("source_column")
         if prop and prop not in properties:
             properties.append(prop)
     return properties
@@ -2147,28 +2120,51 @@ def descriptive_score_options(
     if processor is None or not property_name:
         return []
     states = model.effective_processor_states(processor)
+    type_to_score = {
+        "count": "Count",
+        "value_sum": "Sum",
+        "pooled_mean": "Mean",
+        "pooled_variance": "Var",
+        "min": "Min",
+        "max": "Max",
+    }
     scores = [
-        suffix for suffix in DESCRIPTIVE_SCALAR_SUFFIXES if f"{property_name}_{suffix}" in states
+        score
+        for state in states.values()
+        if state.model_dump().get("source_column") == property_name
+        and (score := type_to_score.get(state.type)) is not None
     ]
-    if f"{property_name}_Median" in states:
-        scores.append("p50")
-    if f"{property_name}_tdigest" in states or f"{property_name}_kll" in states:
+    if any(
+        state.type in {"tdigest", "kll"}
+        and state.model_dump().get("source_column") == property_name
+        and not getattr(state, "outcome", None)
+        for state in states.values()
+    ):
         for score in DESCRIPTIVE_QUANTILE_SCORES:
             if score not in scores:
                 scores.append(score)
     return scores or ["Mean"]
 
 
-def _default_descriptive_property(metric: model.Metric, properties: list[str]) -> str:
-    if isinstance(metric, model.TdigestQuantileMetric):
-        prop = _descriptive_property_from_state(metric.state)
+def _default_descriptive_property(
+    metric: model.Metric,
+    processor: model.Processor | None,
+    properties: list[str],
+) -> str:
+    if isinstance(metric, (model.DistributionMetric, model.QuantileMetric)):
+        state = (
+            model.effective_processor_states(processor).get(metric.state)
+            if processor is not None
+            else None
+        )
+        prop = state.model_dump().get("source_column") if state is not None else None
         if prop and prop in properties:
             return prop
     return properties[0] if properties else "value"
 
 
 def _default_descriptive_score(metric: model.Metric, scores: list[str]) -> str:
-    if isinstance(metric, model.TdigestQuantileMetric):
+    if isinstance(metric, model.QuantileMetric):
         quantile_scores = {
             0.25: "p25",
             0.5: "p50",
@@ -2190,13 +2186,28 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
     processor = processor_for_metric(catalog, metric_name)
     outputs = metric_output_columns(metric_name, metric)
     group_by: list[str] = []
-    grains: list[str] = []
     if processor is not None:
         group_by = list(processor.group_by)
-        grains = processor.grains
-    time_x = "Day" if "daily" in grains else "Month" if "monthly" in grains else None
-    first_dim = group_by[0] if group_by else None
-    second_dim = group_by[1] if len(group_by) > 1 else first_dim
+    axis_fields = chart_axis_options(catalog, metric_name)
+    time_x = next(
+        (
+            field
+            for field in ("Hour", "Day", "Week", "Month", "Quarter", "Year")
+            if field in axis_fields
+        ),
+        None,
+    )
+    business_dimensions = [
+        field
+        for field in group_by
+        if field not in {"Hour", "Day", "Week", "Month", "Quarter", "Year"}
+    ]
+    first_dim = business_dimensions[0] if business_dimensions else (group_by[0] if group_by else None)
+    second_dim = (
+        business_dimensions[1]
+        if len(business_dimensions) > 1
+        else first_dim
+    )
     first_output = outputs[0]
     second_output = outputs[1] if len(outputs) > 1 else first_output
 
@@ -2217,16 +2228,6 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
         y_axis = first_dim if time_x and first_dim else second_dim
         if y_axis and y_axis != x_axis:
             fields["y"] = y_axis
-        properties = descriptive_property_options(catalog, metric_name)
-        if properties:
-            prop = _default_descriptive_property(metric, properties)
-            fields["property"] = prop
-            fields["score"] = _default_descriptive_score(
-                metric,
-                descriptive_score_options(catalog, metric_name, prop),
-            )
-    elif chart_kind == "cohort_heatmap":
-        fields = {"x": time_x or "Month", "y": first_dim or "Cohort", "color": first_output}
     elif chart_kind == "scatter":
         fields = {"x": first_output, "y": second_output, "color": first_dim}
         size = _preferred_size_column(processor, outputs)
@@ -2236,29 +2237,33 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
         fields = {"x": time_x or first_dim or "Month"}
         secondary_metrics = combo_secondary_metric_options(catalog, metric_name)
         if secondary_metrics:
-            fields["y2"] = secondary_metrics[0]
+            fields["secondary_metric"] = secondary_metrics[0]
     elif chart_kind == "interval":
-        fields = {"x": first_dim or time_x or "Month", "y": first_output}
+        fields = {"x": first_dim or time_x or "Month", "metric_output": first_output}
+        lower = next((output for output in outputs if output.endswith("_lower")), None)
+        upper = next((output for output in outputs if output.endswith("_upper")), None)
+        if lower and upper:
+            fields.update({"lower_output": lower, "upper_output": upper})
     elif chart_kind == "donut":
         fields = {"names": first_dim or "Segment"}
     elif chart_kind == "geo_map":
-        fields = {"locations": first_dim or "Country", "value": first_output}
+        fields = {"locations": first_dim or "Country"}
     elif chart_kind == "table":
         fields = {"columns": [*(group_by[:3]), first_output]}
-    elif chart_kind == "calendar_heatmap":
-        fields = {"date": time_x or "Day", "value": first_output}
     elif chart_kind == "bar_polar":
         theta = first_dim or time_x or "Month"
         fields = {"theta": theta, "color": second_dim or theta}
     elif chart_kind == "treemap":
         fields = {"path": group_by[:3] or [first_output]}
     elif chart_kind == "sankey":
-        fields = {
-            "source": first_dim or "source",
-            "target": second_dim or "target",
-        }
+        path = group_by[:4]
+        if len(path) < 2 and time_x and time_x not in path:
+            path.insert(0, time_x)
+        if len(path) < 2:
+            path.append(second_dim or first_dim or "target")
+        fields = {"path": path}
     elif chart_kind == "funnel":
-        stages = funnel_stage_names(processor) if processor is not None else []
+        stages = funnel_count_states(processor) if processor is not None else []
         fields = {"stages": stages, "color": second_dim or first_dim}
         if not stages:
             fields["x"] = first_dim or time_x or "Stage"
@@ -2269,41 +2274,28 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
         if len(group_by) > 1:
             fields["facet_col"] = group_by[1]
     elif chart_kind == "boxplot":
-        properties = distribution_property_options(catalog, metric_name)
-        fields = (
-            {"property": _default_descriptive_property(metric, properties)} if properties else {}
-        )
-        # ``y`` is intentionally absent because scalar states are not
-        # distributions. Property selects another digest-backed metric.
+        fields = {}
+        # ``y`` and ``property`` are intentionally absent: the selected
+        # distribution metric owns the digest and its source property.
         if time_x or first_dim:
             fields["x"] = time_x or first_dim
     elif chart_kind == "histogram":
         properties = distribution_property_options(catalog, metric_name)
         fields = {
             "property": (
-                _default_descriptive_property(metric, properties)
+                _default_descriptive_property(metric, processor, properties)
                 if properties
                 else first_output
             )
         }
-    elif chart_kind.startswith("descriptive_"):
+    elif chart_kind == "descriptive_line":
         properties = descriptive_property_options(catalog, metric_name)
-        prop = _default_descriptive_property(metric, properties)
+        prop = _default_descriptive_property(metric, processor, properties)
         scores = descriptive_score_options(catalog, metric_name, prop)
         score = _default_descriptive_score(metric, scores)
-        if chart_kind == "descriptive_line":
-            fields = {"x": time_x or first_dim or "Month", "property": prop, "score": score}
-            if first_dim:
-                fields["color"] = first_dim
-        elif chart_kind == "descriptive_heatmap":
-            fields = {
-                "x": first_dim or time_x or "Month",
-                "y": second_dim or first_dim or "Month",
-                "property": prop,
-                "score": score,
-            }
-        else:
-            fields = {"property": prop, "score": score}
+        fields = {"x": time_x or first_dim or "Month", "property": prop, "score": score}
+        if first_dim:
+            fields["color"] = first_dim
     elif chart_kind == "calibration_curve":
         fields = {}
     elif chart_kind in {"roc_curve", "precision_recall_curve", "gain_curve", "lift_curve"}:
@@ -2313,7 +2305,9 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
     elif chart_kind == "corr":
         fields = {"x": "frequency", "y": "monetary_value"}
     else:
-        fields = {"y": first_output}
+        fields = {}
+    if chart_kind in METRIC_OUTPUT_SELECTABLE_CHARTS:
+        fields["metric_output"] = first_output
     return fields
 
 
@@ -2332,12 +2326,12 @@ def build_formula_metric(
         }
     else:
         expression = {"col": numerator}
-    return {"source": processor_id, "kind": "formula", "expression": expression}
+    return {"processor": processor_id, "kind": "formula", "expression": expression}
 
 
 def build_approx_distinct_metric(processor_id: str, state: str) -> dict[str, Any]:
     """Create an approximate-distinct-count metric definition."""
-    return {"source": processor_id, "kind": "approx_distinct_count", "state": state}
+    return {"processor": processor_id, "kind": "approx_distinct_count", "state": state}
 
 
 def build_topk_items_metric(
@@ -2349,7 +2343,7 @@ def build_topk_items_metric(
 ) -> dict[str, Any]:
     """Create a Top-K frequent-items metric definition."""
     metric: dict[str, Any] = {
-        "source": processor_id,
+        "processor": processor_id,
         "kind": "topk_items",
         "state": state,
         "limit": limit,
@@ -2359,15 +2353,24 @@ def build_topk_items_metric(
     return metric
 
 
-def build_tdigest_quantile_metric(
+def build_distribution_metric(
+    processor_id: str,
+    state: str,
+) -> dict[str, Any]:
+    """Create a full digest/sketch distribution metric definition."""
+
+    return {"processor": processor_id, "kind": "distribution", "state": state}
+
+
+def build_quantile_metric(
     processor_id: str,
     state: str,
     quantile: float,
 ) -> dict[str, Any]:
     """Create a digest-quantile metric definition."""
     return {
-        "source": processor_id,
-        "kind": "tdigest_quantile",
+        "processor": processor_id,
+        "kind": "quantile",
         "state": state,
         "quantile": quantile,
     }
@@ -2381,7 +2384,7 @@ def build_curve_from_digests_metric(
 ) -> dict[str, Any]:
     """Create a ROC/Average Precision metric from positive and negative digests."""
     return {
-        "source": processor_id,
+        "processor": processor_id,
         "kind": "curve_from_digests",
         "positive_state": positive_state,
         "negative_state": negative_state,
@@ -2396,7 +2399,7 @@ def build_calibration_from_digests_metric(
 ) -> dict[str, Any]:
     """Create a calibration metric from final-score positive and negative digests."""
     return {
-        "source": processor_id,
+        "processor": processor_id,
         "kind": "calibration_from_digests",
         "positive_state": positive_state,
         "negative_state": negative_state,
@@ -2414,7 +2417,7 @@ def build_variant_compare_metric(
 ) -> dict[str, Any]:
     """Create a test-vs-control comparison metric definition."""
     metric: dict[str, Any] = {
-        "source": processor_id,
+        "processor": processor_id,
         "kind": "variant_compare",
         "variant_column": variant_column,
         "test_role": test_role,
@@ -2435,7 +2438,7 @@ def build_contingency_test_metric(
 ) -> dict[str, Any]:
     """Create a contingency-test metric definition."""
     metric: dict[str, Any] = {
-        "source": processor_id,
+        "processor": processor_id,
         "kind": "contingency_test",
         "variant_column": variant_column,
         "tests": tests or ["chi2", "g", "z"],
@@ -2455,7 +2458,7 @@ def build_proportion_test_metric(
 ) -> dict[str, Any]:
     """Create a proportion-test metric definition."""
     metric: dict[str, Any] = {
-        "source": processor_id,
+        "processor": processor_id,
         "kind": "proportion_test",
         "variant_column": variant_column,
         "test_role": test_role,
@@ -2468,11 +2471,24 @@ def build_proportion_test_metric(
 
 def build_lifecycle_summary_metric(
     processor_id: str,
+    entity_column: str,
     *,
+    holdings_state: str,
+    monetary_state: str,
+    first_purchase_state: str,
+    last_purchase_state: str,
     outputs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a lifecycle summary metric definition."""
-    metric: dict[str, Any] = {"source": processor_id, "kind": "lifecycle_summary"}
+    metric: dict[str, Any] = {
+        "processor": processor_id,
+        "kind": "lifecycle_summary",
+        "entity_column": entity_column,
+        "holdings_state": holdings_state,
+        "monetary_state": monetary_state,
+        "first_purchase_state": first_purchase_state,
+        "last_purchase_state": last_purchase_state,
+    }
     if outputs:
         metric["outputs"] = outputs
     return metric
@@ -2480,25 +2496,30 @@ def build_lifecycle_summary_metric(
 
 def build_set_op_metric(
     processor_id: str,
-    op: str,
-    states: list[str],
+    operation: str,
+    operands: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Create a theta-set operation metric definition."""
-    return {"source": processor_id, "kind": "set_op", "op": op, "states": states}
+    return {
+        "processor": processor_id,
+        "kind": "set_op",
+        "operation": operation,
+        "operands": operands,
+    }
 
 
 def build_funnel_dropoff_metric(
     processor_id: str,
-    from_stage: str,
-    to_stage: str,
+    from_state: str,
+    to_state: str,
     output: str = "rate",
 ) -> dict[str, Any]:
     """Create a funnel drop-off metric definition."""
     return {
-        "source": processor_id,
+        "processor": processor_id,
         "kind": "funnel_dropoff",
-        "from_stage": from_stage,
-        "to_stage": to_stage,
+        "from_state": from_state,
+        "to_state": to_state,
         "output": output,
     }
 
@@ -2519,13 +2540,7 @@ def build_tile(
         "chart": chart_kind,
     }
     for key, value in fields.items():
-        if chart_kind == "waterfall" and key in {
-            "color",
-            "facet_row",
-            "facet_col",
-            "facet_column",
-            "facets",
-        }:
+        if chart_kind == "waterfall" and key in {"color", "facet_row", "facet_col"}:
             continue
         if key in {"value", "y"} and chart_kind in METRIC_OWNED_VALUE_CHARTS:
             continue
@@ -2539,7 +2554,7 @@ def build_tile(
             continue
         if value not in (None, "", []):
             tile[key] = value
-    return canonicalize_heatmap_tile(tile)
+    return tile
 
 
 def generated_catalog_id(name: str, suffix: str, *, fallback: str) -> str:
@@ -2732,7 +2747,7 @@ def source_cascade_plan(catalog: model.Catalog, source_id: str) -> SourceCascade
         if processor.source == normalized_source_id
     }
     metric_ids = {
-        name for name, metric in catalog.metrics.metrics.items() if metric.source in processor_ids
+        name for name, metric in catalog.metrics.metrics.items() if metric.processor in processor_ids
     }
     metric_ids = _transitive_metric_dependants(catalog, metric_ids)
     tile_locations, page_filter_locations = _dashboard_dependency_locations(
@@ -2763,7 +2778,7 @@ def processor_cascade_plan(
     direct_metrics = {
         name
         for name, metric in catalog.metrics.metrics.items()
-        if metric.source == normalized_processor_id
+        if metric.processor == normalized_processor_id
     }
     metric_ids = _transitive_metric_dependants(catalog, direct_metrics)
     tile_locations, page_filter_locations = _dashboard_dependency_locations(
@@ -3073,7 +3088,7 @@ def _page_filter_has_support(
     field_key = _dimension_key(field)
     for tile in tiles:
         metric = metrics.get(tile.metric)
-        processor = processors.get(metric.source) if metric is not None else None
+        processor = processors.get(metric.processor) if metric is not None else None
         if processor is not None and any(
             _dimension_key(column) == field_key for column in processor.group_by
         ):
@@ -3103,7 +3118,7 @@ def _remove_source_dashboard_dependencies(
             filters = page.get("filters", [])
             if not isinstance(filters, list):
                 raise ValueError("dashboard page must contain a list at `filters`")
-            remaining_tile_models = [model.Tile.model_validate(tile) for tile in page["tiles"]]
+            remaining_tile_models = [model.validate_tile(tile) for tile in page["tiles"]]
             page["filters"] = [
                 filter_def
                 for filter_def in filters
@@ -3306,8 +3321,8 @@ def write_source_definition(
 def write_processor_definition(
     workspace: str | Path,
     processor_def: dict[str, Any],
-) -> None:
-    """Add or replace one processor in ``processors.yaml``."""
+) -> list[str]:
+    """Add or replace a processor and expose its public digest metrics."""
     if not processor_def.get("id"):
         raise ValueError("processor definition must include `id`")
     path = _catalog_file(workspace, "processors.yaml")
@@ -3316,7 +3331,9 @@ def write_processor_definition(
     if not isinstance(processors, list):
         raise ValueError("processors.yaml must contain a list at `processors`")
     _replace_or_append(processors, processor_def)
+    model.Processors.model_validate(data)
     _write_yaml(path, data)
+    return ensure_digest_distribution_metrics(workspace, str(processor_def["id"]))
 
 
 def rename_processor_definition(
@@ -3326,11 +3343,11 @@ def rename_processor_definition(
     *,
     source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
 ) -> list[str]:
-    """Rename one processor: rewrite it in place and retarget metric sources.
+    """Rename one processor and retarget every metric processor reference.
 
     Editing an ID previously wrote the definition under the new id and left
     the old one behind as a copy. A rename keeps exactly one definition,
-    updates every metric whose ``source`` referenced the old id, and validates
+    updates every metric whose ``processor`` referenced the old id, and validates
     the workspace inside one rollback boundary.
     """
 
@@ -3338,8 +3355,7 @@ def rename_processor_definition(
     if not new_id:
         raise ValueError("processor definition must include `id`")
     if new_id == old_id:
-        write_processor_definition(workspace, processor_def)
-        return ensure_digest_distribution_metrics(workspace, new_id)
+        return write_processor_definition(workspace, processor_def)
 
     with workspace_configuration_transaction(workspace):
         processors_path = _catalog_file(workspace, "processors.yaml")
@@ -3367,8 +3383,8 @@ def rename_processor_definition(
         if not isinstance(metric_defs, dict):
             raise ValueError("metrics.yaml must contain a mapping at `metrics`")
         for definition in metric_defs.values():
-            if isinstance(definition, dict) and definition.get("source") == old_id:
-                definition["source"] = new_id
+            if isinstance(definition, dict) and definition.get("processor") == old_id:
+                definition["processor"] = new_id
 
         model.Processors.model_validate(processors)
         model.Metrics.model_validate(metrics)
@@ -3427,8 +3443,8 @@ def _shared_processor_dimensions(catalog: model.Catalog) -> list[str]:
         if shared is None:
             shared = fields
             continue
-        keys = {field.casefold() for field in fields}
-        shared = [field for field in shared if field.casefold() in keys]
+        keys = set(fields)
+        shared = [field for field in shared if field in keys]
         if not shared:
             return []
     return shared or []
@@ -3495,7 +3511,7 @@ def write_tile_definition(
         tile.pop("value", None)
         tile.pop("y", None)
     if chart_kind == "waterfall":
-        for field_name in ("color", "facet_row", "facet_col", "facet_column", "facets"):
+        for field_name in ("color", "facet_row", "facet_col"):
             tile.pop(field_name, None)
     if chart_kind in METRIC_OWNED_INTENSITY_CHARTS:
         tile.pop("value", None)
@@ -3574,18 +3590,9 @@ def validate_report_candidate(
         ]
     if tile.get("chart") == "boxplot" and tile.get("y") not in (None, ""):
         return False, [
-            "Boxplot `y` is supplied by the selected distribution property. "
-            "Remove `y`; choose `property` and use `x`, `color`, or facets only "
-            "to group the distribution."
+            "Boxplot `y` is supplied by the selected distribution metric. "
+            "Remove `y`; use `x`, `color`, or facets only to group the distribution."
         ]
-    if tile.get("chart") == "boxplot" and tile.get("property") not in (None, ""):
-        properties = distribution_property_options(catalog, str(tile.get("metric") or ""))
-        if tile["property"] not in properties:
-            available = ", ".join(properties) or "none"
-            return False, [
-                f"Boxplot property {tile['property']!r} is not backed by an unconditioned "
-                f"t-digest or KLL metric; choose one of: {available}."
-            ]
     try:
         payload = catalog.model_dump(mode="json", by_alias=True, exclude_none=True)
         dashboards_payload = cast(dict[str, Any], payload["dashboards"])
@@ -3823,16 +3830,16 @@ def _catalog_file(workspace: str | Path, filename: str) -> Path:
 def _minimum_catalog_data(filename: str, workspace_name: str) -> dict[str, Any]:
     if filename == "pipelines.yaml":
         return {
-            "version": 1,
+            "catalog_version": 2,
             "workspace": workspace_name,
             "sources": [],
         }
     if filename == "processors.yaml":
-        return {"processors": []}
+        return {"catalog_version": 2, "processors": []}
     if filename == "metrics.yaml":
-        return {"metrics": {}}
+        return {"catalog_version": 2, "metrics": {}}
     if filename == "dashboards.yaml":
-        return {"theme": {}, "dashboards": []}
+        return {"catalog_version": 2, "theme": {}, "dashboards": []}
     raise ValueError(f"unsupported catalog file: {filename}")
 
 
@@ -4010,68 +4017,22 @@ def _states_with_outcome(processor: model.Processor, outcome: str) -> list[str]:
         name
         for name, spec in model.effective_processor_states(processor).items()
         if spec.type == "tdigest"
-        and str(dict(spec.model_extra or {}).get("outcome", "")).casefold() == outcome.casefold()
+        and str(getattr(spec, "outcome", None) or "").casefold() == outcome.casefold()
     ]
 
 
-def _digest_outcome_role(state_name: str, spec: dict[str, Any]) -> str:
+def _digest_outcome_role(_state_name: str, spec: dict[str, Any]) -> str:
     outcome = str(spec.get("outcome", "") or "").casefold()
-    if outcome in {"positive", "negative"}:
-        return outcome
-    lowered = state_name.casefold()
-    if "positive" in lowered or "positives" in lowered:
-        return "positive"
-    if "negative" in lowered or "negatives" in lowered:
-        return "negative"
-    return ""
+    return outcome if outcome in {"positive", "negative"} else ""
 
 
 def _digest_source_property(
-    processor_def: dict[str, Any], state_name: str, spec: dict[str, Any]
+    _processor_def: dict[str, Any], _state_name: str, spec: dict[str, Any]
 ) -> str:
     score_property = str(spec.get("score_property", "") or "")
     if score_property:
         return score_property
-    source_column = str(spec.get("source_column", "") or "")
-    if source_column:
-        return source_column
-    score = str(spec.get("score", "") or "")
-    if score:
-        raw_score_columns = processor_def.get("score_columns")
-        score_columns = dict(raw_score_columns) if isinstance(raw_score_columns, dict) else {}
-        score_properties = [
-            str(item)
-            for item in processor_def.get("score_properties", []) or []
-            if str(item).strip()
-        ]
-        if score == "primary":
-            return str(
-                score_columns.get("primary", "")
-                or (score_properties[0] if score_properties else "primary")
-            )
-        if score == "calibrated":
-            return str(
-                score_columns.get("calibrated", "")
-                or (score_properties[1] if len(score_properties) > 1 else "")
-                or (score_properties[0] if score_properties else "")
-                or "calibrated"
-            )
-        return score
-    return _digest_property_from_state_name(state_name)
-
-
-def _digest_property_from_state_name(state_name: str) -> str:
-    out = state_name
-    for token in (
-        "tdigest_",
-        "_tdigest",
-        "_positives",
-        "_positive",
-        "_negatives",
-        "_negative",
-    ):
-        out = out.replace(token, "")
-    return out or state_name
+    return str(spec.get("source_column", "") or "")
 
 
 def _digest_state_family(state_name: str, role: str, property_name: str) -> str:
@@ -4149,6 +4110,7 @@ def display_grain(grain: Any) -> str:
     """Map normalized aggregate grain names back to their display labels."""
     mapping = {
         "daily": "Day",
+        "weekly": "Week",
         "monthly": "Month",
         "quarterly": "Quarter",
         "yearly": "Year",
@@ -4156,6 +4118,21 @@ def display_grain(grain: Any) -> str:
     }
     text = str(grain or "")
     return mapping.get(text.casefold(), text)
+
+
+def calendar_dimensions_for_grain(grain: Any) -> list[str]:
+    """Return generated calendar dimensions available at and above a base grain."""
+
+    ordered = ["Hour", "Day", "Week", "Month", "Quarter", "Year"]
+    start = {
+        "hourly": 0,
+        "daily": 1,
+        "weekly": 2,
+        "monthly": 3,
+        "quarterly": 4,
+        "yearly": 5,
+    }.get(model.normalize_grain_name(str(grain)), len(ordered))
+    return ordered[start:]
 
 
 def title_from_identifier(value: str, *, fallback: str = "Untitled") -> str:
@@ -4233,12 +4210,13 @@ __all__ = [
     "build_curve_from_digests_metric",
     "build_default_values",
     "build_derive_column_transforms",
+    "build_distribution_metric",
     "build_formula_metric",
     "build_funnel_dropoff_metric",
     "build_lifecycle_summary_metric",
     "build_proportion_test_metric",
+    "build_quantile_metric",
     "build_set_op_metric",
-    "build_tdigest_quantile_metric",
     "build_tile",
     "build_topk_items_metric",
     "build_variant_compare_metric",
@@ -4250,7 +4228,7 @@ __all__ = [
     "calculated_rows_for_editor",
     "calculated_rows_from_source",
     "calculation_mode_from_expression",
-    "canonicalize_heatmap_tile",
+    "calendar_dimensions_for_grain",
     "case_value_expression",
     "case_value_from_expression",
     "catalog_id_is_safe",
@@ -4304,6 +4282,7 @@ __all__ = [
     "metric_kind_label",
     "metric_kind_options",
     "metric_output_options",
+    "metric_outputs_from_definition",
     "metric_to_dict",
     "metric_yaml",
     "normalize_editor_rows",

@@ -450,25 +450,30 @@ def source_required_fields(source: model.Source) -> list[str]:
 
 def processor_field_references(processor: model.Processor) -> list[str]:
     """Return source fields that processor logic reads outside dimensions."""
-    fields: list[str] = []
-    extra = dict(processor.model_extra or {})
-    entities = extra.get("entities")
-    if isinstance(entities, dict):
-        fields.append(str(entities.get("subject", "") or ""))
-    outcome = extra.get("outcome")
-    if isinstance(outcome, dict):
-        fields.append(str(outcome.get("column", "") or ""))
+    fields = [processor.time.property]
+    entities = getattr(processor, "entities", None)
+    if entities:
+        fields.append(entities.subject)
+    outcome = getattr(processor, "outcome", None)
+    if outcome:
+        fields.append(outcome.column)
     for spec in model.effective_processor_states(processor).values():
-        state_extra = dict(spec.model_extra or {})
-        fields.append(str(state_extra.get("source_column", "") or ""))
-    for key in (
-        "value_column",
-        "score_column",
-        "entity_column",
-        "stage_column",
-        "snapshot_time_column",
-    ):
-        fields.append(str(extra.get(key, "") or ""))
+        fields.append(str(getattr(spec, "source_column", "") or ""))
+    fields.extend(getattr(processor, "properties", []))
+    fields.extend(item.column for item in getattr(processor, "score_properties", []))
+    fields.extend(getattr(processor, "dedup_keys", []))
+    fields.extend(
+        str(value)
+        for value in (
+            getattr(processor, "entity", None),
+            getattr(processor, "variant_column", None),
+            getattr(processor, "as_of_property", None),
+        )
+        if value
+    )
+    keys = getattr(processor, "keys", None)
+    if keys:
+        fields.extend(str(value) for value in keys.model_dump().values())
     return fields
 
 

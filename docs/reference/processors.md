@@ -30,7 +30,7 @@ class Processor(Protocol):
     kind: str              # one of binary_outcome | numeric_distribution | ...
     source_id: str
     group_by: list[str]    # transformed source columns preserved for reporting
-    time.grains: list[str] # Day, Month, Summary, ...
+    time.grain: str        # one physical base grain
     states: dict[str, StateSpec]
     config_hash: str
 
@@ -55,14 +55,13 @@ class Processor(Protocol):
         merge rule. Used by compaction and by the query layer to fold
         multiple chunks' partials into a single answer."""
 
-    # 4. Cross-grain compaction
+    # 4. Base-grain projection/merge
     def compact(
         self,
-        frame: pl.DataFrame,             # finer grain
-        target_grain: str,
+        frame: pl.DataFrame,             # chunk aggregate
+        target_grain: str,               # configured base grain
     ) -> pl.DataFrame:
-        """Reduce a finer-grained aggregate to a coarser one
-        by dropping the fine time-grain column and re-merging."""
+        """Project or merge the chunk aggregate to the one stored base grain."""
 
     # 5. Optional: derived helpers
     def derive(self, frame: pl.DataFrame, params: dict) -> pl.DataFrame:
@@ -70,7 +69,13 @@ class Processor(Protocol):
         most leave this to the metric DSL."""
 ```
 
-The default `merge` and `compact` implementations are generic — they iterate over `self.states` and dispatch to the per-state-type merge rule. Subclasses override them only when the merge requires extra context (e.g. pooled variance needs the `_n_minus1_variance` and `_n_mean_diff_sq` temporaries documented in reference/algorithms.md §2.3).
+The default `merge` and `compact` implementations are generic — they iterate
+over `self.states` and dispatch to the per-state-type merge rule. Ingestion
+calls `compact` only for `time.grain`; query-time rollups reuse the same merge
+contract for coarser calendar grains. Subclasses override the merge only when
+it requires extra context (e.g. pooled variance needs the
+`_n_minus1_variance` and `_n_mean_diff_sq` temporaries documented in
+reference/algorithms.md §2.3).
 
 When the target uses the processor's finest physical level, `compact` first
 checks whether the prepared target keys are unique. Unique rows are projected
@@ -91,12 +96,12 @@ The 5 provenance columns are added by the engine wrapper, not by the processor i
 | `value_sum` | `FLOAT64` | `pl.sum(col)` | `SUM` | binary_outcome, numeric_distribution, snapshot |
 | `min` | matches data | `pl.min(col)` | `MIN` | numeric_distribution, entity_lifecycle |
 | `max` | matches data | `pl.max(col)` | `MAX` | numeric_distribution, entity_lifecycle |
-| `pooled_mean` | `FLOAT64` (paired with `Count`) | `pl.mean(col)` | `weighted_mean(value, count)` | numeric_distribution, score_distribution |
-| `pooled_variance` | `FLOAT64` (paired with `Count, Mean`) | `pl.var(col)` | Welford-merge | numeric_distribution |
+| `pooled_mean` | `FLOAT64` (explicit `source_column` or recipe plus `weight`) | `pl.mean(col)` or named recipe | `weighted_mean(value, weight)` | numeric_distribution, score_distribution |
+| `pooled_variance` | `FLOAT64` (explicit `source_column`, `mean`, and `weight`) | `pl.var(col)` | Welford-merge | numeric_distribution |
 | `tdigest` | `BLOB` | `datasketches.tdigest_double(k=500)` | deserialize/merge/serialize | numeric_distribution, score_distribution |
 | `kll` | `BLOB` | `datasketches.kll_floats_sketch(k=200)` | KLL merge | optional, alternative to tdigest |
 | `cpc` | `BLOB` | `datasketches.cpc_sketch(lg_k=11)` | union | default distinct count for binary_outcome, score_distribution, entity_lifecycle, entity_set, funnel, snapshot |
-| `hll` | `BLOB` | `datasketches.hll_sketch(lg_k=12, tgt_type=HLL_8)` | union | backward-compatible / opt-in distinct counts |
+| `hll` | `BLOB` | `datasketches.hll_sketch(lg_k=12, tgt_type=HLL_8)` | union | explicitly selected distinct-count alternative |
 | `theta` | `BLOB` | `datasketches.theta_sketch(lg_k=12)` | union/intersect/diff | entity_set (cohort) |
 | `topk` | `BLOB` | `datasketches.frequent_strings_sketch(lg_max_map_size=10)` | merge | optional |
 
@@ -109,13 +114,13 @@ dedicated fields. Empty mappings use the defaults shown above. The Builder
 accepts `lg_k` only for CPC/HLL/theta states, `k` only for t-digest/KLL states,
 and `lg_max_map_size` only for Top-K states.
 
-When Configuration Builder applies a processor, each unconditioned t-digest or
-KLL state receives a `tdigest_quantile` metric with no explicit `quantile` if
-no such distribution binding exists. The state remains the mergeable binary
-storage contract; the metric is the public query/report binding. Explicit
-percentile metrics can coexist with it. States marked `outcome: positive` or
-`outcome: negative` are excluded because they are paired implementation inputs
-for curve and calibration metrics.
+Whenever a structured authoring path writes a processor, each unconditioned
+t-digest or KLL state receives a persisted `distribution` metric if no
+distribution binding exists.
+The state remains the mergeable binary storage contract; the metric is the
+public query/report binding. Explicit `quantile` metrics can coexist with it.
+States marked `outcome: positive` or `outcome: negative` are excluded because
+they are paired implementation inputs for curve and calibration metrics.
 
 ---
 
@@ -132,10 +137,10 @@ processors:
   - id: engagement                          # snake_case
     source: ih
     kind: binary_outcome
-    group_by: [Channel, PlacementType, Issue, Group, CustomerType]
+    group_by: [Day, Week, Month, Quarter, Year, Channel, PlacementType, Issue, Group, CustomerType]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
+      property: OutcomeTime
+      grain: daily
 
     outcome:
       column: Outcome
@@ -164,8 +169,8 @@ processors:
 
     states:
       Count:               {type: count}
-      Positives:           {type: count}
-      Negatives:           {type: count}
+      Positives:           {type: count, outcome: positive}
+      Negatives:           {type: count, outcome: negative}
       Revenue:             {type: value_sum, source_column: Revenue}     # for conversion
       Touchpoints:         {type: count}                                  # for conversion
       UniqueCustomers_cpc: {type: cpc, source_column: CustomerID, lg_k: 11}
@@ -343,39 +348,25 @@ processors:
   - id: descriptive
     source: ih
     kind: numeric_distribution
-    group_by: [Channel, PlacementType, Issue, Group, CustomerType, Outcome]
+    group_by: [Day, Week, Month, Quarter, Year, Channel, CustomerType]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
-    properties: [Outcome, Propensity, FinalPropensity, Priority, ResponseTime]
-    quantile_engine: tdigest                # tdigest | kll | exact
-    sketch_build_mode: bulk                 # bulk (default) | legacy; execution-only
-    states:                                  # template, expanded per property
-      "{prop}_Count":    {type: count,           per_property: true}
-      "{prop}_Sum":      {type: value_sum,       per_property: true, numeric_only: true}
-      "{prop}_Mean":     {type: pooled_mean,     per_property: true, numeric_only: true, weight: "{prop}_Count"}
-      "{prop}_Var":      {type: pooled_variance, per_property: true, numeric_only: true, count: "{prop}_Count", mean: "{prop}_Mean"}
-      "{prop}_Min":      {type: min,             per_property: true, numeric_only: true}
-      "{prop}_Max":      {type: max,             per_property: true, numeric_only: true}
-      "{prop}_tdigest":  {type: tdigest,         per_property: true, numeric_only: true, k: 500}
+      property: OutcomeTime
+      grain: daily
+    properties: [ResponseTime]
+    quantile_engine: tdigest
+    states:
+      ResponseTime_Count: {type: count}
+      ResponseTime_Sum: {type: value_sum, source_column: ResponseTime}
+      ResponseTime_Mean: {type: pooled_mean, source_column: ResponseTime, weight: ResponseTime_Count}
+      ResponseTime_Var: {type: pooled_variance, source_column: ResponseTime, mean: ResponseTime_Mean, weight: ResponseTime_Count}
+      ResponseTime_Min: {type: min, source_column: ResponseTime}
+      ResponseTime_Max: {type: max, source_column: ResponseTime}
+      ResponseTime_tdigest: {type: tdigest, source_column: ResponseTime, k: 500}
 ```
 
-The engine expands `{prop}` for each template entry in `properties`. A state
-whose name/metadata does not contain `{prop}` is an ordinary explicit state and
-is built once. This lets recipes add, for example, `ResponseTime_kll` alongside
-the default `ResponseTime_tdigest`, or a CPC/HLL/Theta/Top-K sketch over another
-configured source field. For non-numeric properties (e.g. `Outcome` is a
-string), only `Count` is generated unless an explicit compatible sketch state
-is configured.
-
-`sketch_build_mode` controls only how t-digest/KLL states cross the Python
-callback boundary. `bulk` is the default: it combines the processor's
-quantile-sketch construction for each group and reduces repeated Python
-callbacks while retaining the same state and merge contracts. `legacy` keeps
-the per-field callback plan as an explicit comparison and rollback escape
-hatch. The mode does not change state definitions, merge semantics, or
-source/processor computation hashes; the catalog hash still records the
-authored runtime choice.
+`properties` identifies the approved numeric inputs and `states` is the exact
+persisted output contract. The engine does not generate, merge, or rename
+states implicitly. Sketch construction always uses the bulk implementation.
 
 ### 4.3 Source schema requirements
 
@@ -467,14 +458,12 @@ Same shape as binary_outcome's: drop the appropriate calendar columns, then `mer
 | Metric | Kind | Inputs | Output |
 |---|---|---|---|
 | `Mean(p)`, `Var(p)`, `StdDev(p)` | (state passthrough or formula) | `<p>_Mean`, `<p>_Var` | scalar |
-| `Median(p)` | `tdigest_quantile` | `<p>_tdigest` | scalar |
-| `p25(p)`, `p75(p)`, `p90(p)`, `p95(p)`, `p99(p)` | `tdigest_quantile` | `<p>_tdigest` | scalar |
+| `Distribution(p)` | `distribution` | `<p>_tdigest` or `<p>_kll` | quantile suite |
+| `Median(p)`, `p25(p)`, `p75(p)`, `p90(p)`, `p95(p)`, `p99(p)` | `quantile` | digest state plus required `quantile` | scalar |
 | `Skew(p)` | `formula` | `p25, p50, p75` | Bowley skew = `(p75 + p25 − 2·p50) / (p75 − p25)` |
 
-The Builder-authored distribution form of `tdigest_quantile` omits
-`quantile`. It returns the median as the primary scalar and makes the complete
-quantile suite available to boxplots and other distribution charts. Named
-percentile rows in the table above are optional additional metrics.
+`distribution` exposes the complete quantile suite to boxplots and related
+charts. `quantile` always requires an explicit value between 0 and 1.
 
 ### 4.9 Edge cases
 
@@ -500,13 +489,14 @@ processors:
   - id: model_ml_scores
     source: ih
     kind: score_distribution
-    sketch_build_mode: bulk                 # bulk (default) | legacy; execution-only
-    group_by: [Channel, PlacementType, Issue, Group, CustomerType]
+    group_by: [Day, Week, Month, Quarter, Year, Channel, CustomerType]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
+      property: OutcomeTime
+      grain: daily
 
-    score_properties: [Propensity, FinalPropensity]
+    score_properties:
+      - {column: Propensity, role: primary}
+      - {column: FinalPropensity, role: calibrated}
 
     outcome:
       column: Outcome
@@ -517,8 +507,8 @@ processors:
 
     states:
       Count:                         {type: count}
-      personalization:               {type: pooled_mean, weight: Count, source_metric: personalization}
-      novelty:                       {type: pooled_mean, weight: Count, source_metric: novelty}
+      personalization:               {type: pooled_mean, weight: Count, recipe: personalization}
+      novelty:                       {type: pooled_mean, weight: Count, recipe: novelty}
       Propensity_tdigest_positives:       {type: tdigest, source_column: Propensity,      score_property: Propensity,      outcome: positive, k: 500}
       Propensity_tdigest_negatives:       {type: tdigest, source_column: Propensity,      score_property: Propensity,      outcome: negative, k: 500}
       FinalPropensity_tdigest_positives:  {type: tdigest, source_column: FinalPropensity, score_property: FinalPropensity, outcome: positive, k: 500}
@@ -527,12 +517,6 @@ processors:
       Priority_kll:                  {type: kll, source_column: Priority, k: 200}
       Category_topk:                 {type: topk, source_column: Category, lg_max_map_size: 10}
 ```
-
-`sketch_build_mode` has the same execution-only semantics and computation-hash
-exclusion as for `numeric_distribution`. `bulk` is the default for new and
-omitted configurations; set `legacy` explicitly to compare the former
-per-field callback plan or roll back the optimization without changing the
-logical aggregate contract.
 
 The ingestion runner assigns a hidden source-order index before transforms when
 `personalization` or `novelty` is present. Their bounded samples are restored to
@@ -568,19 +552,12 @@ G = F.group_by(group_keys).agg(
 
 `personalization` and `novelty` formulas live in reference/algorithms.md §5; their inputs are `(CustomerID, ActionName)` and `(CustomerID, InteractionID, ActionName)` respectively.
 
-Each t-digest state selects its transformed input with `source_column`. For
-implicit score states, `score_properties` generates
-`<ScoreProperty>_tdigest_positives` and `<ScoreProperty>_tdigest_negatives`
-for every selected score property. Older `score: primary` and
-`score: calibrated` forms remain supported for existing catalogs and resolve
-through legacy `score_columns` when present.
-An explicit generic state named `<ScoreProperty>_tdigest` with no
-`source_column` infers `<ScoreProperty>` from the state name and includes all
-configured positive and negative outcome rows. Only states with
+Each t-digest or KLL state selects its transformed input with the required
+`source_column`. `score_properties` declares each score column and its role;
+it does not generate states. Only states with
 `outcome: positive` or `outcome: negative` apply an outcome-side filter.
-`<ScoreProperty>_kll` follows the same unconditioned rule. Explicit
-CPC/HLL/Theta/Top-K states use `source_column` and are built over all retained
-outcome rows.
+Unconditioned states include all retained outcome rows. Explicit
+CPC/HLL/Theta/Top-K states also require `source_column`.
 Curve metrics then select stored positive and negative t-digest states with
 `positive_state` and `negative_state` in `metrics.yaml`.
 
@@ -629,8 +606,12 @@ processors:
     kind: entity_lifecycle
     group_by: [ControlGroup]
     time:
-      column: PurchasedDateTime
-      grains: [Year, Summary]
+      property: PurchasedDateTime
+      grain: summary
+      calendar:
+        timezone: UTC
+        week_start: monday
+        fiscal_year_start_month: 1
 
     keys:
       customer_id:    CustomerID
@@ -638,17 +619,10 @@ processors:
       monetary:       OneTimeCost
       purchase_date:  PurchasedDateTime
 
-    model: non_contractual          # non_contractual | contractual
-
-    # only for model=contractual
-    recurring_period_column: RecurringPeriod
-    recurring_cost_column:   RecurringCost
-
     lifespan_years: 9
-    rfm_segments: retail_banking    # named preset; or inline dict
 
     states:
-      unique_holdings:      {type: count,     source_aggregation: n_unique_order}
+      unique_holdings:      {type: count, source_column: HoldingID, distinct: true}
       lifetime_value:       {type: value_sum, source_column: OneTimeCost}
       MinPurchasedDate:     {type: min,       source_column: PurchasedDateTime}
       MaxPurchasedDate:     {type: max,       source_column: PurchasedDateTime}
@@ -673,20 +647,11 @@ F = F.with_columns(
 group_keys = group_by + [customer_id_col, "Year", "Quarter"]   # entity-level keys
 
 agg = [
-    pl.col(order_id_col).n_unique().alias("unique_holdings"),
-    pl.sum(monetary_col).alias("lifetime_value"),
-    pl.min(purchase_date_col).alias("MinPurchasedDate"),
-    pl.max(purchase_date_col).alias("MaxPurchasedDate"),
-    build_cpc(pl.col(customer_id_col)).alias("UniquePurchasers_cpc"),
+    build_state(state_id, typed_state_spec)
+    for state_id, typed_state_spec in processor.states
 ]
 
-if model == "contractual":
-    agg += [(pl.col(recurring_cost_col) * pl.col(recurring_period_column)).sum().alias("recurring_costs")]
-
 G = F.group_by(group_keys).agg(agg)
-
-if model == "contractual":
-    G = G.with_columns(lifetime_value = G.lifetime_value + G.recurring_costs).drop("recurring_costs")
 
 OUTPUT G
 ```
@@ -700,6 +665,20 @@ OUTPUT G
 - Compaction to summary drops `Year, Quarter` and re-merges.
 
 ### 6.5 Derived metric — `lifecycle_summary` (RFM)
+
+The metric explicitly binds the four required state roles; the names below are
+examples, not reserved identifiers:
+
+```yaml
+CLV_Summary:
+  processor: clv
+  kind: lifecycle_summary
+  entity_column: CustomerID
+  holdings_state: unique_holdings
+  monetary_state: lifetime_value
+  first_purchase_state: MinPurchasedDate
+  last_purchase_state: MaxPurchasedDate
+```
 
 ```text
 INPUT compacted lifecycle frame F
@@ -768,10 +747,10 @@ processors:
   - id: unique_users
     source: ih
     kind: entity_set
-    group_by: [Channel, PlacementType]
+    group_by: [Day, Week, Month, Quarter, Year, Channel, PlacementType]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
+      property: OutcomeTime
+      grain: daily
     states:
       ActiveUsers_cpc:    {type: cpc,   source_column: CustomerID, lg_k: 11}
       ActiveUsers_theta:  {type: theta, source_column: CustomerID, lg_k: 12}
@@ -806,6 +785,11 @@ the latest available `Day`. `last: Nd` is inclusive of the anchor; `between:
 -1d]`. Windowed set queries require a configured daily grain so retention is
 computed from persisted sketches rather than raw events.
 
+Reports therefore read exact daily freshness for windowed set metrics and
+anchor relative presets to the latest common covered day across the page. A
+partial month ending on September 18 remains anchored to September 18; its
+monthly period label must not advance the window anchor to September 30.
+
 The planner is responsible for finding the right `period` partitions and for assembling theta operands.
 
 ---
@@ -823,10 +807,10 @@ processors:
   - id: action_funnel
     source: ih
     kind: funnel
-    group_by: [Channel, PlacementType]
+    group_by: [Day, Week, Month, Quarter, Year, Channel, PlacementType]
     time:
-      column: OutcomeTime
-      grains: [Day, Month]
+      property: OutcomeTime
+      grain: daily
     stages:
       - {name: Impression, when: {op: eq, column: Outcome, value: Impression}}
       - {name: Clicked,    when: {op: eq, column: Outcome, value: Clicked}}
@@ -884,10 +868,10 @@ processors:
     kind: snapshot
     snapshot_kind: periodic
     cadence: daily
-    group_by: [Plan, Region]
+    group_by: [Day, Week, Month, Quarter, Year, Plan, Region]
     time:
-      column: as_of_date
-      grains: [Day, Month, Summary]
+      property: as_of_date
+      grain: daily
     states:
       ActiveSubs:  {type: count}
       MRR:         {type: value_sum, source_column: monthly_recurring}
@@ -905,11 +889,12 @@ processors:
     entity: ticket_id
     group_by: [Team, Severity]
     time:
-      grains: [Summary]
+      property: created_at
+      grain: summary
     milestones:
-      - {name: created_at,        column: created_at}
-      - {name: first_response_at, column: first_response_at}
-      - {name: resolved_at,       column: resolved_at}
+      - {name: created_at,        property: created_at}
+      - {name: first_response_at, property: first_response_at}
+      - {name: resolved_at,       property: resolved_at}
     states:
       OpenTickets:      {type: count, where: {op: is_null, column: resolved_at}}
       MeanResolveHours: {type: pooled_mean, source_metric: resolve_hours, weight: ResolvedTickets}
@@ -983,6 +968,5 @@ For each processor, the implementer must deliver:
    - `test_pooled_variance_correctness` — pooled var matches a brute-force computation on the un-grouped data, within `1e-9`.
    - `test_tdigest_curve_correctness` — ROC AUC reconstructed from digests is within `1e-2` of `sklearn.metrics.roc_auc_score` on the raw scores.
    - `test_cpc_distinct_correctness` — CPC distinct-count estimates and bounds cover deterministic fixtures for `n ∈ {1e2, 1e4, 1e6}`.
-   - `test_hll_backward_compatibility` — explicitly configured HLL states still build, merge, and query correctly.
+   - `test_hll_state_contract` — an explicitly configured HLL state builds, merges, and queries correctly.
 4. A markdown reference page in `docs/processors/<id>.md` describing the canonical YAML, expected Source schema, and example output.
-5. (Optional) A migration mapping in `migration.py` if a legacy family corresponds to this processor.

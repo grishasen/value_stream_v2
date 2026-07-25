@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import streamlit as st
 import yaml
 
@@ -15,12 +13,12 @@ def render(ctx: ValueStreamContext) -> None:
     """Render catalog inventory and validation panels."""
     components.render_page_header(
         "Catalog",
-        "Search configured sources, processors, metrics, dashboards, and migration notes.",
+        "Search configured sources, processors, metrics, and dashboards.",
         status="ok" if ctx.validation.ok else "warning",
         status_label="Catalog OK" if ctx.validation.ok else "Needs review",
     )
 
-    tabs = st.tabs(["Sources", "Processors", "Metrics", "Dashboards", "Validation", "Migration"])
+    tabs = st.tabs(["Sources", "Processors", "Metrics", "Dashboards", "Validation"])
     with tabs[0]:
         _sources(ctx)
     with tabs[1]:
@@ -31,8 +29,6 @@ def render(ctx: ValueStreamContext) -> None:
         _dashboards(ctx)
     with tabs[4]:
         components.render_validation_summary(ctx.validation.issues, ok=ctx.validation.ok)
-    with tabs[5]:
-        _migration(ctx)
 
 
 def _sources(ctx: ValueStreamContext) -> None:
@@ -70,7 +66,7 @@ def _metrics(ctx: ValueStreamContext) -> None:
     rows = [
         {
             "id": name,
-            "source": metric.source,
+            "source": metric.processor,
             "kind": metric.kind,
             "depends_on": ", ".join(metric.depends_on),
             "description": metric.description,
@@ -99,12 +95,3 @@ def _dashboards(ctx: ValueStreamContext) -> None:
         st.code(
             yaml.safe_dump(ctx.catalog.dashboards.model_dump(), sort_keys=False), language="yaml"
         )
-
-
-def _migration(ctx: ValueStreamContext) -> None:
-    report = ctx.workspace / "catalog" / "migration_report.md"
-    if not report.exists():
-        st.info("No migration report found in this workspace.")
-        return
-    st.markdown(report.read_text(encoding="utf-8"))
-    st.caption(str(Path(report)))

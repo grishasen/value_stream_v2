@@ -327,8 +327,7 @@ def _running_run_ids(
 def _pega_temp_dirs(catalog: model.Catalog) -> list[Path]:
     roots = {Path(tempfile.gettempdir())}
     for source in catalog.pipelines.sources:
-        extra = dict(source.reader.model_extra or {})
-        archive_temp_dir = extra.get("archive_temp_dir")
+        archive_temp_dir = source.reader.archive_temp_dir
         if isinstance(archive_temp_dir, str | Path):
             roots.add(Path(archive_temp_dir))
     out: list[Path] = []

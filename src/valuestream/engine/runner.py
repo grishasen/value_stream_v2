@@ -927,61 +927,37 @@ def _validate_processor_input_columns(  # noqa: PLR0912
     failures: list[str] = []
     for processor in processors:
         config = processor.config
-        extra = dict(config.model_extra or {})
         required = set(config.group_by)
-        if config.time is not None and config.time.column:
+        if config.time.column:
             required.add(config.time.column)
         required.update(_configured_state_source_columns(config))
-        required.update(str(value) for value in _extra_string_list(extra, "dedup_keys"))
+        required.update(str(value) for value in getattr(config, "dedup_keys", []))
 
         if isinstance(config, model.BinaryOutcomeProcessor | model.ScoreDistributionProcessor):
-            outcome = extra.get("outcome")
-            required.add(
-                str(outcome.get("column", "Outcome"))
-                if isinstance(outcome, dict)
-                else str(extra.get("outcome_column", "Outcome"))
-            )
+            required.add(config.outcome.column)
         if isinstance(config, model.NumericDistributionProcessor):
-            required.update(_extra_string_list(extra, "properties"))
+            required.update(config.properties)
         elif isinstance(config, model.ScoreDistributionProcessor):
-            for name, spec in model.effective_processor_states(config).items():
+            for spec in model.effective_processor_states(config).values():
                 if spec.type == "tdigest":
-                    required.add(_score_state_source_column(config, name, spec))
+                    required.add(_score_state_source_column(spec))
             if "personalization" in model.effective_processor_states(config):
                 required.update({"CustomerID", "Name"})
             if "novelty" in model.effective_processor_states(config):
                 required.update({"CustomerID", "InteractionID", "Name"})
         elif isinstance(config, model.EntityLifecycleProcessor):
-            raw_keys = extra.get("keys")
-            keys: dict[str, object] = raw_keys if isinstance(raw_keys, dict) else {}
-            required.update(
-                {
-                    str(keys.get("customer_id", "CustomerID")),
-                    str(keys.get("order_id", "OrderID")),
-                    str(keys.get("monetary", "Monetary")),
-                    str(keys.get("purchase_date", "PurchaseDate")),
-                }
-            )
+            required.update(config.keys.model_dump().values())
         elif isinstance(config, model.EntitySetProcessor):
-            required.add(str(extra.get("entity", "CustomerID")))
+            required.add(config.entity)
         elif isinstance(config, model.FunnelProcessor):
-            if extra.get("entity"):
-                required.add(str(extra["entity"]))
+            if config.entity:
+                required.add(config.entity)
         elif isinstance(config, model.SnapshotProcessor):
             if config.snapshot_kind == "accumulating":
-                entity = extra.get("entity")
-                if entity:
-                    required.add(str(entity))
-            as_of_column = extra.get("as_of_column")
-            if as_of_column:
-                required.add(str(as_of_column))
-            milestones = extra.get("milestones", [])
-            if isinstance(milestones, list):
-                required.update(
-                    str(item["column"])
-                    for item in milestones
-                    if isinstance(item, dict) and item.get("column")
-                )
+                required.add(config.entity)
+            if config.as_of_property:
+                required.add(config.as_of_property)
+            required.update(milestone.property for milestone in config.milestones)
 
         missing = sorted(column for column in required if column and column not in existing)
         if missing:
@@ -992,63 +968,18 @@ def _validate_processor_input_columns(  # noqa: PLR0912
 
 def _configured_state_source_columns(config: model.Processor) -> set[str]:
     columns: set[str] = set()
-    for name, spec in model.effective_processor_states(config).items():
-        extra = dict(spec.model_extra or {})
-        if isinstance(config, model.NumericDistributionProcessor) and extra.get("per_property"):
-            continue
-        source_column = extra.get("source_column")
+    for spec in model.effective_processor_states(config).values():
+        source_column = getattr(spec, "source_column", None)
         if source_column:
-            columns.add(str(source_column))
-        elif spec.type in {"value_sum", "min", "max", "cpc", "hll", "theta", "topk"}:
-            if isinstance(config, model.EntitySetProcessor) and spec.type in {
-                "cpc",
-                "hll",
-                "theta",
-                "topk",
-            }:
-                columns.add(str((config.model_extra or {}).get("entity", "CustomerID")))
-            elif isinstance(config, model.ScoreDistributionProcessor) and spec.type in {
-                "cpc",
-                "hll",
-                "theta",
-            }:
-                columns.add("CustomerID")
-            elif isinstance(config, model.SnapshotProcessor) and spec.type in {
-                "cpc",
-                "hll",
-                "theta",
-                "topk",
-            }:
-                columns.add(str((config.model_extra or {}).get("entity", "CustomerID")))
-            elif not isinstance(config, model.EntityLifecycleProcessor):
-                columns.add(name)
+            columns.add(source_column)
     return columns
 
 
-def _score_state_source_column(
-    config: model.ScoreDistributionProcessor,
-    state_name: str,
-    spec: model.StateSpec,
-) -> str:
-    state_extra = dict(spec.model_extra or {})
-    if state_extra.get("source_column"):
-        return str(state_extra["source_column"])
-    if state_name.endswith("_tdigest"):
-        return state_name.removesuffix("_tdigest")
-    score_role = str(state_extra.get("score", "primary"))
-    properties = _extra_string_list(dict(config.model_extra or {}), "score_properties")
-    if score_role == "primary":
-        return properties[0] if properties else "Propensity"
-    if score_role == "calibrated":
-        if len(properties) > 1:
-            return properties[1]
-        return properties[0] if properties else "FinalPropensity"
-    return score_role
-
-
-def _extra_string_list(extra: dict[str, object], key: str) -> list[str]:
-    raw = extra.get(key, [])
-    return [str(value) for value in raw] if isinstance(raw, list) else []
+def _score_state_source_column(spec: model.StateSpec) -> str:
+    source_column = getattr(spec, "source_column", None)
+    if not source_column:
+        raise ValueError("score digest state requires source_column")
+    return source_column
 
 
 def _elapsed_ms(started: float) -> float:
@@ -1104,7 +1035,7 @@ def _recovery_progress_adapter(
 
 
 def _debugging_enabled(source: model.Source) -> bool:
-    return source.debugging or _truthy(dict(source.reader.model_extra or {}).get("debugging"))
+    return source.debugging
 
 
 def _log_chunk_schema(

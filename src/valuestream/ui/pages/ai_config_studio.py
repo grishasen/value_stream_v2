@@ -176,7 +176,6 @@ AI_STUDIO_UPLOAD_MAX_BYTES = 512 * 1024 * 1024
 AI_STUDIO_ARCHIVE_EXPANDED_MAX_BYTES = 1024 * 1024 * 1024
 AI_STUDIO_ARCHIVE_MAX_MEMBERS = 64
 AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY = "ai_studio_rename_capitalize_enabled"
-AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY = "ai_studio_rename_capitalize"
 AI_STUDIO_RENAME_CAPITALIZE_WIDGET_KEY = "ai_studio_rename_capitalize_transform"
 AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY = "ai_studio_schema_contract_stale"
 AI_STUDIO_CHECKPOINT_CONTEXT_KEY = "ai_studio_checkpoint_context"
@@ -672,15 +671,6 @@ def _apply_staged_ai_studio_checkpoint(
         if draft_only and key not in draft_keys:
             continue
         st.session_state[key] = copy.deepcopy(value)
-    if (
-        not draft_only
-        and AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY not in state
-        and AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY in state
-    ):
-        st.session_state[AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = bool(
-            state[AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY]
-        )
-    _migrate_rename_capitalize_state()
 
     draft = state.get("ai_studio_draft")
     snapshot: DraftValidationSnapshot | None = None
@@ -1102,12 +1092,14 @@ def _draft_from_catalog(ctx: ValueStreamContext) -> dict[str, Any]:
             exclude_none=True,
         ),
         "processors": {
+            "catalog_version": ctx.catalog.processors.catalog_version,
             "processors": [
                 builder.processor_to_dict(processor)
                 for processor in ctx.catalog.processors.processors
             ]
         },
         "metrics": {
+            "catalog_version": ctx.catalog.metrics.catalog_version,
             "metrics": {
                 name: builder.metric_to_dict(metric)
                 for name, metric in sorted(
@@ -1293,7 +1285,7 @@ def _catalog_approved_fields(draft: dict[str, Any]) -> list[str]:
     for processor in _draft_processor_definitions(draft):
         fields.extend(_processor_dimensions(processor))
         time_def = processor.get("time") if isinstance(processor.get("time"), dict) else {}
-        fields.append(str(time_def.get("column", "") or ""))
+        fields.append(str(time_def.get("property", "") or ""))
         fields.extend(_fields_from_catalog_processor(processor))
     for metric_name, metric_def in _draft_metric_definitions(draft).items():
         fields.append(metric_name)
@@ -1323,18 +1315,16 @@ def _fields_from_catalog_processor(processor: dict[str, Any]) -> list[str]:
     entities = processor.get("entities") if isinstance(processor.get("entities"), dict) else {}
     fields.append(str(entities.get("subject", "") or ""))
     outcome = processor.get("outcome") if isinstance(processor.get("outcome"), dict) else {}
-    fields.append(str(outcome.get("column", "") or processor.get("outcome_column", "") or ""))
+    fields.append(str(outcome.get("column", "") or ""))
     fields.append(str(processor.get("variant_column", "") or ""))
     fields.extend(builder.string_list(processor.get("properties")))
-    fields.extend(builder.string_list(processor.get("score_properties")))
-    score_columns = (
-        processor.get("score_columns")
-        if isinstance(processor.get("score_columns"), dict)
-        else processor.get("scores")
-        if isinstance(processor.get("scores"), dict)
-        else {}
-    )
-    fields.extend(str(field) for field in score_columns.values() if field)
+    score_properties = processor.get("score_properties")
+    if isinstance(score_properties, list):
+        fields.extend(
+            str(item.get("column", "") or "")
+            for item in score_properties
+            if isinstance(item, dict)
+        )
     states = processor.get("states") if isinstance(processor.get("states"), dict) else {}
     for spec in states.values():
         if isinstance(spec, dict):
@@ -2062,7 +2052,6 @@ def _initialize_state(sample: pl.DataFrame) -> None:  # noqa: PLR0915
     st.session_state["ai_studio_raw_filter"] = ""
     st.session_state["ai_studio_calculations"] = []
     st.session_state[AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = False
-    st.session_state.pop(AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY, None)
     st.session_state.pop(AI_STUDIO_RENAME_CAPITALIZE_WIDGET_KEY, None)
     st.session_state["ai_studio_rename_capitalize_applied"] = False
     st.session_state["ai_studio_approved_fields"] = []
@@ -3813,34 +3802,33 @@ def _render_processor_parameter_editor(
             sorted(approved_fields or list(working.columns), key=str.casefold),
             _processor_dimensions(processor_def),
         )
-        dimensions = st.multiselect(
-            "Dimensions",
+        group_by = st.multiselect(
+            "Group By",
             field_options,
             default=[
                 field for field in _processor_dimensions(processor_def) if field in field_options
             ],
-            key=f"{key_prefix}_dimensions",
+            key=f"{key_prefix}_group_by",
             help=config_help.field_help("processor.group_by"),
         )
         time_def = processor_def.get("time") if isinstance(processor_def.get("time"), dict) else {}
-        time_col, grains_col = st.columns(2, gap="xsmall", vertical_alignment="bottom")
+        time_col, grain_col = st.columns(2, gap="xsmall", vertical_alignment="bottom")
         with time_col:
             time_column = forms.select_or_text(
-                "Time Column",
-                forms.with_current(list(working.columns), str(time_def.get("column", "") or "")),
-                time_def.get("column", ""),
+                "Time Property",
+                forms.with_current(list(working.columns), str(time_def.get("property", "") or "")),
+                time_def.get("property", ""),
                 key=f"{key_prefix}_time_column",
                 help_key="processor.time_column",
             )
-        grains = grains_col.multiselect(
-            "Grains",
+        grain_label = grain_col.selectbox(
+            "Base Grain",
             list(forms.PROCESSOR_GRAIN_OPTIONS),
-            default=[
-                builder.display_grain(grain)
-                for grain in builder.string_list(time_def.get("grains")) or ["Summary"]
-                if builder.display_grain(grain) in forms.PROCESSOR_GRAIN_OPTIONS
-            ],
-            key=f"{key_prefix}_grains",
+            index=builder.option_index(
+                list(forms.PROCESSOR_GRAIN_OPTIONS),
+                builder.display_grain(time_def.get("grain") or "summary"),
+            ),
+            key=f"{key_prefix}_grain",
             help=config_help.field_help("processor.grains"),
         )
 
@@ -3861,8 +3849,15 @@ def _render_processor_parameter_editor(
                 "source": source,
                 "kind": kind,
                 "description": description,
-                "dimensions": dimensions,
-                "time": {"column": time_column or None, "grains": grains or ["Summary"]},
+                "group_by": group_by,
+                "time": (
+                    {
+                        "property": time_column,
+                        "grain": model.normalize_grain_name(grain_label),
+                    }
+                    if time_column
+                    else None
+                ),
                 **kind_fields,
                 "states": states,
                 "filter": filter_value,
@@ -4023,13 +4018,11 @@ def _processor_state_rows(processor_def: dict[str, Any]) -> list[dict[str, Any]]
 
 
 def _processor_state_specs(processor_def: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Return explicit state specs filled from kind-derived draft defaults."""
-    specs = {name: dict(spec) for name, spec in _inferred_state_specs(processor_def).items()}
-    for name, spec in builder.state_spec_definitions(processor_def).items():
-        merged = dict(specs.get(name, {}))
-        merged.update(spec)
-        specs[name] = merged
-    return specs
+    """Return only the processor's explicit state output contract."""
+    return {
+        name: dict(spec)
+        for name, spec in builder.state_spec_definitions(processor_def).items()
+    }
 
 
 def _processor_states_from_rows(
@@ -4066,22 +4059,16 @@ def _processor_preserved_fields(processor_def: dict[str, Any]) -> dict[str, Any]
         "source",
         "kind",
         "description",
-        "dimensions",
         "group_by",
         "time",
         "states",
         "filter",
         "entities",
         "outcome",
-        "outcome_column",
-        "positive_values",
-        "negative_values",
         "variant_column",
         "properties",
         "quantile_engine",
-        "sketch_build_mode",
         "score_properties",
-        "score_columns",
         "stages",
         "snapshot_kind",
         "cadence",
@@ -4115,8 +4102,7 @@ def _draft_source_ids(draft: dict[str, Any]) -> list[str]:
 
 
 def _processor_dimensions(processor_def: dict[str, Any]) -> list[str]:
-    dimensions = processor_def.get("dimensions", processor_def.get("group_by", []))
-    return builder.string_list(dimensions)
+    return builder.string_list(processor_def.get("group_by", []))
 
 
 def _numeric_field_options(working: pl.DataFrame, fields: list[str]) -> list[str]:
@@ -4134,49 +4120,55 @@ def _draft_metric_choice_label(draft: dict[str, Any], metric_name: str) -> str:
     metric_def = _draft_metric_definitions(draft).get(metric_name)
     if metric_def is None:
         return metric_name
-    source = str(metric_def.get("source", "") or "unknown")
+    processor = str(metric_def.get("processor", "") or "unknown")
     kind = str(metric_def.get("kind", "") or "unknown")
     display = metric_def.get("display") if isinstance(metric_def.get("display"), dict) else {}
     label = str(display.get("label") or "").strip()
     if label:
-        return f"{label} — {metric_name} · {source} · {builder.metric_kind_label(kind)}"
-    return f"{metric_name} · {source} · {builder.metric_kind_label(kind)}"
+        return f"{label} — {metric_name} · {processor} · {builder.metric_kind_label(kind)}"
+    return f"{metric_name} · {processor} · {builder.metric_kind_label(kind)}"
 
 
-def _draft_metric_source_ids(draft: dict[str, Any]) -> list[str]:
+def _draft_metric_processor_ids(draft: dict[str, Any]) -> list[str]:
     metric_defs = _draft_metric_definitions(draft)
-    metric_sources = [
-        str(metric_def.get("source", "") or "")
+    metric_processors = [
+        str(metric_def.get("processor", "") or "")
         for metric_def in metric_defs.values()
-        if metric_def.get("source")
+        if metric_def.get("processor")
     ]
-    ordered_sources = [
+    ordered_processors = [
         processor_id
         for processor_id in _draft_processor_ids(draft)
-        if processor_id in metric_sources
+        if processor_id in metric_processors
     ]
-    unknown_sources = sorted(
-        {source for source in metric_sources if source and source not in ordered_sources},
+    unknown_processors = sorted(
+        {
+            processor
+            for processor in metric_processors
+            if processor and processor not in ordered_processors
+        },
         key=str.casefold,
     )
-    return [*ordered_sources, *unknown_sources]
+    return [*ordered_processors, *unknown_processors]
 
 
-def _draft_metric_kinds_for_source(draft: dict[str, Any], source: str) -> list[str]:
+def _draft_metric_kinds_for_processor(draft: dict[str, Any], processor: str) -> list[str]:
     kinds = [
         str(metric_def.get("kind", "") or "")
         for metric_def in _draft_metric_definitions(draft).values()
-        if metric_def.get("source") == source
+        if metric_def.get("processor") == processor
     ]
     return sorted(builder.dedupe([kind for kind in kinds if kind]), key=builder.metric_kind_label)
 
 
-def _draft_metric_names_for_source_kind(draft: dict[str, Any], source: str, kind: str) -> list[str]:
+def _draft_metric_names_for_processor_kind(
+    draft: dict[str, Any], processor: str, kind: str
+) -> list[str]:
     return sorted(
         [
             name
             for name, metric_def in _draft_metric_definitions(draft).items()
-            if metric_def.get("source") == source and metric_def.get("kind") == kind
+            if metric_def.get("processor") == processor and metric_def.get("kind") == kind
         ],
         key=str.casefold,
     )
@@ -4328,31 +4320,31 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
         current_metric_def = (
             metrics.get(str(current_metric), {}) if isinstance(current_metric, str) else {}
         )
-        source_options = _draft_metric_source_ids(draft)
-        if not source_options:
-            st.info("No metric sources are available.")
+        processor_options = _draft_metric_processor_ids(draft)
+        if not processor_options:
+            st.info("No metric processors are available.")
             return
-        current_source = str(current_metric_def.get("source", "") or "")
-        source_key = "ai_studio_metric_editor_source"
-        if st.session_state.get(source_key) not in source_options:
-            st.session_state.pop(source_key, None)
-        source = st.selectbox(
-            "Source Processor",
-            source_options,
-            index=builder.option_index(source_options, current_source),
-            key=source_key,
+        current_processor = str(current_metric_def.get("processor", "") or "")
+        processor_key = "ai_studio_metric_editor_processor"
+        if st.session_state.get(processor_key) not in processor_options:
+            st.session_state.pop(processor_key, None)
+        processor = st.selectbox(
+            "Processor",
+            processor_options,
+            index=builder.option_index(processor_options, current_processor),
+            key=processor_key,
             help=config_help.field_help("metric.processor"),
         )
-        kind_options = _draft_metric_kinds_for_source(draft, source)
+        kind_options = _draft_metric_kinds_for_processor(draft, processor)
         if not kind_options:
             st.info("Selected processor has no editable metric kinds.")
             return
         current_kind = (
             str(current_metric_def.get("kind", "") or "")
-            if current_metric_def.get("source") == source
+            if current_metric_def.get("processor") == processor
             else ""
         )
-        kind_key = f"ai_studio_metric_editor_kind_{builder.widget_key_fragment(source)}"
+        kind_key = f"ai_studio_metric_editor_kind_{builder.widget_key_fragment(processor)}"
         if st.session_state.get(kind_key) not in kind_options:
             st.session_state.pop(kind_key, None)
         kind = st.selectbox(
@@ -4363,11 +4355,11 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
             key=kind_key,
             help=config_help.field_help("metric.kind"),
         )
-        metric_choices = _draft_metric_names_for_source_kind(draft, source, kind)
+        metric_choices = _draft_metric_names_for_processor_kind(draft, processor, kind)
         if not metric_choices:
             st.info("Selected processor and kind have no editable metrics.")
             return
-        metric_key = f"ai_studio_metric_editor_metric_{builder.widget_key_fragment(source)}_{builder.widget_key_fragment(kind)}"
+        metric_key = f"ai_studio_metric_editor_metric_{builder.widget_key_fragment(processor)}_{builder.widget_key_fragment(kind)}"
         if st.session_state.get(metric_key) not in metric_choices:
             st.session_state.pop(metric_key, None)
             current_metric = None
@@ -4405,14 +4397,14 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
 
         edited_metric = _without_empty(
             {
-                "source": source,
+                "processor": processor,
                 "kind": kind,
                 "description": description,
                 "depends_on": depends_on,
                 "display": display,
                 **_metric_kind_parameter_fields(
                     draft,
-                    source,
+                    processor,
                     kind,
                     metric_def,
                     key_prefix=key_prefix,
@@ -4600,121 +4592,9 @@ def _state_type_from_spec(spec: Any) -> str:
     return ""
 
 
-def _inferred_state_types(processor: dict[str, Any]) -> dict[str, str]:
-    return {
-        name: state_type
-        for name, spec in _inferred_state_specs(processor).items()
-        if (state_type := _state_type_from_spec(spec))
-    }
-
-
-def _inferred_state_specs(processor: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    kind = str(processor.get("kind", "") or "")
-    if kind == "binary_outcome":
-        states = {
-            "Count": {"type": "count"},
-            "Positives": {"type": "count"},
-            "Negatives": {"type": "count"},
-        }
-        subject = _processor_subject(processor)
-        if subject:
-            states["UniqueSubjects_cpc"] = {
-                "type": "cpc",
-                "source_column": subject,
-                "lg_k": 11,
-            }
-        return states
-    if kind == "numeric_distribution":
-        engine = "kll" if str(processor.get("quantile_engine", "") or "") == "kll" else "tdigest"
-        return _numeric_distribution_state_specs(
-            builder.string_list(processor.get("properties")),
-            engine,
-        )
-    if kind == "score_distribution":
-        subject = _processor_subject(processor) or "CustomerID"
-        unique_state = "UniqueCustomers_cpc" if subject == "CustomerID" else "UniqueSubjects_cpc"
-        states = {
-            "Count": {"type": "count"},
-            "personalization": {"type": "pooled_mean", "weight": "Count"},
-            "novelty": {"type": "pooled_mean", "weight": "Count"},
-            unique_state: {"type": "cpc", "source_column": subject, "lg_k": 11},
-        }
-        for property_name in builder.score_properties_from_definition(processor):
-            states[f"{property_name}_tdigest_positives"] = {
-                "type": "tdigest",
-                "source_column": property_name,
-                "outcome": "positive",
-                "score_property": property_name,
-                "k": 500,
-            }
-            states[f"{property_name}_tdigest_negatives"] = {
-                "type": "tdigest",
-                "source_column": property_name,
-                "outcome": "negative",
-                "score_property": property_name,
-                "k": 500,
-            }
-        return states
-    if kind in {"snapshot", "entity_lifecycle"}:
-        return {"Count": {"type": "count"}}
-    if kind == "funnel":
-        return {
-            f"{stage}_Count": {"type": "count"}
-            for stage in forms.stage_names_from_definition(processor.get("stages"))
-        }
-    return {}
-
-
-def _numeric_distribution_state_types(properties: list[str], engine: str) -> dict[str, str]:
-    return {
-        name: state_type
-        for name, spec in _numeric_distribution_state_specs(properties, engine).items()
-        if (state_type := _state_type_from_spec(spec))
-    }
-
-
-def _numeric_distribution_state_specs(
-    properties: list[str],
-    engine: str,
-) -> dict[str, dict[str, Any]]:
-    states: dict[str, dict[str, Any]] = {}
-    for prop in properties:
-        states.update(
-            {
-                f"{prop}_Count": {"type": "count", "per_property": True},
-                f"{prop}_Sum": {"type": "value_sum", "per_property": True},
-                f"{prop}_Mean": {
-                    "type": "pooled_mean",
-                    "per_property": True,
-                    "weight": f"{prop}_Count",
-                },
-                f"{prop}_Var": {"type": "pooled_variance", "per_property": True},
-                f"{prop}_Min": {"type": "min", "per_property": True},
-                f"{prop}_Max": {"type": "max", "per_property": True},
-                f"{prop}_{engine}": {"type": engine, "per_property": True},
-            }
-        )
-    return states
-
-
-def _processor_subject(processor: dict[str, Any]) -> str:
-    entities = processor.get("entities")
-    if isinstance(entities, dict):
-        return str(entities.get("subject", "") or "")
-    return ""
-
-
 def _draft_funnel_stage_options(draft: dict[str, Any], processor_id: str) -> list[str]:
     processor = _draft_processor_by_id(draft, processor_id)
-    stages = forms.stage_names_from_definition(processor.get("stages"))
-    if stages:
-        return stages
-    suffix = "_Count"
-    return [
-        name[: -len(suffix)]
-        for name, state_type in _draft_state_types(draft, processor_id).items()
-        if state_type == "count" and name.endswith(suffix)
-    ]
+    return forms.stage_names_from_definition(processor.get("stages"))
 
 
 def _ai_reports(
@@ -4836,7 +4716,7 @@ def _deterministic_dashboards_from_metrics(
     tiles: list[dict[str, Any]] = []
     used_ids: set[str] = set()
     for metric_name, metric_def in sorted(metrics.items(), key=lambda item: item[0].casefold()):
-        processor = processors.get(str(metric_def.get("source", "") or ""), {})
+        processor = processors.get(str(metric_def.get("processor", "") or ""), {})
         title = builder.title_from_identifier(metric_name)
         chart_kind, fields = _deterministic_tile_fields(
             metric_name,
@@ -4890,6 +4770,7 @@ def _deterministic_dashboards_from_metrics(
         approved_fields,
     )
     return {
+        "catalog_version": 2,
         "theme": dict(dashboards.get("theme", {})) if isinstance(dashboards, dict) else {},
         "dashboards": [
             {
@@ -4928,7 +4809,7 @@ def _deterministic_page_filters(
         metric_name: [
             field
             for field in _processor_dimensions(
-                processors.get(str(metric_def.get("source", "") or ""), {})
+                processors.get(str(metric_def.get("processor", "") or ""), {})
             )
             if field in approved_fields
         ]
@@ -5047,17 +4928,18 @@ def _deterministic_tile_fields(
     first_dimension = _first_existing_field(dimensions, approved_fields)
     time_field = _first_time_field(processor, working, approved_fields)
     value = outputs[0] if outputs else metric_name
+    output_selection = {"metric_output": value} if len(outputs) > 1 else {}
     if kind == "lifecycle_summary":
         columns = builder.dedupe([*dimensions[:3], *outputs[:6]])
         return "table", {"columns": columns or [value]}
     if not time_field and not first_dimension:
-        return "kpi_card", {"value": value}
+        return "kpi_card", output_selection
     if time_field:
-        fields = {"x": time_field, "y": value}
+        fields = {"x": time_field, **output_selection}
         if first_dimension:
             fields["color"] = first_dimension
         return "line", fields
-    return "bar", {"x": first_dimension, "y": value}
+    return "bar", {"x": first_dimension, **output_selection}
 
 
 def _metric_output_fields(metric_name: str, metric_def: dict[str, Any]) -> list[str]:
@@ -5091,11 +4973,12 @@ def _first_time_field(
     approved_fields: list[str],
 ) -> str:
     time_def = processor.get("time") if isinstance(processor.get("time"), dict) else {}
-    time_column = str(time_def.get("column", "") or "")
-    grains = [builder.display_grain(grain) for grain in builder.string_list(time_def.get("grains"))]
-    candidates = [grain for grain in ("Day", "Month", "Quarter", "Year") if grain in grains]
-    candidates.append(time_column)
-    candidates.extend(["Day", "Month", "Quarter", "Year"])
+    time_property = str(time_def.get("property", "") or "")
+    group_by = _processor_dimensions(processor)
+    available_calendar = builder.calendar_dimensions_for_grain(time_def.get("grain"))
+    candidates = [field for field in available_calendar if field in group_by]
+    if time_property in group_by:
+        candidates.append(time_property)
     return _first_existing_field(candidates, [*approved_fields, *working.columns])
 
 
@@ -5451,14 +5334,14 @@ def _chat_review() -> None:
     rows = []
     for name, metric_def in draft.get("metrics", {}).get("metrics", {}).items():
         processor = (
-            processors.get(metric_def.get("source")) if isinstance(metric_def, dict) else None
+            processors.get(metric_def.get("processor")) if isinstance(metric_def, dict) else None
         )
         rows.append(
             {
                 "Metric": name,
                 "Kind": metric_def.get("kind", "") if isinstance(metric_def, dict) else "",
-                "Processor": metric_def.get("source", "") if isinstance(metric_def, dict) else "",
-                "Group By": ", ".join(processor.get("dimensions", processor.get("group_by", [])))
+                "Processor": metric_def.get("processor", "") if isinstance(metric_def, dict) else "",
+                "Group By": ", ".join(processor.get("group_by", []))
                 if isinstance(processor, dict)
                 else "",
             }
@@ -6447,10 +6330,7 @@ def _validate_draft_catalog_for_active_source(
 def _expected_rename_capitalize_contract() -> bool | None:
     """Return the active sample's naming mode when sample-backed state is initialized."""
 
-    if (
-        AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY not in st.session_state
-        and AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY not in st.session_state
-    ):
+    if AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY not in st.session_state:
         return None
     return _rename_capitalize_enabled()
 
@@ -6836,7 +6716,7 @@ def _render_ai_data_sharing_confirmation(approved_fields: list[str]) -> None:
     already_confirmed = _ai_data_sharing_confirmed(approved_fields)
     if already_confirmed:
         with st.container(border=True):
-            with st.container(key="vs_ai_sharing_consent", gap="xsmall"):
+            with st.container(key="vs_ai_yes_consent", gap="xsmall"):
                 components.status_badge("AI access confirmed", "ready")
                 st.caption(
                     f"Confirmed for {contract['provider']} · "
@@ -7937,21 +7817,7 @@ def _render_stale_preprocessing_field_feedback(section: str) -> None:
 
 
 def _rename_capitalize_enabled() -> bool:
-    _migrate_rename_capitalize_state()
     return bool(st.session_state.get(AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY))
-
-
-def _migrate_rename_capitalize_state() -> None:
-    """Move pre-fix widget-owned state to the durable authoring key once."""
-
-    if (
-        AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY not in st.session_state
-        and AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY in st.session_state
-    ):
-        st.session_state[AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = bool(
-            st.session_state[AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY]
-        )
-    st.session_state.pop(AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY, None)
 
 
 def _on_rename_capitalize_toggle_change() -> None:
@@ -8276,7 +8142,14 @@ def _studio_baseline_dashboards(primary_x: str, group_by: list[str]) -> dict[str
 
     dashboard_title = "Studio Overview"
     dashboard_id = builder.stable_catalog_id(dashboard_title, fallback="dashboard")
-    dimension = group_by[0] if group_by else primary_x
+    dimension = next(
+        (
+            field
+            for field in group_by
+            if field not in {"Hour", "Day", "Week", "Month", "Quarter", "Year", "Summary"}
+        ),
+        primary_x,
+    )
     page_specs = (
         (
             "Engagement",
@@ -8322,10 +8195,9 @@ def _studio_baseline_dashboards(primary_x: str, group_by: list[str]) -> dict[str
             used_tile_ids.add(tile_id)
             fields: dict[str, Any] = {
                 "x": primary_x if chart_kind == "line" else dimension,
-                "y": metric_name,
             }
-            if chart_kind == "line" and group_by:
-                fields["color"] = group_by[0]
+            if chart_kind == "line" and dimension != primary_x:
+                fields["color"] = dimension
             tiles.append(
                 builder.build_tile(
                     tile_id=tile_id,
@@ -8353,6 +8225,7 @@ def _studio_baseline_dashboards(primary_x: str, group_by: list[str]) -> dict[str
             }
         )
     return {
+        "catalog_version": 2,
         "theme": {},
         "dashboards": [
             {
@@ -8381,6 +8254,23 @@ def _build_draft_catalog(working: pl.DataFrame, approved_fields: list[str]) -> d
     )
     group_by = [field for field in group_by if field in approved_fields]
     grains = _processor_grains(working)
+    time_dimensions = [grain for grain in grains if grain != "Summary"]
+    group_by = list(dict.fromkeys([*time_dimensions, *group_by]))
+    grain = next(
+        (
+            canonical
+            for label, canonical in (
+                ("Hour", "hourly"),
+                ("Day", "daily"),
+                ("Week", "weekly"),
+                ("Month", "monthly"),
+                ("Quarter", "quarterly"),
+                ("Year", "yearly"),
+            )
+            if label in grains
+        ),
+        "summary",
+    )
     primary_x = _primary_chart_x(working, group_by)
     processor_id = _generated_processor_id(source_id)
     reader: dict[str, Any] = {
@@ -8467,7 +8357,7 @@ def _build_draft_catalog(working: pl.DataFrame, approved_fields: list[str]) -> d
     dashboards = _studio_baseline_dashboards(primary_x, group_by)
     return {
         "pipelines": {
-            "version": 1,
+            "catalog_version": 2,
             "workspace": str(
                 st.session_state.get("ai_studio_active_workspace_name") or "workspace"
             ),
@@ -8494,6 +8384,7 @@ def _build_draft_catalog(working: pl.DataFrame, approved_fields: list[str]) -> d
             ],
         },
         "processors": {
+            "catalog_version": 2,
             "processors": [
                 _without_empty(
                     {
@@ -8501,22 +8392,40 @@ def _build_draft_catalog(working: pl.DataFrame, approved_fields: list[str]) -> d
                         "source": source_id,
                         "kind": "binary_outcome",
                         "description": "Generated engagement processor.",
-                        "dimensions": group_by,
-                        "time": {"column": time_column, "grains": grains},
+                        "group_by": group_by,
+                        "time": (
+                            {
+                                "property": time_column,
+                                "grain": grain,
+                                "calendar": {
+                                    "timezone": "UTC",
+                                    "week_start": "monday",
+                                    "fiscal_year_start_month": 1,
+                                },
+                            }
+                            if time_column
+                            else None
+                        ),
                         "entities": {"subject": subject} if subject else None,
                         "outcome": {
                             "column": outcome_column,
                             "positive_values": positive_values,
                             "negative_values": negative_values,
                         },
+                        "states": {
+                            "Count": {"type": "count"},
+                            "Positives": {"type": "count", "outcome": "positive"},
+                            "Negatives": {"type": "count", "outcome": "negative"},
+                        },
                     }
                 )
             ]
         },
         "metrics": {
+            "catalog_version": 2,
             "metrics": {
                 "Studio_CTR": {
-                    "source": processor_id,
+                    "processor": processor_id,
                     "kind": "formula",
                     "description": "Click-through rate generated by AI Configuration Studio.",
                     "expression": {
@@ -8527,21 +8436,21 @@ def _build_draft_catalog(working: pl.DataFrame, approved_fields: list[str]) -> d
                     "display": {"label": "Click-through rate", "value_format": "percent"},
                 },
                 "Studio_Count": {
-                    "source": processor_id,
+                    "processor": processor_id,
                     "kind": "formula",
                     "description": "Total outcome rows generated by AI Configuration Studio.",
                     "expression": {"col": "Count"},
                     "display": {"label": "Total outcomes", "value_format": "integer"},
                 },
                 "Studio_Positive_Outcomes": {
-                    "source": processor_id,
+                    "processor": processor_id,
                     "kind": "formula",
                     "description": "Observed positive outcomes in the selected scope.",
                     "expression": {"col": "Positives"},
                     "display": {"label": "Positive outcomes", "value_format": "integer"},
                 },
                 "Studio_Negative_Outcomes": {
-                    "source": processor_id,
+                    "processor": processor_id,
                     "kind": "formula",
                     "description": "Observed negative outcomes in the selected scope.",
                     "expression": {"col": "Negatives"},
@@ -9208,17 +9117,9 @@ def _default_group_by_fields(
     approved_fields: list[str],
     required_fields: list[str] | None = None,
 ) -> list[str]:
-    # Calendar fields the draft derives from the timestamp are grain outputs,
-    # not business dimensions; grouping by them duplicates the grain machinery.
-    # Real calendar columns shipped by the source (no timestamp to derive from)
-    # remain eligible.
-    derived_calendar = (
-        set(_calendar_outputs_to_derive()) if "OutcomeTime" in sample.columns else set()
-    )
-    eligible_fields = [field for field in approved_fields if field not in derived_calendar]
     return dimension_profile.default_group_by_fields(
         sample,
-        eligible_fields,
+        approved_fields,
         required_fields=required_fields or _studio_required_fields(sample),
         limit=5,
     )

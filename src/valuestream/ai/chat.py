@@ -91,7 +91,8 @@ _METRIC_KIND_EXPLANATIONS = {
     "formula": "Derived from aggregate state columns or dependency metrics using the expression AST.",
     "approx_distinct_count": ("Approximate distinct count from a CPC, HLL, or Theta sketch state."),
     "topk_items": "Top-K items from a processor top-k state.",
-    "tdigest_quantile": "Quantile or percentile derived from a t-digest state.",
+    "distribution": "Full quantile distribution derived from a t-digest or KLL state.",
+    "quantile": "One explicit quantile derived from a t-digest or KLL state.",
     "variant_compare": "Compares test and control roles across a variant column.",
     "curve_from_digests": "Model-quality curve metric reconstructed from positive and negative score digests.",
     "calibration_from_digests": "Calibration bins reconstructed from positive and negative score digests.",
@@ -186,13 +187,13 @@ def catalog_chat_manifest(
     sources = {source.id: source for source in catalog.pipelines.sources}
     metrics: list[dict[str, Any]] = []
     for metric_name, metric in sorted(catalog.metrics.metrics.items()):
-        processor = processors.get(metric.source)
+        processor = processors.get(metric.processor)
         source = sources.get(processor.source) if processor is not None else None
         metric_chat_description = _first_description(
             metric_descriptions,
             metric_name,
             metric.kind,
-            metric.source,
+            metric.processor,
             processor.kind if processor is not None else "",
             processor.source if processor is not None else "",
         )
@@ -203,7 +204,7 @@ def catalog_chat_manifest(
                 "chat_description": metric_chat_description,
                 "kind": metric.kind,
                 "kind_explanation": _METRIC_KIND_EXPLANATIONS.get(metric.kind, ""),
-                "processor": metric.source,
+                "processor": metric.processor,
                 "processor_description": processor.description if processor is not None else "",
                 "processor_kind": processor.kind if processor is not None else "",
                 "dataset": processor.source if processor is not None else "",
@@ -415,7 +416,7 @@ def _metric_configuration(metric: model.Metric) -> dict[str, Any]:
         {
             key: value
             for key, value in payload.items()
-            if key not in {"source", "kind", "description"}
+            if key not in {"processor", "kind", "description"}
         }
     )
 
@@ -484,7 +485,8 @@ def metric_output_columns(metric_name: str, metric: model.Metric) -> list[str]:
     simple_metric_kinds = {
         "formula",
         "approx_distinct_count",
-        "tdigest_quantile",
+        "distribution",
+        "quantile",
         "set_op",
         "funnel_dropoff",
     }
@@ -522,7 +524,7 @@ def allowed_chart_kinds(catalog: model.Catalog, metric_name: str) -> list[str]:
     return kinds or list(_BASE_CHART_KINDS)
 
 
-def chart_tile_from_intent(intent: ChatIntent) -> dict[str, Any]:
+def chart_tile_from_intent(intent: ChatIntent) -> dict[str, Any]:  # noqa: PLR0911, PLR0912
     """Map a validated chart intent to a chart-factory tile spec.
 
     The chat intent carries generic ``x``/``y``/``color``/``facet_col`` fields;
@@ -546,27 +548,43 @@ def chart_tile_from_intent(intent: ChatIntent) -> dict[str, Any]:
         if chart.color:
             tile["color"] = chart.color
         return tile
+    if chart.y and chart.y != intent.metric:
+        tile["metric_output"] = chart.y
     if kind == "kpi_card":
-        tile["value"] = chart.y or intent.metric
         return tile
     if kind == "donut":
-        tile["names"] = chart.x or chart.color
-        tile["values"] = chart.y or intent.metric
+        tile["names"] = chart.x or chart.color or next(iter(intent.group_by), "")
+        if chart.color and chart.color != tile["names"]:
+            tile["color"] = chart.color
         return tile
     if kind == "heatmap":
         # Two dimensions form the axes; the metric value is the color scale.
         tile["x"] = chart.x
         tile["y"] = chart.color or chart.facet_col
-        tile["color"] = chart.y or intent.metric
         return tile
-    for key, value in (
-        ("x", chart.x),
-        ("y", chart.y),
-        ("color", chart.color),
-        ("facet_col", chart.facet_col),
-    ):
-        if value:
-            tile[key] = value
+    if kind in {"line", "bar", "stacked_area"}:
+        tile["x"] = chart.x
+        color = chart.color
+        if kind == "stacked_area" and not color:
+            color = next((field for field in intent.group_by if field != chart.x), "")
+        if color:
+            tile["color"] = color
+        if chart.facet_col:
+            tile["facet_col"] = chart.facet_col
+        return tile
+    if kind == "table":
+        selected_output = str(tile.get("metric_output") or intent.metric)
+        tile["columns"] = list(
+            dict.fromkeys([*intent.group_by, selected_output])
+        )
+        return tile
+    if kind == "scatter":
+        tile["x"] = chart.x
+        tile["y"] = chart.y
+        if chart.color:
+            tile["color"] = chart.color
+        if chart.facet_col:
+            tile["facet_col"] = chart.facet_col
     return tile
 
 
@@ -612,7 +630,7 @@ def chat_starter_questions(catalog: model.Catalog, *, limit: int = 4) -> list[st
     questions: list[str] = []
     for metric_name, metric in sorted(catalog.metrics.metrics.items()):
         label = _title_from_identifier(metric_name)
-        processor = processors.get(metric.source)
+        processor = processors.get(metric.processor)
         dimensions = list(processor.group_by) if processor is not None else []
         time_axes = _query_time_axes(processor) if processor is not None else []
         if dimensions:
@@ -637,7 +655,7 @@ def deterministic_chat_starters(catalog: model.Catalog) -> list[DeterministicCha
 
     processors = {processor.id: processor for processor in catalog.processors.processors}
     metric_items = [
-        (metric_name, metric, processors.get(metric.source))
+        (metric_name, metric, processors.get(metric.processor))
         for metric_name, metric in sorted(catalog.metrics.metrics.items())
     ]
     count_item = _best_deterministic_metric(metric_items, kind="count")
@@ -906,7 +924,7 @@ Rules:
 - Use the chat descriptions, metric descriptions, kind explanations, and configuration to choose the right metric.
 - Use datasets and processors only to understand what each metric measures; do not output dataset or processor ids.
 - Datasets/sources are not queryable directly. The output metric must always be a metric from the catalog.
-- group_by must contain only business dimensions, not time columns.
+- group_by may contain exact configured business dimensions and derived calendar columns.
 - Do not choose or return an aggregate grain. Value Stream chooses the physical aggregate automatically.
 - Use time_axis Day, Month, Quarter, or Year only when the question asks for a time bucket or trend.
 - Use response "chart" when the user asks to plot, chart, visualize, trend, or compare visually.
@@ -921,7 +939,8 @@ Rules:
 - Set chart.x to the explicit requested axis when available. It may be a time column or business dimension.
 - For time-trend requests, set time_axis and chart.x to Day/Month/Quarter/Year.
 - For dimension-comparison requests, set chart.x to a business dimension such as Issue, Channel, or CustomerSegment.
-- Put metric output columns in chart.y only. Never use a metric output column as chart.x.
+- Use chart.y only to select a metric_output when a multi-output metric needs one; scalar
+  chart measures otherwise come directly from the selected metric.
 - Put business dimensions in group_by, chart.color, or chart.facet_col, not in chart.x for time trends.
 - When a time trend is requested "by" a business dimension, include that dimension in group_by and chart.color.
 - For comparison charts with multiple business dimensions, use one dimension as chart.x and the others as chart.color or chart.facet_col.
@@ -1401,11 +1420,11 @@ def _resolve_metric_name(value: object, catalog: model.Catalog) -> str:
 
 def _processor_for_metric(catalog: model.Catalog, metric: model.Metric) -> model.Processor:
     processor = next(
-        (candidate for candidate in catalog.processors.processors if candidate.id == metric.source),
+        (candidate for candidate in catalog.processors.processors if candidate.id == metric.processor),
         None,
     )
     if processor is None:
-        raise ValueError(f"metric references unknown processor {metric.source!r}")
+        raise ValueError(f"metric references unknown processor {metric.processor!r}")
     return processor
 
 

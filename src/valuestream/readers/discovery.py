@@ -58,7 +58,7 @@ def _chunk_id(path: Path, regex: str | None) -> str:
 
 def _reader_root(workspace_path: str | Path, source: model.Source) -> Path:
     extra = _reader_extra(source.reader)
-    raw = extra.get("root") or extra.get("base_dir") or "."
+    raw = extra.get("root") or "."
     root = Path(str(raw))
     if not root.is_absolute():
         root = Path(workspace_path) / root
@@ -66,7 +66,7 @@ def _reader_root(workspace_path: str | Path, source: model.Source) -> Path:
 
 
 def _reader_extra(reader: model.Reader) -> dict[str, object]:
-    return dict(reader.model_extra or {})
+    return reader.model_dump(mode="python", exclude_none=True)
 
 
 __all__ = ["Chunk", "discover"]

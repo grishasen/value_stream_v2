@@ -35,7 +35,7 @@ def test_catalog_cache_reloads_after_metric_edit(tmp_path: Path) -> None:
     metrics_path = tmp_path / "catalog" / "metrics.yaml"
     text = metrics_path.read_text(encoding="utf-8")
     metrics_path.write_text(
-        text + "\n  Pinned_Copy:\n    source: ih_engagement\n    kind: formula\n"
+        text + "\n  Pinned_Copy:\n    processor: ih_engagement\n    kind: formula\n"
         "    expression: {col: Count}\n",
         encoding="utf-8",
     )

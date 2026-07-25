@@ -80,7 +80,7 @@ Workspace ─── Catalog ─── { Source, Dimension, Processor, Metric, Da
                                 ▼
                             Metric ── Processor (FK)
                                   \── kind ∈ { formula, approx_distinct_count,
-                                              tdigest_quantile, variant_compare,
+                                              distribution, quantile, variant_compare,
                                               proportion_test, contingency_test,
                                               curve_from_digests,
                                               calibration_from_digests,
@@ -123,7 +123,17 @@ A built-in time-grain helper. The default calendar emits `Day, Month (YYYY-MM), 
 The set of YAML files in `<workspace>/catalog/` that define everything declarative about the workspace: `pipelines.yaml`, `processors.yaml`, `metrics.yaml`, and `dashboards.yaml`. Loaded once at startup, validated, and hashed into a single `config_hash`.
 
 ### Chart
-A presentation-layer artifact bound to a Tile. Each chart has a `kind` (`line, stacked_area, bar, kpi_card, waterfall, pareto, treemap, heatmap, scatter, combo, interval, donut, geo_map, table, bar_polar, sankey, gauge, funnel, boxplot, histogram, calibration_curve, roc_curve, precision_recall_curve, gain_curve, lift_curve, rfm_density, exposure, corr, model`) and required Tile fields (`x, y, color, facets, …`). `heatmap` is an adaptive family whose intensity comes from the selected metric; `calendar_heatmap`, `cohort_heatmap`, and `descriptive_heatmap` are compatibility aliases, not separate authoring choices. Funnel likewise accepts configured Funnel-processor stages or numeric-distribution count rows through one chart kind. Combo, Pareto, and Waterfall Y, Polar bar Radius, Treemap Color, Donut Values, and Sankey link Value are metric-owned, while Combo `y2` identifies a compatible same-kind scalar metric backed by the same processor. Waterfall is a single trace: its colors are semantic (increase, decrease, or total), and it does not accept color grouping or facets. See reference/chart-catalog.md.
+A presentation-layer artifact bound to a Tile. Tiles are a strict
+chart-discriminated union: each chart admits only its own dimension and style
+roles. Every Metric publishes a read-only output contract. A metric-owned
+chart role persists one member of that contract in `metric_output`, including
+the single output of a scalar metric. Heatmap uses `x` and optional
+`y`; Sankey and Treemap use ordered `path`; Donut uses `names`; Combo uses
+`secondary_metric`. Pareto and Waterfall Y, Polar radius, Treemap color,
+Donut values, and Sankey link values are metric-owned. Waterfall accepts only
+`x` plus common presentation settings; its colors are semantic increase,
+decrease, and total. Retired chart aliases and source/target shorthand are
+rejected. See reference/chart-catalog.md.
 
 ### Chunk
 The unit of idempotent work in the ingestion engine. A chunk consists of:
@@ -144,7 +154,11 @@ Only an `ok` row whose parent run is `ok` or `partial` is query-visible and
 eligible for idempotent reuse.
 
 ### Compaction
-The process of reducing finer-grained aggregates into coarser-grained aggregates by `groupby + state-merge`. Compaction is a pure file operation and never touches raw data. Standard chain: `Day → Month → Summary`, stored internally as `daily → monthly → summary`.
+The process of reducing aggregate states with `groupby + state-merge`.
+Ingestion uses it once to produce the processor's configured base-grain
+partial. Coarser `Week`, `Month`, `Quarter`, `Year`, and `Summary` answers are
+merged from that base aggregate at query time; duplicate coarser physical
+materializations are not written. Compaction never touches raw data.
 
 ### Config hash
 The sha256 of the canonicalized YAML for a Processor (or for the whole catalog, depending on context). Recorded on every aggregate row and returned by query surfaces where available. Used to:
@@ -165,10 +179,13 @@ The phase of a pipeline run where the engine globs the Source's input folder, ap
 A node in the AST that evaluates to a column or a scalar at query time. Used in: `transforms[*].filter`, `transforms[*].derive_column`, `processors.<id>.filter`, and `metrics.<id>.expression` (when `kind: formula`).
 
 ### Freshness
-The minimum gap between "the latest available chunk from upstream" and "the latest aggregate row served by the query layer," for a given `(source, processor, grain)`. Surfaced on every dashboard tile and in the `/api/v1/workspace` response.
+The minimum gap between "the latest available chunk from upstream" and "the latest aggregate row served by the query layer," for a given `(source, processor, grain)`. Freshness retains both the authored aggregate-period label and, when the stored grain provides one, the exact latest covered date. Report presets use the latest common exact coverage needed by their metrics so partial periods do not create empty relative windows. Freshness is surfaced on every dashboard tile and in the `/api/v1/workspace` response.
 
 ### Grain
-A time resolution at which a Processor materializes aggregates. User-facing configs use calendar names such as `Day`, `Month`, `Quarter`, `Year`, and `Summary`; the storage layer normalizes currently implemented grains to `daily`, `monthly`, and `summary`.
+The time resolution of a Processor. `time.grain` is the one physical base
+grain stored by ingestion. Calendar columns at that grain and above remain
+valid `group_by` dimensions, so queries can request `Day`, `Week`, `Month`,
+`Quarter`, `Year`, or `Summary` without storing a copy for each resolution.
 
 ### CPC state
 A binary state (Apache DataSketches CPC sketch) used by default to estimate
@@ -177,8 +194,8 @@ estimate bounds but does not support intersection or difference. See
 reference/algorithms.md.
 
 ### HLL state
-A binary state (Apache DataSketches HLL_4 or HLL_8 sketch) retained for
-backward compatibility and opt-in distinct counts. Merge rule: union. See
+A binary state (Apache DataSketches HLL_4 or HLL_8 sketch) available as an
+explicit distinct-count alternative. Merge rule: union. See
 reference/algorithms.md.
 
 ### Ingestion engine
@@ -193,16 +210,27 @@ The mapping from each aggregate row to the chunks and config that produced it. S
 ### Mergeable state
 A state column whose values can be combined under a deterministic, associative-commutative rule across rows. The state catalog defines:
 - `count` → SUM
+  - row count when no selector is set
+  - non-null or distinct count when `source_column` is set
+  - outcome/stage counts only when the corresponding typed selector is set
 - `value_sum` → SUM
 - `min`, `max` → MIN/MAX
-- `pooled_mean` → SUM-of-(value*count) / SUM-of-count
-- `pooled_variance` → Welford-merge
+- `pooled_mean` → SUM-of-(value*weight) / SUM-of-weight, with explicit
+  `source_column` or computation `recipe` and `weight` state
+- `pooled_variance` → Welford-merge using explicit `mean` and `weight`
+  companion states
 - `tdigest`, `kll` → sketch merge
 - `cpc`, `hll`, `theta` → sketch union (intersect/diff for theta only)
 - `topk` → frequent-items merge
 
 ### Metric
-A *derived* business measurement bound to a Processor. A metric has a `kind` and inputs from the Processor's state. Examples: `CTR (formula)`, `ROC_AUC (curve_from_digests)`, `Lift (variant_compare)`, `Median_ResponseTime (tdigest_quantile)`, `UniqueCustomers (approx_distinct_count)`, `Experiment_Significance (contingency_test)`, `CLV_Summary (lifecycle_summary)`.
+A *derived* business measurement bound to a Processor. A metric has a `kind`
+and inputs from the Processor's explicit state contract. Examples:
+`CTR (formula)`, `ROC_AUC (curve_from_digests)`, `Lift (variant_compare)`,
+`ResponseTime_Distribution (distribution)`, `Median_ResponseTime (quantile)`,
+`UniqueCustomers (approx_distinct_count)`, and a lifecycle summary whose four
+input states are explicitly bound. State identifiers never imply metric
+semantics.
 
 Every metric may also carry `display` metadata: a friendly `label`, `unit`,
 default `value_format`, and `direction` (`higher_is_better`,
@@ -217,7 +245,9 @@ future recipe edits automatically.
 A Parquet file produced by one Processor processing one chunk. Lives at `aggregates/<src>/<proc>/daily/period=YYYY-MM/part-<pipeline_run_id>.parquet`. A "partial" is conceptually the smallest unit of write; compaction merges multiple partials into one.
 
 ### Period
-The hive partition key used inside an aggregate directory. For `daily`, `monthly`, and the default `summary` materialization, `period = YYYY-MM`. `time.aggregation_levels` can coarsen summary storage to quarter or year. For optional grains the convention is the smallest "obviously coarser" string (`weekly_iso → YYYY-MM-Www`, `hourly → YYYY-MM-DD`).
+The hive partition key used inside the processor's base-grain aggregate
+directory. Daily and monthly bases use `period = YYYY-MM`; finer or coarser
+bases use the smallest useful partition label for their configured resolution.
 
 ### Pipeline run
 One end-to-end execution of an ingestion against a Source. Has an id (UUID), a config hash, a status (`running | ok | failed | partial`), counts of total / ok / failed chunks, and start/end timestamps. Recorded in `meta/pipeline_runs.duckdb`.
@@ -306,10 +336,14 @@ processor `group_by` column still requires raw replay.
 ### Time filter
 A page-level list of supported date presets plus one default preset. Time
 selection becomes query-layer `start`/`end` bounds and never bypasses aggregate
-routing. `all_time` is the backward-compatible default.
+routing. `all_time` is the canonical default.
 
 ### Time grain
-The Processor-level storage contract declared under `time.grains`. Calendar columns like `Day`, `Month`, `Quarter`, and `Year` are generated by transforms and can be used in reports, but they are not ordinary business group-by columns.
+The Processor-level storage contract declared by `time.property` and
+`time.grain`. Calendar columns at or above that base grain are persisted as
+ordinary `group_by` dimensions when selected. For example, a daily processor
+may expose `Day`, `Week`, `Month`, `Quarter`, and `Year` to report roles without
+adding a separate time-role system.
 
 ### Transform
 A typed step in the Source's `transforms` list. Each transform takes a Polars LazyFrame and returns a LazyFrame. Built-in transforms: `rename_capitalize, parse_datetime, derive_calendar, derive_action_id, filter, dedup, defaults, derive_column, cast, drop_columns`. Transforms operate **before** processors fan out, so they affect every Processor bound to the Source.
@@ -338,7 +372,7 @@ A workspace is the unit of deployment, security boundary, and backup.
 | `workspace` | top-level YAML | `[a-z][a-z0-9_-]+` | `bdt` |
 | `source.id` | `pipelines.yaml` | snake_case | `ih`, `holdings` |
 | `group_by` column | `processors.yaml` | transformed column name | `Channel`, `CustomerType` |
-| `processor.id` | `processors.yaml` | snake_case; recommended same as legacy family for migration | `engagement`, `model_ml_scores` |
+| `processor.id` | `processors.yaml` | snake_case | `engagement`, `model_ml_scores` |
 | `metric key` | `metrics.yaml` | PascalCase or snake_case, free | `CTR`, `ROC_AUC`, `CLV_Summary` |
 | `dashboard.id`, `page.id`, `tile.id` | `dashboards.yaml` | snake_case | `marketing_overview`, `engagement`, `daily_ctr` |
 | `chunk_id` | derived from filename | string | `2024-08-21` |
@@ -364,11 +398,10 @@ and do not require reprocessing.
 
 Adding a State to an existing Processor changes its computation hash. Queries
 under the updated Catalog read only aggregate partials carrying that new hash;
-older files remain available for the older Catalog version but are never mixed
-with the new schema. Until ingestion publishes the new contract, report tiles
-show that a first run or backfill is required. Optional backfill for a widening
-therefore refers to historical coverage, not permission to derive a missing
-state from old aggregate files.
+older files remain available for the older configuration hash but are never
+mixed with the new schema. Until ingestion publishes the new contract, report
+tiles show that a source replay is required. Historical replay is never
+permission to derive a missing state from old aggregate files.
 
 ### Authoring revision (UI-local)
 
@@ -398,8 +431,6 @@ the final recoverable draft removes the checkpoint.
 Uploaded Studio samples and their derived preview frames remain session-local
 inputs to authoring. They do not become production source files or persisted
 aggregates merely because a draft references their schema.
-
-The migration tool (`valuestream migrate`) classifies each change automatically and reports the action required.
 
 ## 6. Examples
 
@@ -466,10 +497,10 @@ States produced by 'engagement' processor:
 ```
 processors.yaml:
   engagement:
-    group_by: [Channel, PlacementType, ...]
+    group_by: [Day, Week, Month, Quarter, Year, Channel, PlacementType, ...]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
+      property: OutcomeTime
+      grain: daily
 
 dashboards.yaml:
   daily_ctr:
@@ -502,7 +533,7 @@ Transforms define the user-facing schema. If a nicer business name is needed, cr
 | Source | Processor | feeds | 1 : N |
 | Processor | Dimension | groups by | N : N |
 | Processor | State | produces | 1 : N |
-| Processor | Grain | materializes at | 1 : N |
+| Processor | Base grain | materializes at | 1 : 1 |
 | Processor | Metric | sourced by | 1 : N |
 | Metric | Tile | bound to | 1 : N |
 | Tile | Dashboard | belongs to | N : 1 |

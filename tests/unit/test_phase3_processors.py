@@ -24,8 +24,9 @@ def test_periodic_snapshot_does_not_group_by_entity() -> None:
                 "snapshot_kind": "periodic",
                 "cadence": "daily",
                 "group_by": ["Channel", "Issue"],
+                "time": {"property": "Day", "grain": "daily"},
                 "entity": "CustomerID",
-                "as_of_column": "Day",
+                "as_of_property": "Day",
                 "states": {
                     "Count": {"type": "count"},
                     "ActiveCustomers_hll": {
@@ -67,10 +68,11 @@ def test_accumulating_snapshot_latest_entity_wins() -> None:
                 "kind": "snapshot",
                 "snapshot_kind": "accumulating",
                 "group_by": ["Team"],
+                "time": {"property": "CreatedAt", "grain": "daily"},
                 "entity": "TicketID",
                 "milestones": [
-                    {"name": "created_at", "column": "CreatedAt"},
-                    {"name": "resolved_at", "column": "ResolvedAt"},
+                    {"name": "created_at", "property": "CreatedAt"},
+                    {"name": "resolved_at", "property": "ResolvedAt"},
                 ],
                 "states": {
                     "OpenTickets": {

@@ -26,20 +26,10 @@ def group_by_columns(config: model.Processor) -> list[str]:
     return list(config.group_by)
 
 
-def extra(processor: model.Processor) -> dict[str, Any]:
-    return dict(processor.model_extra or {})
-
-
 def spec_extra(spec: model.StateSpec) -> dict[str, Any]:
-    return dict(spec.model_extra or {})
-
-
-def list_extra(raw_extra: dict[str, Any], key: str) -> list[str]:
-    """Return ``raw_extra[key]`` coerced to a list of strings, or ``[]``."""
-    raw = raw_extra.get(key, [])
-    if isinstance(raw, list):
-        return [str(item) for item in raw]
-    return []
+    payload = spec.model_dump(mode="python", by_alias=True, exclude_none=True)
+    payload.pop("type", None)
+    return payload
 
 
 def expression(value: Any) -> ast.Expr:
@@ -65,6 +55,12 @@ def filtered_column(column: str, raw_extra: dict[str, Any]) -> pl.Expr:
 
 def count_expr(raw_extra: dict[str, Any], *, alias: str) -> pl.Expr:
     condition = where_expr(raw_extra)
+    source_column = str(raw_extra.get("source_column") or "")
+    if source_column:
+        value = filtered_column(source_column, raw_extra)
+        if raw_extra.get("distinct") is True:
+            return value.n_unique().alias(alias)
+        return value.count().alias(alias)
     if condition is None:
         return pl.len().alias(alias)
     return pl.when(condition).then(1).otherwise(0).sum().alias(alias)
@@ -169,14 +165,15 @@ def sketch_build_expr(
     spec: model.StateSpec,
     *,
     existing: set[str],
-    default_source_column: str,
     source_dtypes: pl.Schema | None = None,
-) -> tuple[pl.Expr | None, tuple[str, str, int]]:
+) -> tuple[pl.Expr, tuple[str, str, int]]:
     """Return a list-aggregation expression and sketch metadata."""
     raw_extra = spec_extra(spec)
-    source_column = str(raw_extra.get("source_column", default_source_column))
+    source_column = str(getattr(spec, "source_column", "") or "")
     if source_column not in existing:
-        return None, (name, spec.type, _sketch_k(spec))
+        raise ValueError(
+            f"state {name!r} requires missing source column {source_column!r}"
+        )
     helper = f"__values_{name}"
     values = filtered_column(source_column, raw_extra)
     string_values = (
@@ -523,11 +520,9 @@ def weighted_mean_expr(value_col: str, weight_col: str) -> pl.Expr:
 
 
 def _variance_companions(name: str, spec: model.StateSpec) -> tuple[str, str]:
-    extra = spec_extra(spec)
-    base = name[:-4] if name.endswith("_Var") else name
-    mean_col = str(extra.get("mean", f"{base}_Mean"))
-    count_col = str(extra.get("weight", f"{base}_Count"))
-    return mean_col, count_col
+    if not isinstance(spec, model.PooledVarianceState):
+        raise TypeError(f"state {name!r} is not pooled_variance")
+    return spec.mean, spec.weight
 
 
 def _sketch_k(spec: model.StateSpec) -> int:
@@ -551,10 +546,8 @@ __all__ = [
     "distribution_sketch_expr",
     "ensure_state_columns",
     "expression",
-    "extra",
     "filtered_column",
     "group_by_columns",
-    "list_extra",
     "merge_for_query",
     "merge_state_frame",
     "period_from_column",

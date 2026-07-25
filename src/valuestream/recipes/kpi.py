@@ -15,6 +15,8 @@ from valuestream.utils.names import dedupe_strings as _dedupe_strings
 
 _METRIC_ADAPTER = TypeAdapter(model.Metric)
 _PROCESSOR_ADAPTER = TypeAdapter(model.Processor)
+_STATE_ADAPTER = TypeAdapter(model.StateSpec)
+_TILE_ADAPTER = TypeAdapter(model.Tile)
 _PLACEHOLDER = re.compile(r"^\$\{([a-z][a-z0-9_]*)\}$")
 # Explicit ``states`` replace the kind defaults for these processor kinds, so
 # recipe state additions must first pin the defaults to keep them computed.
@@ -95,10 +97,6 @@ class RecipeReport(_RecipeModel):
     chart: str = "kpi_card"
     placement: Literal["content", "kpi_strip"] = "kpi_strip"
     kpi: model.KpiSpec | None = None
-    # Input role whose bound digest state names the tile's ``property``
-    # (with the _tdigest/_kll suffix stripped) — distribution charts such as
-    # boxplots read their quantile-suite columns through it.
-    property_from: str | None = None
 
 
 class KpiRecipe(_RecipeModel):
@@ -136,7 +134,7 @@ class KpiRecipe(_RecipeModel):
                 )
         template = _metric_template(self)
         placeholders = _placeholder_names(template)
-        allowed = {"processor_id", "metric_id", *role_set}
+        allowed = {"processor_id", "metric_id", "entity_column", *role_set}
         if unknown := placeholders - allowed:
             raise ValueError(
                 f"metric template references unknown placeholder(s): {', '.join(sorted(unknown))}"
@@ -145,16 +143,15 @@ class KpiRecipe(_RecipeModel):
             raise ValueError(f"recipe input role(s) are unused: {', '.join(sorted(unused))}")
         sample_bindings = dict.fromkeys(allowed, "bound")
         _METRIC_ADAPTER.validate_python(_substitute(template, sample_bindings))
-        model.Tile.model_validate(
-            {
-                "id": "recipe_tile",
-                "title": self.title,
-                "metric": "recipe_metric",
-                "chart": self.report.chart,
-                "placement": self.report.placement,
-                "kpi": self.report.kpi or None,
-            }
-        )
+        tile_sample: dict[str, Any] = {
+            "id": "recipe_tile",
+            "title": self.title,
+            "metric": "recipe_metric",
+            "chart": self.report.chart,
+            "placement": self.report.placement,
+            "kpi": self.report.kpi or None,
+        }
+        _TILE_ADAPTER.validate_python(tile_sample)
         return self
 
 
@@ -289,10 +286,23 @@ def instantiate_metric(
             raise ValueError(f"{selected!r} is not a valid binding for {item.label}")
     _validate_paired_bindings(recipe, processor, bindings)
 
-    values = {"processor_id": processor.id, "metric_id": metric_id, **bindings}
+    entity_column = (
+        processor.keys.customer_id
+        if isinstance(processor, model.EntityLifecycleProcessor)
+        else ""
+    )
+    values = {
+        "processor_id": processor.id,
+        "metric_id": metric_id,
+        "entity_column": entity_column,
+        **bindings,
+    }
     metric_def = _substitute(_metric_template(recipe), values)
     if not isinstance(metric_def, dict):  # pragma: no cover - schema guards this shape
         raise TypeError("recipe metric template must materialize to a mapping")
+    display = dict(metric_def.get("display") or {})
+    display["label"] = _metric_label_from_id(metric_id)
+    metric_def["display"] = display
     metric_def["recipe"] = {"id": recipe.id, "version": recipe.version}
     validated = _METRIC_ADAPTER.validate_python(metric_def)
     return validated.model_dump(
@@ -305,12 +315,14 @@ def instantiate_metric(
 
 def instantiate_tile(
     recipe: KpiRecipe,
+    processor: model.Processor,
     metric_id: str,
     tile_id: str,
     bindings: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Materialize and validate a recommended report tile for a recipe metric."""
 
+    del processor, bindings
     value_format = recipe.metric.display.value_format if recipe.metric.display else None
     raw: dict[str, Any] = {
         "id": tile_id,
@@ -319,32 +331,14 @@ def instantiate_tile(
         "description": recipe.summary,
         "chart": recipe.report.chart,
         "placement": recipe.report.placement,
-        "value": metric_id,
     }
     if value_format:
         raw["value_format"] = value_format
     if recipe.report.kpi:
         raw["kpi"] = recipe.report.kpi
-    if recipe.report.property_from:
-        bound_state = (bindings or {}).get(recipe.report.property_from, "")
-        if not bound_state:
-            raise ValueError(
-                f"recipe {recipe.id!r} tile needs the {recipe.report.property_from!r} "
-                "input binding to derive its property"
-            )
-        raw["property"] = digest_state_property(bound_state)
-    return model.Tile.model_validate(raw).model_dump(
+    return _TILE_ADAPTER.validate_python(raw).model_dump(
         mode="json", exclude_none=True, exclude_defaults=True
     )
-
-
-def digest_state_property(state: str) -> str:
-    """Return the property name a digest state persists quantiles under."""
-
-    for suffix in ("_tdigest", "_kll"):
-        if state.endswith(suffix):
-            return state.removesuffix(suffix)
-    return state
 
 
 def unique_artifact_id(preferred: str, existing: set[str]) -> str:
@@ -356,6 +350,17 @@ def unique_artifact_id(preferred: str, existing: set[str]) -> str:
     while f"{preferred}_{index}" in existing:
         index += 1
     return f"{preferred}_{index}"
+
+
+def _metric_label_from_id(metric_id: str) -> str:
+    """Derive the default recipe-created display name from its stable ID."""
+
+    label = re.sub(r"[_-]+", " ", metric_id).strip()
+    label = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", label)
+    label = re.sub(r"\s+", " ", label)
+    if label.startswith("VS "):
+        label = label[3:]
+    return label[:1].upper() + label[1:] if label else metric_id
 
 
 def recipe_binding_options(
@@ -421,7 +426,7 @@ def recipe_binding_options(
                 attributes=item.state_attributes,
             )
             state_definition = _proposed_state_definition(item, field, state_type)
-            spec = model.StateSpec.model_validate(state_definition)
+            spec = _STATE_ADAPTER.validate_python(state_definition)
             parameters = _state_parameter_summary(spec)
             technical = f"Proposed aggregate state: {state_name} · {state_type}"
             if parameters:
@@ -456,19 +461,30 @@ def recipe_binding_options(
 def processor_recipe_fields(processor: model.Processor) -> list[str]:
     """Return deterministic processor-owned fields eligible for new recipe states."""
 
-    fields = list(processor.group_by)
-    extra = dict(processor.model_extra or {})
-    for key in ("entity", "variant_column", "outcome_column"):
-        if extra.get(key):
-            fields.append(str(extra[key]))
-    for key in ("properties", "score_properties", "dedup_keys"):
-        values = extra.get(key)
-        if isinstance(values, list):
-            fields.extend(str(value) for value in values)
-    for key in ("entities", "keys", "score_columns", "outcome"):
-        values = extra.get(key)
-        if isinstance(values, dict):
-            fields.extend(str(value) for value in values.values() if isinstance(value, str))
+    fields = [*processor.group_by, processor.time.property]
+    if isinstance(processor, model.BinaryOutcomeProcessor):
+        fields.extend([processor.outcome.column, *processor.dedup_keys])
+        fields.extend(filter(None, [processor.variant_column]))
+        if processor.entities:
+            fields.append(processor.entities.subject)
+    elif isinstance(processor, model.NumericDistributionProcessor):
+        fields.extend(processor.properties)
+    elif isinstance(processor, model.ScoreDistributionProcessor):
+        fields.extend([item.column for item in processor.score_properties])
+        fields.extend([processor.outcome.column, *processor.dedup_keys])
+        if processor.entities:
+            fields.append(processor.entities.subject)
+    elif isinstance(processor, model.EntityLifecycleProcessor):
+        fields.extend(processor.keys.model_dump().values())
+    elif isinstance(processor, model.EntitySetProcessor):
+        fields.append(processor.entity)
+        if processor.entities:
+            fields.append(processor.entities.subject)
+    elif isinstance(processor, model.FunnelProcessor):
+        fields.extend(filter(None, [processor.entity]))
+    elif isinstance(processor, model.SnapshotProcessor):
+        fields.extend(filter(None, [processor.entity, processor.as_of_property]))
+        fields.extend(item.property for item in processor.milestones)
     for name, spec in model.effective_processor_states(processor).items():
         field = _state_business_field(processor, name, spec)
         if field:
@@ -495,7 +511,7 @@ def processor_with_recipe_states(
             for name, spec in model.effective_processor_states(processor).items()
         }
     for name, definition in state_additions.items():
-        configured_states[name] = model.StateSpec.model_validate(definition).model_dump(
+        configured_states[name] = _STATE_ADAPTER.validate_python(definition).model_dump(
             mode="python",
             by_alias=True,
             exclude_none=True,
@@ -543,7 +559,18 @@ def _proposed_state_name(
 
 def _input_options(item: RecipeInput, processor: model.Processor) -> list[str]:
     if item.source == "stage":
-        return model.funnel_stage_names(processor)
+        if not isinstance(processor, model.FunnelProcessor):
+            return []
+        by_stage = {
+            state.stage: name
+            for name, state in processor.states.items()
+            if isinstance(state, model.CountState) and state.stage
+        }
+        return [
+            by_stage[stage.name]
+            for stage in processor.stages
+            if stage.name in by_stage
+        ]
 
     out: list[str] = []
     wanted_types = set(item.state_types)
@@ -565,7 +592,7 @@ def _state_attributes_match(
     expected: dict[str, str],
     absent: tuple[str, ...],
 ) -> bool:
-    values = {"type": spec.type, **dict(spec.model_extra or {})}
+    values = spec.model_dump(mode="python", exclude_none=True)
     return not any(key in values for key in absent) and all(
         str(values.get(key, "")).casefold() == value.casefold() for key, value in expected.items()
     )
@@ -629,69 +656,21 @@ def recipe_binding_attribute(
         return ""
     if attribute == "type":
         return spec.type
-    extra = dict(spec.model_extra or {})
     if attribute == "score_property":
         return str(
-            extra.get("score_property") or extra.get("source_column") or extra.get("score") or ""
+            getattr(spec, "score_property", None) or getattr(spec, "source_column", None) or ""
         )
-    return str(extra.get(attribute, ""))
+    return str(getattr(spec, attribute, "") or "")
 
 
-def _state_business_field(  # noqa: PLR0911, PLR0912
+def _state_business_field(
     processor: model.Processor,
     state_name: str,
     spec: model.StateSpec,
 ) -> str:
-    extra = dict(spec.model_extra or {})
     for key in ("source_column", "score_property"):
-        if extra.get(key):
-            return str(extra[key])
-
-    processor_extra = dict(processor.model_extra or {})
-    score_key = extra.get("score")
-    score_columns = processor_extra.get("score_columns")
-    if score_key and isinstance(score_columns, dict) and score_columns.get(score_key):
-        return str(score_columns[score_key])
-
-    lowered_name = state_name.casefold()
-    entities = processor_extra.get("entities")
-    subject = entities.get("subject") if isinstance(entities, dict) else None
-    if lowered_name.startswith("uniquesubject"):
-        return str(subject or "SubjectID")
-    if lowered_name.startswith("uniquecustomer"):
-        return str(subject or "CustomerID")
-    if lowered_name.startswith("uniqueinteraction"):
-        return "InteractionID"
-
-    property_names: list[str] = []
-    for key in ("properties", "score_properties"):
-        raw_properties = processor_extra.get(key, [])
-        if isinstance(raw_properties, list):
-            property_names.extend(str(value) for value in raw_properties)
-    for property_name in sorted(set(property_names), key=len, reverse=True):
-        if state_name.casefold().startswith(f"{property_name}_".casefold()):
-            return property_name
-
-    if processor.kind == "funnel":
-        for stage_name in model.funnel_stage_names(processor):
-            if state_name.casefold() == f"{stage_name}_count".casefold():
-                return stage_name
-
-    suffixes = (
-        "_tdigest_positives",
-        "_tdigest_negatives",
-        "_tdigest",
-        "_kll",
-        "_cpc",
-        "_hll",
-        "_theta",
-        "_topk",
-        "_count",
-    )
-    lowered = state_name.casefold()
-    for suffix in suffixes:
-        if lowered.endswith(suffix):
-            return state_name[: -len(suffix)]
+        if value := getattr(spec, key, None):
+            return str(value)
     return ""
 
 
@@ -699,10 +678,7 @@ def _state_business_scope(
     processor: model.Processor,
     state_name: str,
 ) -> str:
-    if processor.kind == "funnel":
-        for stage_name in model.funnel_stage_names(processor):
-            if state_name.casefold().startswith(stage_name.casefold()):
-                return stage_name
+    del processor, state_name
     return ""
 
 
@@ -737,11 +713,15 @@ def recipe_algorithm_label(state_type: str) -> str:
 
 
 def _state_parameter_summary(spec: model.StateSpec) -> str:
-    extra = dict(spec.model_extra or {})
+    values = {
+        key: getattr(spec, key)
+        for key in ("lg_k", "k", "lg_max_map_size")
+        if getattr(spec, key, None) is not None
+    }
     return " · ".join(
-        f"{key}={extra[key]}"
-        for key in ("lg_k", "k", "capacity", "lg_max_map_size")
-        if key in extra
+        f"{key}={values[key]}"
+        for key in ("lg_k", "k", "lg_max_map_size")
+        if key in values
     )
 
 

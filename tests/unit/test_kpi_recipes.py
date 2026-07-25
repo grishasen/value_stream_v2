@@ -12,7 +12,6 @@ from jsonschema import Draft202012Validator
 
 from valuestream.config import model
 from valuestream.recipes import (
-    digest_state_property,
     instantiate_metric,
     instantiate_tile,
     load_builtin_kpi_recipes,
@@ -117,12 +116,18 @@ def test_sketch_binding_options_propose_every_grouping_field_and_algorithm() -> 
             "source": "events",
             "kind": "binary_outcome",
             "group_by": ["Channel", "Placement"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "states": {
                 "UniqueSubjects_hll": {
                     "type": "hll",
                     "source_column": "SubjectID",
                     "lg_k": 12,
                 }
+            },
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
             },
         }
     )
@@ -180,6 +185,13 @@ def test_binding_options_reconcile_stale_generated_state_after_catalog_rerun() -
             "source": "events",
             "kind": "binary_outcome",
             "group_by": ["Channel"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {"Count": {"type": "count"}},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
         }
     )
 
@@ -203,9 +215,15 @@ def test_distribution_binding_options_separate_field_from_algorithm() -> None:
             "id": "latency",
             "source": "events",
             "kind": "numeric_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "properties": ["Latency"],
             "states": {
-                "Latency_tdigest": {"type": "tdigest", "k": 500},
-                "Latency_kll": {"type": "kll", "k": 200},
+                "Latency_tdigest": {
+                    "type": "tdigest",
+                    "source_column": "Latency",
+                    "k": 500,
+                },
+                "Latency_kll": {"type": "kll", "source_column": "Latency", "k": 200},
             },
         }
     )
@@ -224,6 +242,8 @@ def test_distribution_recipe_excludes_outcome_conditioned_digests() -> None:
             "id": "scores",
             "source": "events",
             "kind": "score_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "score_properties": [{"column": "Propensity", "role": "primary"}],
             "states": {
                 "Propensity_tdigest": {
                     "type": "tdigest",
@@ -232,8 +252,14 @@ def test_distribution_recipe_excludes_outcome_conditioned_digests() -> None:
                 "Propensity_positive": {
                     "type": "tdigest",
                     "source_column": "Propensity",
+                    "score_property": "Propensity",
                     "outcome": "positive",
                 },
+            },
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
             },
         }
     )
@@ -282,10 +308,11 @@ def test_recipe_binding_ui_uses_field_and_algorithm_not_state_id() -> None:
         processor = config_model.BinaryOutcomeProcessor.model_validate(
             {
                 "id": "engagement",
-                "source": "events",
-                "kind": "binary_outcome",
-                "group_by": ["Channel", "Placement"],
-                "states": {
+                    "source": "events",
+                    "kind": "binary_outcome",
+                    "group_by": ["Channel", "Placement"],
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "states": {
                     "UniqueSubjects_hll": {
                         "type": "hll",
                         "source_column": "SubjectID",
@@ -295,9 +322,14 @@ def test_recipe_binding_ui_uses_field_and_algorithm_not_state_id() -> None:
                         "type": "hll",
                         "source_column": "InteractionID",
                         "lg_k": 12,
+                        },
                     },
-                },
-            }
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked"],
+                        "negative_values": ["Impression"],
+                    },
+                }
         )
         st.session_state["bindings"] = _render_recipe_bindings(
             recipe,
@@ -347,6 +379,7 @@ def test_recipe_library_requires_preview_before_returning_install_request() -> N
         catalog = config_model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "preview",
                     "sources": [
                         {
@@ -356,17 +389,30 @@ def test_recipe_library_requires_preview_before_returning_install_request() -> N
                     ],
                 },
                 "processors": {
+                    "catalog_version": 2,
                     "processors": [
                         {
                             "id": "engagement",
                             "source": "events",
                             "kind": "binary_outcome",
-                            "dimensions": ["Channel"],
+                            "group_by": ["Channel"],
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
+                            "states": {
+                                "Count": {"type": "count"},
+                                "Positives": {"type": "count", "outcome": "positive"},
+                                "Negatives": {"type": "count", "outcome": "negative"},
+                            },
+                            "outcome": {
+                                "column": "Outcome",
+                                "positive_values": ["Clicked"],
+                                "negative_values": ["Impression"],
+                            },
                         }
                     ]
                 },
-                "metrics": {"metrics": {}},
+                "metrics": {"catalog_version": 2, "metrics": {}},
                 "dashboards": {
+                    "catalog_version": 2,
                     "dashboards": [
                         {
                             "id": "overview",
@@ -418,9 +464,11 @@ def test_recipe_readiness_distinguishes_mapping_from_backfill() -> None:
             "id": "latency",
             "source": "events",
             "kind": "numeric_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "properties": ["Latency", "Cost"],
             "states": {
-                "Latency_tdigest": {"type": "tdigest"},
-                "Cost_tdigest": {"type": "tdigest"},
+                "Latency_tdigest": {"type": "tdigest", "source_column": "Latency"},
+                "Cost_tdigest": {"type": "tdigest", "source_column": "Cost"},
             },
         }
     )
@@ -437,7 +485,7 @@ def test_recipe_instantiation_materializes_valid_metric_and_tile_with_provenance
     readiness = recipe_readiness(recipe, processor)
 
     metric = instantiate_metric(recipe, processor, "Test_Engagement", readiness.resolved_inputs)
-    tile = instantiate_tile(recipe, "Test_Engagement", "test_engagement_tile")
+    tile = instantiate_tile(recipe, processor, "Test_Engagement", "test_engagement_tile")
 
     assert metric["expression"]["den"]["op"] == "add"
     assert metric["recipe"] == {"id": recipe.id, "version": recipe.version}
@@ -452,6 +500,7 @@ def test_install_preview_contains_exact_yaml_patch_and_materialization_plan() ->
     catalog = model.Catalog.model_validate(
         {
             "pipelines": {
+                "catalog_version": 2,
                 "workspace": "preview",
                 "sources": [
                     {
@@ -460,19 +509,28 @@ def test_install_preview_contains_exact_yaml_patch_and_materialization_plan() ->
                         "schema": {"natural_key": ["CustomerID"]},
                     }
                 ],
-            },
-            "processors": {
+        },
+        "processors": {
+            "catalog_version": 2,
                 "processors": [
                     {
                         "id": "engagement",
-                        "source": "events",
-                        "kind": "binary_outcome",
-                        "dimensions": ["Channel"],
-                    }
-                ]
-            },
-            "metrics": {"metrics": {}},
-            "dashboards": {
+                    "source": "events",
+                    "kind": "binary_outcome",
+                    "group_by": ["Channel"],
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "states": {"Count": {"type": "count"}},
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked"],
+                        "negative_values": ["Impression"],
+                    },
+                }
+            ]
+        },
+        "metrics": {"catalog_version": 2, "metrics": {}},
+        "dashboards": {
+            "catalog_version": 2,
                 "dashboards": [
                     {
                         "id": "overview",
@@ -538,17 +596,29 @@ def test_roc_recipe_rejects_mismatched_score_digest_pair() -> None:
             "id": "scores",
             "source": "events",
             "kind": "score_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "score_properties": [
+                {"column": "Propensity", "role": "primary"},
+                {"column": "Priority", "role": "auxiliary"},
+            ],
             "states": {
                 "Propensity_positive": {
                     "type": "tdigest",
+                    "source_column": "Propensity",
                     "outcome": "positive",
                     "score_property": "Propensity",
                 },
                 "Priority_negative": {
                     "type": "tdigest",
+                    "source_column": "Priority",
                     "outcome": "negative",
                     "score_property": "Priority",
                 },
+            },
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
             },
         }
     )
@@ -566,64 +636,6 @@ def test_roc_recipe_rejects_mismatched_score_digest_pair() -> None:
 
 
 @pytest.mark.unit
-def test_roc_recipe_resolves_legacy_score_aliases_to_business_fields() -> None:
-    recipe = _recipe("model_quality.roc_auc")
-    processor = model.ScoreDistributionProcessor.model_validate(
-        {
-            "id": "scores",
-            "source": "events",
-            "kind": "score_distribution",
-            "score_columns": {
-                "primary": "Propensity",
-                "calibrated": "FinalPropensity",
-            },
-            "states": {
-                "tdigest_positives": {
-                    "type": "tdigest",
-                    "score": "primary",
-                    "outcome": "positive",
-                },
-                "tdigest_negatives": {
-                    "type": "tdigest",
-                    "score": "primary",
-                    "outcome": "negative",
-                },
-                "tdigest_finalprop_positives": {
-                    "type": "tdigest",
-                    "score": "calibrated",
-                    "outcome": "positive",
-                },
-                "tdigest_finalprop_negatives": {
-                    "type": "tdigest",
-                    "score": "calibrated",
-                    "outcome": "negative",
-                },
-            },
-        }
-    )
-    readiness = recipe_readiness(recipe, processor)
-
-    positive_options = recipe_binding_options(
-        recipe.inputs[0], processor, readiness.input_options["positive_digest"]
-    )
-
-    assert [option.field for option in positive_options] == [
-        "Propensity",
-        "FinalPropensity",
-    ]
-    with pytest.raises(ValueError, match="same score property"):
-        instantiate_metric(
-            recipe,
-            processor,
-            "Bad_AUC",
-            {
-                "positive_digest": "tdigest_positives",
-                "negative_digest": "tdigest_finalprop_negatives",
-            },
-        )
-
-
-@pytest.mark.unit
 def test_roc_recipe_can_propose_a_matched_digest_pair_for_a_new_score_field() -> None:
     recipe = _recipe("model_quality.roc_auc")
     processor = model.ScoreDistributionProcessor.model_validate(
@@ -632,7 +644,14 @@ def test_roc_recipe_can_propose_a_matched_digest_pair_for_a_new_score_field() ->
             "source": "events",
             "kind": "score_distribution",
             "group_by": ["NewScore"],
-            "score_properties": ["Propensity"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "score_properties": [{"column": "Propensity", "role": "primary"}],
+            "states": {"Count": {"type": "count"}},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
         }
     )
     readiness = recipe_readiness(recipe, processor)
@@ -691,13 +710,14 @@ def test_funnel_recipe_rejects_identical_start_and_completion() -> None:
             "id": "funnel",
             "source": "events",
             "kind": "funnel",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "stages": [
                 {"name": "Started", "when": {"col": "Started"}},
                 {"name": "Completed", "when": {"col": "Completed"}},
             ],
             "states": {
-                "Started_Count": {"type": "count"},
-                "Completed_Count": {"type": "count"},
+                "Started_Count": {"type": "count", "stage": "Started"},
+                "Completed_Count": {"type": "count", "stage": "Completed"},
             },
         }
     )
@@ -712,68 +732,6 @@ def test_funnel_recipe_rejects_identical_start_and_completion() -> None:
                 "completion_count": "Started_Count",
             },
         )
-
-
-@pytest.mark.unit
-def test_recipe_state_additions_preserve_entity_set_default_states() -> None:
-    processor = model.EntitySetProcessor.model_validate(
-        {"id": "cohort", "source": "events", "kind": "entity_set", "entity": "SubjectID"}
-    )
-
-    configured = processor_with_recipe_states(
-        processor,
-        {"Channel_cpc": {"type": "cpc", "source_column": "Channel", "lg_k": 11}},
-    )
-
-    effective = model.effective_processor_states(configured)
-    assert {"ActiveUsers_cpc", "ActiveUsers_theta", "Channel_cpc"} <= set(effective)
-    assert effective["ActiveUsers_cpc"].model_extra["source_column"] == "SubjectID"
-
-
-@pytest.mark.unit
-def test_recipe_state_additions_preserve_entity_lifecycle_default_states() -> None:
-    processor = model.EntityLifecycleProcessor.model_validate(
-        {"id": "lifecycle", "source": "orders", "kind": "entity_lifecycle"}
-    )
-
-    configured = processor_with_recipe_states(
-        processor,
-        {"Channel_topk": {"type": "topk", "source_column": "Channel", "lg_max_map_size": 10}},
-    )
-
-    effective = model.effective_processor_states(configured)
-    assert {
-        "unique_holdings",
-        "lifetime_value",
-        "MinPurchasedDate",
-        "MaxPurchasedDate",
-        "UniquePurchasers_cpc",
-        "Channel_topk",
-    } <= set(effective)
-
-
-@pytest.mark.unit
-def test_funnel_recipe_is_ready_without_hand_duplicated_stage_counts() -> None:
-    recipe = _recipe("funnel.conversion_rate")
-    processor = model.FunnelProcessor.model_validate(
-        {
-            "id": "funnel",
-            "source": "events",
-            "kind": "funnel",
-            "stages": [
-                {"name": "Impression", "when": {"col": "Impression"}},
-                {"name": "Conversion", "when": {"col": "Conversion"}},
-            ],
-        }
-    )
-
-    readiness = recipe_readiness(recipe, processor)
-
-    assert readiness.status == "ready"
-    assert readiness.resolved_inputs == {
-        "start_count": "Impression_Count",
-        "completion_count": "Conversion_Count",
-    }
 
 
 @pytest.mark.unit
@@ -797,12 +755,24 @@ def _recipe(recipe_id: str):
 
 
 def _binary_processor(states: dict[str, dict[str, object]]) -> model.BinaryOutcomeProcessor:
+    if not states:
+        states = {
+            "Count": {"type": "count"},
+            "Positives": {"type": "count", "outcome": "positive"},
+            "Negatives": {"type": "count", "outcome": "negative"},
+        }
     return model.BinaryOutcomeProcessor.model_validate(
         {
             "id": "engagement",
             "source": "events",
             "kind": "binary_outcome",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "states": states,
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
         }
     )
 
@@ -815,29 +785,37 @@ def test_distribution_boxplot_recipe_materializes_quantile_free_metric_and_tile(
             "id": "descriptive",
             "source": "ih",
             "kind": "numeric_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "properties": ["Propensity"],
+            "states": {
+                "Propensity_tdigest": {
+                    "type": "tdigest",
+                    "source_column": "Propensity",
+                }
+            },
         }
     )
 
     metric_def = instantiate_metric(
         recipe, processor, "PropensityDistribution", {"digest_state": "Propensity_tdigest"}
     )
-    assert metric_def["kind"] == "tdigest_quantile"
-    # A distribution metric stores no single quantile; the model reads the
-    # median by default and boxplot tiles pull the full quantile suite.
+    assert metric_def["kind"] == "distribution"
+    # A distribution metric stores no single quantile; boxplot tiles pull the
+    # full quantile suite from the selected metric.
     assert "quantile" not in metric_def
     parsed = model.Metrics.model_validate(
-        {"metrics": {"PropensityDistribution": metric_def}}
+        {"catalog_version": 2, "metrics": {"PropensityDistribution": metric_def}}
     ).metrics["PropensityDistribution"]
-    assert parsed.quantile == 0.5
+    assert isinstance(parsed, model.DistributionMetric)
+    assert parsed.state == "Propensity_tdigest"
 
     tile_def = instantiate_tile(
-        recipe, "PropensityDistribution", "tile_dist", {"digest_state": "Propensity_tdigest"}
+        recipe,
+        processor,
+        "PropensityDistribution",
+        "tile_dist",
+        {"digest_state": "Propensity_tdigest"},
     )
     assert tile_def["chart"] == "boxplot"
     assert tile_def["metric"] == "PropensityDistribution"
-    assert tile_def["property"] == "Propensity"
-
-    assert digest_state_property("Latency_kll") == "Latency"
-    with pytest.raises(ValueError, match="digest_state"):
-        instantiate_tile(recipe, "PropensityDistribution", "tile_dist", {})
+    assert "property" not in tile_def

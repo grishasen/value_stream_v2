@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
+from pydantic import TypeAdapter
 
 import valuestream.processors.processors_helper as p3
 from valuestream.config import model
 from valuestream.states import tdigest, theta, topk
+
+_STATE_ADAPTER = TypeAdapter(model.StateSpec)
+
+
+def _state(payload: dict[str, object]) -> model.StateSpec:
+    return _STATE_ADAPTER.validate_python(payload)
 
 
 @pytest.mark.unit
@@ -23,9 +30,18 @@ def test_merge_state_frame_combines_pooled_variance() -> None:
         }
     )
     specs = {
-        "X_Count": model.StateSpec.model_validate({"type": "count"}),
-        "X_Mean": model.StateSpec.model_validate({"type": "pooled_mean", "weight": "X_Count"}),
-        "X_Var": model.StateSpec.model_validate({"type": "pooled_variance"}),
+        "X_Count": _state({"type": "count"}),
+        "X_Mean": _state(
+            {"type": "pooled_mean", "source_column": "X", "weight": "X_Count"}
+        ),
+        "X_Var": _state(
+            {
+                "type": "pooled_variance",
+                "source_column": "X",
+                "mean": "X_Mean",
+                "weight": "X_Count",
+            }
+        ),
     }
 
     merged = p3.merge_state_frame(frame, specs, ["g"])
@@ -38,7 +54,16 @@ def test_merge_state_frame_combines_pooled_variance() -> None:
 @pytest.mark.unit
 def test_merge_state_frame_pooled_variance_requires_companions() -> None:
     frame = pl.DataFrame({"g": ["A", "A"], "X_Var": [2.0, 2.0]})
-    specs = {"X_Var": model.StateSpec.model_validate({"type": "pooled_variance"})}
+    specs = {
+        "X_Var": _state(
+            {
+                "type": "pooled_variance",
+                "source_column": "X",
+                "mean": "X_Mean",
+                "weight": "X_Count",
+            }
+        )
+    }
 
     with pytest.raises(ValueError, match="pooled_variance state 'X_Var' requires companion"):
         p3.merge_state_frame(frame, specs, ["g"])
@@ -55,8 +80,8 @@ def test_compact_state_frame_projects_unique_identity_groups_without_merging() -
         }
     )
     specs = {
-        "Count": model.StateSpec.model_validate({"type": "count"}),
-        "X_tdigest": model.StateSpec.model_validate({"type": "tdigest"}),
+        "Count": _state({"type": "count"}),
+        "X_tdigest": _state({"type": "tdigest", "source_column": "X"}),
     }
 
     def unexpected_merge(*_args: object, **_kwargs: object) -> pl.DataFrame:
@@ -85,10 +110,17 @@ def test_compact_state_frame_preserves_singleton_pooled_state_semantics() -> Non
         }
     )
     specs = {
-        "Count": model.StateSpec.model_validate({"type": "count"}),
-        "X_Mean": model.StateSpec.model_validate({"type": "pooled_mean", "weight": "Count"}),
-        "X_Var": model.StateSpec.model_validate(
-            {"type": "pooled_variance", "mean": "X_Mean", "weight": "Count"}
+        "Count": _state({"type": "count"}),
+        "X_Mean": _state(
+            {"type": "pooled_mean", "source_column": "X", "weight": "Count"}
+        ),
+        "X_Var": _state(
+            {
+                "type": "pooled_variance",
+                "source_column": "X",
+                "mean": "X_Mean",
+                "weight": "Count",
+            }
         ),
     }
     expected = p3.merge_state_frame(frame, specs, ["g"]).sort("g")
@@ -115,8 +147,8 @@ def test_compact_state_frame_falls_back_for_duplicate_identity_groups() -> None:
         }
     )
     specs = {
-        "Count": model.StateSpec.model_validate({"type": "count"}),
-        "X_tdigest": model.StateSpec.model_validate({"type": "tdigest"}),
+        "Count": _state({"type": "count"}),
+        "X_tdigest": _state({"type": "tdigest", "source_column": "X"}),
     }
     calls = 0
 
@@ -141,7 +173,7 @@ def test_compact_state_frame_falls_back_for_duplicate_identity_groups() -> None:
 @pytest.mark.unit
 def test_compact_state_frame_uses_merge_for_coarser_level() -> None:
     frame = pl.DataFrame({"g": ["A", "B"], "Count": [2, 3]})
-    specs = {"Count": model.StateSpec.model_validate({"type": "count"})}
+    specs = {"Count": _state({"type": "count"})}
     calls = 0
 
     def merge(frame: pl.DataFrame, *, group_columns: list[str]) -> pl.DataFrame:
@@ -164,12 +196,11 @@ def test_compact_state_frame_uses_merge_for_coarser_level() -> None:
 @pytest.mark.unit
 def test_native_sketch_string_cast_preserves_python_boolean_spelling() -> None:
     frame = pl.DataFrame({"g": ["A", "A", "A"], "flag": [True, True, False]})
-    spec = model.StateSpec.model_validate({"type": "theta", "source_column": "flag", "lg_k": 12})
+    spec = _state({"type": "theta", "source_column": "flag", "lg_k": 12})
     expression, metadata = p3.sketch_build_expr(
         "flags",
         spec,
         existing=set(frame.columns),
-        default_source_column="flag",
         source_dtypes=frame.schema,
     )
     assert expression is not None
@@ -193,14 +224,13 @@ def test_topk_native_string_cast_preserves_original_sketch_stream() -> None:
             "category": ["Web", "Web", "Web", "Mobile", "Mobile", None],
         }
     )
-    spec = model.StateSpec.model_validate(
+    spec = _state(
         {"type": "topk", "source_column": "category", "lg_max_map_size": 10}
     )
     expression, metadata = p3.sketch_build_expr(
         "categories",
         spec,
         existing=set(frame.columns),
-        default_source_column="category",
         source_dtypes=frame.schema,
     )
     assert expression is not None
@@ -221,14 +251,13 @@ def test_topk_native_string_cast_preserves_original_sketch_stream() -> None:
 def test_topk_native_string_cast_preserves_over_capacity_update_order() -> None:
     values = [f"k{(index * 17) % 40}" for index in range(371)]
     frame = pl.DataFrame({"g": ["A"] * len(values), "category": values})
-    spec = model.StateSpec.model_validate(
+    spec = _state(
         {"type": "topk", "source_column": "category", "lg_max_map_size": 3}
     )
     expression, metadata = p3.sketch_build_expr(
         "categories",
         spec,
         existing=set(frame.columns),
-        default_source_column="category",
         source_dtypes=frame.schema,
     )
     assert expression is not None
@@ -244,14 +273,13 @@ def test_topk_native_string_cast_preserves_over_capacity_update_order() -> None:
 @pytest.mark.unit
 def test_topk_keeps_per_value_python_string_fallback_when_native_cast_is_not_exact() -> None:
     frame = pl.DataFrame({"g": ["A", "A"], "value": [0.0, -0.0]})
-    spec = model.StateSpec.model_validate(
+    spec = _state(
         {"type": "topk", "source_column": "value", "lg_max_map_size": 10}
     )
     expression, metadata = p3.sketch_build_expr(
         "values",
         spec,
         existing=set(frame.columns),
-        default_source_column="value",
         source_dtypes=frame.schema,
     )
     assert expression is not None

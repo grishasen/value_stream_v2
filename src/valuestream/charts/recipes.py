@@ -26,22 +26,22 @@ _AGGREGATE_CHART_PROCESSORS = (
 METRIC_OWNED_Y_CHARTS = frozenset({"line", "bar", "stacked_area", "waterfall", "combo", "pareto"})
 METRIC_OWNED_RADIAL_CHARTS = frozenset({"bar_polar"})
 METRIC_OWNED_COLOR_CHARTS = frozenset({"treemap"})
-METRIC_OWNED_VALUES_CHARTS = frozenset({"donut"})
+METRIC_OWNED_VALUES_CHARTS = frozenset({"donut", "treemap"})
 METRIC_OWNED_VALUE_CHARTS = frozenset(
     {"kpi_card", "gauge", "sankey", *METRIC_OWNED_Y_CHARTS, *METRIC_OWNED_RADIAL_CHARTS}
 )
-LEGACY_HEATMAP_CHARTS = frozenset({"calendar_heatmap", "cohort_heatmap", "descriptive_heatmap"})
-HEATMAP_CHARTS = frozenset({"heatmap", *LEGACY_HEATMAP_CHARTS})
+HEATMAP_CHARTS = frozenset({"heatmap"})
 METRIC_OWNED_INTENSITY_CHARTS = HEATMAP_CHARTS
-INTERVAL_METRIC_OUTPUT_FIELDS = frozenset(
+METRIC_OUTPUT_SELECTABLE_CHARTS = frozenset(
     {
-        "y",
-        "error_y",
-        "error_y_lower",
-        "error_y_upper",
-        "error_y_minus",
-        "error_y_plus",
+        *METRIC_OWNED_VALUE_CHARTS,
+        *METRIC_OWNED_VALUES_CHARTS,
+        *METRIC_OWNED_COLOR_CHARTS,
+        *METRIC_OWNED_INTENSITY_CHARTS,
     }
+)
+INTERVAL_METRIC_OUTPUT_FIELDS = frozenset(
+    {"metric_output", "lower_output", "upper_output"}
 )
 
 
@@ -62,24 +62,23 @@ CHART_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     # Heatmap intensity is supplied by the selected metric. With no Y axis a
     # daily X axis renders as a calendar; otherwise X/Y render a matrix.
     "heatmap": ("x",),
-    "cohort_heatmap": ("x", "y"),
     "scatter": ("x", "y"),
-    # The selected metric supplies Y. ``y2`` names a compatible secondary
+    # The selected metric supplies Y. ``secondary_metric`` names a compatible secondary
     # metric, not another arbitrary aggregate output column.
-    "combo": ("x", "y2"),
-    "interval": ("x", "y"),
+    "combo": ("x", "secondary_metric"),
+    "interval": ("x", "metric_output"),
     # Donut slice values come from the selected metric.
     "donut": ("names",),
-    "geo_map": ("locations", "value"),
+    "geo_map": ("locations",),
     "table": (),
-    "calendar_heatmap": ("date",),
     # Polar radius comes from the selected metric.
-    "bar_polar": ("theta", "color"),
-    # Sankey link values come from the selected metric.
-    "sankey": ("source", "target"),
+    "bar_polar": ("theta",),
+    # Sankey links connect each adjacent pair in an ordered dimension path.
+    # Link values come from the selected metric.
+    "sankey": ("path",),
     # Gauges, like KPI cards, display the selected metric's primary output.
     "gauge": (),
-    "funnel": ("stages", "color"),
+    "funnel": ("stages",),
     "boxplot": (),
     "histogram": ("property",),
     "calibration_curve": (),
@@ -92,7 +91,6 @@ CHART_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "corr": ("x", "y"),
     "model": (),
     "descriptive_line": ("x", "property", "score"),
-    "descriptive_heatmap": ("x", "y", "property", "score"),
     "experiment_z_score": ("x", "y"),
     "experiment_odds_ratio": ("x", "y"),
     "clv_treemap": ("path",),
@@ -106,24 +104,17 @@ CHART_OPTIONAL_FIELDS: dict[str, tuple[str, ...]] = {
     "waterfall": (),
     "pareto": ("color", "facet_row", "facet_col"),
     "treemap": (),
-    "heatmap": ("y", "property", "score"),
-    "cohort_heatmap": (),
+    "heatmap": ("y",),
     "scatter": ("color", "size", "animation_frame", "animation_group", "facet_row", "facet_col"),
     "combo": ("color", "facet_row", "facet_col"),
-    "interval": (
-        "error_y",
-        "error_y_lower",
-        "error_y_upper",
-        "color",
-        "facet_row",
-        "facet_col",
-    ),
+    "interval": ("lower_output", "upper_output", "color", "facet_row", "facet_col"),
     "donut": ("color",),
     "geo_map": ("lat", "lon", "color", "size"),
     "table": ("columns", "group_by"),
+    "bar_polar": ("color",),
     "gauge": ("facet_row", "facet_col"),
     "funnel": ("x", "facet_row", "facet_col"),
-    "boxplot": ("property", "x", "color", "facet_row", "facet_col"),
+    "boxplot": ("x", "color", "facet_row", "facet_col"),
     "histogram": ("color", "facet_row", "facet_col"),
     "calibration_curve": ("color", "facet_row", "facet_col"),
     "roc_curve": ("color", "facet_row", "facet_col"),
@@ -136,11 +127,11 @@ CHART_OPTIONAL_FIELDS: dict[str, tuple[str, ...]] = {
     "descriptive_line": ("color", "facet_row", "facet_col"),
     "experiment_z_score": ("color", "facet_row", "facet_col"),
     "experiment_odds_ratio": ("color", "facet_row", "facet_col"),
-    "clv_treemap": ("value", "color"),
+    "clv_treemap": (),
 }
 
 
-# Each tuple is one required role. Alternatives are accepted legacy/runtime aliases.
+# Each tuple is one required canonical role.
 TILE_REQUIRED_ALTERNATIVES: dict[str, tuple[tuple[str, ...], ...]] = {
     "line": (("x",),),
     "stacked_area": (("x",), ("color",)),
@@ -148,27 +139,24 @@ TILE_REQUIRED_ALTERNATIVES: dict[str, tuple[tuple[str, ...], ...]] = {
     "kpi_card": (),
     "waterfall": (("x",),),
     "pareto": (("x",),),
-    "treemap": (("path", "x", "names"),),
+    "treemap": (("path",),),
     "heatmap": (("x",),),
-    "cohort_heatmap": (("x",), ("y",)),
     "scatter": (("x",), ("y",)),
-    "combo": (("x",), ("y2", "line_y")),
-    "interval": (("x",), ("y",)),
-    "donut": (("names", "x"),),
-    "geo_map": (("locations", "location", "lat"), ("value", "color", "y")),
-    "calendar_heatmap": (("date", "x"),),
-    "bar_polar": (("theta",), ("color",)),
-    "sankey": (("source",), ("target",)),
+    "combo": (("x",), ("secondary_metric",)),
+    "interval": (("x",), ("metric_output",)),
+    "donut": (("names",),),
+    "geo_map": (("locations", "lat"),),
+    "bar_polar": (("theta",),),
+    "sankey": (("path",),),
     "gauge": (),
-    "funnel": (("stages",), ("color",)),
+    "funnel": (("stages",),),
     "boxplot": (),
-    "histogram": (("property", "x", "y"),),
+    "histogram": (("property",),),
     "corr": (("x",), ("y",)),
     "descriptive_line": (("x",), ("property",), ("score",)),
-    "descriptive_heatmap": (("x",), ("y",), ("property",), ("score",)),
     "experiment_z_score": (("x",), ("y",)),
     "experiment_odds_ratio": (("x",), ("y",)),
-    "clv_treemap": (("path", "x", "names"),),
+    "clv_treemap": (("path",),),
 }
 
 
@@ -177,96 +165,61 @@ def chart_field_controls(chart_kind: str) -> tuple[str, ...]:
 
     required = CHART_REQUIRED_FIELDS.get(chart_kind)
     if required is None:
-        return ("x", "y", "color", "facet_row", "facet_col")
-    return tuple(dict.fromkeys((*required, *CHART_OPTIONAL_FIELDS.get(chart_kind, ()))))
+        return ()
+    metric_output = ("metric_output",) if chart_kind in METRIC_OUTPUT_SELECTABLE_CHARTS else ()
+    return tuple(
+        dict.fromkeys((*metric_output, *required, *CHART_OPTIONAL_FIELDS.get(chart_kind, ())))
+    )
 
 
 _TILE_RUNTIME_FIELDS = {
     "animation_frame",
     "animation_group",
-    "axis_title_standoff",
-    "barmode",
-    "barnorm",
     "bins",
-    "cell_fill_color",
-    "color_continuous_scale",
+    "color",
+    "columns",
     "conditional_formatting",
-    "connector_color",
-    "cumulative_label",
-    "date",
-    "default_color",
-    "delta_reference",
-    "direction",
-    "error_y",
-    "error_y_lower",
-    "error_y_minus",
-    "error_y_plus",
-    "error_y_upper",
     "facet_col",
-    "facet_column",
     "facet_row",
-    "facets",
-    "filters",
     "goal_line",
-    "goal_lines",
-    "grain",
     "group_by",
-    "groupnorm",
-    "header_fill_color",
-    "fallback_property",
-    "field",
     "height",
     "hole",
     "horizon",
-    "hover_name",
     "labels",
     "lat",
-    "layout",
-    "legend_title",
-    "line_y",
-    "location",
     "locationmode",
     "locations",
     "log_x",
     "log_y",
+    "lower_output",
     "lon",
-    "measure",
+    "metric_output",
     "names",
-    "number_format",
     "path",
     "property",
-    "quality_help",
-    "quality_label",
-    "r",
     "reference",
     "references",
     "scale_mode",
     "score",
-    "show_chart_title",
+    "secondary_metric",
     "show_trend_delta",
     "showlegend",
     "size",
     "sort_by",
     "sort_direction",
-    "source",
     "stages",
-    "summary_aggregation",
-    "target",
     "theme",
     "theta",
     "top_n",
-    "trend_delta",
-    "value",
+    "upper_output",
     "value_format",
-    "values",
     "width",
     "x",
     "x_axis_title",
     "y",
-    "y2",
     "y2_axis_title",
     "y_axis_title",
-    "z",
 }
 SUPPORTED_TILE_FIELDS = frozenset(
     {
@@ -293,21 +246,17 @@ RECIPES: dict[str, ChartRecipe] = {
     "pareto": ChartRecipe("pareto", _AGGREGATE_CHART_PROCESSORS),
     "treemap": ChartRecipe("treemap", _AGGREGATE_CHART_PROCESSORS),
     "heatmap": ChartRecipe("heatmap", _AGGREGATE_CHART_PROCESSORS),
-    "cohort_heatmap": ChartRecipe("cohort_heatmap", _AGGREGATE_CHART_PROCESSORS),
     "scatter": ChartRecipe("scatter", _AGGREGATE_CHART_PROCESSORS),
     "combo": ChartRecipe("combo", _AGGREGATE_CHART_PROCESSORS),
     "interval": ChartRecipe("interval", _AGGREGATE_CHART_PROCESSORS),
     "donut": ChartRecipe("donut", _AGGREGATE_CHART_PROCESSORS),
     "geo_map": ChartRecipe("geo_map", _AGGREGATE_CHART_PROCESSORS),
     "table": ChartRecipe("table", _AGGREGATE_CHART_PROCESSORS),
-    "calendar_heatmap": ChartRecipe(
-        "calendar_heatmap", ("binary_outcome", "score_distribution", "snapshot")
-    ),
     "bar_polar": ChartRecipe("bar_polar", ("binary_outcome",)),
     "sankey": ChartRecipe("sankey", _AGGREGATE_CHART_PROCESSORS),
     "gauge": ChartRecipe("gauge", _AGGREGATE_CHART_PROCESSORS),
     "funnel": ChartRecipe("funnel", ("funnel", "numeric_distribution")),
-    "boxplot": ChartRecipe("boxplot", ("numeric_distribution",)),
+    "boxplot": ChartRecipe("boxplot", ("numeric_distribution", "score_distribution")),
     "histogram": ChartRecipe("histogram", ("numeric_distribution", "entity_lifecycle")),
     "calibration_curve": ChartRecipe("calibration_curve", ("score_distribution",)),
     "roc_curve": ChartRecipe("roc_curve", ("score_distribution",)),
@@ -319,7 +268,6 @@ RECIPES: dict[str, ChartRecipe] = {
     "corr": ChartRecipe("corr", ("entity_lifecycle",), "frequency", "monetary_value"),
     "model": ChartRecipe("model", ("entity_lifecycle",)),
     "descriptive_line": ChartRecipe("descriptive_line", ("numeric_distribution",)),
-    "descriptive_heatmap": ChartRecipe("descriptive_heatmap", ("numeric_distribution",)),
     "experiment_z_score": ChartRecipe("experiment_z_score", ("binary_outcome",)),
     "experiment_odds_ratio": ChartRecipe("experiment_odds_ratio", ("binary_outcome",)),
     "clv_treemap": ChartRecipe("clv_treemap", ("entity_lifecycle",)),
@@ -331,7 +279,7 @@ __all__ = [
     "CHART_REQUIRED_FIELDS",
     "HEATMAP_CHARTS",
     "INTERVAL_METRIC_OUTPUT_FIELDS",
-    "LEGACY_HEATMAP_CHARTS",
+    "METRIC_OUTPUT_SELECTABLE_CHARTS",
     "METRIC_OWNED_COLOR_CHARTS",
     "METRIC_OWNED_INTENSITY_CHARTS",
     "METRIC_OWNED_RADIAL_CHARTS",

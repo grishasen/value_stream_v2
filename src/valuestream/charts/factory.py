@@ -58,13 +58,7 @@ _TIME_COLUMNS = {
 }
 _CURVE_CHARTS = {"roc_curve", "precision_recall_curve", "gain_curve", "lift_curve"}
 _CURVE_LIST_COLUMNS = {"fpr", "tpr", "precision", "recall"}
-_COLOR_VALUE_CHARTS = {
-    "calendar_heatmap",
-    "cohort_heatmap",
-    "descriptive_heatmap",
-    "heatmap",
-    "treemap",
-}
+_COLOR_VALUE_CHARTS = {"heatmap", "treemap"}
 _TREEMAP_LIGHT_COLORSCALE = [
     "#334155",
     "#315B73",
@@ -150,6 +144,10 @@ def render_chart(  # noqa: PLR0912, PLR0915
     if kind == "sankey":
         # Sankey link values are the selected metric's primary output.
         tile["value"] = _metric_value_column(rows, tile)
+    if kind == "geo_map":
+        tile["value"] = _metric_value_column(rows, tile)
+    if kind == "interval":
+        tile["y"] = _metric_value_column(rows, tile)
     rows = _apply_scale_mode(rows, tile)
     if tile.get("scale_mode") == "percent_change" and not tile.get("value_format"):
         tile["value_format"] = "percent"
@@ -380,10 +378,17 @@ def _kpi_card(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
 def _metric_value_column(rows: pl.DataFrame, tile: Mapping[str, Any]) -> str:
     """Resolve the selected metric's primary numeric output for scalar displays."""
 
-    metric_name = str(tile.get("metric") or "")
-    if metric_name in rows.columns and rows.schema[metric_name].is_numeric():
-        return metric_name
-    return _first_numeric_column(rows) or (rows.columns[-1] if rows.columns else "")
+    output = str(tile.get("metric_output") or tile.get("metric") or "")
+    if output not in rows.columns:
+        raise ValueError(
+            f"tile {tile.get('id', '<unknown>')!r} requires metric output {output!r}, "
+            "but the query did not return it"
+        )
+    if not rows.schema[output].is_numeric():
+        raise ValueError(
+            f"tile {tile.get('id', '<unknown>')!r} metric output {output!r} must be numeric"
+        )
+    return output
 
 
 def _waterfall(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
@@ -454,23 +459,13 @@ def _treemap(rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, An
 
 def _treemap_path(tile: Mapping[str, Any]) -> list[str]:
     raw_path = tile.get("path")
-    if isinstance(raw_path, list | tuple):
-        return [str(item) for item in raw_path if item not in (None, "", "---")]
-    if raw_path not in (None, "", "---"):
-        return [str(raw_path)]
-    for key in ("x", "names"):
-        value = tile.get(key)
-        if value not in (None, "", "---"):
-            return [str(value)]
-    return []
+    if not isinstance(raw_path, list | tuple):
+        raise ValueError("treemap path must be a list of dimensions")
+    return [str(item) for item in raw_path if item not in (None, "", "---")]
 
 
 def _treemap_value_field(tile: Mapping[str, Any]) -> str | None:
-    for key in ("value", "values", "y"):
-        value = tile.get(key)
-        if value not in (None, "", "---"):
-            return str(value)
-    return None
+    return _field(tile, "values")
 
 
 def _treemap_color_scale(tile: Mapping[str, Any], theme: Mapping[str, Any]) -> Any:
@@ -538,30 +533,17 @@ def _unified_heatmap(
 ) -> go.Figure:
     """Render one metric-owned heatmap as a matrix, calendar, or one-row strip."""
 
-    authored_kind = str(tile.get("chart") or "heatmap")
     plotted = rows
     value_col = _metric_value_column(plotted, tile)
-    property_name = str(tile.get("property") or "")
-    score = str(tile.get("score") or "")
-    if property_name and score:
-        plotted, value_col = _with_descriptive_metric_column(
-            plotted,
-            property_name,
-            score,
-        )
 
-    x = str(tile.get("x") or tile.get("date") or "Day")
+    x = str(tile.get("x") or "Day")
     normalized = {**tile, "chart": "heatmap", "x": x, "color": value_col}
     y = str(tile.get("y") or "")
     if y:
         normalized["y"] = y
         return _heatmap(plotted, normalized, theme)
-    if authored_kind == "calendar_heatmap" or x in {"Day", "day", "as_of_date"}:
-        return _calendar_heatmap(
-            plotted,
-            {**normalized, "date": x, "_metric_value": value_col},
-            theme,
-        )
+    if x == "Day":
+        return _calendar_heatmap(plotted, normalized, theme)
     return _single_axis_heatmap(plotted, normalized, theme)
 
 
@@ -591,12 +573,6 @@ def _single_axis_heatmap(
     )
     fig.update_layout(title=str(tile.get("title", "")))
     return fig
-
-
-def _cohort_heatmap(
-    rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, Any]
-) -> go.Figure:
-    return _heatmap(rows, tile, theme)
 
 
 def _scatter(rows: pl.DataFrame, tile: Mapping[str, Any], *, max_points: int) -> go.Figure:
@@ -653,9 +629,9 @@ def _scatter_size_column(
 def _combo(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
     x = _field(tile, "x")
     y = _field(tile, "y")
-    y2 = str(tile.get("y2") or tile.get("line_y") or "")
+    y2 = str(tile.get("secondary_metric") or "")
     if y2 not in rows.columns:
-        raise ValueError("combo chart requires a secondary y field via 'y2' or 'line_y'")
+        raise ValueError(f"combo chart secondary metric output {y2!r} is not available")
     plotted = rows.sort(x) if x in rows.columns else rows
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     color = _optional_column(plotted, tile.get("color"))
@@ -684,10 +660,10 @@ def _combo(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
 def _interval(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
     plotted = rows.sort(_field(tile, "x")) if _field(tile, "x") in rows.columns else rows
     y = _field(tile, "y")
-    lower = _optional_column(plotted, tile.get("error_y_lower"))
-    upper = _optional_column(plotted, tile.get("error_y_upper"))
-    error_y = _optional_column(plotted, tile.get("error_y") or tile.get("error_y_plus"))
-    error_y_minus = _optional_column(plotted, tile.get("error_y_minus"))
+    lower = _optional_column(plotted, tile.get("lower_output"))
+    upper = _optional_column(plotted, tile.get("upper_output"))
+    error_y = None
+    error_y_minus = None
     if lower and upper and y in plotted.columns:
         error_y = "__interval_error_plus"
         error_y_minus = "__interval_error_minus"
@@ -714,8 +690,8 @@ def _interval(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
 
 
 def _donut(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
-    names = str(tile.get("names") or tile.get("x") or "label")
-    values = str(tile.get("values") or tile.get("y") or tile.get("value") or "value")
+    names = _field(tile, "names")
+    values = _field(tile, "values")
     plotted = _sort_and_limit(
         rows, {**tile, "sort_by": tile.get("sort_by") or values}, default_sort=values
     )
@@ -731,7 +707,7 @@ def _donut(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
 
 
 def _geo_map(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
-    value = str(tile.get("value") or tile.get("color") or tile.get("y") or rows.columns[-1])
+    value = _field(tile, "value")
     lat = tile.get("lat")
     lon = tile.get("lon")
     if (
@@ -970,14 +946,12 @@ def _calendar_heatmap(
     tile: Mapping[str, Any],
     theme: Mapping[str, Any] | None = None,
 ) -> go.Figure:
-    date_col = str(tile.get("date") or tile.get("x") or "Day")
-    value_col = str(tile.get("_metric_value") or _metric_value_column(rows, tile))
+    date_col = _field(tile, "x")
+    value_col = _field(tile, "color")
     if date_col not in rows.columns:
-        raise ValueError(f"calendar_heatmap date column {date_col!r} not present")
+        raise ValueError(f"heatmap calendar X column {date_col!r} not present")
     if value_col not in rows.columns:
-        value_col = _first_numeric_column(rows) or ""
-    if not value_col:
-        raise ValueError("calendar_heatmap requires a numeric value column")
+        raise ValueError(f"heatmap metric output {value_col!r} not present")
     matrix, weeks, weekdays = _calendar_matrix(rows, date_col, value_col)
     fig = go.Figure(
         go.Heatmap(
@@ -997,36 +971,86 @@ def _bar_polar(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
         rows,
         r=_field(tile, "r"),
         theta=_field(tile, "theta"),
-        color=_field(tile, "color"),
+        color=_optional_text(tile.get("color")),
         title=str(tile.get("title", "")),
     )
 
 
 def _sankey(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
-    source_col = _field(tile, "source")
-    target_col = _field(tile, "target")
+    path = _sankey_path(tile)
     value_col = _field(tile, "value")
-    labels = list(
-        dict.fromkeys(
-            [
-                *[str(value) for value in rows[source_col].to_list()],
-                *[str(value) for value in rows[target_col].to_list()],
-            ]
+    missing = [column for column in [*path, value_col] if column not in rows.columns]
+    if missing:
+        raise ValueError(
+            f"tile {tile.get('id', '<unknown>')!r} references missing Sankey columns {missing!r}"
         )
-    )
-    index = {label: pos for pos, label in enumerate(labels)}
+
+    labels: list[str] = []
+    stages: list[str] = []
+    node_index: dict[tuple[int, str], int] = {}
+    path_values = {column: rows[column].to_list() for column in path}
+    for stage_index, column in enumerate(path):
+        for raw_value in path_values[column]:
+            label = "(missing)" if raw_value is None else str(raw_value)
+            key = (stage_index, label)
+            if key in node_index:
+                continue
+            node_index[key] = len(labels)
+            labels.append(label)
+            stages.append(column)
+
+    link_values: dict[tuple[int, int], float] = {}
+    link_stages: dict[tuple[int, int], str] = {}
+    metric_values = rows[value_col].to_list()
+    for row_index, raw_metric_value in enumerate(metric_values):
+        metric_value = _as_float(raw_metric_value) or 0.0
+        for stage_index, (source_col, target_col) in enumerate(pairwise(path)):
+            source_label = _sankey_label(path_values[source_col][row_index])
+            target_label = _sankey_label(path_values[target_col][row_index])
+            source_index = node_index[(stage_index, source_label)]
+            target_index = node_index[(stage_index + 1, target_label)]
+            link_key = (source_index, target_index)
+            link_values[link_key] = link_values.get(link_key, 0.0) + metric_value
+            link_stages[link_key] = f"{source_col} → {target_col}"
+
+    link_keys = list(link_values)
     fig = go.Figure(
         go.Sankey(
-            node={"label": labels},
+            node={
+                "label": labels,
+                "customdata": stages,
+                "hovertemplate": "%{label}<br>Step: %{customdata}<extra></extra>",
+            },
             link={
-                "source": [index[str(value)] for value in rows[source_col].to_list()],
-                "target": [index[str(value)] for value in rows[target_col].to_list()],
-                "value": [_as_float(value) or 0.0 for value in rows[value_col].to_list()],
+                "source": [source for source, _target in link_keys],
+                "target": [target for _source, target in link_keys],
+                "value": [link_values[key] for key in link_keys],
+                "customdata": [link_stages[key] for key in link_keys],
+                "hovertemplate": (
+                    "%{source.label} → %{target.label}<br>"
+                    "%{customdata}<br>Value: %{value}<extra></extra>"
+                ),
             },
         )
     )
     fig.update_layout(title=str(tile.get("title", "")))
     return fig
+
+
+def _sankey_path(tile: Mapping[str, Any]) -> list[str]:
+    raw_path = tile.get("path")
+    if not isinstance(raw_path, (list, tuple)):
+        raise ValueError(f"tile {tile.get('id', '<unknown>')!r} Sankey path must be a list")
+    path = [str(value) for value in raw_path if value not in (None, "")]
+    if len(path) < 2:
+        raise ValueError(
+            f"tile {tile.get('id', '<unknown>')!r} Sankey path requires at least two steps"
+        )
+    return path
+
+
+def _sankey_label(value: Any) -> str:
+    return "(missing)" if value is None else str(value)
 
 
 def _gauge(rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, Any]) -> go.Figure:
@@ -1310,19 +1334,9 @@ def _funnel_count_column(
     tile: Mapping[str, Any],
     stage_col: str | None,
 ) -> str | None:
-    candidates = [
-        tile.get("values"),
-        tile.get("value"),
-        f"{tile.get('property')}_Count" if tile.get("property") else None,
-        f"{stage_col}_Count" if stage_col else None,
-        tile.get("metric") if str(tile.get("metric", "")).endswith("_Count") else None,
-        "Count",
-    ]
-    for candidate in candidates:
-        column = _optional_column(rows, candidate)
-        if column is not None:
-            return column
-    return None
+    if stage_col is None:
+        return None
+    return _metric_value_column(rows, tile)
 
 
 def _categorical_funnel_rows(
@@ -1353,41 +1367,19 @@ def _categorical_funnel_rows(
 def _boxplot(
     rows: pl.DataFrame, tile: Mapping[str, Any], theme: Mapping[str, Any] | None = None
 ) -> go.Figure:
-    prop = tile.get("property") or _infer_quantile_property(rows)
-    if prop is not None and f"{prop}_Median" in rows.columns:
-        return _quantile_box(rows, str(prop), tile, theme)
-    fig = px.box(
-        rows,
-        x=tile.get("x"),
-        y=tile.get("y", prop),
-        color=tile.get("color"),
-        facet_row=_facet_row(tile),
-        facet_col=_facet_col(tile),
-        title=str(tile.get("title", "")),
-    )
-    fig.update_layout(boxmode="group")
-    return fig
-
-
-def _infer_quantile_property(rows: pl.DataFrame) -> str | None:
-    """Return the sole quantile-suite property present in the frame, if any.
-
-    Boxplot tiles authored without ``property`` would otherwise box the scalar
-    metric value — one number per group — instead of the digest's quantile
-    suite that the query layer already delivered alongside it.
-    """
-
-    candidates = {
-        column.removesuffix("_Median") for column in rows.columns if column.endswith("_Median")
-    }
-    candidates = {
-        candidate
-        for candidate in candidates
-        if f"{candidate}_p25" in rows.columns and f"{candidate}_p75" in rows.columns
-    }
-    if len(candidates) == 1:
-        return next(iter(candidates))
-    return None
+    properties = [
+        column.removesuffix("_Median")
+        for column in rows.columns
+        if column.endswith("_Median")
+        and f"{column.removesuffix('_Median')}_p25" in rows.columns
+        and f"{column.removesuffix('_Median')}_p75" in rows.columns
+    ]
+    if len(properties) != 1:
+        raise ValueError(
+            "boxplot distribution metric must produce exactly one complete "
+            "p25/Median/p75 quantile suite"
+        )
+    return _quantile_box(rows, properties[0], tile, theme)
 
 
 def _histogram(
@@ -1395,7 +1387,9 @@ def _histogram(
     tile: Mapping[str, Any],
     theme: Mapping[str, Any] | None = None,
 ) -> go.Figure:
-    column = str(tile.get("property", tile.get("x", tile.get("y", rows.columns[-1]))))
+    column = _field(tile, "property")
+    if column not in rows.columns and f"{column}_tdigest" not in rows.columns:
+        raise ValueError(f"histogram property {column!r} not present in the metric result")
     if f"{column}_tdigest" in rows.columns:
         return _histogram_from_digest(rows, tile, theme)
     return px.histogram(
@@ -1814,23 +1808,18 @@ def _downsample_by_color(
 
 def _funnel_stage_rows(rows: pl.DataFrame, stages: list[str]) -> pl.DataFrame:
     if not stages:
-        stages = [
-            column.removesuffix("_Count") for column in rows.columns if column.endswith("_Count")
-        ]
+        raise ValueError("funnel requires explicit stage-count state names")
     out: list[dict[str, Any]] = []
     group_columns = [
         column
         for column in rows.columns
-        if column not in {f"{stage}_Count" for stage in stages}
-        and not column.endswith("_Customers_cpc")
-        and not column.endswith("_Customers_hll")
+        if column not in set(stages)
     ]
     for row in rows.iter_rows(named=True):
         groups = {column: row[column] for column in group_columns}
         for stage in stages:
-            count_column = f"{stage}_Count"
-            if count_column in row:
-                out.append({**groups, "stage": stage, "Count": row[count_column]})
+            if stage in row:
+                out.append({**groups, "stage": stage, "Count": row[stage]})
     return pl.DataFrame(out) if out else pl.DataFrame({"stage": [], "Count": []})
 
 
@@ -2135,7 +2124,7 @@ def _expand_calibration(rows: pl.DataFrame) -> pl.DataFrame:
 
 
 def _kpi_reference(rows: pl.DataFrame, tile: Mapping[str, Any]) -> float | None:
-    raw = tile.get("reference", tile.get("delta_reference"))
+    raw = tile.get("reference")
     if isinstance(raw, str) and raw in rows.columns and rows.height:
         return _as_float(rows[raw][0])
     ref = _as_float(raw)
@@ -2145,13 +2134,6 @@ def _kpi_reference(rows: pl.DataFrame, tile: Mapping[str, Any]) -> float | None:
     if isinstance(goal, Mapping):
         return _as_float(goal.get("value"))
     return _as_float(goal)
-
-
-def _first_numeric_column(rows: pl.DataFrame) -> str | None:
-    for column in rows.columns:
-        if rows.schema[column].is_numeric():
-            return column
-    return None
 
 
 def _table_fill_colors(
@@ -2357,8 +2339,11 @@ def _apply_y_axis_labels(
         if standoff is not None:
             secondary_axis_layout["title_standoff"] = standoff
         if chart == "combo":
-            secondary_field = "y2" if tile.get("y2") else "line_y"
-            y2_title = _axis_title(tile, secondary_field, "y2_axis_title")
+            y2_title = str(
+                tile.get("y2_axis_title")
+                or tile.get("secondary_metric")
+                or ""
+            )
             if y2_title:
                 secondary_axis_layout["title_text"] = y2_title
         fig.update_yaxes(**secondary_axis_layout, secondary_y=True)
@@ -2436,9 +2421,7 @@ def _apply_qualitative_colorway(
         or chart.startswith("experiment_")
         or chart
         in {
-            "calendar_heatmap",
             "clv_treemap",
-            "cohort_heatmap",
             "corr",
             "gauge",
             "heatmap",
@@ -2788,7 +2771,7 @@ def _rule_color(rule: Mapping[str, Any]) -> str:
 
 
 def _format_spec(tile: Mapping[str, Any]) -> str | None:
-    raw = tile.get("value_format", tile.get("number_format"))
+    raw = tile.get("value_format")
     if raw is None:
         return None
     value_format = str(raw).casefold()
@@ -3086,19 +3069,11 @@ def _optional_text(value: Any) -> str | None:
 
 
 def _facet_row(tile: Mapping[str, Any]) -> str | None:
-    facets = tile.get("facets")
-    if isinstance(facets, Mapping) and "row" in facets:
-        return _optional_text(facets["row"])
     return _optional_text(tile.get("facet_row"))
 
 
 def _facet_col(tile: Mapping[str, Any]) -> str | None:
-    facets = tile.get("facets")
-    if isinstance(facets, Mapping) and "col" in facets:
-        return _optional_text(facets["col"])
-    if isinstance(facets, Mapping) and "column" in facets:
-        return _optional_text(facets["column"])
-    return _optional_text(tile.get("facet_col", tile.get("facet_column")))
+    return _optional_text(tile.get("facet_col"))
 
 
 __all__ = ["MAX_POINTS", "render_chart"]

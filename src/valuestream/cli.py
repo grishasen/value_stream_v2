@@ -17,13 +17,11 @@ from rich.table import Table
 from valuestream import __version__
 from valuestream.config import model as config_model
 from valuestream.config.loader import CatalogLoadError, load
-from valuestream.config.migration import migrate_toml
 from valuestream.config.validate import CatalogIssue, CatalogValidationResult, validate_catalog
 from valuestream.engine import PipelineRunResult, ledger, probe_source, run_source, run_workspace
 from valuestream.generators import PegaDummyGenerationConfig, generate_pega_dummy_data
 from valuestream.mcp.server import run_stdio as run_mcp_stdio
 from valuestream.query import query_metric
-from valuestream.store.backfill import backfill_from_legacy_db
 from valuestream.store.duckdb_export import export_metric_tables_to_duckdb, metric_export_db_path
 from valuestream.store.duckdb_views import refresh_aggregate_views
 from valuestream.store.vacuum import vacuum_workspace
@@ -577,97 +575,6 @@ def _resolve_generation_end_date(start: dt.date, end_date: str | None, days: int
     if end_date is None:
         raise click.ClickException("Provide --end-date or --days")
     return _parse_iso_date(end_date, "end-date")
-
-
-@main.command()
-@click.option(
-    "--from",
-    "source_toml",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False),
-    help="Legacy TOML config to translate.",
-)
-@click.option(
-    "--to",
-    "target_catalog",
-    required=True,
-    type=click.Path(file_okay=False),
-    help="Destination catalog directory, usually <workspace>/catalog.",
-)
-def migrate(source_toml: str, target_catalog: str) -> None:
-    """Translate a legacy TOML config into Phase 6 catalog YAML."""
-    console = Console()
-    try:
-        report = migrate_toml(source_toml, target_catalog)
-    except Exception as exc:
-        click.echo(traceback.format_exc(), err=True)
-        _log_caught_exception(
-            "migration_failed",
-            exc,
-            command="migrate",
-            source_toml=source_toml,
-            target_catalog=target_catalog,
-        )
-        raise click.ClickException(str(exc)) from exc
-
-    color = "green" if report.ok else "yellow"
-    status = "ok" if report.ok else "needs review"
-    console.print(
-        f"[bold {color}]{status}[/] — generated {len(report.generated_files)} file(s), "
-        f"mapped {len(report.mappings)} field(s), found {len(report.gaps)} gap(s)."
-    )
-    console.print(f"report: {report.target / 'migration_report.md'}")
-
-
-@main.command()
-@click.option(
-    "--workspace",
-    "workspace_dir",
-    required=True,
-    type=click.Path(exists=True, file_okay=False),
-    help="Value Stream workspace directory.",
-)
-@click.option(
-    "--from-legacy-db",
-    "legacy_db",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False),
-    help="Legacy DuckDB database containing aggregate tables.",
-)
-def backfill(workspace_dir: str, legacy_db: str) -> None:
-    """Import legacy DuckDB aggregate tables into partitioned parquet."""
-    console = Console()
-    try:
-        result = backfill_from_legacy_db(workspace_dir, legacy_db)
-    except Exception as exc:
-        click.echo(traceback.format_exc(), err=True)
-        _log_caught_exception(
-            "backfill_failed",
-            exc,
-            command="backfill",
-            workspace_dir=workspace_dir,
-            legacy_db=legacy_db,
-        )
-        raise click.ClickException(str(exc)) from exc
-
-    console.print(
-        f"[bold green]ok[/] — backfilled {len(result.tables)} table(s), "
-        f"{result.rows} row(s); skipped {len(result.skipped)} catalog target(s)."
-    )
-    table = Table(show_header=True, header_style="bold")
-    table.add_column("legacy table")
-    table.add_column("target")
-    table.add_column("rows", justify="right")
-    table.add_column("files", justify="right")
-    for item in result.tables:
-        table.add_row(
-            item.table,
-            f"{item.source_id}/{item.processor_id}/{item.grain}",
-            str(item.rows),
-            str(len(item.written)),
-        )
-    if result.tables:
-        console.print(table)
 
 
 def _log_caught_exception(event: str, exc: Exception, **context: str) -> None:

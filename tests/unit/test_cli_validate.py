@@ -83,7 +83,7 @@ class TestErrorPaths:
         _seed_workspace(ws)
         metrics_path = ws / "catalog" / "metrics.yaml"
         metrics = yaml.safe_load(metrics_path.read_text())
-        metrics["metrics"][FORMULA_METRIC]["source"] = "no_such_processor"
+        metrics["metrics"][FORMULA_METRIC]["processor"] = "no_such_processor"
         metrics_path.write_text(yaml.safe_dump(metrics))
 
         runner = CliRunner()
@@ -168,7 +168,7 @@ class TestErrorPaths:
         _seed_workspace(ws)
         proc_path = ws / "catalog" / "processors.yaml"
         proc = yaml.safe_load(proc_path.read_text())
-        proc["processors"][0]["dimensions"].append("GhostColumn")
+        proc["processors"][0]["group_by"].append("GhostColumn")
         proc_path.write_text(yaml.safe_dump(proc))
 
         runner = CliRunner()

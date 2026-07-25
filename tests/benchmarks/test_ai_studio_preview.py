@@ -190,7 +190,7 @@ def _canonical_authoring_draft() -> dict[str, Any]:
     ]
     metrics = {
         "Studio_CTR": {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "formula",
             "expression": {
                 "op": "safe_div",
@@ -199,17 +199,17 @@ def _canonical_authoring_draft() -> dict[str, Any]:
             },
         },
         "Studio_Count": {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "formula",
             "expression": {"col": "Count"},
         },
         "Studio_Positive_Outcomes": {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "formula",
             "expression": {"col": "Positives"},
         },
         "Studio_Negative_Outcomes": {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "formula",
             "expression": {"col": "Negatives"},
         },
@@ -221,15 +221,14 @@ def _canonical_authoring_draft() -> dict[str, Any]:
             "metric": metric,
             "chart": "line" if variant == 1 else "bar",
             "x": "Day" if variant == 1 else "Channel",
-            "y": metric,
-            "color": "Channel" if variant == 1 else "",
+            "color": "Channel",
         }
         for metric in metric_names
         for variant in (1, 2)
     ]
     return {
         "pipelines": {
-            "version": 1,
+            "catalog_version": 2,
             "workspace": "ai_studio_benchmark",
             "sources": [
                 {
@@ -243,13 +242,19 @@ def _canonical_authoring_draft() -> dict[str, Any]:
             ],
         },
         "processors": {
+            "catalog_version": 2,
             "processors": [
                 {
                     "id": "engagement",
                     "source": "ih",
                     "kind": "binary_outcome",
-                    "dimensions": ["Channel"],
-                    "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+                    "group_by": ["Day", "Month", "Quarter", "Year", "Channel"],
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "states": {
+                        "Count": {"type": "count"},
+                        "Positives": {"type": "count", "outcome": "positive"},
+                        "Negatives": {"type": "count", "outcome": "negative"},
+                    },
                     "outcome": {
                         "column": "Outcome",
                         "positive_values": ["Clicked"],
@@ -258,8 +263,9 @@ def _canonical_authoring_draft() -> dict[str, Any]:
                 }
             ]
         },
-        "metrics": {"metrics": metrics},
+        "metrics": {"catalog_version": 2, "metrics": metrics},
         "dashboards": {
+            "catalog_version": 2,
             "dashboards": [
                 {
                     "id": "overview",

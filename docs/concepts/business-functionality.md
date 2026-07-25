@@ -89,18 +89,12 @@ Value Stream records enough context to explain where a number came from:
   coverage, and on-demand query output for inspection.
 - Operations pages show run status and chunk-level detail.
 
-## Migration Functionality
+## Catalog contract
 
-The migration tooling helps teams move from legacy dashboard assets:
-
-- `valuestream migrate` translates a legacy TOML configuration into Value
-  Stream catalog YAML and writes a migration report.
-- `valuestream backfill` imports existing legacy DuckDB aggregate tables into
-  the partitioned aggregate layout.
-- Side-by-side validation compares old and new metrics before sign-off.
-
-Migration is not a blind import. The generated report should be reviewed for
-mapped fields, gaps, and assumptions.
+Workspaces use only the strict catalog-v2 contract. All four catalog files
+must declare `catalog_version: 2`; unknown fields, retired aliases, and older
+catalog versions are rejected. A workspace moving from another system must be
+authored and validated as catalog v2, then populated from source data.
 
 ## Decision Rules for Business Changes
 
@@ -108,7 +102,7 @@ mapped fields, gaps, and assumptions.
 |---|---|
 | Add a formula metric from existing state | Usually no raw replay required |
 | Add a dashboard tile for an existing metric | Usually no raw replay required |
-| Add a new processor | Future runs populate the new aggregate; backfill may be needed |
+| Add a new processor | Future runs populate the new aggregate; historical source replay may be needed |
 | Add a new group-by dimension | Raw source replay is usually required |
 | Change outcome definitions | Raw source replay is usually required |
 | Remove a dimension from reports | Usually safe if no tile depends on it |

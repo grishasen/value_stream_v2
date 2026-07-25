@@ -95,13 +95,18 @@ for all four catalog files plus `ai.yaml`, including post-write validation.
 Recipe confirmation and apply never start ingestion; the outcome links to Data
 Load when the processor contract requires materialization.
 
-An installed metric carries recipe provenance as ordinary permissive metric
-metadata:
+For recipe-created metrics, `display.label` is derived from the chosen Metric
+ID. The recipe still supplies units, formatting, direction, and calculation
+metadata, but it cannot replace the metric's identity with a generic recipe
+name.
+
+An installed metric carries recipe provenance in the strict typed metric
+contract:
 
 ```yaml
 metrics:
   VS_Unique_Entities:
-    source: ih_engagement
+    processor: ih_engagement
     kind: approx_distinct_count
     state: UniqueCustomers_cpc
     description: Approximate distinct entity count from a persisted mergeable sketch.

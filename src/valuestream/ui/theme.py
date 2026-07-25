@@ -740,6 +740,19 @@ __VS_ACTIVE_CSS_VARS__
             margin-bottom: 0.15rem;
         }
 
+        div[class*="st-key-vs_ai_yes_consent"] {
+            background: var(--vs-metric-delta-bg);
+            border: 1px solid var(--vs-verified);
+            border-left-width: 0.3rem;
+            border-radius: 0.7rem;
+            box-shadow: 0 1px 2px var(--vs-shadow);
+            padding: 0.75rem 1rem 0.7rem;
+        }
+
+        div[class*="st-key-vs_ai_yes_consent"] [data-testid="stCaptionContainer"] p {
+            color: var(--vs-ink) !important;
+        }
+
         div[class*="st-key-vs_ai_sharing_consent"] {
             background: var(--vs-attention-soft);
             border: 1px solid var(--vs-attention);

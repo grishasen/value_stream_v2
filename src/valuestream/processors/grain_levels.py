@@ -39,20 +39,20 @@ def finest_configured_level(config: model.Processor) -> str:
 
 
 def aggregate_grain_candidates(config: model.Processor, grain: str) -> list[str]:
-    """Return stored grains to try for a requested grain, finest-eligible first.
+    """Return configured physical grains eligible to answer a requested grain.
 
-    The requested grain is preferred, followed by any configured grain whose
-    physical level is finer-or-equal to the request (coarsest first), so a
-    query can roll a finer aggregate up to the requested grain when an exact
-    physical aggregate is absent.
+    The coarsest eligible configured grain is preferred. Canonical processors
+    store one base grain, so coarser queries roll that aggregate up at query
+    time without probing retired duplicate materializations.
     """
 
     grain = model.normalize_grain_name(grain)
     requested_level = config.aggregation_level_for(grain)
+    if requested_level not in TIME_LEVELS:
+        return [grain] if grain in config.grains else []
     requested_rank = TIME_LEVELS.index(requested_level)
-    candidates = [grain, *config.grains, "monthly", "daily", "summary"]
     available: list[tuple[int, str]] = []
-    for candidate in candidates:
+    for candidate in config.grains:
         normalized = model.normalize_grain_name(candidate)
         level = config.aggregation_level_for(normalized)
         if level not in TIME_LEVELS:
@@ -63,7 +63,7 @@ def aggregate_grain_candidates(config: model.Processor, grain: str) -> list[str]
     ordered = [
         candidate for _, candidate in sorted(available, key=lambda item: item[0], reverse=True)
     ]
-    return [grain, *[candidate for candidate in ordered if candidate != grain]]
+    return ordered
 
 
 def normalize_target_grain(config: model.Processor, target_grain: str, processor_kind: str) -> str:

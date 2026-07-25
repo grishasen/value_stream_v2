@@ -117,6 +117,11 @@ The scratch editor begins empty for a new metric. Choose a processor and metric
 kind, then enter a display name. The Builder generates a stable technical ID;
 existing metrics retain their IDs during guided edits.
 
+For **Edit Existing Metric**, the searchable **Metric** selector comes first.
+Choosing a metric updates **Processor** and **Metric Kind** to match it. You can
+also change processor or kind directly; the Metric selection then moves to a
+compatible metric while the full searchable metric list remains available.
+
 For a recipe, read the business definition and accuracy notes, select a
 compatible processor, and resolve any field, algorithm, population, or stage
 mapping. Choose **Review changes** to inspect the exact processor, metric, and
@@ -141,9 +146,9 @@ confirmation is enabled. Cancel leaves the catalog unchanged.
 | Add an approximate-distinct metric from an existing CPC/HLL/Theta state | No |
 | Add or change processor state | Yes |
 
-Open **Report presentation** to set the friendly label, unit, default number
-format, and whether higher or lower values are favorable. These fields affect
-Reports only and do not require reprocessing.
+Set **Metric Label** in the main editor. Open **Report presentation** to set
+the unit, default number format, and whether higher or lower values are
+favorable. These fields affect Reports only and do not require reprocessing.
 
 For ROC, average-precision, and calibration metrics, choose the backing digest
 property when the processor has positive and negative t-digest pairs. The
@@ -195,8 +200,9 @@ the hierarchy; advanced mode can optionally set a separate size value.
 For a **Donut** chart, the selected metric supplies the slice values. Choose
 Names for the category labels; no separate Value field is needed.
 
-For a **Sankey** chart, the selected metric supplies link values. Choose only
-Source and Target for the flow endpoints.
+For a **Sankey** chart, the selected metric supplies link values. Choose an
+ordered **Flow Path** with at least two time/dimension fields. Every adjacent
+pair becomes another step, such as Channel → Customer Type → Placement.
 
 Choose the one **Apply to workspace** action. The tile and page settings are
 validated as a complete catalog before Apply, then written and validated

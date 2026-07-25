@@ -12,7 +12,6 @@ import pytest
 from plotly.graph_objects import Figure  # type: ignore[import-untyped]
 
 from valuestream.charts import render_chart
-from valuestream.charts.factory import _infer_quantile_property
 from valuestream.states import tdigest
 from valuestream.ui import theme as ui_theme
 
@@ -37,7 +36,16 @@ SUPPORTED_CHART_CASES = [
         {"chart": "waterfall", "title": "Waterfall", "metric": "Revenue", "x": "Channel"},
         "marketing",
     ),
-    ({"chart": "pareto", "title": "Pareto", "x": "Campaign", "y": "Revenue"}, "marketing"),
+    (
+        {
+            "chart": "pareto",
+            "title": "Pareto",
+            "metric": "Revenue",
+            "metric_output": "Revenue",
+            "x": "Campaign",
+        },
+        "marketing",
+    ),
     (
         {
             "chart": "treemap",
@@ -48,28 +56,46 @@ SUPPORTED_CHART_CASES = [
         None,
     ),
     (
-        {"chart": "heatmap", "title": "Heat", "x": "Channel", "y": "Placement", "color": "CTR"},
+        {
+            "chart": "heatmap",
+            "title": "Heat",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "x": "Channel",
+            "y": "Placement",
+        },
         None,
     ),
     (
         {
-            "chart": "cohort_heatmap",
+            "chart": "heatmap",
             "title": "Cohort",
+            "metric": "Retention",
+            "metric_output": "Retention",
             "x": "Month",
             "y": "Cohort",
-            "color": "Retention",
         },
         "marketing",
     ),
     ({"chart": "scatter", "title": "Scatter", "x": "frequency", "y": "monetary_value"}, None),
-    ({"chart": "combo", "title": "Combo", "x": "Day", "y": "Spend", "y2": "Revenue"}, "marketing"),
+    (
+        {
+            "chart": "combo",
+            "title": "Combo",
+            "metric": "Spend",
+            "metric_output": "Spend",
+            "secondary_metric": "Revenue",
+            "x": "Day",
+        },
+        "marketing",
+    ),
     (
         {
             "chart": "interval",
             "title": "Interval",
+            "metric": "Lift",
+            "metric_output": "Lift",
             "x": "Campaign",
-            "y": "Lift",
-            "error_y": "StdErr",
         },
         "marketing",
     ),
@@ -78,15 +104,22 @@ SUPPORTED_CHART_CASES = [
         {
             "chart": "geo_map",
             "title": "Geo",
+            "metric": "Revenue",
+            "metric_output": "Revenue",
             "locations": "CountryCode",
-            "value": "Revenue",
             "locationmode": "ISO-3",
         },
         "marketing",
     ),
     ({"chart": "table", "title": "Table", "columns": ["Campaign", "Revenue"]}, "marketing"),
     (
-        {"chart": "calendar_heatmap", "title": "Calendar", "date": "Day", "value": "Revenue"},
+        {
+            "chart": "heatmap",
+            "title": "Calendar",
+            "metric": "Revenue",
+            "metric_output": "Revenue",
+            "x": "Day",
+        },
         "marketing",
     ),
     (
@@ -104,8 +137,8 @@ SUPPORTED_CHART_CASES = [
             "chart": "sankey",
             "title": "Sankey",
             "metric": "FlowValue",
-            "source": "SourceStage",
-            "target": "TargetStage",
+            "metric_output": "FlowValue",
+            "path": ["SourceStage", "TargetStage"],
         },
         "marketing",
     ),
@@ -122,7 +155,7 @@ SUPPORTED_CHART_CASES = [
         },
         None,
     ),
-    ({"chart": "boxplot", "title": "Box", "x": "Channel", "property": "ResponseTime"}, "box"),
+    ({"chart": "boxplot", "title": "Box", "x": "Channel"}, "box"),
     ({"chart": "histogram", "title": "Hist", "property": "monetary_value"}, None),
     ({"chart": "calibration_curve", "title": "Calibration"}, "calibration"),
     ({"chart": "roc_curve", "title": "ROC", "color": "Channel"}, "curve"),
@@ -145,12 +178,12 @@ SUPPORTED_CHART_CASES = [
     ),
     (
         {
-            "chart": "descriptive_heatmap",
+            "chart": "heatmap",
             "title": "DHeat",
+            "metric": "ResponseTime_Mean",
+            "metric_output": "ResponseTime_Mean",
             "x": "Channel",
             "y": "Placement",
-            "property": "ResponseTime",
-            "score": "Mean",
         },
         "descriptive",
     ),
@@ -211,15 +244,15 @@ def test_purchase_frequency_projection_uses_run_rate_and_clear_axis_labels() -> 
 
 
 @pytest.mark.unit
-def test_kpi_card_ignores_legacy_dimension_value_override() -> None:
+def test_kpi_card_uses_selected_metric_output() -> None:
     figure = render_chart(
         pl.DataFrame({"Channel": ["Web"], "CTR": [0.25]}),
         {
             "id": "ctr",
             "title": "CTR",
-            "metric": "CTR",
+            "metric": "Experiment",
+            "metric_output": "CTR",
             "chart": "kpi_card",
-            "value": "Channel",
         },
     )
 
@@ -233,10 +266,10 @@ def test_kpi_card_ignores_legacy_dimension_value_override() -> None:
         ("line", "Day", {}),
         ("bar", "Channel", {}),
         ("stacked_area", "Day", {"color": "Channel"}),
-        ("waterfall", "Channel", {"color": "Channel"}),
+        ("waterfall", "Channel", {}),
     ],
 )
-def test_metric_owned_y_charts_ignore_legacy_y_override(
+def test_metric_owned_y_charts_use_selected_metric_output(
     chart_kind: str,
     x: str,
     extra: dict[str, str],
@@ -253,10 +286,10 @@ def test_metric_owned_y_charts_ignore_legacy_y_override(
         {
             "id": f"ctr_{chart_kind}",
             "title": "CTR",
-            "metric": "CTR",
+            "metric": "Experiment",
+            "metric_output": "CTR",
             "chart": chart_kind,
             "x": x,
-            "y": "Count",
             **extra,
         },
     )
@@ -266,7 +299,7 @@ def test_metric_owned_y_charts_ignore_legacy_y_override(
 
 
 @pytest.mark.unit
-def test_pareto_uses_metric_output_instead_of_legacy_y_override() -> None:
+def test_pareto_uses_selected_metric_output() -> None:
     figure = render_chart(
         pl.DataFrame(
             {
@@ -278,10 +311,10 @@ def test_pareto_uses_metric_output_instead_of_legacy_y_override() -> None:
         {
             "id": "ctr_pareto",
             "title": "CTR",
-            "metric": "CTR",
+            "metric": "Experiment",
+            "metric_output": "CTR",
             "chart": "pareto",
             "x": "Channel",
-            "y": "Count",
         },
     )
 
@@ -290,7 +323,7 @@ def test_pareto_uses_metric_output_instead_of_legacy_y_override() -> None:
 
 
 @pytest.mark.unit
-def test_polar_bar_uses_metric_output_instead_of_legacy_radius_override() -> None:
+def test_polar_bar_uses_selected_metric_output() -> None:
     figure = render_chart(
         pl.DataFrame(
             {
@@ -302,9 +335,9 @@ def test_polar_bar_uses_metric_output_instead_of_legacy_radius_override() -> Non
         {
             "id": "ctr_polar",
             "title": "CTR",
-            "metric": "CTR",
+            "metric": "Experiment",
+            "metric_output": "CTR",
             "chart": "bar_polar",
-            "r": "Count",
             "theta": "Channel",
             "color": "Channel",
         },
@@ -327,10 +360,10 @@ def test_combo_chart_preserves_secondary_axis_semantics() -> None:
         {
             "id": "clicks_and_impressions",
             "metric": "FunnelClicks",
+            "metric_output": "Clicked_Count",
             "chart": "combo",
             "x": "Day",
-            "y": "DimensionThatMustBeIgnored",
-            "y2": "Impression_Count",
+            "secondary_metric": "Impression_Count",
             "labels": {
                 "Clicked_Count": "Clicked Count",
                 "Impression_Count": "Impression Count",
@@ -422,10 +455,10 @@ def test_theme_background_overrides_builtin_plotly_template_background() -> None
         {
             "id": "interactions_trend",
             "metric": "Interactions",
+            "metric_output": "Interactions",
             "chart": "line",
             "title": "Interactions Trend",
             "x": "Day",
-            "y": "Interactions",
         },
         theme={
             "template": "plotly_white",
@@ -482,10 +515,10 @@ def test_grouped_report_uses_the_app_dark_chart_palette_and_surface() -> None:
             {
                 "id": "interactions_trend",
                 "metric": "Interactions",
+                "metric_output": "Interactions",
                 "chart": "line",
                 "title": "Interactions Trend",
                 "x": "Day",
-                "y": "Interactions",
                 "color": "Channel",
             },
             theme=ui_theme.dashboard_theme({"base": "dark"}),
@@ -522,10 +555,10 @@ def test_grouped_report_can_use_the_true_light_chart_palette_and_surface() -> No
             {
                 "id": "interactions_trend",
                 "metric": "Interactions",
+                "metric_output": "Interactions",
                 "chart": "line",
                 "title": "Interactions Trend",
                 "x": "Day",
-                "y": "Interactions",
                 "color": "Channel",
                 "theme": tile_theme,
             },
@@ -551,7 +584,14 @@ def test_line_downsampling_caps_large_frames() -> None:
 
     figure = render_chart(
         frame,
-        {"id": "line", "metric": "CTR", "chart": "line", "title": "Line", "x": "Day", "y": "CTR"},
+        {
+            "id": "line",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "chart": "line",
+            "title": "Line",
+            "x": "Day",
+        },
         max_points=100,
     )
 
@@ -565,7 +605,14 @@ def test_line_chart_sorts_rows_by_x_axis() -> None:
 
     figure = render_chart(
         frame,
-        {"id": "line", "metric": "CTR", "chart": "line", "title": "Line", "x": "Day", "y": "CTR"},
+        {
+            "id": "line",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "chart": "line",
+            "title": "Line",
+            "x": "Day",
+        },
     )
 
     assert [dt.date.fromisoformat(str(value)[:10]) for value in figure.data[0]["x"]] == sorted(days)
@@ -578,7 +625,14 @@ def test_sparse_line_chart_renders_as_grouped_bar() -> None:
 
     figure = render_chart(
         frame,
-        {"id": "line", "metric": "CTR", "chart": "line", "title": "Line", "x": "Day", "y": "CTR"},
+        {
+            "id": "line",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "chart": "line",
+            "title": "Line",
+            "x": "Day",
+        },
     )
 
     assert figure.data[0].type == "bar"
@@ -593,7 +647,14 @@ def test_line_chart_keeps_line_trace_at_distinct_threshold() -> None:
 
     figure = render_chart(
         frame,
-        {"id": "line", "metric": "CTR", "chart": "line", "title": "Line", "x": "Day", "y": "CTR"},
+        {
+            "id": "line",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "chart": "line",
+            "title": "Line",
+            "x": "Day",
+        },
     )
 
     assert figure.data[0].type == "scatter"
@@ -613,10 +674,10 @@ def test_bar_chart_sorts_and_limits_rows() -> None:
         {
             "id": "bar",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "bar",
             "title": "Bar",
             "x": "Channel",
-            "y": "CTR",
             "sort_by": "CTR",
             "sort_direction": "desc",
             "top_n": 2,
@@ -633,10 +694,10 @@ def test_bar_chart_supports_percent_stacking() -> None:
         {
             "id": "bar",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "bar",
             "title": "Bar",
             "x": "Channel",
-            "y": "CTR",
             "color": "Placement",
             "barmode": "percent",
         },
@@ -682,10 +743,10 @@ def test_chart_settings_add_goal_line_percent_format_and_trend_delta() -> None:
         {
             "id": "line",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "line",
             "title": "Line",
             "x": "Day",
-            "y": "CTR",
             "value_format": "percent",
             "goal_line": {"value": 0.25, "label": "Target"},
             "show_trend_delta": True,
@@ -704,10 +765,10 @@ def test_facet_annotation_prefixes_are_stripped_but_values_remain() -> None:
         {
             "id": "line",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "line",
             "title": "Line",
             "x": "Day",
-            "y": "CTR",
             "facet_row": "Channel",
             "facet_col": "Placement",
             "show_trend_delta": True,
@@ -742,10 +803,9 @@ def test_gauge_renders_faceted_indicator_grid() -> None:
         {
             "id": "gauge",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "gauge",
             "title": "Gauge",
-            # Legacy overrides must not redirect the gauge away from its metric.
-            "value": "Channel",
             "facet_row": "Channel",
             "facet_col": "Placement",
             "reference": {
@@ -818,7 +878,7 @@ def test_calibration_curve_percent_format_applies_to_both_rate_axes() -> None:
 
 
 @pytest.mark.unit
-def test_calibration_curve_supports_legacy_facet_column_alias() -> None:
+def test_calibration_curve_supports_canonical_facet_column() -> None:
     rows = pl.DataFrame(
         {
             "Segment": ["A", "B"],
@@ -844,7 +904,7 @@ def test_calibration_curve_supports_legacy_facet_column_alias() -> None:
             "metric": "MIL_Calibration",
             "chart": "calibration_curve",
             "title": "Calibration",
-            "facet_column": "Segment",
+            "facet_col": "Segment",
             "value_format": "percent",
         },
     )
@@ -904,7 +964,7 @@ def test_pareto_chart_adds_cumulative_share_axis() -> None:
             "chart": "pareto",
             "title": "Pareto",
             "x": "Campaign",
-            "y": "Revenue",
+            "metric_output": "Revenue",
         },
     )
 
@@ -914,17 +974,16 @@ def test_pareto_chart_adds_cumulative_share_axis() -> None:
 
 
 @pytest.mark.unit
-def test_sankey_chart_maps_source_target_labels_to_link_indices() -> None:
+def test_sankey_chart_maps_path_labels_to_link_indices() -> None:
     figure = render_chart(
         _marketing_frame(),
         {
             "id": "sankey",
             "metric": "FlowValue",
+            "metric_output": "FlowValue",
             "chart": "sankey",
             "title": "Sankey",
-            "source": "SourceStage",
-            "target": "TargetStage",
-            "value": "Revenue",
+            "path": ["SourceStage", "TargetStage"],
         },
     )
 
@@ -936,16 +995,47 @@ def test_sankey_chart_maps_source_target_labels_to_link_indices() -> None:
 
 
 @pytest.mark.unit
-def test_calendar_heatmap_buckets_dates_by_weekday_and_week_start() -> None:
+def test_sankey_chart_connects_every_adjacent_step_in_ordered_path() -> None:
+    figure = render_chart(
+        _marketing_frame(),
+        {
+            "id": "multi_step_sankey",
+            "metric": "FlowValue",
+            "metric_output": "FlowValue",
+            "chart": "sankey",
+            "title": "Multi-step Sankey",
+            "path": ["SourceStage", "TargetStage", "Campaign"],
+        },
+    )
+
+    trace = figure.data[0]
+
+    assert list(trace["node"]["customdata"]) == [
+        "SourceStage",
+        "SourceStage",
+        "TargetStage",
+        "TargetStage",
+        "Campaign",
+        "Campaign",
+        "Campaign",
+    ]
+    assert len(trace["link"]["source"]) == _marketing_frame().height * 2
+    assert list(trace["link"]["value"]) == pytest.approx(
+        [80.0, 80.0, 30.0, 30.0, 50.0, 50.0]
+    )
+
+
+@pytest.mark.unit
+def test_daily_heatmap_buckets_dates_by_weekday_and_week_start() -> None:
     figure = render_chart(
         _marketing_frame(),
         {
             "id": "calendar",
             "metric": "Revenue",
-            "chart": "calendar_heatmap",
+            "metric_output": "Revenue",
+            "chart": "heatmap",
             "title": "Calendar",
-            "date": "Day",
-            "value": "Revenue",
+            "x": "Day",
         },
     )
 
@@ -960,10 +1050,10 @@ def test_chart_settings_apply_axis_and_legend_label_overrides() -> None:
         {
             "id": "line",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "line",
             "title": "Line",
             "x": "Channel",
-            "y": "CTR",
             "color": "Placement",
             "labels": {"Channel": "Channel Name", "CTR": "CTR", "Placement": "Placement"},
             "y_axis_title": "CTR (%)",
@@ -986,10 +1076,10 @@ def test_chart_title_is_suppressed_when_tile_header_owns_title() -> None:
         {
             "id": "line",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "line",
             "title": "Line",
             "x": "Channel",
-            "y": "CTR",
         },
     )
 
@@ -1009,10 +1099,10 @@ def test_chart_defaults_to_friendly_axis_and_legend_labels() -> None:
         {
             "id": "bar",
             "metric": "VS_Click_to_Conversion_Dropoff",
+            "metric_output": "VS_Click_to_Conversion_Dropoff",
             "chart": "bar",
             "title": "Dropoff",
             "x": "CustomerSegment",
-            "y": "VS_Click_to_Conversion_Dropoff",
             "color": "Offer_Type",
         },
     )
@@ -1023,7 +1113,7 @@ def test_chart_defaults_to_friendly_axis_and_legend_labels() -> None:
 
 
 @pytest.mark.unit
-def test_treemap_supports_legacy_x_y_tile_shape() -> None:
+def test_treemap_renders_dimension_path() -> None:
     figure = render_chart(
         pl.DataFrame(
             {
@@ -1035,11 +1125,10 @@ def test_treemap_supports_legacy_x_y_tile_shape() -> None:
         {
             "id": "treemap",
             "metric": "VS_Interactions",
+            "metric_output": "VS_Interactions",
             "chart": "treemap",
             "title": "Interactions by Segment",
-            "x": "CustomerSegment",
-            "y": "VS_Interactions",
-            "color": "Channel",
+            "path": ["CustomerSegment", "Channel"],
         },
     )
 
@@ -1048,7 +1137,7 @@ def test_treemap_supports_legacy_x_y_tile_shape() -> None:
 
 
 @pytest.mark.unit
-def test_treemap_uses_metric_output_instead_of_legacy_color_override() -> None:
+def test_treemap_uses_selected_metric_output() -> None:
     figure = render_chart(
         pl.DataFrame(
             {
@@ -1060,10 +1149,10 @@ def test_treemap_uses_metric_output_instead_of_legacy_color_override() -> None:
         {
             "id": "ctr_treemap",
             "title": "CTR",
-            "metric": "CTR",
+            "metric": "Experiment",
+            "metric_output": "CTR",
             "chart": "treemap",
             "path": ["Channel"],
-            "color": "Count",
         },
     )
 
@@ -1073,7 +1162,7 @@ def test_treemap_uses_metric_output_instead_of_legacy_color_override() -> None:
 
 
 @pytest.mark.unit
-def test_donut_uses_metric_output_instead_of_legacy_values_override() -> None:
+def test_donut_uses_selected_metric_output() -> None:
     figure = render_chart(
         pl.DataFrame(
             {
@@ -1085,10 +1174,10 @@ def test_donut_uses_metric_output_instead_of_legacy_values_override() -> None:
         {
             "id": "ctr_mix",
             "title": "CTR mix",
-            "metric": "CTR",
+            "metric": "Experiment",
+            "metric_output": "CTR",
             "chart": "donut",
             "names": "Channel",
-            "values": "Count",
         },
     )
 
@@ -1107,10 +1196,10 @@ def test_treemap_uses_theme_aware_default_colorscales() -> None:
     tile = {
         "id": "treemap",
         "metric": "CTR",
+        "metric_output": "CTR",
         "chart": "treemap",
         "title": "CTR Treemap",
         "path": ["Channel", "Placement"],
-        "color": "CTR",
     }
 
     light = render_chart(rows, tile, theme={"base": "light"})
@@ -1135,10 +1224,10 @@ def test_treemap_respects_explicit_color_scale_override() -> None:
         {
             "id": "treemap",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "treemap",
             "title": "CTR Treemap",
             "path": ["Channel", "Placement"],
-            "color": "CTR",
             "color_continuous_scale": "Cividis",
         },
         theme={"base": "dark"},
@@ -1160,10 +1249,10 @@ def test_treemap_applies_percent_format_to_colorbar_and_hover() -> None:
         {
             "id": "treemap",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "treemap",
             "title": "CTR Treemap",
             "path": ["Channel", "Placement"],
-            "color": "CTR",
             "value_format": "percent",
         },
     )
@@ -1184,11 +1273,11 @@ def test_heatmap_uses_theme_aware_hot_cold_colorscales() -> None:
     tile = {
         "id": "heatmap",
         "metric": "CTR",
+        "metric_output": "CTR",
         "chart": "heatmap",
         "title": "CTR Heatmap",
         "x": "Channel",
         "y": "Placement",
-        "color": "CTR",
     }
 
     light = render_chart(rows, tile, theme={"base": "light"})
@@ -1201,7 +1290,7 @@ def test_heatmap_uses_theme_aware_hot_cold_colorscales() -> None:
 
 
 @pytest.mark.unit
-def test_heatmap_intensity_is_derived_from_metric_not_color_override() -> None:
+def test_heatmap_intensity_uses_selected_metric_output() -> None:
     rows = pl.DataFrame(
         {
             "Channel": ["Web", "Email"],
@@ -1215,13 +1304,12 @@ def test_heatmap_intensity_is_derived_from_metric_not_color_override() -> None:
         rows,
         {
             "id": "heatmap",
-            "metric": "CTR",
+            "metric": "Experiment",
+            "metric_output": "CTR",
             "chart": "heatmap",
             "title": "CTR Heatmap",
             "x": "Channel",
             "y": "Placement",
-            "color": "Count",
-            "value": "Count",
         },
     )
 
@@ -1246,10 +1334,10 @@ def test_unified_heatmap_without_y_uses_daily_calendar_layout() -> None:
         {
             "id": "calendar",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "heatmap",
             "title": "CTR Calendar",
             "x": "Day",
-            "value": "Count",
         },
     )
 
@@ -1274,11 +1362,11 @@ def test_heatmap_respects_explicit_color_scale_override() -> None:
         {
             "id": "heatmap",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "heatmap",
             "title": "CTR Heatmap",
             "x": "Channel",
             "y": "Placement",
-            "color": "CTR",
             "color_continuous_scale": "Cividis",
         },
         theme={"base": "dark"},
@@ -1300,11 +1388,11 @@ def test_heatmap_applies_percent_format_to_colorbar_and_hover_z() -> None:
         {
             "id": "heatmap",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "heatmap",
             "title": "CTR Heatmap",
             "x": "Channel",
             "y": "Placement",
-            "color": "CTR",
             "value_format": "percent",
         },
     )
@@ -1315,7 +1403,7 @@ def test_heatmap_applies_percent_format_to_colorbar_and_hover_z() -> None:
 
 
 @pytest.mark.unit
-def test_calendar_heatmap_applies_percent_format_to_colorbar_and_hover_z() -> None:
+def test_daily_heatmap_applies_percent_format_to_colorbar_and_hover_z() -> None:
     figure = render_chart(
         pl.DataFrame(
             {
@@ -1326,10 +1414,10 @@ def test_calendar_heatmap_applies_percent_format_to_colorbar_and_hover_z() -> No
         {
             "id": "calendar",
             "metric": "CTR",
-            "chart": "calendar_heatmap",
+            "metric_output": "CTR",
+            "chart": "heatmap",
             "title": "CTR Calendar",
-            "date": "Day",
-            "value": "CTR",
+            "x": "Day",
             "value_format": "percent",
         },
     )
@@ -1339,7 +1427,7 @@ def test_calendar_heatmap_applies_percent_format_to_colorbar_and_hover_z() -> No
 
 
 @pytest.mark.unit
-def test_descriptive_heatmap_uses_same_colorscale_as_regular_heatmap() -> None:
+def test_metric_output_heatmap_uses_theme_aware_colorscale() -> None:
     rows = pl.DataFrame(
         {
             "Channel": ["Web", "Email"],
@@ -1347,36 +1435,21 @@ def test_descriptive_heatmap_uses_same_colorscale_as_regular_heatmap() -> None:
             "ResponseTime_Mean": [0.1, 0.2],
         }
     )
-    descriptive = render_chart(
-        rows,
-        {
-            "id": "descriptive_heatmap",
-            "metric": "ResponseTime",
-            "chart": "descriptive_heatmap",
-            "title": "Response Time Heatmap",
-            "x": "Channel",
-            "y": "Placement",
-            "property": "ResponseTime",
-            "score": "Mean",
-        },
-        theme={"base": "dark"},
-    )
-    regular = render_chart(
+    figure = render_chart(
         rows,
         {
             "id": "heatmap",
-            "metric": "ResponseTime",
+            "metric": "ResponseTimeMean",
+            "metric_output": "ResponseTime_Mean",
             "chart": "heatmap",
             "title": "Response Time Heatmap",
             "x": "Channel",
             "y": "Placement",
-            "color": "ResponseTime_Mean",
         },
         theme={"base": "dark"},
     )
 
-    assert descriptive.data[0].colorscale == regular.data[0].colorscale
-    assert descriptive.data[0].colorscale[0][1] == "#5598E7"
+    assert figure.data[0].colorscale[0][1] == "#5598E7"
 
 
 @pytest.mark.unit
@@ -1438,7 +1511,9 @@ def test_colored_boxplots_render_in_group_mode() -> None:
             {
                 "Month": ["2026-01", "2026-01", "2026-02", "2026-02"],
                 "Issue": ["Acquisition", "Activation", "Acquisition", "Activation"],
-                "Propensity": [0.1, 0.2, 0.3, 0.4],
+                "Propensity_p25": [0.1, 0.2, 0.3, 0.4],
+                "Propensity_Median": [0.2, 0.3, 0.4, 0.5],
+                "Propensity_p75": [0.3, 0.4, 0.5, 0.6],
             }
         ),
         {
@@ -1447,7 +1522,6 @@ def test_colored_boxplots_render_in_group_mode() -> None:
             "chart": "boxplot",
             "title": "Propensity",
             "x": "Month",
-            "property": "Propensity",
             "color": "Issue",
         },
     )
@@ -1475,7 +1549,6 @@ def test_colored_quantile_boxplots_render_in_group_mode() -> None:
             "chart": "boxplot",
             "title": "Quartiles",
             "x": "Month",
-            "property": "Propensity",
             "color": "Issue",
         },
     )
@@ -1527,7 +1600,6 @@ def test_quantile_boxplots_render_faceted_grouped_subplots() -> None:
             "chart": "boxplot",
             "title": "Quartiles",
             "x": "Month",
-            "property": "Propensity",
             "color": "Issue",
             "facet_row": "Channel",
             "facet_col": "CustomerType",
@@ -1624,12 +1696,12 @@ def test_funnel_uses_categorical_count_rows_with_facets() -> None:
         rows,
         {
             "id": "outcome_funnel",
-            "metric": "Outcome_Mean",
+            "metric": "OutcomeCounts",
+            "metric_output": "Outcome_Count",
             "chart": "funnel",
             "title": "Outcome Funnel",
             "stages": ["Impression", "Clicked", "Conversion"],
             "x": "Outcome",
-            "property": "Outcome",
             "color": "Issue",
             "facet_col": "Channel",
         },
@@ -1703,10 +1775,10 @@ def test_conditional_formatting_colors_bar_marks() -> None:
         {
             "id": "bar",
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "bar",
             "title": "Bar",
             "x": "Channel",
-            "y": "CTR",
             "conditional_formatting": [
                 {"column": "CTR", "operator": ">=", "value": 0.3, "color": "#2e7d32"},
                 {"column": "CTR", "operator": "<", "value": 0.3, "color": "#c62828"},
@@ -1783,9 +1855,9 @@ def test_comparison_scale_and_semantic_colors_are_partitioned_by_series() -> Non
         rows,
         {
             "metric": "CTR",
+            "metric_output": "CTR",
             "chart": "line",
             "x": "Day",
-            "y": "CTR",
             "color": "Channel",
             "scale_mode": "index_100",
         },
@@ -1812,11 +1884,11 @@ def test_interval_chart_accepts_absolute_confidence_bounds() -> None:
         ),
         {
             "metric": "Effect",
+            "metric_output": "Effect",
             "chart": "interval",
             "x": "Channel",
-            "y": "Effect",
-            "error_y_lower": "Low",
-            "error_y_upper": "High",
+            "lower_output": "Low",
+            "upper_output": "High",
         },
     )
 
@@ -1830,18 +1902,18 @@ def test_interval_chart_accepts_null_confidence_bounds() -> None:
         pl.DataFrame(
             {
                 "Channel": ["Web"],
-                "Effect": [None],
-                "Low": [None],
-                "High": [None],
+                "Effect": pl.Series([None], dtype=pl.Float64),
+                "Low": pl.Series([None], dtype=pl.Float64),
+                "High": pl.Series([None], dtype=pl.Float64),
             }
         ),
         {
             "metric": "Effect",
+            "metric_output": "Effect",
             "chart": "interval",
             "x": "Channel",
-            "y": "Effect",
-            "error_y_lower": "Low",
-            "error_y_upper": "High",
+            "lower_output": "Low",
+            "upper_output": "High",
         },
     )
 
@@ -1953,7 +2025,6 @@ def test_boxplot_without_property_infers_quantile_suite_columns() -> None:
             "chart": "boxplot",
             "title": "Distribution",
             "x": "Year",
-            "y": "dist_metric",
             "color": "Issue",
         },
     )
@@ -1969,27 +2040,19 @@ def test_boxplot_without_property_infers_quantile_suite_columns() -> None:
 
 
 @pytest.mark.unit
-def test_boxplot_property_inference_requires_unambiguous_suite() -> None:
-    single = pl.DataFrame(
-        {
-            "FinalPropensity_Median": [0.2],
-            "FinalPropensity_p25": [0.1],
-            "FinalPropensity_p75": [0.3],
-        }
-    )
-    assert _infer_quantile_property(single) == "FinalPropensity"
-
-    ambiguous = pl.DataFrame(
-        {
-            "A_Median": [0.2],
-            "A_p25": [0.1],
-            "A_p75": [0.3],
-            "B_Median": [0.2],
-            "B_p25": [0.1],
-            "B_p75": [0.3],
-        }
-    )
-    assert _infer_quantile_property(ambiguous) is None
-
-    no_suite = pl.DataFrame({"metric": [0.5]})
-    assert _infer_quantile_property(no_suite) is None
+def test_boxplot_requires_one_complete_distribution_suite() -> None:
+    with pytest.raises(ValueError, match="exactly one complete"):
+        render_chart(
+            pl.DataFrame(
+                {
+                    "FinalPropensity_p25": [0.1],
+                    "FinalPropensity_p75": [0.3],
+                }
+            ),
+            {
+                "id": "box",
+                "metric": "distribution",
+                "chart": "boxplot",
+                "title": "Distribution",
+            },
+        )

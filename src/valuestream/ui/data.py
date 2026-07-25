@@ -54,7 +54,7 @@ _TIME_COLUMN_EQUIVALENTS = {
     "quarterly": ("Quarter", "quarter"),
     "yearly": ("Year", "year"),
 }
-_FACET_FIELDS = ("facet_col", "facet_column", "facet_row", "facets")
+_FACET_FIELDS = ("facet_col", "facet_row")
 _CURVE_CHARTS = {"roc_curve", "precision_recall_curve", "gain_curve", "lift_curve"}
 _CHART_DIMENSION_FIELDS = {
     "line": ("x", *_FACET_FIELDS, "color"),
@@ -63,19 +63,17 @@ _CHART_DIMENSION_FIELDS = {
     "kpi_card": ("group_by",),
     "waterfall": ("x",),
     "pareto": ("x", *_FACET_FIELDS, "color"),
-    "treemap": ("path", "x", "names"),
+    "treemap": ("path",),
     "heatmap": ("x", "y"),
-    "cohort_heatmap": ("x", "y"),
     "scatter": ("animation_frame", "animation_group", *_FACET_FIELDS, "color"),
     "combo": ("x", *_FACET_FIELDS, "color"),
     "interval": ("x", *_FACET_FIELDS, "color"),
-    "donut": ("names", "x", "color"),
-    "geo_map": ("locations", "location", "lat", "lon", *_FACET_FIELDS, "color"),
+    "donut": ("names", "color"),
+    "geo_map": ("locations", "lat", "lon", *_FACET_FIELDS, "color"),
     "table": ("group_by", "columns"),
-    "calendar_heatmap": ("date", "x"),
     "bar_polar": ("theta", "color"),
-    "sankey": ("source", "target"),
-    "gauge": ("facet_row", "facet_col", "facet_column", "facets", "group_by"),
+    "sankey": ("path",),
+    "gauge": ("facet_row", "facet_col", "group_by"),
     "funnel": ("x", *_FACET_FIELDS, "color"),
     "boxplot": ("x", *_FACET_FIELDS, "color"),
     "histogram": (*_FACET_FIELDS, "color"),
@@ -86,7 +84,6 @@ _CHART_DIMENSION_FIELDS = {
     "lift_curve": (*_FACET_FIELDS, "color"),
     "corr": ("color",),
     "descriptive_line": ("x", *_FACET_FIELDS, "color"),
-    "descriptive_heatmap": ("x", "y"),
     "experiment_z_score": ("x", "y", *_FACET_FIELDS, "color"),
     "experiment_odds_ratio": ("x", "y", *_FACET_FIELDS, "color"),
 }
@@ -121,8 +118,9 @@ class FilterCapability:
 
 
 def tile_to_dict(tile: model.Tile) -> dict[str, Any]:
-    """Return a plain dict including permissive tile extras."""
-    return {**tile.model_dump(exclude={"model_extra"}), **dict(tile.model_extra or {})}
+    """Return the canonical strict tile payload."""
+
+    return tile.model_dump(mode="python", exclude_none=True)
 
 
 def query_tile(
@@ -137,20 +135,14 @@ def query_tile(
     """Query aggregate data for a dashboard tile."""
     tile_dict = tile_to_dict(tile)
     query_metric_name = tile.metric
-    if tile.chart in {"boxplot", "histogram"} and tile_dict.get("property") not in (None, ""):
+    if tile.chart == "histogram" and tile_dict.get("property") not in (None, ""):
         property_name = str(tile_dict["property"])
         distribution_metric_name = distribution_property_metrics(catalog, tile.metric).get(
             property_name,
             "",
         )
-        if tile.chart == "boxplot" and not distribution_metric_name:
-            raise ValueError(
-                f"Boxplot property {property_name!r} is not backed by an unconditioned "
-                "t-digest or KLL metric."
-            )
         query_metric_name = distribution_metric_name or query_metric_name
-    dimension_aliases = _dimension_aliases(catalog, query_metric_name, tile_dict)
-    canonical_tile = _canonicalize_tile_dimensions(tile_dict, dimension_aliases)
+    canonical_tile = tile_dict
     tile_filters = dict(tile_dict.get("filters") or {})
     filter_columns = available_filter_columns_for_tile(catalog, tile)
     if filters:
@@ -178,11 +170,6 @@ def query_tile(
         tile.chart in _STATEFUL_CHARTS
         or tile.chart == "histogram"
         or tile.chart.startswith("descriptive_")
-        or (
-            tile.chart == "heatmap"
-            and tile_dict.get("property") not in (None, "")
-            and tile_dict.get("score") not in (None, "")
-        )
         or _tile_references_scalar_state(catalog, query_metric_name, canonical_tile),
         tile.chart in {"boxplot", "combo"},
         tile.chart in _CURVE_CHARTS,
@@ -200,7 +187,7 @@ def query_tile(
             end,
             rows,
         )
-    return _restore_dimension_aliases(_restore_time_columns(rows, tile_dict), dimension_aliases)
+    return _restore_time_columns(rows, tile_dict)
 
 
 def _join_combo_secondary_metric(
@@ -217,15 +204,13 @@ def _join_combo_secondary_metric(
 ) -> pl.DataFrame:
     """Join the combo's compatible secondary metric onto primary metric rows."""
 
-    secondary_name = str(canonical_tile.get("y2") or canonical_tile.get("line_y") or "")
+    secondary_name = str(canonical_tile.get("secondary_metric") or "")
     secondary_metric = catalog.metrics.metrics.get(secondary_name)
     if secondary_metric is None:
-        # Keep legacy raw-column combo tiles renderable. Catalog validation and
-        # both authoring surfaces require a metric ID for all new definitions.
-        return primary_rows
+        raise ValueError(f"Combo secondary metric {secondary_name!r} is not configured.")
     secondary_outputs = metric_output_columns(secondary_name, secondary_metric)
     if secondary_outputs != [secondary_name]:
-        raise ValueError(f"Combo Y2 metric {secondary_name!r} must expose one scalar output.")
+        raise ValueError(f"Combo secondary metric {secondary_name!r} must expose one scalar output.")
     secondary_rows = _cached_query_metric(
         str(Path(workspace_path).resolve()),
         _metric_query_cache_signature(catalog, workspace_path, secondary_name, grain),
@@ -241,7 +226,9 @@ def _join_combo_secondary_metric(
         False,
     )
     if secondary_name not in secondary_rows.columns:
-        raise ValueError(f"Combo Y2 metric {secondary_name!r} did not produce its scalar output.")
+        raise ValueError(
+            f"Combo secondary metric {secondary_name!r} did not produce its scalar output."
+        )
 
     primary_metric = catalog.metrics.metrics[tile.metric]
     value_columns = {
@@ -475,49 +462,28 @@ def filter_capabilities_for_page(
     catalog: model.Catalog,
     page: model.DashboardPage,
 ) -> list[FilterCapability]:
-    """Return explicit or safely inferred page filters with tile coverage."""
+    """Return explicitly configured page filters with exact tile coverage."""
 
     explicit = list(page.filters)
-    fields = (
-        [item.field for item in explicit]
-        if explicit
-        else available_filter_columns_for_page(catalog, page)
-    )
-    explicit_by_key = {_dimension_key(item.field): item for item in explicit}
     out: list[FilterCapability] = []
-    inferred_primary = 0
-    for field in fields:
+    for authored in explicit:
+        field = authored.field
         supported = tuple(
             tile.id
             for tile in page.tiles
-            if _canonical_column(field, available_filter_columns_for_tile(catalog, tile))
-            is not None
+            if field in available_filter_columns_for_tile(catalog, tile)
         )
         unsupported = tuple(tile.id for tile in page.tiles if tile.id not in supported)
-        authored = explicit_by_key.get(_dimension_key(field))
-        if authored is not None:
-            label = authored.label or _humanize_identifier(field)
-            display = authored.display
-            scope = authored.scope
-            control = authored.control
-        else:
-            applies_to_all = not unsupported
-            display = "primary" if applies_to_all and inferred_primary < 3 else "secondary"
-            if display == "primary":
-                inferred_primary += 1
-            label = _humanize_identifier(field)
-            scope = "all_tiles" if applies_to_all else "compatible_tiles"
-            control = "multiselect"
         out.append(
             FilterCapability(
                 field=field,
-                label=label,
-                display=display,
-                scope=scope,
-                control=control,
+                label=authored.label or _humanize_identifier(field),
+                display=authored.display,
+                scope=authored.scope,
+                control=authored.control,
                 supported_tile_ids=supported,
                 unsupported_tile_ids=unsupported,
-                explicit=authored is not None,
+                explicit=True,
             )
         )
     return out
@@ -597,7 +563,7 @@ def _processor_group_columns(
     if metric is None:
         return candidates
     processor = next(
-        (candidate for candidate in catalog.processors.processors if candidate.id == metric.source),
+        (candidate for candidate in catalog.processors.processors if candidate.id == metric.processor),
         None,
     )
     if processor is None:
@@ -615,7 +581,7 @@ def _processor_for_metric(catalog: model.Catalog, metric_name: str) -> model.Pro
     if metric is None:
         return None
     return next(
-        (candidate for candidate in catalog.processors.processors if candidate.id == metric.source),
+        (candidate for candidate in catalog.processors.processors if candidate.id == metric.processor),
         None,
     )
 
@@ -656,47 +622,6 @@ def _append_dimensions(candidates: list[str], value: Any) -> None:
             candidates.append(candidate)
 
 
-def _dimension_aliases(
-    catalog: model.Catalog,
-    metric_name: str,
-    tile: Mapping[str, Any],
-) -> dict[str, str]:
-    processor = _processor_for_metric(catalog, metric_name)
-    if processor is None:
-        return {}
-    candidates: list[str] = []
-    for field in _dimension_fields_for_tile(tile):
-        _append_dimensions(candidates, tile.get(field))
-    aliases: dict[str, str] = {}
-    for candidate in candidates:
-        column = _canonical_column(candidate, processor.group_by)
-        if column is not None and column != candidate:
-            aliases[candidate] = column
-    return aliases
-
-
-def _canonicalize_tile_dimensions(
-    tile: Mapping[str, Any],
-    aliases: Mapping[str, str],
-) -> dict[str, Any]:
-    return {key: _canonicalize_dimension_value(value, aliases) for key, value in tile.items()}
-
-
-def _canonicalize_dimension_value(value: Any, aliases: Mapping[str, str]) -> Any:
-    if isinstance(value, Mapping):
-        return {
-            key: _canonicalize_dimension_value(nested_value, aliases)
-            for key, nested_value in value.items()
-        }
-    if isinstance(value, list):
-        return [_canonicalize_dimension_value(item, aliases) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_canonicalize_dimension_value(item, aliases) for item in value)
-    if isinstance(value, str):
-        return aliases.get(value, value)
-    return value
-
-
 def _canonicalize_filter_keys(
     filters: Mapping[str, Any],
     columns: list[str],
@@ -708,27 +633,7 @@ def _canonicalize_filter_keys(
 
 
 def _canonical_column(candidate: str, columns: Iterable[str]) -> str | None:
-    choices = list(columns)
-    if candidate in choices:
-        return candidate
-    key = _dimension_key(candidate)
-    if not key:
-        return None
-    for column in choices:
-        if _dimension_key(column) == key:
-            return column
-    startswith_matches = [
-        column
-        for column in choices
-        if _dimension_key(column).startswith(key) or key.startswith(_dimension_key(column))
-    ]
-    if len(startswith_matches) == 1:
-        return startswith_matches[0]
-    return None
-
-
-def _dimension_key(value: str) -> str:
-    return "".join(ch for ch in value.casefold() if ch.isalnum())
+    return candidate if candidate in columns else None
 
 
 def _humanize_identifier(value: str) -> str:
@@ -768,15 +673,7 @@ def _dimension_fields_for_tile(tile: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _has_facet_dimensions(tile: Mapping[str, Any]) -> bool:
-    facets = tile.get("facets")
-    return bool(
-        tile.get("facet_row")
-        or tile.get("facet_col")
-        or tile.get("facet_column")
-        or (
-            isinstance(facets, Mapping) and any(facets.get(key) for key in ("row", "col", "column"))
-        )
-    )
+    return bool(tile.get("facet_row") or tile.get("facet_col"))
 
 
 def _restore_time_columns(rows: pl.DataFrame, tile: Mapping[str, Any]) -> pl.DataFrame:
@@ -794,14 +691,6 @@ def _restore_time_columns(rows: pl.DataFrame, tile: Mapping[str, Any]) -> pl.Dat
         )
         if source is not None:
             out = out.with_columns(pl.col(source).alias(candidate))
-    return out
-
-
-def _restore_dimension_aliases(rows: pl.DataFrame, aliases: Mapping[str, str]) -> pl.DataFrame:
-    out = rows
-    for alias, source in aliases.items():
-        if alias not in out.columns and source in out.columns:
-            out = out.with_columns(pl.col(source).alias(alias))
     return out
 
 

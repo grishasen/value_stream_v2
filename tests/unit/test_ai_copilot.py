@@ -36,7 +36,7 @@ from valuestream.ui.pages.ai_config_studio import (
 def _base_draft() -> dict:
     return {
         "pipelines": {
-            "version": 1,
+            "catalog_version": 2,
             "workspace": "test",
             "sources": [
                 {
@@ -50,13 +50,19 @@ def _base_draft() -> dict:
             ],
         },
         "processors": {
+            "catalog_version": 2,
             "processors": [
                 {
                     "id": "engagement",
                     "source": "ih",
                     "kind": "binary_outcome",
-                    "dimensions": ["Channel"],
-                    "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+                    "group_by": ["Channel"],
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "states": {
+                        "Count": {"type": "count"},
+                        "Positives": {"type": "count", "outcome": "positive"},
+                        "Negatives": {"type": "count", "outcome": "negative"},
+                    },
                     "outcome": {
                         "column": "Outcome",
                         "positive_values": ["Clicked"],
@@ -66,9 +72,10 @@ def _base_draft() -> dict:
             ]
         },
         "metrics": {
+            "catalog_version": 2,
             "metrics": {
                 "CTR": {
-                    "source": "engagement",
+                    "processor": "engagement",
                     "kind": "formula",
                     "expression": {
                         "op": "safe_div",
@@ -79,6 +86,7 @@ def _base_draft() -> dict:
             }
         },
         "dashboards": {
+            "catalog_version": 2,
             "dashboards": [
                 {
                     "id": "overview",
@@ -94,7 +102,6 @@ def _base_draft() -> dict:
                                     "metric": "CTR",
                                     "chart": "line",
                                     "x": "Day",
-                                    "y": "CTR",
                                 }
                             ],
                         }
@@ -121,8 +128,13 @@ def _binary_processor(channel_field: str) -> dict:
         "id": "engagement",
         "source": "ih",
         "kind": "binary_outcome",
-        "dimensions": [channel_field],
-        "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+        "group_by": [channel_field],
+        "time": {"property": "OutcomeTime", "grain": "daily"},
+        "states": {
+            "Count": {"type": "count"},
+            "Positives": {"type": "count", "outcome": "positive"},
+            "Negatives": {"type": "count", "outcome": "negative"},
+        },
         "outcome": {
             "column": "Outcome",
             "positive_values": ["Clicked"],
@@ -142,7 +154,11 @@ def test_apply_operations_upserts_metric_and_tile() -> None:
         {
             "op": "set_metric",
             "name": "Total",
-            "metric": {"source": "engagement", "kind": "formula", "expression": {"col": "Count"}},
+            "metric": {
+                "processor": "engagement",
+                "kind": "formula",
+                "expression": {"col": "Count"},
+            },
         },
         {
             "op": "set_tile",
@@ -480,7 +496,7 @@ def test_patch_rejection_restores_changed_object_instead_of_deleting_it() -> Non
                 "op": "set_metric",
                 "name": "Total",
                 "metric": {
-                    "source": "engagement",
+                    "processor": "engagement",
                     "kind": "formula",
                     "expression": {"col": "Count"},
                 },
@@ -661,23 +677,15 @@ def test_patch_bundles_close_processor_metric_tile_and_report_dependencies() -> 
             {
                 "op": "set_processor",
                 "processor": {
+                    **_binary_processor("Channel"),
                     "id": "satisfaction",
-                    "source": "ih",
-                    "kind": "binary_outcome",
-                    "dimensions": ["Channel"],
-                    "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
-                    "outcome": {
-                        "column": "Outcome",
-                        "positive_values": ["Clicked"],
-                        "negative_values": ["Impression"],
-                    },
                 },
             },
             {
                 "op": "set_metric",
                 "name": "Satisfaction",
                 "metric": {
-                    "source": "satisfaction",
+                    "processor": "satisfaction",
                     "kind": "formula",
                     "expression": {
                         "op": "safe_div",
@@ -695,7 +703,6 @@ def test_patch_bundles_close_processor_metric_tile_and_report_dependencies() -> 
                     "title": "Satisfaction",
                     "metric": "Satisfaction",
                     "chart": "kpi_card",
-                    "value": "Satisfaction",
                 },
             },
         ],
@@ -838,10 +845,10 @@ def test_copilot_tool_loop_repairs_invalid_operations_before_pending_review() ->
     responses = iter(
         [
             '{"reply":"Adding it.","operations":[{"op":"set_metric","name":"Total",'
-            '"metric":{"source":"missing","kind":"formula","expression":{"col":"Count"}}}],'
+            '"metric":{"processor":"missing","kind":"formula","expression":{"col":"Count"}}}],'
             '"questions":[]}',
-            '{"reply":"Corrected the source.","operations":[{"op":"set_metric",'
-            '"name":"Total","metric":{"source":"engagement","kind":"formula",'
+            '{"reply":"Corrected the processor.","operations":[{"op":"set_metric",'
+            '"name":"Total","metric":{"processor":"engagement","kind":"formula",'
             '"expression":{"col":"Count"}}}],"questions":[]}',
         ]
     )
@@ -868,7 +875,7 @@ def test_copilot_tool_loop_repairs_invalid_operations_before_pending_review() ->
 
     assert result.iterations == 2
     assert result.pending_draft is not None
-    assert result.pending_draft["metrics"]["metrics"]["Total"]["source"] == "engagement"
+    assert result.pending_draft["metrics"]["metrics"]["Total"]["processor"] == "engagement"
     assert "Validation or operation errors" in prompts[1]
     assert "CustomerID" not in prompts[1]
 
@@ -879,8 +886,11 @@ def test_copilot_tool_loop_rejects_processor_edit_on_filters_step() -> None:
         [
             '{"reply":"Filtering the processor.","operations":[{"op":"set_processor",'
             '"processor":{"id":"engagement","source":"ih","kind":"binary_outcome",'
-            '"dimensions":["Channel"],"time":{"column":"OutcomeTime",'
-            '"grains":["Day","Summary"]},"outcome":{"column":"Outcome",'
+            '"group_by":["Channel"],"time":{"property":"OutcomeTime","grain":"daily"},'
+            '"states":{"Count":{"type":"count"},'
+            '"Positives":{"type":"count","outcome":"positive"},'
+            '"Negatives":{"type":"count","outcome":"negative"}},'
+            '"outcome":{"column":"Outcome",'
             '"positive_values":["Clicked"],"negative_values":["Impression"]},'
             '"filter":{"op":"eq","column":"Outcome","value":"Clicked"}}}],'
             '"questions":[]}',
@@ -1060,11 +1070,11 @@ def test_operation_field_normalization_covers_schema_slots_without_changing_valu
         {
             "op": "set_processor",
             "processor": {
-                "id": "engagement",
-                "source": "ih",
-                "kind": "binary_outcome",
-                "dimensions": ["pyChannel"],
-                "time": {"column": "pxOutcomeTime", "grains": ["Summary"]},
+                    "id": "engagement",
+                    "source": "ih",
+                    "kind": "binary_outcome",
+                    "group_by": ["pyChannel"],
+                    "time": {"property": "pxOutcomeTime", "grain": "summary"},
                 "outcome": {
                     "column": "pyOutcome",
                     "positive_values": ["pyChannel"],
@@ -1076,9 +1086,9 @@ def test_operation_field_normalization_covers_schema_slots_without_changing_valu
         },
         {
             "op": "set_metric",
-            "name": "ChannelLift",
-            "metric": {
-                "source": "engagement",
+                "name": "ChannelLift",
+                "metric": {
+                    "processor": "engagement",
                 "kind": "variant_compare",
                 "variant_column": "pyChannel",
                 "expression": {"col": "pyChannel"},
@@ -1144,8 +1154,8 @@ def test_operation_field_normalization_covers_schema_slots_without_changing_valu
     assert normalized[1]["name"] == "pyChannel"
     assert normalized[1]["expression"]["col"] == "Channel"
     processor = normalized[2]["processor"]
-    assert processor["dimensions"] == ["Channel"]
-    assert processor["time"]["column"] == "OutcomeTime"
+    assert processor["group_by"] == ["Channel"]
+    assert processor["time"]["property"] == "OutcomeTime"
     assert processor["outcome"]["column"] == "Outcome"
     assert processor["outcome"]["positive_values"] == ["pyChannel"]
     assert processor["filter"]["column"] == "Channel"
@@ -1392,7 +1402,7 @@ def test_copilot_processor_repairs_stale_raw_field_after_rename_capitalize() -> 
     assert result.validation_issues == ()
     assert result.pending_draft is not None
     processor = result.pending_draft["processors"]["processors"][0]
-    assert processor["dimensions"] == ["Channel"]
+    assert processor["group_by"] == ["Channel"]
     assert "stale raw field" in prompts[1]
     assert "pyChannel" in prompts[1]
 
@@ -1411,7 +1421,7 @@ def test_copilot_cumulative_repair_cannot_leave_a_stale_processor() -> None:
                     "op": "set_metric",
                     "name": "Total",
                     "metric": {
-                        "source": "engagement",
+                        "processor": "engagement",
                         "kind": "formula",
                         "expression": {"col": "Count"},
                     },
@@ -1439,7 +1449,7 @@ def test_copilot_cumulative_repair_cannot_leave_a_stale_processor() -> None:
 def test_copilot_metric_repairs_stale_variant_column_after_rename_capitalize() -> None:
     def metric(variant_column: str) -> dict:
         return {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "variant_compare",
             "variant_column": variant_column,
             "test_role": "Test",
@@ -1491,26 +1501,39 @@ def test_copilot_metric_repairs_stale_variant_column_after_rename_capitalize() -
 
 
 @pytest.mark.unit
-def test_copilot_processor_contract_accepts_score_column_rows_and_state_ids() -> None:
+def test_copilot_processor_contract_accepts_typed_score_properties_and_state_ids() -> None:
     processor = {
         "id": "engagement",
         "source": "ih",
         "kind": "score_distribution",
-        "dimensions": ["Channel"],
-        "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
-        "outcome_column": "Outcome",
-        "score_properties": ["Propensity", "FinalPropensity"],
-        "score_columns": [
-            {"column": "Propensity", "state": "Propensity_tdigest"},
-            {"column": "FinalPropensity", "state": "FinalPropensity_tdigest"},
+        "group_by": ["Channel"],
+        "time": {"property": "OutcomeTime", "grain": "daily"},
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": ["Clicked"],
+            "negative_values": ["Impression"],
+        },
+        "score_properties": [
+            {"column": "Propensity", "role": "primary"},
+            {"column": "FinalPropensity", "role": "calibrated"},
         ],
         "states": {
             "Count": {"type": "count"},
-            "Positives": {"type": "count"},
-            "Negatives": {"type": "count"},
+            "Positives": {"type": "count", "outcome": "positive"},
+            "Negatives": {"type": "count", "outcome": "negative"},
+            "Propensity_tdigest": {
+                "type": "tdigest",
+                "source_column": "Propensity",
+            },
+            "FinalPropensity_tdigest": {
+                "type": "tdigest",
+                "source_column": "FinalPropensity",
+            },
             "Propensity_tdigest_positives": {
                 "type": "tdigest",
                 "source_column": "Propensity",
+                "score_property": "Propensity",
+                "outcome": "positive",
             },
         },
     }
@@ -1537,7 +1560,7 @@ def test_copilot_processor_contract_accepts_score_column_rows_and_state_ids() ->
 
 
 @pytest.mark.unit
-def test_copilot_tile_repairs_stale_raw_field_and_allows_metric_results() -> None:
+def test_copilot_tile_repairs_stale_raw_dimension_field() -> None:
     responses = iter(
         [
             _operation_response(
@@ -1552,8 +1575,6 @@ def test_copilot_tile_repairs_stale_raw_field_and_allows_metric_results() -> Non
                         "metric": "CTR",
                         "chart": "bar",
                         "x": "pyChannel",
-                        "y": "Count",
-                        "error_y": "Positives",
                     },
                 },
             ),
@@ -1569,8 +1590,6 @@ def test_copilot_tile_repairs_stale_raw_field_and_allows_metric_results() -> Non
                         "metric": "CTR",
                         "chart": "bar",
                         "x": "Channel",
-                        "y": "Count",
-                        "error_y": "Positives",
                     },
                 },
             ),
@@ -1583,7 +1602,7 @@ def test_copilot_tile_repairs_stale_raw_field_and_allows_metric_results() -> Non
         return next(responses)
 
     result = run_copilot_tool_loop(
-        prompt="Add Channel CTR with count error bars.",
+        prompt="Add Channel CTR.",
         draft=_rename_capitalize_draft(),
         call_model=call_model,
         validate=ai_config_studio_page.validate_draft_catalog,
@@ -1596,8 +1615,6 @@ def test_copilot_tile_repairs_stale_raw_field_and_allows_metric_results() -> Non
     tiles = result.pending_draft["dashboards"]["dashboards"][0]["pages"][0]["tiles"]
     tile = next(item for item in tiles if item["id"] == "channel_ctr")
     assert tile["x"] == "Channel"
-    assert tile["y"] == "Count"
-    assert tile["error_y"] == "Positives"
     assert "stale raw field" in prompts[1]
     assert "pyChannel" in prompts[1]
 
@@ -1606,13 +1623,10 @@ def test_copilot_tile_repairs_stale_raw_field_and_allows_metric_results() -> Non
 @pytest.mark.parametrize(
     "tile_fields",
     [
-        pytest.param({"facets": {"row": "pyChannel"}}, id="facets-mapping"),
-        pytest.param({"error_y_plus": "pyChannel"}, id="error-y-plus"),
-        pytest.param({"error_y_minus": "pyChannel"}, id="error-y-minus"),
-        pytest.param({"hover_name": "pyChannel"}, id="hover-name"),
-        pytest.param({"measure": "pyChannel"}, id="measure"),
-        pytest.param({"z": "pyChannel"}, id="z"),
-        pytest.param({"fallback_property": "pyChannel"}, id="fallback-property"),
+        pytest.param({"facet_row": "pyChannel"}, id="facet-row"),
+        pytest.param({"facet_col": "pyChannel"}, id="facet-col"),
+        pytest.param({"color": "pyChannel"}, id="color"),
+        pytest.param({"group_by": ["pyChannel"]}, id="group-by"),
         pytest.param({"labels": {"pyChannel": "Channel"}}, id="labels-mapping"),
     ],
 )
@@ -1635,65 +1649,18 @@ def test_draft_field_contract_rejects_stale_extended_tile_fields(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("reference_key", ["reference", "delta_reference"])
-def test_draft_field_contract_accepts_numeric_string_tile_reference(
-    reference_key: str,
-) -> None:
-    draft = _rename_capitalize_draft()
-    tile = draft["dashboards"]["dashboards"][0]["pages"][0]["tiles"][0]
-    tile.clear()
-    tile.update(
-        {
-            "id": "ctr",
-            "title": "CTR",
-            "metric": "CTR",
-            "chart": "kpi_card",
-            "value": "CTR",
-            reference_key: "0.25",
-        }
-    )
-
-    ok, issues = validate_draft_field_contract(
-        draft,
-        ["Channel", "CustomerID", "Outcome", "OutcomeTime"],
-        source_id="ih",
-    )
-
-    assert ok
-    assert issues == []
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "calendar_field",
-    ["day", "week", "month", "quarter", "year", "as_of_date"],
-)
-def test_draft_field_contract_accepts_lowercase_calendar_tile_fields(
-    calendar_field: str,
-) -> None:
-    draft = _rename_capitalize_draft()
-    tile = draft["dashboards"]["dashboards"][0]["pages"][0]["tiles"][0]
-    tile["x"] = calendar_field
-
-    ok, issues = validate_draft_field_contract(
-        draft,
-        ["Channel", "CustomerID", "Outcome", "OutcomeTime"],
-        source_id="ih",
-    )
-
-    assert ok
-    assert issues == []
-
-
-@pytest.mark.unit
-def test_draft_field_contract_validates_funnel_stage_expressions_not_stage_names() -> None:
+def test_draft_field_contract_validates_funnel_expressions_and_state_ids() -> None:
     draft = _rename_capitalize_draft()
     draft["processors"]["processors"][0] = {
         "id": "engagement",
         "source": "ih",
         "kind": "funnel",
-        "dimensions": ["Channel"],
-        "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+        "group_by": ["Channel"],
+        "time": {"property": "OutcomeTime", "grain": "daily"},
+        "states": {
+            "Impression_Count": {"type": "count", "stage": "Impression"},
+            "Clicked_Count": {"type": "count", "stage": "Clicked"},
+        },
         "stages": [
             {
                 "name": "Impression",
@@ -1709,7 +1676,7 @@ def test_draft_field_contract_validates_funnel_stage_expressions_not_stage_names
     tile.update(
         {
             "chart": "funnel",
-            "stages": ["Impression", "Clicked"],
+            "stages": ["Impression_Count", "Clicked_Count"],
             "color": "Channel",
         }
     )
@@ -1733,7 +1700,7 @@ def test_draft_field_contract_validates_funnel_stage_expressions_not_stage_names
     assert not ok
     assert any("stale raw field 'pyChannel' in funnel stages" in issue for issue in issues)
 
-    tile["stages"] = ["Impression", "Clicked"]
+    tile["stages"] = ["Impression_Count", "Clicked_Count"]
     draft["processors"]["processors"][0]["stages"][1]["when"] = {
         "op": "eq",
         "column": "pyChannel",
@@ -1764,7 +1731,7 @@ def test_draft_field_contract_rejects_stale_processor_and_accepts_effective_fiel
     assert issues == []
 
     stale = copy.deepcopy(draft)
-    stale["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    stale["processors"]["processors"][0]["group_by"] = ["pyChannel"]
 
     ok, issues = validate_draft_field_contract(
         stale,
@@ -1778,31 +1745,10 @@ def test_draft_field_contract_rejects_stale_processor_and_accepts_effective_fiel
 
 
 @pytest.mark.unit
-def test_draft_field_contract_rejects_implicit_scalar_state_source_column() -> None:
-    draft = _rename_capitalize_draft()
-    draft["processors"]["processors"][0]["states"] = {
-        "Count": {"type": "count"},
-        "Positives": {"type": "count"},
-        "Negatives": {"type": "count"},
-        "pyRevenue": {"type": "value_sum"},
-    }
-
-    ok, issues = validate_draft_field_contract(
-        draft,
-        ["Channel", "CustomerID", "Outcome", "OutcomeTime", "Revenue"],
-        source_id="ih",
-    )
-
-    assert not ok
-    assert any("processor 'engagement'" in issue and "pyRevenue" in issue for issue in issues)
-    assert any("Use 'Revenue'" in issue for issue in issues)
-
-
-@pytest.mark.unit
 def test_draft_field_contract_revalidates_baseline_objects_when_rename_changes() -> None:
     processor_baseline = _rename_capitalize_draft()
     processor_baseline["pipelines"]["sources"][0]["transforms"] = []
-    processor_baseline["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    processor_baseline["processors"]["processors"][0]["group_by"] = ["pyChannel"]
     processor_candidate = copy.deepcopy(processor_baseline)
     processor_candidate["pipelines"]["sources"][0]["transforms"] = [{"kind": "rename_capitalize"}]
 
@@ -1887,8 +1833,13 @@ def test_draft_field_contract_rejects_inactive_dependency_mutations() -> None:
             "id": "legacy_engagement",
             "source": "legacy",
             "kind": "binary_outcome",
-            "dimensions": ["LegacyChannel"],
-            "time": {"column": "LegacyTime", "grains": ["Day", "Summary"]},
+            "group_by": ["LegacyChannel"],
+            "time": {"property": "LegacyTime", "grain": "daily"},
+            "states": {
+                "Count": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "Negatives": {"type": "count", "outcome": "negative"},
+            },
             "outcome": {
                 "column": "LegacyOutcome",
                 "positive_values": ["Yes"],
@@ -1897,7 +1848,7 @@ def test_draft_field_contract_rejects_inactive_dependency_mutations() -> None:
         }
     )
     baseline["metrics"]["metrics"]["LegacyCTR"] = {
-        "source": "legacy_engagement",
+        "processor": "legacy_engagement",
         "kind": "formula",
         "expression": {"col": "Count"},
     }
@@ -1908,12 +1859,11 @@ def test_draft_field_contract_rejects_inactive_dependency_mutations() -> None:
             "metric": "LegacyCTR",
             "chart": "line",
             "x": "Day",
-            "y": "LegacyCTR",
         }
     )
 
     processor_candidate = copy.deepcopy(baseline)
-    processor_candidate["processors"]["processors"][1]["dimensions"] = ["inventedField"]
+    processor_candidate["processors"]["processors"][1]["group_by"] = ["inventedField"]
     metric_candidate = copy.deepcopy(baseline)
     metric_candidate["metrics"]["metrics"]["LegacyCTR"]["expression"] = {"col": "Positives"}
     report_candidate = copy.deepcopy(baseline)
@@ -1986,7 +1936,7 @@ def test_draft_field_contract_allows_new_calculated_output_downstream() -> None:
             "expression": {"col": "Channel"},
         }
     )
-    draft["processors"]["processors"][0]["dimensions"] = ["ChannelCopy"]
+    draft["processors"]["processors"][0]["group_by"] = ["ChannelCopy"]
 
     ok, issues = validate_draft_field_contract(
         draft,
@@ -2024,7 +1974,7 @@ def test_draft_field_contract_allows_hidden_local_filter_without_exposing_it_dow
     assert ok
     assert issues == []
 
-    draft["processors"]["processors"][0]["dimensions"] = ["HiddenFlag"]
+    draft["processors"]["processors"][0]["group_by"] = ["HiddenFlag"]
     ok, issues = validate_draft_field_contract(
         draft,
         ["Channel", "CustomerID", "Outcome", "OutcomeTime"],
@@ -2081,7 +2031,17 @@ def test_draft_field_contract_respects_lifecycle_metric_output_subset() -> None:
             "source": "ih",
             "kind": "entity_lifecycle",
             "group_by": ["Channel"],
-            "time": {"column": "OutcomeTime", "grains": ["Summary"]},
+            "time": {"property": "OutcomeTime", "grain": "summary"},
+            "states": {
+                "Holdings": {
+                    "type": "count",
+                    "source_column": "Outcome",
+                    "distinct": True,
+                },
+                "Monetary": {"type": "value_sum", "source_column": "Outcome"},
+                "FirstPurchase": {"type": "min", "source_column": "OutcomeTime"},
+                "LastPurchase": {"type": "max", "source_column": "OutcomeTime"},
+            },
             "keys": {
                 "customer_id": "CustomerID",
                 "order_id": "Outcome",
@@ -2092,8 +2052,13 @@ def test_draft_field_contract_respects_lifecycle_metric_output_subset() -> None:
     ]
     draft["metrics"]["metrics"] = {
         "Lifecycle": {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "lifecycle_summary",
+            "holdings_state": "Holdings",
+            "monetary_state": "Monetary",
+            "first_purchase_state": "FirstPurchase",
+            "last_purchase_state": "LastPurchase",
+            "entity_column": "CustomerID",
             "outputs": ["frequency"],
         }
     }
@@ -2103,47 +2068,34 @@ def test_draft_field_contract_respects_lifecycle_metric_output_subset() -> None:
             "metric": "Lifecycle",
             "chart": "bar",
             "x": "Channel",
-            "y": "lifetime_value",
+            "metric_output": "lifetime_value",
         }
     )
 
-    ok, issues = validate_draft_field_contract(
-        draft,
-        ["Channel", "CustomerID", "Outcome", "OutcomeTime"],
-        source_id="ih",
-    )
+    ok, issues = ai_config_studio_page.validate_draft_catalog(draft)
 
     assert not ok
-    assert any("lifetime_value" in issue and "queryable fields" in issue for issue in issues)
+    assert any("lifetime_value" in issue and "metric output" in issue for issue in issues)
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("outputs", "metric_extra", "tile_field"),
+    ("outputs", "tile_field"),
     [
         pytest.param(
             ["frequency", "bogus"],
-            {},
             "bogus",
             id="unknown-configured-output",
         ),
         pytest.param(
             ["frequency"],
-            {"output": "lifetime_value"},
-            "lifetime_value",
-            id="ignored-singular-output",
-        ),
-        pytest.param(
-            ["frequency"],
-            {},
             "Lifecycle",
             id="metric-name",
         ),
     ],
 )
-def test_draft_field_contract_rejects_non_queryable_lifecycle_fields(
+def test_catalog_rejects_non_queryable_lifecycle_outputs(
     outputs: list[str],
-    metric_extra: dict[str, str],
     tile_field: str,
 ) -> None:
     draft = _rename_capitalize_draft()
@@ -2153,7 +2105,17 @@ def test_draft_field_contract_rejects_non_queryable_lifecycle_fields(
             "source": "ih",
             "kind": "entity_lifecycle",
             "group_by": ["Channel"],
-            "time": {"column": "OutcomeTime", "grains": ["Summary"]},
+            "time": {"property": "OutcomeTime", "grain": "summary"},
+            "states": {
+                "Holdings": {
+                    "type": "count",
+                    "source_column": "Outcome",
+                    "distinct": True,
+                },
+                "Monetary": {"type": "value_sum", "source_column": "Outcome"},
+                "FirstPurchase": {"type": "min", "source_column": "OutcomeTime"},
+                "LastPurchase": {"type": "max", "source_column": "OutcomeTime"},
+            },
             "keys": {
                 "customer_id": "CustomerID",
                 "order_id": "Outcome",
@@ -2164,10 +2126,14 @@ def test_draft_field_contract_rejects_non_queryable_lifecycle_fields(
     ]
     draft["metrics"]["metrics"] = {
         "Lifecycle": {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "lifecycle_summary",
+            "holdings_state": "Holdings",
+            "monetary_state": "Monetary",
+            "first_purchase_state": "FirstPurchase",
+            "last_purchase_state": "LastPurchase",
+            "entity_column": "CustomerID",
             "outputs": outputs,
-            **metric_extra,
         }
     }
     tile = draft["dashboards"]["dashboards"][0]["pages"][0]["tiles"][0]
@@ -2176,18 +2142,14 @@ def test_draft_field_contract_rejects_non_queryable_lifecycle_fields(
             "metric": "Lifecycle",
             "chart": "bar",
             "x": "Channel",
-            "y": tile_field,
+            "metric_output": tile_field,
         }
     )
 
-    ok, issues = validate_draft_field_contract(
-        draft,
-        ["Channel", "CustomerID", "Outcome", "OutcomeTime"],
-        source_id="ih",
-    )
+    ok, issues = ai_config_studio_page.validate_draft_catalog(draft)
 
     assert not ok
-    assert any(tile_field in issue and "queryable fields" in issue for issue in issues)
+    assert any("outputs.1" in issue or tile_field in issue for issue in issues), issues
 
 
 @pytest.mark.unit
@@ -2208,8 +2170,13 @@ def test_draft_field_contract_scopes_validation_to_active_source() -> None:
             "id": "legacy_engagement",
             "source": "legacy",
             "kind": "binary_outcome",
-            "dimensions": ["pyChannel"],
-            "time": {"column": "LegacyTime", "grains": ["Day", "Summary"]},
+            "group_by": ["pyChannel"],
+            "time": {"property": "LegacyTime", "grain": "daily"},
+            "states": {
+                "Count": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "Negatives": {"type": "count", "outcome": "negative"},
+            },
             "outcome": {
                 "column": "LegacyOutcome",
                 "positive_values": ["Yes"],
@@ -2218,7 +2185,7 @@ def test_draft_field_contract_scopes_validation_to_active_source() -> None:
         }
     )
     draft["metrics"]["metrics"]["LegacyCTR"] = {
-        "source": "legacy_engagement",
+        "processor": "legacy_engagement",
         "kind": "formula",
         "expression": {
             "op": "safe_div",
@@ -2242,7 +2209,6 @@ def test_draft_field_contract_scopes_validation_to_active_source() -> None:
             "metric": "LegacyCTR",
             "chart": "bar",
             "x": "pyChannel",
-            "y": "LegacyCTR",
         }
     )
 
@@ -2255,7 +2221,7 @@ def test_draft_field_contract_scopes_validation_to_active_source() -> None:
     assert ok
     assert issues == []
 
-    draft["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    draft["processors"]["processors"][0]["group_by"] = ["pyChannel"]
     ok, issues = validate_draft_field_contract(
         draft,
         ["Channel", "CustomerID", "Outcome", "OutcomeTime"],
@@ -2274,6 +2240,7 @@ def test_draft_field_contract_scopes_validation_to_active_source() -> None:
 def test_copilot_set_dashboards_repairs_stale_filter_and_tile_field() -> None:
     def dashboards(channel_field: str) -> dict:
         return {
+            "catalog_version": 2,
             "dashboards": [
                 {
                     "id": "overview",
@@ -2290,7 +2257,6 @@ def test_copilot_set_dashboards_repairs_stale_filter_and_tile_field() -> None:
                                     "metric": "CTR",
                                     "chart": "bar",
                                     "x": channel_field,
-                                    "y": "CTR",
                                 }
                             ],
                         }
@@ -2340,10 +2306,11 @@ def test_copilot_set_dashboards_repairs_stale_filter_and_tile_field() -> None:
 def test_draft_field_contract_accepts_authoritative_odds_ratio_result_column() -> None:
     draft = _rename_capitalize_draft()
     draft["metrics"]["metrics"]["Experiment"] = {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "contingency_test",
         "variant_column": "Channel",
         "tests": ["chi2", "g", "z"],
+        "outputs": ["g_odds_ratio_stat", "g_odds_ratio_ci_high"],
     }
     draft["dashboards"]["dashboards"][0]["pages"][0]["tiles"].append(
         {
@@ -2376,7 +2343,7 @@ def test_copilot_tool_loop_never_applies_operations_in_read_only_mode() -> None:
         prompts.append(prompt)
         return (
             '{"reply":"I will add Total.","operations":[{"op":"set_metric",'
-            '"name":"Total","metric":{"source":"engagement","kind":"formula",'
+            '"name":"Total","metric":{"processor":"engagement","kind":"formula",'
             '"expression":{"col":"Count"}}}],"questions":[]}'
         )
 
@@ -2647,7 +2614,7 @@ def test_copilot_panel_holds_operations_in_pending_review(
         return (
             '{"reply": "Added a total metric.", '
             '"operations": [{"op": "set_metric", "name": "Total", '
-            '"metric": {"source": "engagement", "kind": "formula", '
+            '"metric": {"processor": "engagement", "kind": "formula", '
             '"expression": {"col": "Count"}}}], '
             '"questions": []}'
         )
@@ -2698,7 +2665,7 @@ def test_pending_copilot_details_include_change_table_and_yaml() -> None:
                 "op": "set_metric",
                 "name": "Total",
                 "metric": {
-                    "source": "engagement",
+                    "processor": "engagement",
                     "kind": "formula",
                     "expression": {"col": "Count"},
                 },
@@ -2774,8 +2741,6 @@ def test_copilot_accepts_effective_filter_after_rename_capitalize(
         effective_fields = ["Channel", "CustomerID", "OutcomeTime", "Outcome"]
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state[page.AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = True
-        st.session_state[page.AI_STUDIO_RENAME_CAPITALIZE_LEGACY_KEY] = True
-        st.session_state["ai_studio_rename_capitalize_applied"] = True
         st.session_state["ai_studio_source_id"] = "ih"
         st.session_state["ai_studio_raw_schema_columns"] = raw_fields
         st.session_state["ai_studio_effective_schema_columns"] = effective_fields
@@ -3147,7 +3112,7 @@ def test_pending_review_allows_read_only_copilot_and_preserves_pending(
                 "op": "set_metric",
                 "name": "Total",
                 "metric": {
-                    "source": "engagement",
+                    "processor": "engagement",
                     "kind": "formula",
                     "expression": {"col": "Count"},
                 },

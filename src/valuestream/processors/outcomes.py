@@ -7,6 +7,8 @@ from typing import Any
 
 import polars as pl
 
+from valuestream.config import model
+
 
 @dataclass(frozen=True)
 class Outcome:
@@ -17,19 +19,13 @@ class Outcome:
     negative_values: list[Any]
 
 
-def parse_outcome(extra: dict[str, Any]) -> Outcome:
-    """Return the configured ``outcome`` block, falling back to demo defaults."""
-    raw = extra.get("outcome")
-    if isinstance(raw, dict):
-        return Outcome(
-            column=str(raw.get("column", "Outcome")),
-            positive_values=list(raw.get("positive_values", ["Clicked", "Conversion"])),
-            negative_values=list(raw.get("negative_values", ["Impression", "Pending"])),
-        )
+def parse_outcome(spec: model.OutcomeSpec) -> Outcome:
+    """Resolve the processor's required, explicitly typed outcome contract."""
+
     return Outcome(
-        column="Outcome",
-        positive_values=["Clicked", "Conversion"],
-        negative_values=["Impression", "Pending"],
+        column=spec.column,
+        positive_values=list(spec.positive_values),
+        negative_values=list(spec.negative_values),
     )
 
 

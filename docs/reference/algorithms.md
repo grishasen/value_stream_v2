@@ -128,12 +128,8 @@ return sketch.serialize()              # bytes
 
 Nulls are removed before construction. The array path removes one Python-to-C
 call per value for non-trivial groups; the scalar path remains for tiny groups,
-where allocating and normalizing an array can cost more than it saves. The
-default `sketch_build_mode: bulk` is a separate optimization: it bundles all
-t-digest and KLL fields for one group into a single Polars Python callback
-before calling these native builders. `sketch_build_mode: legacy` retains the
-former per-field callback plan as an explicit comparison and rollback path;
-both modes emit merge-compatible sketch states.
+where allocating and normalizing an array can cost more than it saves. All
+catalog-v2 distribution processors use the bulk construction plan.
 
 **Merge**:
 ```text
@@ -438,7 +434,10 @@ For Polars Series groups of at least 256 rows, distinct users, action
 frequencies, and interaction lengths are reduced with native Polars expressions;
 smaller or non-Series inputs retain the scalar compatibility path.
 
-Both metrics are stored as `pooled_mean` states with `Count` as the weight, so cross-chunk merging is just a weighted mean.
+Both metrics are stored as `pooled_mean` states with an explicit
+`recipe` (`personalization` or `novelty`) and `Count` as the weight, so
+cross-chunk merging is a weighted mean without deriving behavior from the
+state name.
 
 ---
 
@@ -539,13 +538,12 @@ reused for union, intersection, or difference.
 **Cohort retention example** (in metric DSL):
 ```yaml
 RetainedUsers_30d:
-  source: unique_users
+  processor: unique_users
   kind: set_op
-  op: intersection
+  operation: intersection
   operands:
     - {state: ActiveUsers_theta, time_window: {last: 1d}}
     - {state: ActiveUsers_theta, time_window: {between: [-30d, -1d]}}
-  output: count
 ```
 
 The planner reads two theta blobs, runs `theta_intersection`, and reports `get_estimate()`.

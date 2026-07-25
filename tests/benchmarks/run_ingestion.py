@@ -193,15 +193,13 @@ def _prepare_workspace(
     shutil.copytree(source_workspace / "catalog", scratch / "catalog")
     catalog = load(source_workspace)
     source = next(item for item in catalog.pipelines.sources if item.id == source_id)
-    extra = dict(source.reader.model_extra or {})
-    raw_root = Path(str(extra.get("root") or extra.get("base_dir") or "."))
+    raw_root = Path(source.reader.root or ".")
     resolved_root = raw_root if raw_root.is_absolute() else source_workspace / raw_root
 
     pipelines_path = scratch / "catalog" / "pipelines.yaml"
     pipelines = yaml.safe_load(pipelines_path.read_text(encoding="utf-8"))
     raw_source = next(item for item in pipelines["sources"] if item["id"] == source_id)
     raw_source["reader"]["root"] = str(resolved_root.resolve())
-    raw_source["reader"].pop("base_dir", None)
     pipelines_path.write_text(yaml.safe_dump(pipelines, sort_keys=False), encoding="utf-8")
 
     processors_path = scratch / "catalog" / "processors.yaml"
@@ -220,8 +218,14 @@ def _prepare_workspace(
     if missing:
         raise ValueError(f"benchmark suite requires missing processor(s): {', '.join(missing)}")
     processors_path.write_text(yaml.safe_dump(processor_catalog, sort_keys=False), encoding="utf-8")
-    (scratch / "catalog" / "metrics.yaml").write_text("metrics: {}\n", encoding="utf-8")
-    (scratch / "catalog" / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
+    (scratch / "catalog" / "metrics.yaml").write_text(
+        "catalog_version: 2\nmetrics: {}\n",
+        encoding="utf-8",
+    )
+    (scratch / "catalog" / "dashboards.yaml").write_text(
+        "catalog_version: 2\ndashboards: []\n",
+        encoding="utf-8",
+    )
 
 
 def _input_manifest(workspace: Path, source_id: str) -> dict[str, Any]:

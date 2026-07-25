@@ -943,7 +943,10 @@ def _default_value_column(rows, intent: ChatIntent) -> str:
         return intent.chart.y
     if intent.metric in rows.columns:
         return intent.metric
-    return str(rows.columns[-1])
+    raise ValueError(
+        f"metric {intent.metric!r} does not produce a scalar column with that name; "
+        "select an explicit metric output"
+    )
 
 
 def _first_existing(value: str | None, columns) -> str | None:

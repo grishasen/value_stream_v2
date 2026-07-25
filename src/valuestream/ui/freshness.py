@@ -26,6 +26,7 @@ class Freshness:
     last_created_at: dt.datetime | None
     last_run_finished_at: dt.datetime | None
     status: str
+    latest_data_date: dt.date | None = None
 
 
 def metric_freshness(
@@ -40,11 +41,12 @@ def metric_freshness(
     metric = catalog.metrics.metrics.get(metric_name)
     if metric is None:
         return Freshness(None, None, None, "unknown metric")
-    processor = next((p for p in catalog.processors.processors if p.id == metric.source), None)
+    processor = next((p for p in catalog.processors.processors if p.id == metric.processor), None)
     if processor is None:
         return Freshness(None, None, None, "unknown processor")
     latest_period: str | None = None
     last_created_at: dt.datetime | None = None
+    latest_data_date: dt.date | None = None
     run = latest_run(workspace_path, source_id=processor.source)
     config_hash = processor_computation_hash(catalog, processor)
     for stored_grain in grain_levels.aggregate_grain_candidates(processor, grain):
@@ -84,12 +86,14 @@ def metric_freshness(
             break
         # Keep the existence check and freshness aggregation in one optimized
         # graph so their shared Parquet scan can be eliminated.
+        data_date_expr = _latest_data_date_expr(filtered)
         count_frame, frame = pl.collect_all(
             [
                 count_plan,
                 filtered.select(
                     pl.col("period").cast(pl.String).max().alias("latest_period"),
                     pl.col("created_at").max().alias("last_created_at"),
+                    data_date_expr,
                 ),
             ]
         )
@@ -99,13 +103,43 @@ def metric_freshness(
             row = frame.row(0, named=True)
             latest_period = row["latest_period"]
             last_created_at = row["last_created_at"]
+            latest_data_date = _coerce_data_date(row["latest_data_date"])
         break
     return Freshness(
         latest_period=latest_period,
         last_created_at=last_created_at,
         last_run_finished_at=run.get("finished_at"),
         status=str(run.get("status", "not run")),
+        latest_data_date=latest_data_date,
     )
+
+
+def _latest_data_date_expr(frame: pl.LazyFrame) -> pl.Expr:
+    """Return the latest exact aggregate date when the stored grain carries one."""
+
+    names = set(frame.collect_schema().names())
+    for column in ("Day", "as_of_date"):
+        if column in names:
+            return (
+                pl.col(column)
+                .cast(pl.Date, strict=False)
+                .max()
+                .alias("latest_data_date")
+            )
+    return pl.lit(None, dtype=pl.Date).alias("latest_data_date")
+
+
+def _coerce_data_date(value: Any) -> dt.date | None:
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    if isinstance(value, str):
+        try:
+            return dt.date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
 
 
 def _filter_successful_chunks(

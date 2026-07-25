@@ -59,17 +59,15 @@ from valuestream.ui.pages.ai_config_studio import (
     _draft_files,
     _draft_funnel_stage_options,
     _draft_metric_choice_label,
-    _draft_metric_kinds_for_source,
-    _draft_metric_names_for_source_kind,
-    _draft_metric_source_ids,
-    _draft_state_options,
+    _draft_metric_kinds_for_processor,
+    _draft_metric_names_for_processor_kind,
+    _draft_metric_processor_ids,
     _field_approval_editor_rows,
     _generated_processor_id,
     _install_recipe_in_draft,
     _load_ai_settings_config,
     _normalize_studio_step,
     _processor_state_rows,
-    _processor_state_specs,
     _processor_states_from_rows,
     _rename_capitalize_mapping,
     _render_selected_step,
@@ -599,17 +597,20 @@ def test_parse_ai_yaml_sections_accepts_fenced_file_keys() -> None:
         """
 ```yaml
 processors.yaml:
+  catalog_version: 2
   processors:
     - id: engagement
       source: ih
       kind: binary_outcome
 metrics.yaml:
+  catalog_version: 2
   metrics:
     CTR:
-      source: engagement
+      processor: engagement
       kind: formula
       expression: {col: Count}
 dashboards.yaml:
+  catalog_version: 2
   dashboards:
     - id: overview
       title: Overview
@@ -635,7 +636,12 @@ chat_with_data:
 def test_generate_validated_candidate_repairs_before_returning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    responses = iter(["metrics: {metrics: {}}", "metrics: {metrics: {CTR: {}}}"])
+    responses = iter(
+        [
+            "metrics: {catalog_version: 2, metrics: {}}",
+            "metrics: {catalog_version: 2, metrics: {CTR: {}}}",
+        ]
+    )
     prompts: list[str] = []
 
     def validate(candidate: dict) -> tuple[bool, list[str]]:
@@ -657,8 +663,8 @@ def test_generate_validated_candidate_repairs_before_returning(
 
 @pytest.mark.unit
 def test_generate_validated_candidate_records_parse_and_success_diagnostics() -> None:
-    malformed_response = "metrics:\n  metrics: [\n    - broken"
-    valid_response = "metrics: {metrics: {CTR: {}}}"
+    malformed_response = "metrics:\n  catalog_version: 2\n  metrics: [\n    - broken"
+    valid_response = "metrics: {catalog_version: 2, metrics: {CTR: {}}}"
     responses = iter([malformed_response, valid_response])
 
     result = ai_studio.generate_validated_candidate(
@@ -688,7 +694,7 @@ def test_generate_validated_candidate_records_parse_and_success_diagnostics() ->
     assert parse_diagnostic.sections == ()
     assert parse_diagnostic.response_chars == len(malformed_response)
     assert re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", parse_diagnostic.error_type)
-    assert parse_diagnostic.line == 3
+    assert parse_diagnostic.line == 4
     assert parse_diagnostic.column == 5
 
     assert success_diagnostic.attempt == 2
@@ -724,7 +730,7 @@ def test_generate_validated_candidate_bounds_attempt_diagnostic_issues() -> None
     result = ai_studio.generate_validated_candidate(
         base_draft=_base_draft(),
         prompt="generate",
-        call=lambda _prompt: "metrics: {metrics: {CTR: {}}}",
+        call=lambda _prompt: "metrics: {catalog_version: 2, metrics: {CTR: {}}}",
         repair_prompt=lambda _draft, _issues, _trace: "repair",
         max_repairs=0,
         validate=lambda _candidate: (False, issues),
@@ -764,12 +770,17 @@ def test_generate_validated_candidate_repairs_stale_post_rename_processor_field(
     source["transforms"] = [{"kind": "rename_capitalize"}]
     processor_yaml = """
 processors:
+  catalog_version: 2
   processors:
     - id: engagement
       source: ih
       kind: binary_outcome
-      dimensions: [{channel}]
-      time: {{column: OutcomeTime, grains: [Day, Summary]}}
+      group_by: [{channel}]
+      time: {{property: OutcomeTime, grain: daily}}
+      states:
+        Count: {{type: count}}
+        Positives: {{type: count, outcome: positive}}
+        Negatives: {{type: count, outcome: negative}}
       outcome:
         column: Outcome
         positive_values: [Clicked]
@@ -804,7 +815,7 @@ processors:
     assert result.ok
     assert result.attempts == 2
     assert result.draft is not None
-    assert result.draft["processors"]["processors"][0]["dimensions"] == ["Channel"]
+    assert result.draft["processors"]["processors"][0]["group_by"] == ["Channel"]
     assert "stale raw field" in prompts[1]
     assert "pyChannel" in prompts[1]
 
@@ -823,7 +834,10 @@ def test_generate_validated_candidate_never_returns_invalid_output(
     result = ai_studio.generate_validated_candidate(
         base_draft=accepted,
         prompt="first",
-        call=lambda _prompt: "metrics: {metrics: {bad: {source: missing, kind: formula}}}",
+        call=lambda _prompt: (
+            "metrics: {catalog_version: 2, "
+            "metrics: {bad: {processor: missing, kind: formula}}}"
+        ),
         repair_prompt=lambda _draft, _issues, _trace: "repair",
         max_repairs=2,
     )
@@ -894,7 +908,7 @@ def test_draft_validation_snapshot_uses_effective_field_contract_and_cache_ident
     st.session_state["ai_studio_effective_schema_signature"] = "schema-a"
 
     stale = copy.deepcopy(draft)
-    stale["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    stale["processors"]["processors"][0]["group_by"] = ["pyChannel"]
     stale_snapshot = ai_config_studio_page._draft_validation_snapshot(stale)
     valid_snapshot = ai_config_studio_page._draft_validation_snapshot(draft)
 
@@ -925,7 +939,7 @@ def test_invalid_schema_snapshot_clears_matching_review_on_cache_miss_and_hit() 
         "natural_key": ["pyCustomerID", "pyChannel"],
     }
     source["transforms"] = [{"kind": "rename_capitalize"}]
-    draft["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    draft["processors"]["processors"][0]["group_by"] = ["pyChannel"]
     approved = ["Channel", "CustomerID", "Outcome", "OutcomeTime"]
     signature = ai_config_studio_page._draft_signature(draft)
     st.session_state["ai_studio_draft_source"] = ""
@@ -1077,17 +1091,19 @@ def test_merge_and_validate_ai_sections() -> None:
     sections = parse_ai_yaml_sections(
         """
 metrics:
-  CTR:
-    source: engagement
-    kind: formula
-    expression:
-      op: safe_div
-      num: {col: Positives}
-      den: {col: Count}
-  Total:
-    source: engagement
-    kind: formula
-    expression: {col: Count}
+  catalog_version: 2
+  metrics:
+    CTR:
+      processor: engagement
+      kind: formula
+      expression:
+        op: safe_div
+        num: {col: Positives}
+        den: {col: Count}
+    Total:
+      processor: engagement
+      kind: formula
+      expression: {col: Count}
 """
     )
 
@@ -1171,7 +1187,7 @@ def test_apply_draft_persists_reviewed_removals_after_catalog_reload(tmp_path: P
     current["processors"]["processors"].append(legacy_processor)
     current["metrics"]["metrics"]["LegacyCTR"] = {
         **current["metrics"]["metrics"]["CTR"],
-        "source": "legacy_engagement",
+        "processor": "legacy_engagement",
     }
     ctx = SimpleNamespace(workspace=tmp_path)
     ai_config_studio_page._apply_draft(ctx, current)
@@ -1192,7 +1208,7 @@ def test_apply_draft_persists_reviewed_removals_after_catalog_reload(tmp_path: P
 def test_filter_draft_by_metric_selection_drops_dependent_tiles() -> None:
     draft = _base_draft()
     draft["metrics"]["metrics"]["Total"] = {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "formula",
         "expression": {"col": "Count"},
     }
@@ -1203,7 +1219,6 @@ def test_filter_draft_by_metric_selection_drops_dependent_tiles() -> None:
             "metric": "Total",
             "chart": "bar",
             "x": "Channel",
-            "y": "Total",
         }
     )
 
@@ -1254,7 +1269,7 @@ def test_install_recipe_in_ai_draft_adds_metric_and_report_tile() -> None:
             page_id="engagement",
             page_title="Engagement",
         ),
-        tile_def=instantiate_tile(recipe, metric_id, "recipe_engagement_tile"),
+        tile_def=instantiate_tile(recipe, processor, metric_id, "recipe_engagement_tile"),
     )
 
     updated = _install_recipe_in_draft(draft, request)
@@ -1302,7 +1317,7 @@ def test_install_recipe_in_ai_draft_adds_processor_state_before_metric() -> None
     ok, issues = validate_draft_catalog(updated)
 
     assert ok, issues
-    assert "states" not in draft["processors"]["processors"][0]
+    assert "Channel_cpc" not in draft["processors"]["processors"][0]["states"]
     states = updated["processors"]["processors"][0]["states"]
     assert states["Channel_cpc"] == state_additions["Channel_cpc"]
     assert {"Count", "Positives", "Negatives"} <= set(states)
@@ -1398,7 +1413,7 @@ def test_default_group_by_fields_include_explicit_calendar_granularities() -> No
 
 
 @pytest.mark.unit
-def test_default_group_by_filters_derived_calendar_before_limit(
+def test_default_group_by_includes_derived_calendar_dimensions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -1428,17 +1443,16 @@ def test_default_group_by_filters_derived_calendar_before_limit(
         ["Outcome", "OutcomeTime"],
     )
 
-    assert group_by == ["Channel", "Group", "Issue", "PlacementType"]
-    assert not set(group_by) & {"Day", "Month", "Quarter", "Year"}
+    assert group_by == ["Channel", "Day", "Month", "Quarter", "Year"]
 
 
 @pytest.mark.unit
 def test_missing_kind_specific_metric_fields_are_repairable_draft_issues() -> None:
     issues = [
         "metrics.metrics.customer_reach.approx_distinct_count.state: Field required",
-        "metrics.metrics.response_p50.tdigest_quantile.state: Field required",
+        "metrics.metrics.response_p50.quantile.state: Field required",
         "metrics.metrics.calibration.calibration_from_digests.positive_state: Field required",
-        "metrics.metrics.dropoff.funnel_dropoff.to_stage: Field required",
+        "metrics.metrics.dropoff.funnel_dropoff.to_state: Field required",
         "processors.processors.0.binary_outcome.states: Input should be a valid dictionary",
         "metrics.metrics.ModelControl_Contingency.contingency_test.tests.0: Input should be 'chi2', 'g' or 'z'",
         "dashboards[overview].pages[main].tiles[bad].metric: unknown metric 'Missing'",
@@ -1485,7 +1499,8 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
     assert "Approved field role dictionary:" in prompt
     assert "optional chat_with_data" in prompt
     assert "chat_with_data.agent_prompt" in prompt
-    assert "tdigest_quantile:" in prompt
+    assert "distribution:" in prompt
+    assert "quantile:" in prompt
     assert "allowed_tests:" in prompt
     assert "safe_dimension_candidates:" in prompt
     assert "- Channel" in prompt
@@ -1498,7 +1513,7 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
     assert "Hidden field count: 1" in prompt
     assert "InternalSecret" not in prompt
     assert "Do not emit legacy TOML-only settings such as metrics.global_filters" in prompt
-    assert "Set sketch_build_mode to bulk" in prompt
+    assert "sketch_build_mode" not in prompt
     assert (
         "Create as many distinct valid processors as possible from the approved schema "
         "and business requirements."
@@ -1583,9 +1598,15 @@ def test_chart_prompt_dictionary_matches_tile_validation_contract() -> None:
 
     chart_dictionary = ai_studio.catalog_prompt_dictionaries()["chart_required_fields"]
     required_by_chart = chart_dictionary["required_fields_by_chart"]
-    chart_kinds = set(get_args(model.Tile.model_fields["chart"].annotation))
+    tile_union = get_args(model.Tile)[0]
+    chart_kinds = {
+        chart
+        for tile_model in get_args(tile_union)
+        for chart in get_args(tile_model.model_fields["chart"].annotation)
+    }
 
-    assert set(required_by_chart) == chart_kinds
+    assert set(required_by_chart) == set(TILE_REQUIRED_ALTERNATIVES)
+    assert set(required_by_chart) <= chart_kinds
     for chart, alternatives in TILE_REQUIRED_ALTERNATIVES.items():
         assert required_by_chart[chart] == ["|".join(group) for group in alternatives], chart
 
@@ -1601,7 +1622,13 @@ def test_chart_prompt_dictionary_matches_tile_validation_contract() -> None:
     state_type_enum = ai_studio.catalog_prompt_dictionaries()["catalog_schema"]["processors.yaml"][
         "state_type_enum"
     ]
-    assert set(state_type_enum) == set(get_args(model.StateSpec.model_fields["type"].annotation))
+    state_union = get_args(model.StateSpec)[0]
+    state_types = {
+        state_type
+        for state_model in get_args(state_union)
+        for state_type in get_args(state_model.model_fields["type"].annotation)
+    }
+    assert set(state_type_enum) == state_types
 
 
 @pytest.mark.unit
@@ -1779,23 +1806,10 @@ def test_validation_trace_for_repair_captures_model_validation_traceback() -> No
 
 
 @pytest.mark.unit
-def test_metric_editor_state_options_handle_invalid_ai_state_lists() -> None:
-    draft = _base_draft()
-    draft["processors"]["processors"][0]["states"] = [
-        {"name": "UniqueCustomers_hll", "type": "hll"},
-        {"name": "Score_tdigest", "type": "tdigest"},
-    ]
-
-    assert _draft_state_options(draft, "engagement", state_types={"hll"}) == ["UniqueCustomers_hll"]
-    assert "Count" in _draft_state_options(draft, "engagement", state_types={"count"})
-    assert _draft_state_options(draft, "engagement", state_types={"tdigest"}) == ["Score_tdigest"]
-
-
-@pytest.mark.unit
-def test_draft_metric_choice_label_includes_id_source_and_kind() -> None:
+def test_draft_metric_choice_label_includes_id_processor_and_kind() -> None:
     draft = _base_draft()
     draft["metrics"]["metrics"]["Dropoff"] = {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "formula",
         "expression": {
             "op": "safe_div",
@@ -1811,10 +1825,10 @@ def test_draft_metric_choice_label_includes_id_source_and_kind() -> None:
 
 
 @pytest.mark.unit
-def test_draft_metric_filter_helpers_scope_metrics_by_source_and_kind() -> None:
+def test_draft_metric_filter_helpers_scope_metrics_by_processor_and_kind() -> None:
     draft = _base_draft()
     draft["metrics"]["metrics"]["Dropoff"] = {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "formula",
         "expression": {
             "op": "safe_div",
@@ -1823,14 +1837,14 @@ def test_draft_metric_filter_helpers_scope_metrics_by_source_and_kind() -> None:
         },
     }
     draft["metrics"]["metrics"]["Reach"] = {
-        "source": "unknown_profile",
+        "processor": "unknown_profile",
         "kind": "approx_distinct_count",
         "state": "UniqueCustomers_hll",
     }
 
-    assert _draft_metric_source_ids(draft) == ["engagement", "unknown_profile"]
-    assert _draft_metric_kinds_for_source(draft, "engagement") == ["formula"]
-    assert _draft_metric_names_for_source_kind(draft, "engagement", "formula") == [
+    assert _draft_metric_processor_ids(draft) == ["engagement", "unknown_profile"]
+    assert _draft_metric_kinds_for_processor(draft, "engagement") == ["formula"]
+    assert _draft_metric_names_for_processor_kind(draft, "engagement", "formula") == [
         "CTR",
         "Dropoff",
     ]
@@ -1877,7 +1891,7 @@ def test_metric_editor_update_renames_tile_metric_references() -> None:
         "CTR",
         "ClickThroughRate",
         {
-            "source": "engagement",
+            "processor": "engagement",
             "kind": "formula",
             "expression": {"col": "Count"},
         },
@@ -1908,28 +1922,6 @@ def test_metric_editor_funnel_stage_options_use_processor_stages() -> None:
         "Click",
         "Conversion",
     ]
-
-
-@pytest.mark.unit
-def test_processor_editor_converts_ai_state_lists_to_state_mapping() -> None:
-    processor = {
-        "id": "engagement",
-        "kind": "binary_outcome",
-        "states": [
-            {"name": "UniqueCustomers_hll", "type": "hll", "source_column": "CustomerID"},
-            {"name": "BadState", "type": "", "enabled": True},
-        ],
-    }
-
-    rows = _processor_state_rows(processor)
-    states = _processor_states_from_rows(rows, builder.state_spec_definitions(processor))
-
-    assert states["UniqueCustomers_hll"] == {
-        "type": "hll",
-        "source_column": "CustomerID",
-    }
-    assert states["Count"] == {"type": "count"}
-    assert "BadState" not in states
 
 
 @pytest.mark.unit
@@ -1972,109 +1964,22 @@ def test_processor_editor_state_rows_preserve_kind_specific_extras() -> None:
 
 
 @pytest.mark.unit
-def test_processor_editor_inferred_state_rows_preserve_runtime_metadata() -> None:
-    processor = {
-        "id": "scores",
-        "kind": "score_distribution",
-        "score_properties": ["ModelScore"],
-        "entities": {"subject": "CustomerID"},
-    }
-
-    rows = _processor_state_rows(processor)
-    states = _processor_states_from_rows(rows, _processor_state_specs(processor))
-
-    assert states["ModelScore_tdigest_positives"] == {
-        "type": "tdigest",
-        "source_column": "ModelScore",
-        "outcome": "positive",
-        "score_property": "ModelScore",
-        "k": 500,
-    }
-    assert states["ModelScore_tdigest_negatives"] == {
-        "type": "tdigest",
-        "source_column": "ModelScore",
-        "outcome": "negative",
-        "score_property": "ModelScore",
-        "k": 500,
-    }
-    assert states["UniqueCustomers_cpc"] == {
-        "type": "cpc",
-        "source_column": "CustomerID",
-        "lg_k": 11,
-    }
-    assert states["personalization"] == {"type": "pooled_mean", "weight": "Count"}
-
-
-@pytest.mark.unit
-def test_processor_editor_inferred_binary_cpc_uses_subject_source_column() -> None:
-    processor = {
-        "id": "engagement",
-        "kind": "binary_outcome",
-        "entities": {"subject": "CustomerID"},
-    }
-
-    rows = _processor_state_rows(processor)
-    states = _processor_states_from_rows(rows, _processor_state_specs(processor))
-
-    assert states["UniqueSubjects_cpc"] == {
-        "type": "cpc",
-        "source_column": "CustomerID",
-        "lg_k": 11,
-    }
-
-
-@pytest.mark.unit
-def test_state_spec_definitions_handle_ai_state_lists() -> None:
-    processor = {
-        "states": [
-            {
-                "name": "UniqueCustomers_hll",
-                "type": "hll",
-                "source_column": "CustomerID",
-                "lg_k": 12,
-                "enabled": True,
-            }
-        ]
-    }
-
-    assert builder.state_spec_definitions(processor) == {
-        "UniqueCustomers_hll": {
-            "type": "hll",
-            "source_column": "CustomerID",
-            "lg_k": 12,
-        }
-    }
-
-
-@pytest.mark.unit
-def test_processor_states_from_rows_drop_cleared_source_column() -> None:
-    existing = {"Visitors_hll": {"type": "hll", "source_column": "CustomerID", "lg_k": 12}}
-    rows = [{"State": "Visitors_hll", "Type": "hll", "Source Column": "", "Enabled": True}]
-
-    states = _processor_states_from_rows(rows, existing)
-
-    assert states == {"Visitors_hll": {"type": "hll", "lg_k": 12}}
-
-
-@pytest.mark.unit
-def test_processor_editor_rename_updates_metric_sources() -> None:
+def test_processor_editor_rename_updates_metric_processors() -> None:
     draft = _base_draft()
+    replacement = {
+        **draft["processors"]["processors"][0],
+        "id": "engagement_v2",
+    }
 
     updated = _update_processor_definition(
         draft,
         "engagement",
         "engagement_v2",
-        {
-            "id": "engagement_v2",
-            "source": "ih",
-            "kind": "binary_outcome",
-            "dimensions": ["Channel"],
-            "states": {"Count": {"type": "count"}},
-        },
+        replacement,
     )
 
     assert updated["processors"]["processors"][0]["id"] == "engagement_v2"
-    assert updated["metrics"]["metrics"]["CTR"]["source"] == "engagement_v2"
+    assert updated["metrics"]["metrics"]["CTR"]["processor"] == "engagement_v2"
 
 
 @pytest.mark.unit
@@ -2758,8 +2663,18 @@ def test_tile_keep_table_selects_all_tiles_by_default_in_editor_state() -> None:
         # the keep table starts fully checked for every draft revision.
         st.session_state["ai_studio_tiles_to_keep"] = []
         draft = {
-            "metrics": {"metrics": {"ctr": {"kind": "formula", "source": "engagement"}}},
+            "metrics": {
+                "catalog_version": 2,
+                "metrics": {
+                    "ctr": {
+                        "kind": "formula",
+                        "processor": "engagement",
+                        "expression": {"col": "Count"},
+                    }
+                },
+            },
             "dashboards": {
+                "catalog_version": 2,
                 "dashboards": [
                     {
                         "id": "studio",
@@ -2775,7 +2690,6 @@ def test_tile_keep_table_selects_all_tiles_by_default_in_editor_state() -> None:
                                         "metric": "ctr",
                                         "chart": "line",
                                         "x": "Day",
-                                        "y": "ctr",
                                     },
                                     {
                                         "id": "ctr_bar",
@@ -2783,7 +2697,6 @@ def test_tile_keep_table_selects_all_tiles_by_default_in_editor_state() -> None:
                                         "metric": "ctr",
                                         "chart": "bar",
                                         "x": "Channel",
-                                        "y": "ctr",
                                     },
                                 ],
                             }
@@ -2826,7 +2739,7 @@ def test_rename_capitalize_mapping_uses_pega_aware_names() -> None:
 @pytest.mark.unit
 def test_schema_sample_applies_rename_capitalize_before_later_steps() -> None:
     st.session_state.clear()
-    st.session_state["ai_studio_rename_capitalize"] = True
+    st.session_state["ai_studio_rename_capitalize_enabled"] = True
     st.session_state["ai_studio_defaults"] = [
         {"Field": "Revenue", "Default Value": "1.5", "Enabled": True}
     ]
@@ -2852,7 +2765,6 @@ def test_schema_sample_applies_rename_capitalize_before_later_steps() -> None:
     assert {"pyName", "pxOutcomeTime", "pyRevenue"}.isdisjoint(working.columns)
     assert working.get_column("Revenue").to_list() == [1.5]
     assert st.session_state["ai_studio_rename_capitalize_enabled"] is True
-    assert "ai_studio_rename_capitalize" not in st.session_state
 
 
 @pytest.mark.unit
@@ -2980,7 +2892,7 @@ def test_deterministic_demo_timestamp_plan_preprocesses_without_error() -> None:
 @pytest.mark.unit
 def test_schema_sample_uses_original_columns_when_rename_capitalize_is_off() -> None:
     st.session_state.clear()
-    st.session_state["ai_studio_rename_capitalize"] = False
+    st.session_state["ai_studio_rename_capitalize_enabled"] = False
 
     frame = pl.DataFrame({"pyName": ["Offer"], "pxOutcomeTime": ["2026-01-01"]})
 
@@ -3009,7 +2921,7 @@ def test_filters_step_uses_effective_schema_as_field_source(monkeypatch) -> None
 @pytest.mark.unit
 def test_rename_capitalize_sync_remaps_filters_without_forced_rerun() -> None:
     st.session_state.clear()
-    st.session_state["ai_studio_rename_capitalize"] = True
+    st.session_state["ai_studio_rename_capitalize_enabled"] = True
     st.session_state["ai_studio_rename_capitalize_applied"] = False
     st.session_state["ai_studio_filter_rows"] = [
         {"Field": "pyName", "Operator": "Equals", "Value": "Offer", "Enabled": True}
@@ -3029,7 +2941,7 @@ def test_rename_capitalize_sync_remaps_filters_without_forced_rerun() -> None:
 @pytest.mark.unit
 def test_rename_capitalize_sync_remaps_back_to_original_schema() -> None:
     st.session_state.clear()
-    st.session_state["ai_studio_rename_capitalize"] = False
+    st.session_state["ai_studio_rename_capitalize_enabled"] = False
     st.session_state["ai_studio_rename_capitalize_applied"] = True
     st.session_state["ai_studio_filter_rows"] = [
         {"Field": "Name", "Operator": "Equals", "Value": "Offer", "Enabled": True}
@@ -3299,17 +3211,19 @@ def test_ai_refine_panel_holds_revision_in_pending_review(
             "READY",
             """
 metrics:
-  CTR:
-    source: engagement
-    kind: formula
-    expression:
-      op: safe_div
-      num: {col: Positives}
-      den: {col: Count}
-  Total:
-    source: engagement
-    kind: formula
-    expression: {col: Count}
+  catalog_version: 2
+  metrics:
+    CTR:
+      processor: engagement
+      kind: formula
+      expression:
+        op: safe_div
+        num: {col: Positives}
+        den: {col: Count}
+    Total:
+      processor: engagement
+      kind: formula
+      expression: {col: Count}
 """,
         ]
     )
@@ -3476,7 +3390,7 @@ def test_studio_status_panel_does_not_repeat_apply_action_on_early_steps() -> No
 def _base_draft() -> dict:
     return {
         "pipelines": {
-            "version": 1,
+            "catalog_version": 2,
             "workspace": "test",
             "sources": [
                 {
@@ -3490,13 +3404,19 @@ def _base_draft() -> dict:
             ],
         },
         "processors": {
+            "catalog_version": 2,
             "processors": [
                 {
                     "id": "engagement",
                     "source": "ih",
                     "kind": "binary_outcome",
-                    "dimensions": ["Channel"],
-                    "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+                    "group_by": ["Channel", "Day", "Month", "Quarter", "Year"],
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "states": {
+                        "Count": {"type": "count"},
+                        "Positives": {"type": "count", "outcome": "positive"},
+                        "Negatives": {"type": "count", "outcome": "negative"},
+                    },
                     "outcome": {
                         "column": "Outcome",
                         "positive_values": ["Clicked"],
@@ -3506,9 +3426,10 @@ def _base_draft() -> dict:
             ]
         },
         "metrics": {
+            "catalog_version": 2,
             "metrics": {
                 "CTR": {
-                    "source": "engagement",
+                    "processor": "engagement",
                     "kind": "formula",
                     "expression": {
                         "op": "safe_div",
@@ -3519,6 +3440,7 @@ def _base_draft() -> dict:
             }
         },
         "dashboards": {
+            "catalog_version": 2,
             "dashboards": [
                 {
                     "id": "overview",
@@ -3534,7 +3456,6 @@ def _base_draft() -> dict:
                                     "metric": "CTR",
                                     "chart": "line",
                                     "x": "Day",
-                                    "y": "CTR",
                                     "color": "Channel",
                                 }
                             ],
@@ -3592,7 +3513,7 @@ def test_invalid_schema_snapshot_is_not_reported_as_reviewed_or_published() -> N
         "natural_key": ["pyCustomerID", "pyChannel"],
     }
     source["transforms"] = [{"kind": "rename_capitalize"}]
-    draft["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    draft["processors"]["processors"][0]["group_by"] = ["pyChannel"]
     approved = ["Channel", "CustomerID", "Outcome", "OutcomeTime"]
     signature = ai_config_studio_page._draft_signature(draft)
     st.session_state["ai_studio_draft_source"] = ""
@@ -3669,7 +3590,7 @@ def test_status_bar_keeps_invalid_review_and_workspace_pending(
         "natural_key": ["pyCustomerID", "pyChannel"],
     }
     source["transforms"] = [{"kind": "rename_capitalize"}]
-    draft["processors"]["processors"][0]["dimensions"] = ["pyChannel"]
+    draft["processors"]["processors"][0]["group_by"] = ["pyChannel"]
 
     rendered = AppTest.from_function(app, kwargs={"draft": draft}).run()
 
@@ -3783,7 +3704,7 @@ def _catalog_with_extras() -> model.Catalog:
         }
     )
     catalog_payload["metrics"]["metrics"]["Revenue"] = {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "formula",
         "expression": {"col": "Count"},
     }
@@ -3797,7 +3718,7 @@ def test_builder_source_addition_draft_is_additive_and_namespaces_generated_ids(
     candidate["pipelines"]["sources"][0]["id"] = "sample"
     candidate["processors"]["processors"][0]["id"] = "sample_engagement"
     candidate["processors"]["processors"][0]["source"] = "sample"
-    candidate["metrics"]["metrics"]["CTR"]["source"] = "sample_engagement"
+    candidate["metrics"]["metrics"]["CTR"]["processor"] = "sample_engagement"
 
     merged = ai_config_studio_page._builder_source_addition_draft(
         SimpleNamespace(catalog=model.Catalog.model_validate(active)),
@@ -3812,14 +3733,13 @@ def test_builder_source_addition_draft_is_additive_and_namespaces_generated_ids(
     assert "CTR" in merged["metrics"]["metrics"]
     added_metric_ids = set(merged["metrics"]["metrics"]) - {"CTR"}
     assert added_metric_ids == {"sample_metric_ctr"}
-    assert merged["metrics"]["metrics"]["sample_metric_ctr"]["source"] == "sample_engagement"
+    assert merged["metrics"]["metrics"]["sample_metric_ctr"]["processor"] == "sample_engagement"
     assert [dashboard["id"] for dashboard in merged["dashboards"]["dashboards"]] == [
         "overview",
         "sample_dashboard_overview",
     ]
     added_tile = merged["dashboards"]["dashboards"][1]["pages"][0]["tiles"][0]
     assert added_tile["metric"] == "sample_metric_ctr"
-    assert added_tile["y"] == "sample_metric_ctr"
     ok, issues = validate_draft_catalog(merged)
     assert ok, issues
 
@@ -3968,7 +3888,7 @@ def test_workspace_apply_requires_explicit_replacement_consent() -> None:
 
     catalog_payload = _base_draft()
     catalog_payload["metrics"]["metrics"]["Revenue"] = {
-        "source": "engagement",
+        "processor": "engagement",
         "kind": "formula",
         "expression": {"col": "Count"},
     }

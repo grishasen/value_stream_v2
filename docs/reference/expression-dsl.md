@@ -219,7 +219,7 @@ Each AST node compiles to exactly one Polars expression. The full table:
 ```yaml
 metrics:
   CTR:
-    source: engagement
+    processor: engagement
     kind: formula
     expression:
       op: safe_div
@@ -232,7 +232,7 @@ metrics:
 ```yaml
 metrics:
   StdErr:
-    source: engagement
+    processor: engagement
     kind: formula
     depends_on: [CTR]
     expression:

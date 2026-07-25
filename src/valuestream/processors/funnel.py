@@ -47,20 +47,11 @@ class FunnelProcessor:
 
     @property
     def stages(self) -> list[FunnelStage]:
-        raw = p3.extra(self.config).get("stages", [])
-        if not isinstance(raw, list):
-            return []
-        stages: list[FunnelStage] = []
-        for item in raw:
-            if not isinstance(item, dict) or not item.get("name"):
-                continue
-            stages.append(FunnelStage(name=str(item["name"]), when=item["when"]))
-        return stages
+        return [FunnelStage(name=item.name, when=item.when) for item in self.config.stages]
 
     @property
     def entity_column(self) -> str | None:
-        raw = p3.extra(self.config).get("entity")
-        return str(raw) if raw is not None else None
+        return self.config.entity
 
     @property
     def state_specs(self) -> dict[str, model.StateSpec]:
@@ -81,11 +72,13 @@ class FunnelProcessor:
         source_schema = source.collect_schema()
         existing = set(source_schema.names())
         time_columns = grain_levels.chunk_time_group_columns(existing, self.config)
-        group_keys = [
-            column
-            for column in [*self.group_by_columns, *time_columns]
-            if column and column in existing
-        ]
+        group_keys = list(
+            dict.fromkeys(
+                column
+                for column in [*self.group_by_columns, *time_columns]
+                if column and column in existing
+            )
+        )
         grouped = source.group_by(group_keys).agg(self._agg_exprs(existing, source_schema))
         grouped = p3.postprocess_sketches(grouped, self._sketch_columns(existing))
         grouped = p3.ensure_state_columns(grouped, self.state_specs)
@@ -135,74 +128,72 @@ class FunnelProcessor:
 
     def _agg_exprs(self, existing: set[str], source_schema: pl.Schema) -> list[pl.Expr]:
         exprs: list[pl.Expr] = []
-        entity = self.entity_column
-        for stage in self.stages:
-            condition = translate(p3.expression(stage.when))
-            exprs.append(pl.when(condition).then(1).otherwise(0).sum().alias(f"{stage.name}_Count"))
-            if entity is not None and entity in existing:
-                for name, _ in self._stage_cardinality_states(stage):
+        stage_conditions = {
+            stage.name: translate(p3.expression(stage.when)) for stage in self.stages
+        }
+        for name, spec in self.state_specs.items():
+            stage = getattr(spec, "stage", None)
+            condition = stage_conditions.get(stage) if stage else None
+            if stage and condition is None:
+                raise ValueError(
+                    f"funnel processor {self.id!r} state {name!r} "
+                    f"references unknown stage {stage!r}"
+                )
+            if spec.type == "count":
+                if condition is not None:
+                    exprs.append(pl.when(condition).then(1).otherwise(0).sum().alias(name))
+                elif spec.source_column:
+                    if spec.source_column not in existing:
+                        raise ValueError(
+                            f"funnel processor {self.id!r} state {name!r} "
+                            f"requires missing source column {spec.source_column!r}"
+                        )
+                    count = (
+                        pl.col(spec.source_column).n_unique()
+                        if spec.distinct
+                        else pl.col(spec.source_column).count()
+                    )
+                    exprs.append(count.alias(name))
+                else:
+                    exprs.append(pl.len().alias(name))
+            elif spec.type in {"cpc", "hll", "theta", "topk"}:
+                if spec.source_column not in existing:
+                    raise ValueError(
+                        f"funnel processor {self.id!r} state {name!r} "
+                        f"requires missing source column {spec.source_column!r}"
+                    )
+                if condition is not None:
                     exprs.append(
                         pl.when(condition)
-                        .then(pl.col(entity))
+                        .then(pl.col(spec.source_column))
                         .otherwise(None)
                         .drop_nulls()
                         .unique()
                         .alias(f"__values_{name}")
                     )
-        stage_states = self._stage_state_names()
-        for name, spec in self.state_specs.items():
-            if name in stage_states or spec.type not in {"cpc", "hll", "theta", "topk"}:
-                continue
-            expression, _ = p3.sketch_build_expr(
-                name,
-                spec,
-                existing=existing,
-                default_source_column=entity or name,
-                source_dtypes=source_schema,
-            )
-            if expression is not None:
-                exprs.append(expression)
+                else:
+                    expression, _ = p3.sketch_build_expr(
+                        name,
+                        spec,
+                        existing=existing,
+                        source_dtypes=source_schema,
+                    )
+                    if expression is not None:
+                        exprs.append(expression)
         return exprs
 
     def _sketch_columns(self, existing: set[str]) -> list[tuple[str, str, int]]:
-        entity = self.entity_column
         columns: list[tuple[str, str, int]] = []
-        if entity is not None and entity in existing:
-            for stage in self.stages:
-                for name, spec in self._stage_cardinality_states(stage):
-                    default = 11 if spec.type == "cpc" else 12
-                    lg_k = int(p3.spec_extra(spec).get("lg_k", default))
-                    columns.append((name, spec.type, lg_k))
-        stage_states = self._stage_state_names()
         for name, spec in self.state_specs.items():
-            if name in stage_states or spec.type not in {"cpc", "hll", "theta", "topk"}:
+            if spec.type not in {"cpc", "hll", "theta", "topk"}:
                 continue
             _, metadata = p3.sketch_build_expr(
                 name,
                 spec,
                 existing=existing,
-                default_source_column=entity or name,
             )
             columns.append(metadata)
         return columns
-
-    def _stage_state_names(self) -> set[str]:
-        names: set[str] = set()
-        for stage in self.stages:
-            names.add(f"{stage.name}_Count")
-            names.update(name for name, _ in self._stage_cardinality_states(stage))
-        return names
-
-    def _stage_cardinality_states(
-        self,
-        stage: FunnelStage,
-    ) -> list[tuple[str, model.StateSpec]]:
-        names = {f"{stage.name}_Customers_cpc", f"{stage.name}_Customers_hll"}
-        return [
-            (name, spec)
-            for name, spec in self.state_specs.items()
-            if name in names and spec.type in {"cpc", "hll"}
-        ]
 
 
 __all__ = ["FunnelProcessor", "FunnelStage"]

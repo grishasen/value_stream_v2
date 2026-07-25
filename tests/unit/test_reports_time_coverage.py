@@ -7,8 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from valuestream.config import model
 from valuestream.ui.pages.reports import (
     _empty_tile_message,
+    _freshness_grain_for_metric,
     _latest_data_notice,
     _latest_page_data_coverage,
     _relative_time_bounds,
@@ -16,7 +18,7 @@ from valuestream.ui.pages.reports import (
 
 
 @pytest.mark.unit
-def test_latest_page_data_coverage_uses_end_of_latest_aggregate_month() -> None:
+def test_latest_page_data_coverage_uses_common_aggregate_month_end() -> None:
     latest_date, label = _latest_page_data_coverage(
         [
             SimpleNamespace(latest_period="2024-08"),
@@ -25,8 +27,41 @@ def test_latest_page_data_coverage_uses_end_of_latest_aggregate_month() -> None:
         ]
     )
 
-    assert latest_date == dt.date(2024, 9, 30)
-    assert label == "2024-09"
+    assert latest_date == dt.date(2024, 8, 31)
+    assert label == "2024-08"
+
+
+@pytest.mark.unit
+def test_latest_page_data_coverage_prefers_exact_partial_month_date() -> None:
+    latest_date, label = _latest_page_data_coverage(
+        [
+            SimpleNamespace(
+                latest_period="2024-09",
+                latest_data_date=dt.date(2024, 9, 18),
+            ),
+            SimpleNamespace(latest_period="2024-09"),
+        ]
+    )
+
+    assert latest_date == dt.date(2024, 9, 18)
+    assert label == "2024-09-18"
+
+
+@pytest.mark.unit
+def test_windowed_set_metric_uses_daily_freshness_coverage() -> None:
+    metric = model.SetOpMetric.model_validate(
+        {
+            "processor": "audience",
+            "kind": "set_op",
+            "operation": "intersection",
+            "operands": [
+                {"state": "Customers_theta", "time_window": {"last": "1d"}},
+                {"state": "Customers_theta"},
+            ],
+        }
+    )
+
+    assert _freshness_grain_for_metric(metric, "summary") == "daily"
 
 
 @pytest.mark.unit

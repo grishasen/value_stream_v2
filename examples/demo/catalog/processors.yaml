@@ -1,28 +1,17 @@
+catalog_version: 2
 processors:
 - id: ih_engagement
   source: ih
   kind: binary_outcome
-  description: Engagement outcomes for Pega interaction history, with customer, channel,
-    offer, and experiment dimensions.
-  dimensions:
-  - Channel
-  - Direction
-  - CustomerSegment
-  - IsProspect
-  - Issue
-  - Group
-  - Name
-  - Treatment
-  - PlacementType
-  - ModelControlGroup
-  - MktType
-  - MktValue
-  - PropensitySource
-  - ModelClass
+  description: Engagement outcomes for Pega interaction history, with customer, channel, offer, and experiment
+    dimensions.
   time:
-    column: OutcomeTime
-    grains:
-    - Day
+    property: OutcomeTime
+    grain: daily
+    calendar:
+      timezone: UTC
+      week_start: monday
+      fiscal_year_start_month: 1
   entities:
     subject: SubjectID
   outcome:
@@ -38,8 +27,10 @@ processors:
       type: count
     Positives:
       type: count
+      outcome: positive
     Negatives:
       type: count
+      outcome: negative
     UniqueCustomers_cpc:
       type: cpc
       source_column: SubjectID
@@ -48,16 +39,46 @@ processors:
       type: cpc
       source_column: InteractionID
       lg_k: 11
-- value:
-    column: ResponseTime
-    state: ResponseTime_tdigest
-  id: ih_response_time
+  group_by:
+  - Day
+  - Week
+  - Month
+  - Quarter
+  - Year
+  - Channel
+  - Direction
+  - CustomerSegment
+  - IsProspect
+  - Issue
+  - Group
+  - Name
+  - Treatment
+  - PlacementType
+  - ModelControlGroup
+  - MktType
+  - MktValue
+  - PropensitySource
+  - ModelClass
+- id: ih_response_time
   source: ih
   kind: numeric_distribution
-  sketch_build_mode: bulk
-  description: Response time distribution from decision to outcome by customer, channel,
-    and offer context.
-  dimensions:
+  description: Response time distribution from decision to outcome by customer, channel, and offer context.
+  time:
+    property: OutcomeTime
+    grain: daily
+    calendar:
+      timezone: UTC
+      week_start: monday
+      fiscal_year_start_month: 1
+  properties:
+  - ResponseTime
+  quantile_engine: tdigest
+  group_by:
+  - Day
+  - Week
+  - Month
+  - Quarter
+  - Year
   - Channel
   - Direction
   - CustomerSegment
@@ -66,32 +87,44 @@ processors:
   - Group
   - Name
   - Outcome
-  time:
-    column: OutcomeTime
-    grains:
-    - Day
-  properties:
-  - ResponseTime
-  quantile_engine: tdigest
+  states:
+    ResponseTime_Count:
+      type: count
+      source_column: ResponseTime
+    ResponseTime_Sum:
+      type: value_sum
+      source_column: ResponseTime
+    ResponseTime_Mean:
+      type: pooled_mean
+      source_column: ResponseTime
+      weight: ResponseTime_Count
+    ResponseTime_Var:
+      type: pooled_variance
+      source_column: ResponseTime
+      mean: ResponseTime_Mean
+      weight: ResponseTime_Count
+    ResponseTime_Min:
+      type: min
+      source_column: ResponseTime
+    ResponseTime_Max:
+      type: max
+      source_column: ResponseTime
+    ResponseTime_tdigest:
+      type: tdigest
+      source_column: ResponseTime
+      k: 500
 - entity: SubjectID
   id: ih_outcome_funnel
   source: ih
   kind: funnel
   description: Outcome progression from impressions to clicks to conversions.
-  dimensions:
-  - Channel
-  - Direction
-  - CustomerSegment
-  - IsProspect
-  - Issue
-  - Group
-  - Name
-  - ModelControlGroup
-  - PlacementType
   time:
-    column: OutcomeTime
-    grains:
-    - Day
+    property: OutcomeTime
+    grain: daily
+    calendar:
+      timezone: UTC
+      week_start: monday
+      fiscal_year_start_month: 1
   stages:
   - name: Impression
     when:
@@ -111,31 +144,55 @@ processors:
   states:
     Impression_Count:
       type: count
+      stage: Impression
     Clicked_Count:
       type: count
+      stage: Clicked
     Conversion_Count:
       type: count
+      stage: Conversion
+  group_by:
+  - Day
+  - Week
+  - Month
+  - Quarter
+  - Year
+  - Channel
+  - Direction
+  - CustomerSegment
+  - IsProspect
+  - Issue
+  - Group
+  - Name
+  - ModelControlGroup
+  - PlacementType
 - id: ih_propensity_scores
   source: ih
   kind: score_distribution
-  sketch_build_mode: bulk
-  description: Distribution of propensity, final propensity, priority, and rank across
-    engagement dimensions.
+  description: Distribution of propensity, final propensity, priority, and rank across engagement dimensions.
   time:
-    column: OutcomeTime
-    grains:
-    - Day
+    property: OutcomeTime
+    grain: daily
+    calendar:
+      timezone: UTC
+      week_start: monday
+      fiscal_year_start_month: 1
   states:
     FinalPropensity_tdigest:
       type: tdigest
+      source_column: FinalPropensity
     Propensity_tdigest:
       type: tdigest
+      source_column: Propensity
     Priority_tdigest:
       type: tdigest
+      source_column: Priority
     Count:
       type: count
     personalization:
       type: pooled_mean
+      weight: Count
+      recipe: personalization
     Propensity_tdigest_positives:
       type: tdigest
       source_column: Propensity
@@ -159,23 +216,31 @@ processors:
     UniqueCustomers_cpc:
       type: cpc
       lg_k: 11
+      source_column: CustomerID
     novelty:
       type: pooled_mean
+      weight: Count
+      recipe: novelty
   score_properties:
-  - Propensity
-  - FinalPropensity
-  - Priority
-  outcome_column: Outcome
-  score_columns:
-  - column: FinalPropensity
-    state: FinalPropensity_tdigest
   - column: Propensity
-    state: Propensity_tdigest
+    role: primary
+  - column: FinalPropensity
+    role: calibrated
   - column: Priority
-    state: Priority_tdigest
-  - column: Rank
-    state: Rank_tdigest
-  dimensions:
+    role: auxiliary
+  outcome:
+    column: Outcome
+    positive_values:
+    - Clicked
+    negative_values:
+    - Impression
+    - Pending
+  group_by:
+  - Day
+  - Week
+  - Month
+  - Quarter
+  - Year
   - Channel
   - Direction
   - CustomerSegment
@@ -186,10 +251,3 @@ processors:
   - ModelControlGroup
   - PropensitySource
   - PlacementType
-  outcome:
-    column: Outcome
-    positive_values:
-    - Clicked
-    negative_values:
-    - Impression
-    - Pending

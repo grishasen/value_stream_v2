@@ -72,7 +72,9 @@ These observations shape Value Stream's component boundaries below.
 
 1. **Aggregate-first.** Raw rows live only inside a single chunk's lazy pipeline; nothing raw is persisted, ever.
 2. **Configurable.** A user with no Python skills can author a new metric and a new dashboard tile in YAML, with schema validation and useful errors.
-3. **Multi-grain.** The same logical metric exists at multiple grains (daily, monthly, summary) and the query layer chooses the cheapest grain that still answers correctly.
+3. **Multi-grain queries.** The same logical metric is queryable at the
+   processor's base grain and every coarser calendar grain; only the base
+   aggregate is physically stored.
 4. **Mergeable state catalog.** Sum, min, max, weighted mean, pooled variance, t-digest, KLL, CPC, HLL, Theta sketches — and explicit rules for when each is correct.
 5. **Snapshot support.** Periodic and accumulating snapshot tables for state KPIs (current pipeline, open tickets, subscription state).
 6. **Programmable.** Current capabilities are reachable via CLI, Streamlit, Python SDK, DuckDB export, Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API. Remote HTTP MCP and multi-user/OIDC deployment are deferred.
@@ -281,24 +283,25 @@ State columns in every aggregate table fall into one of these categories. Each i
 | `pooled_variance` | `DOUBLE` (triple: `n, mean, m2`) | Welford-merge | variance, stddev, skew |
 | `tdigest` | `BLOB` (datasketches-format) | `tdigest_merge` | quantiles, ROC AUC, calibration |
 | `cpc` | `BLOB` (Apache DataSketches CPC) | `cpc_union` | default DAU/MAU/unique buyers/reach |
-| `hll` | `BLOB` (Apache DataSketches HLL_8) | `hll_union` | backward-compatible / opt-in distinct counts |
+| `hll` | `BLOB` (Apache DataSketches HLL_8) | `hll_union` | explicitly selected distinct-count alternative |
 | `theta` | `BLOB` (Theta sketch) | `theta_union/intersect/diff` | exact-set algebra (intersections, differences) — needed for retention/cohort |
 | `kll` | `BLOB` (KLL sketch) | `kll_merge` | quantiles with stronger guarantees than t-digest |
 | `topk` | `BLOB` (Frequent-Items sketch) | `topk_merge` | heavy hitters, frequent actions |
 
 The state catalog is extensible — a processor declares which states it produces and by what type. The compaction engine looks up the merge rule from the type, not from the processor.
 
-### 6.6 Multi-grain materialization
+### 6.6 One materialization, multiple query grains
 
-Each processor is materialized at one or more grains. Three are reserved and always available when a calendar column is declared:
+Each processor declares exactly one physical base grain in `time.grain`.
+Ingestion writes only that aggregate. The processor's mergeable state contract
+allows the query layer to answer any coarser calendar grain by grouping and
+merging the base rows. For a daily base, `Day`, `Week`, `Month`, `Quarter`,
+`Year`, and `Summary` remain available report dimensions without six physical
+copies.
 
-- `daily` — one row per `(date, group_by_tuple)`
-- `monthly` — one row per `(year-month, group_by_tuple)`
-- `summary` — one row per `group_by_tuple` (no time)
-
-A processor may also declare custom grains, e.g. `weekly_iso`, `quarterly`, `hourly` — each materialized as its own physical table.
-
-Compaction across grains is automatic: monthly is compacted from daily, summary from monthly. Because state types are mergeable, this is a `groupby + merge` pass, not a re-aggregation from raw data.
+A request finer than the configured base grain is invalid because aggregate
+states cannot be disaggregated. Choosing a finer base grain is therefore the
+storage-versus-flexibility decision made in processor configuration.
 
 ---
 
@@ -871,17 +874,12 @@ aggregates/ih/engagement/daily/period=2024-08/part-<run>.parquet
 | 2024-08-21 | Web | Leaderboard | Sales | Cards | Premium | Test | 12450 | 184 | 12266 | 0x… | 0x… | 8a32… | 2024-08-21 | 2024-08 | 2024-08-21T22:13:01Z | f1c2… |
 | 2024-08-21 | Web | Leaderboard | Sales | Cards | Premium | Control | 1230 | 8 | 1222 | 0x… | 0x… | 8a32… | 2024-08-21 | 2024-08 | 2024-08-21T22:13:01Z | f1c2… |
 
-For each chunk, monthly materialization consumes the base daily aggregate state
-(never the raw rows), groups by `dim_tuple` without `Day`, sums counts, unions
-CPC sketches, and writes an immutable run/chunk partial:
-
-```text
-aggregates/ih/engagement/monthly/period=2024-08/part-<run>.parquet
-```
-
-Cross-grain materialization is purely an aggregate-state operation — no raw
-data is involved. Query-time merging combines the latest successful partial per
-chunk; `valuestream vacuum` later removes superseded physical files.
+No monthly or summary copy is written. A monthly request scans the daily
+partial, groups by the requested dimensions plus `Month`, and merges each
+state with its registered merge rule. A summary request performs the same
+merge without a time bucket. Query-time merging combines the latest successful
+partial per chunk; `valuestream vacuum` later removes superseded physical
+files.
 
 ---
 
@@ -895,10 +893,8 @@ input: (metric, group_by, filters, time_axis/time_range, optional grain=auto)
 2. derive the requested logical grain from explicit criteria such as
    time_axis=Day/Month/Quarter/Year; default to summary when no time bucket is
    requested
-3. enumerate physical aggregates of the processor (grain × period scope)
-4. pick the smallest aggregate whose grain >= requested logical grain, or a
-   finer aggregate that can be safely rolled up when the coarser aggregate is
-   not materialized,
+3. resolve the processor's single physical base aggregate and period scope
+4. verify the base grain is finer than or equal to the requested logical grain,
    AND whose group-by columns ⊇ requested group_by
    AND whose states cover the metric's needs
 5. emit a DuckDB query:
@@ -1296,7 +1292,7 @@ AI Configuration Studio remains a separate guided workflow because it starts fro
 | `scatter` | `x, y, size?, color?, animation_frame?, animation_group?` | |
 | `gauge` | `references?, facets?` | value is the selected metric |
 | `funnel` | `stages, color` | from `funnel` processor |
-| `boxplot` | `x, y, color?` | from `numeric_distribution` quantile states |
+| `boxplot` | `x?, color?, facet_row?, facet_col?` | selected distribution metric owns the digest/property |
 | `histogram` | `property, color?, facets?` | reconstructed from t-digest bins |
 | `calibration_curve` | `metric: Calibration` | from `calibration_from_digests` |
 | `rfm_density` | `metric: CLV_Summary` | 2D / 3D density of R-F-M |
@@ -1496,7 +1492,7 @@ Open questions:
 
 1. Should `dashboards.yaml` support computed columns at the tile level, or should everything be a metric? Leaning **metric**, to keep aggregate routing predictable.
 2. Should `metrics.yaml` support metric inheritance (CTR variants)? Probably yes, with `extends:` keyword — defer to Phase 5.
-3. Distinct-count default: CPC with `lg_k=11`. HLL with `lg_k=12` remains supported for backward compatibility and explicit performance trade-offs.
+3. Distinct-count default: CPC with `lg_k=11`. HLL with `lg_k=12` is an explicit alternative for different performance trade-offs.
 4. Do we need a tdigest-of-tdigests for very deep hierarchies, or is one-pass merging enough? Benchmarks in Phase 2.
 5. Should the Builder UI persist YAML in git, or in DuckDB with import/export? Likely git (configs as code) but with a one-click export to share with non-developers.
 

@@ -29,6 +29,7 @@ def test_unscoped_recipe_sketches_build_without_a_funnel_entity() -> None:
                 "source": "events",
                 "kind": "funnel",
                 "group_by": ["Region"],
+                "time": {"property": "EventTime", "grain": "summary"},
                 "stages": [
                     {
                         "name": "Started",
@@ -36,6 +37,7 @@ def test_unscoped_recipe_sketches_build_without_a_funnel_entity() -> None:
                     }
                 ],
                 "states": {
+                    "Started_Count": {"type": "count", "stage": "Started"},
                     "Region_cpc": {
                         "type": "cpc",
                         "source_column": "Region",

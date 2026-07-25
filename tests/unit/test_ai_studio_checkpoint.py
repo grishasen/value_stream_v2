@@ -17,10 +17,10 @@ from valuestream.ui.pages import ai_config_studio as studio_page
 
 def _catalog_draft(workspace_name: str = "workspace") -> dict[str, object]:
     return {
-        "pipelines": {"version": 1, "workspace": workspace_name, "sources": []},
-        "processors": {"processors": []},
-        "metrics": {"metrics": {}},
-        "dashboards": {"theme": {}, "dashboards": []},
+        "pipelines": {"catalog_version": 2, "workspace": workspace_name, "sources": []},
+        "processors": {"catalog_version": 2, "processors": []},
+        "metrics": {"catalog_version": 2, "metrics": {}},
+        "dashboards": {"catalog_version": 2, "theme": {}, "dashboards": []},
     }
 
 
@@ -253,8 +253,7 @@ def test_ai_studio_checkpoint_drift_expiry_invalid_and_cleanup(tmp_path: Path) -
 def test_ai_studio_checkpoint_restores_after_restart_and_revalidates(tmp_path: Path) -> None:
     _sample, relative, identity = _prepare_workspace(tmp_path)
     state = _workspace_state(relative, identity)
-    state.pop("ai_studio_rename_capitalize_enabled")
-    state["ai_studio_rename_capitalize"] = True
+    state["ai_studio_rename_capitalize_enabled"] = True
     ai_studio_checkpoint.write_ai_studio_checkpoint(
         tmp_path,
         session_state=state,
@@ -279,7 +278,6 @@ def test_ai_studio_checkpoint_restores_after_restart_and_revalidates(tmp_path: P
         {"Field": "Channel", "Default Value": "Unknown"}
     ]
     assert refreshed.session_state["ai_studio_rename_capitalize_enabled"] is True
-    assert "ai_studio_rename_capitalize" not in refreshed.session_state
     restored_draft = refreshed.session_state["ai_studio_draft"]
     restored_signature = studio_page._draft_signature(restored_draft)
     assert refreshed.session_state["ai_studio_reviewed_signature"] == ""

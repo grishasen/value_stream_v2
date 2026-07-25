@@ -328,7 +328,7 @@ def test_chart_tile_from_intent_maps_kind_specific_fields() -> None:
     )
     assert donut["chart"] == "donut"
     assert donut["names"] == "Channel"
-    assert donut["values"] == "VS_Interactions"
+    assert "values" not in donut
 
     heatmap = chart_tile_from_intent(
         ChatIntent(
@@ -343,7 +343,7 @@ def test_chart_tile_from_intent_maps_kind_specific_fields() -> None:
     )
     assert heatmap["x"] == "Channel"
     assert heatmap["y"] == "Issue"
-    assert heatmap["color"] == "VS_Engagement_Rate"
+    assert "color" not in heatmap
 
     kpi = chart_tile_from_intent(
         ChatIntent(
@@ -357,7 +357,7 @@ def test_chart_tile_from_intent_maps_kind_specific_fields() -> None:
         )
     )
     assert kpi["chart"] == "kpi_card"
-    assert kpi["value"] == "VS_Engagement_Rate"
+    assert "value" not in kpi
     assert kpi["value_format"] == "percent"
 
     roc = chart_tile_from_intent(
@@ -390,16 +390,16 @@ def test_chat_starter_questions_are_metric_grounded() -> None:
 
 
 @pytest.mark.unit
-def test_deterministic_starters_cover_supported_test_ai_studio_contracts() -> None:
-    catalog = load(Path("examples/test_ai_studio"))
+def test_deterministic_starters_cover_supported_demo_contracts() -> None:
+    catalog = load(Path("examples/demo"))
 
     starters = deterministic_chat_starters(catalog)
     by_key = {starter.key: starter for starter in starters}
 
     assert list(by_key) == ["count", "rate", "unique", "channel", "date_range"]
-    assert by_key["count"].intent.metric == "Studio_Count"
-    assert by_key["rate"].intent.metric in {"Studio_CTR", "VS_Engagement_Rate"}
-    assert by_key["unique"].intent.metric == "VS_Unique_Entities"
+    assert by_key["count"].intent.metric == "VS_Interactions"
+    assert by_key["rate"].intent.metric == "VS_Engagement_Rate"
+    assert by_key["unique"].intent.metric == "VS_Unique_Customers"
     assert by_key["unique"].intent.metric in catalog.metrics.metrics
     assert by_key["channel"].intent.group_by == ["Channel"]
     assert by_key["channel"].intent.chart is not None
@@ -436,7 +436,7 @@ def test_deterministic_starters_execute_through_governed_demo_aggregates(
 
 @pytest.mark.unit
 def test_date_range_template_reads_only_query_layer(monkeypatch: pytest.MonkeyPatch) -> None:
-    catalog = load(Path("examples/test_ai_studio"))
+    catalog = load(Path("examples/demo"))
     starter = next(
         item for item in deterministic_chat_starters(catalog) if item.key == "date_range"
     )
@@ -460,7 +460,7 @@ def test_date_range_template_reads_only_query_layer(monkeypatch: pytest.MonkeyPa
     assert calls == [
         (
             "/tmp/aggregate-only",
-            "Studio_Count",
+            "VS_Interactions",
             {
                 "group_by": [],
                 "filters": {},

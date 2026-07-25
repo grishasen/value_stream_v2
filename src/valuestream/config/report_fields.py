@@ -6,19 +6,20 @@ from collections.abc import Iterable
 
 from valuestream.config import model
 
-CALENDAR_FIELDS = ("Day", "Month", "Quarter", "Year")
-_TIME_FIELD_BY_GRAIN = {
-    "daily": "Day",
-    "weekly": "Week",
-    "monthly": "Month",
-    "quarterly": "Quarter",
-    "yearly": "Year",
+CALENDAR_FIELDS = ("Hour", "Day", "Week", "Month", "Quarter", "Year")
+_TIME_FIELDS_BY_GRAIN = {
+    "hourly": ("Hour", "Day", "Week", "Month", "Quarter", "Year"),
+    "daily": ("Day", "Week", "Month", "Quarter", "Year"),
+    "weekly": ("Week", "Month", "Quarter", "Year"),
+    "monthly": ("Month", "Quarter", "Year"),
+    "quarterly": ("Quarter", "Year"),
+    "yearly": ("Year",),
+    "summary": (),
 }
 SCALAR_STATE_TYPES = frozenset(
     {"count", "value_sum", "min", "max", "pooled_mean", "pooled_variance"}
 )
 DESCRIPTIVE_SCORES = ("Count", "Sum", "Mean", "Var", "Min", "Max", "p25", "p50", "p75", "p90", "p95")
-_DESCRIPTIVE_STATE_SUFFIXES = (*DESCRIPTIVE_SCORES, "Median", "tdigest", "kll")
 _LIFECYCLE_OUTPUT_COLUMNS = (
     "customers_count",
     "unique_holdings",
@@ -108,10 +109,15 @@ def descriptive_properties(processor: model.Processor | None) -> list[str]:
 
     if processor is None:
         return []
-    extra = dict(processor.model_extra or {})
-    properties = [str(item) for item in extra.get("properties", []) if item not in (None, "")]
-    for state_name in model.effective_processor_states(processor):
-        property_name = _descriptive_property_from_state(state_name)
+    properties = (
+        list(processor.properties)
+        if isinstance(processor, model.NumericDistributionProcessor)
+        else [item.column for item in processor.score_properties]
+        if isinstance(processor, model.ScoreDistributionProcessor)
+        else []
+    )
+    for state in model.effective_processor_states(processor).values():
+        property_name = state.model_dump().get("source_column")
         if property_name and property_name not in properties:
             properties.append(property_name)
     return properties
@@ -123,10 +129,8 @@ def distribution_property_metrics(
 ) -> dict[str, str]:
     """Map boxplot properties to queryable distribution metrics.
 
-    Only unconditioned t-digest and KLL states from the selected metric's
-    processor qualify. When both a percentile metric and a distribution
-    metric expose the same state, prefer the distribution metric whose
-    ``quantile`` was omitted.
+    Only explicit distribution metrics over unconditioned t-digest and KLL
+    states from the selected metric's processor qualify.
     """
 
     metric = catalog.metrics.metrics.get(metric_name)
@@ -136,7 +140,7 @@ def distribution_property_metrics(
         (
             candidate
             for candidate in catalog.processors.processors
-            if candidate.id == metric.source
+            if candidate.id == metric.processor
         ),
         None,
     )
@@ -145,32 +149,20 @@ def distribution_property_metrics(
 
     states = model.effective_processor_states(processor)
     property_metrics: dict[str, str] = {}
-    distribution_properties: set[str] = set()
     for candidate_name, candidate in catalog.metrics.metrics.items():
-        if not isinstance(candidate, model.TdigestQuantileMetric):
+        if not isinstance(candidate, model.DistributionMetric):
             continue
-        if candidate.source != processor.id:
+        if candidate.processor != processor.id:
             continue
         state = states.get(candidate.state)
         if state is None or state.type not in {"tdigest", "kll"}:
             continue
-        outcome = str(dict(state.model_extra or {}).get("outcome", "") or "").casefold()
+        outcome = str(getattr(state, "outcome", None) or "").casefold()
         if outcome in {"positive", "negative"}:
             continue
-
-        suffix = f"_{state.type}"
-        property_name = (
-            candidate.state[: -len(suffix)]
-            if candidate.state.casefold().endswith(suffix)
-            else candidate.state
-        )
-        is_distribution = "quantile" not in candidate.model_fields_set
-        if property_name not in property_metrics or (
-            is_distribution and property_name not in distribution_properties
-        ):
-            property_metrics[property_name] = candidate_name
-        if is_distribution:
-            distribution_properties.add(property_name)
+        source_column = getattr(state, "source_column", None)
+        if source_column:
+            property_metrics[source_column] = candidate_name
     return property_metrics
 
 
@@ -179,10 +171,9 @@ def report_field_options(catalog: model.Catalog, metric_name: str) -> list[str]:
 
     metric = catalog.metrics.metrics.get(metric_name)
     processor_by_id = {processor.id: processor for processor in catalog.processors.processors}
-    processor = processor_by_id.get(metric.source) if metric is not None else None
-    fields: list[str] = [*CALENDAR_FIELDS]
+    processor = processor_by_id.get(metric.processor) if metric is not None else None
+    fields: list[str] = report_axis_options(catalog, metric_name)
     if processor is not None:
-        fields.extend(processor.group_by)
         fields.extend(
             name
             for name, state in model.effective_processor_states(processor).items()
@@ -194,8 +185,6 @@ def report_field_options(catalog: model.Catalog, metric_name: str) -> list[str]:
                 f"{property_name}_{score}" for score in (*DESCRIPTIVE_SCORES, "Median")
             )
     fields.extend(_metric_and_dependency_outputs(catalog, metric_name))
-    if isinstance(metric, model.TdigestQuantileMetric):
-        fields.extend(_quantile_metric_aliases(metric_name))
     return _dedupe(fields)
 
 
@@ -204,21 +193,14 @@ def report_axis_options(catalog: model.Catalog, metric_name: str) -> list[str]:
 
     metric = catalog.metrics.metrics.get(metric_name)
     processor_by_id = {processor.id: processor for processor in catalog.processors.processors}
-    processor = processor_by_id.get(metric.source) if metric is not None else None
+    processor = processor_by_id.get(metric.processor) if metric is not None else None
     if processor is None:
         return []
-    configured_grains = _dedupe(
-        [
-            *processor.grains,
-            *model.normalize_grains(
-                [str(grain) for grain in catalog.pipelines.defaults.calendar.grains]
-            ),
-        ]
-    )
+    configured_calendar_fields = set(catalog.pipelines.defaults.calendar.grains)
     time_fields = [
-        _TIME_FIELD_BY_GRAIN[grain]
-        for grain in configured_grains
-        if grain in _TIME_FIELD_BY_GRAIN
+        field
+        for field in _TIME_FIELDS_BY_GRAIN[processor.time.grain]
+        if field in configured_calendar_fields
     ]
     return _dedupe([*time_fields, *processor.group_by])
 
@@ -238,24 +220,6 @@ def _metric_and_dependency_outputs(catalog: model.Catalog, metric_name: str) -> 
         outputs.extend(metric_output_columns(current, metric))
         pending.extend(metric.depends_on)
     return outputs
-
-
-def _descriptive_property_from_state(state_name: str) -> str | None:
-    for suffix in _DESCRIPTIVE_STATE_SUFFIXES:
-        marker = f"_{suffix}"
-        if state_name.endswith(marker):
-            return state_name[: -len(marker)]
-    return None
-
-
-def _quantile_metric_aliases(metric_name: str) -> list[str]:
-    """Return legacy property prefixes implied by a named quantile metric."""
-
-    lower = metric_name.casefold()
-    for suffix in ("_median", "_p25", "_p50", "_p75", "_p90", "_p95"):
-        if lower.endswith(suffix):
-            return [metric_name[: -len(suffix)]]
-    return []
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:

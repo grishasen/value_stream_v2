@@ -12,7 +12,22 @@ from valuestream.processors.registry import create_processor, processor_kinds, r
 @pytest.mark.unit
 def test_registry_constructs_builtin_processor() -> None:
     config = model.BinaryOutcomeProcessor.model_validate(
-        {"id": "engagement", "source": "events", "kind": "binary_outcome"}
+        {
+            "id": "engagement",
+            "source": "events",
+            "kind": "binary_outcome",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {
+                "Count": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "Negatives": {"type": "count", "outcome": "negative"},
+            },
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": [1],
+                "negative_values": [0],
+            },
+        }
     )
 
     processor = create_processor(config, computation_hash="computed")

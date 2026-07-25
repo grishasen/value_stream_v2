@@ -20,19 +20,17 @@ Discriminated unions:
 * :class:`Processor` — 7 built-in processor kinds.
 * :class:`Metric` — 9 built-in metric kinds.
 
-Kind-specific fields not enumerated here are accepted via
-``model_config(extra='allow')`` so that Phase-1 processor implementations
-can tighten their own model without breaking Phase 0 validators.
+Catalog version 2 is intentionally strict: every accepted field is part of
+the public contract and unknown or retired fields fail validation.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from valuestream.expr.ast import Dtype, Expr
-from valuestream.utils.names import dedupe_strings as _dedupe
 
 # ---------------------------------------------------------------------------
 # Common building blocks.
@@ -43,17 +41,6 @@ class _StrictModel(BaseModel):
     """Base for strictly-typed config models — forbids unknown fields."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-
-class _PermissiveModel(BaseModel):
-    """Base for kind-specialized config models — allows extra fields.
-
-    Kept permissive at Phase 0 because per-kind processors and metrics
-    grow extra config knobs in Phase 1+. Tightening this is a per-kind
-    concern when those processors land.
-    """
-
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 # ---------------------------------------------------------------------------
@@ -84,11 +71,18 @@ class SourceSchema(_StrictModel):
 
 
 # Reader kinds — discriminated on ``kind``.
-class _ReaderBase(_PermissiveModel):
+class _ReaderBase(_StrictModel):
     kind: str
     file_pattern: str
     group_by_filename: str | None = None
     streaming: bool = False
+    root: str | None = None
+    background: bool = False
+    hive_partitioning: bool = False
+    separator: str | None = None
+    infer_schema_length: int | None = Field(default=None, ge=0)
+    try_parse_dates: bool = True
+    archive_temp_dir: str | None = None
 
 
 class PegaDsExportReader(_ReaderBase):
@@ -133,7 +127,9 @@ class ParseDatetime(_TransformBase):
 class DeriveCalendar(_TransformBase):
     kind: Literal["derive_calendar"]
     from_: str = Field(alias="from")
-    outputs: list[str] = Field(default_factory=lambda: ["Day", "Month", "Year", "Quarter"])
+    outputs: list[str] = Field(
+        default_factory=lambda: ["Day", "Week", "Month", "Quarter", "Year"]
+    )
 
 
 class DeriveActionId(_TransformBase):
@@ -209,7 +205,7 @@ class Source(_StrictModel):
 class Pipelines(_StrictModel):
     """Top-level shape for ``pipelines.yaml``."""
 
-    version: int = 1
+    catalog_version: Literal[2]
     workspace: str
     defaults: WorkspaceDefaults = Field(default_factory=WorkspaceDefaults)
     sources: list[Source]
@@ -220,52 +216,141 @@ class Pipelines(_StrictModel):
 # ---------------------------------------------------------------------------
 
 
-class StateSpec(_PermissiveModel):
-    """A state column on a processor's aggregate output.
-
-    Kind-specific fields (``source_column``, ``lg_k``, ``per_property``,
-    etc.) are tracked via ``extra='allow'`` for Phase 0.
-    """
-
-    type: Literal[
-        "count",
-        "value_sum",
-        "min",
-        "max",
-        "pooled_mean",
-        "pooled_variance",
-        "tdigest",
-        "kll",
-        "cpc",
-        "hll",
-        "theta",
-        "topk",
-    ]
-
-
-class ProcessorTime(_PermissiveModel):
-    """Processor time contract.
-
-    ``column`` is the source timestamp used to derive calendar fields.
-    ``grains`` are user-facing calendar grains. They are normalized to the
-    internal aggregate names on the parent processor. ``aggregation_levels``
-    controls the physical row level stored for each grain.
-    """
-
-    column: str | None = None
-    grains: list[str] = Field(default_factory=lambda: ["Day", "Month", "Summary"])
-    aggregation_levels: dict[str, str] = Field(
-        default_factory=lambda: {
-            "Day": "Day",
-            "Month": "Month",
-            "Summary": "Month",
-        }
-    )
+class CountState(_StrictModel):
+    type: Literal["count"]
+    source_column: str | None = None
+    distinct: bool = False
+    outcome: Literal["positive", "negative"] | None = None
+    stage: str | None = None
+    where: Expr | None = None
 
     @model_validator(mode="after")
-    def _validate_aggregation_levels(self) -> ProcessorTime:
-        normalize_aggregation_levels(self.aggregation_levels)
+    def _one_count_selector(self) -> CountState:
+        selectors = [self.source_column is not None, self.outcome is not None, self.stage is not None]
+        if sum(selectors) > 1:
+            raise ValueError("count state accepts only one of source_column, outcome, or stage")
+        if self.distinct and self.source_column is None:
+            raise ValueError("distinct count state requires source_column")
         return self
+
+
+class ValueSumState(_StrictModel):
+    type: Literal["value_sum"]
+    source_column: str
+    where: Expr | None = None
+
+
+class MinState(_StrictModel):
+    type: Literal["min"]
+    source_column: str
+
+
+class MaxState(_StrictModel):
+    type: Literal["max"]
+    source_column: str
+
+
+class PooledMeanState(_StrictModel):
+    type: Literal["pooled_mean"]
+    source_column: str | None = None
+    weight: str
+    recipe: Literal["personalization", "novelty"] | None = None
+
+    @model_validator(mode="after")
+    def _mean_source_or_recipe(self) -> PooledMeanState:
+        if (self.source_column is None) == (self.recipe is None):
+            raise ValueError("pooled_mean state requires exactly one of source_column or recipe")
+        return self
+
+
+class PooledVarianceState(_StrictModel):
+    type: Literal["pooled_variance"]
+    source_column: str
+    mean: str
+    weight: str
+
+
+class _DigestState(_StrictModel):
+    source_column: str
+    k: int | None = Field(default=None, ge=8)
+    score_property: str | None = None
+    outcome: Literal["positive", "negative"] | None = None
+
+    @model_validator(mode="after")
+    def _conditioned_digest_has_property(self) -> _DigestState:
+        if self.outcome and not self.score_property:
+            raise ValueError("outcome-conditioned sketch states require score_property")
+        return self
+
+
+class TDigestState(_DigestState):
+    type: Literal["tdigest"]
+
+
+class KllState(_DigestState):
+    type: Literal["kll"]
+
+
+class _CardinalityState(_StrictModel):
+    source_column: str
+    lg_k: int | None = Field(default=None, ge=4, le=26)
+    stage: str | None = None
+    where: Expr | None = None
+
+
+class CpcState(_CardinalityState):
+    type: Literal["cpc"]
+
+
+class HllState(_CardinalityState):
+    type: Literal["hll"]
+
+
+class ThetaState(_CardinalityState):
+    type: Literal["theta"]
+
+
+class TopKState(_StrictModel):
+    type: Literal["topk"]
+    source_column: str
+    lg_max_map_size: int | None = Field(default=None, ge=3)
+
+
+StateSpec = Annotated[
+    CountState
+    | ValueSumState
+    | MinState
+    | MaxState
+    | PooledMeanState
+    | PooledVarianceState
+    | TDigestState
+    | KllState
+    | CpcState
+    | HllState
+    | ThetaState
+    | TopKState,
+    Field(discriminator="type"),
+]
+
+
+class ProcessorCalendar(_StrictModel):
+    timezone: str = "UTC"
+    week_start: Literal["monday", "sunday"] = "monday"
+    fiscal_year_start_month: int = Field(default=1, ge=1, le=12)
+
+
+class ProcessorTime(_StrictModel):
+    """Canonical semantic time contract for one processor."""
+
+    property: str
+    grain: Literal["hourly", "daily", "weekly", "monthly", "quarterly", "yearly", "summary"]
+    calendar: ProcessorCalendar = Field(default_factory=ProcessorCalendar)
+
+    @property
+    def column(self) -> str:
+        """Internal ingestion name for the configured timestamp property."""
+
+        return self.property
 
 
 _GRAIN_ALIASES: dict[str, str] = {
@@ -336,50 +421,65 @@ def normalize_aggregation_levels(levels: dict[str, str] | None) -> dict[str, str
     return out
 
 
-class _ProcessorBase(_PermissiveModel):
+class OutcomeSpec(_StrictModel):
+    column: str
+    positive_values: list[Any]
+    negative_values: list[Any]
+
+
+class EntitiesSpec(_StrictModel):
+    subject: str
+
+
+class ScorePropertySpec(_StrictModel):
+    column: str
+    role: Literal["primary", "calibrated", "auxiliary"] = "auxiliary"
+
+
+class FunnelStageSpec(_StrictModel):
+    name: str
+    when: Expr
+
+
+class LifecycleKeysSpec(_StrictModel):
+    customer_id: str
+    order_id: str
+    monetary: str
+    purchase_date: str
+
+
+class SnapshotMilestoneSpec(_StrictModel):
+    name: str
+    property: str
+
+
+class _ProcessorBase(_StrictModel):
     id: str
     source: str
     kind: str
     description: str = ""
     group_by: list[str] = Field(default_factory=list)
-    time: ProcessorTime | None = None
-    states: dict[str, StateSpec] = Field(default_factory=dict)
+    time: ProcessorTime
+    states: dict[str, StateSpec] = Field(min_length=1)
     filter: Expr | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_authoring_fields(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            data = dict(data)
-            dimensions = data.pop("dimensions", None)
-            if dimensions is not None and "group_by" not in data:
-                data["group_by"] = dimensions
-            if data.get("kind") == "score_distribution":
-                score_alias = data.pop("scores", None)
-                if score_alias is not None and "score_columns" not in data:
-                    data["score_columns"] = score_alias
-                if "score_properties" not in data:
-                    score_properties = _score_properties_from_legacy(data.get("score_columns"))
-                    if score_properties:
-                        data["score_properties"] = score_properties
-            legacy = {"extra_dimensions", "grains"} & set(data)
-            if legacy:
-                names = ", ".join(sorted(legacy))
-                raise ValueError(
-                    f"legacy processor field(s) are not supported: {names}; "
-                    "use dimensions and time.grains"
-                )
-        return data
 
     @property
     def grains(self) -> list[str]:
-        raw_grains = self.time.grains if self.time is not None else ["Day", "Month", "Summary"]
-        return normalize_grains([str(grain) for grain in raw_grains])
+        """Return the single physical materialization configured for this processor."""
+
+        return [self.time.grain]
 
     @property
     def aggregation_levels(self) -> dict[str, str]:
-        raw = self.time.aggregation_levels if self.time is not None else None
-        return normalize_aggregation_levels(raw)
+        base_grain = self.time.grain
+        levels = {base_grain: base_grain}
+        if base_grain != "summary":
+            levels["summary"] = (
+                "monthly"
+                if base_grain in {"hourly", "daily", "weekly", "monthly"}
+                else base_grain
+            )
+        return levels
 
     def aggregation_level_for(self, grain: str) -> str:
         normalized = normalize_grain_name(grain)
@@ -388,34 +488,51 @@ class _ProcessorBase(_PermissiveModel):
 
 class BinaryOutcomeProcessor(_ProcessorBase):
     kind: Literal["binary_outcome"]
+    outcome: OutcomeSpec
+    dedup_keys: list[str] = Field(default_factory=list)
+    entities: EntitiesSpec | None = None
+    variant_column: str | None = None
 
 
 class NumericDistributionProcessor(_ProcessorBase):
     kind: Literal["numeric_distribution"]
-    sketch_build_mode: Literal["legacy", "bulk"] = "bulk"
+    properties: list[str] = Field(min_length=1)
+    quantile_engine: Literal["tdigest", "kll"] = "tdigest"
 
 
 class ScoreDistributionProcessor(_ProcessorBase):
     kind: Literal["score_distribution"]
-    sketch_build_mode: Literal["legacy", "bulk"] = "bulk"
+    score_properties: list[ScorePropertySpec] = Field(min_length=1)
+    outcome: OutcomeSpec
+    dedup_keys: list[str] = Field(default_factory=list)
+    entities: EntitiesSpec | None = None
 
 
 class EntityLifecycleProcessor(_ProcessorBase):
     kind: Literal["entity_lifecycle"]
+    keys: LifecycleKeysSpec
+    lifespan_years: float | None = Field(default=None, gt=0)
 
 
 class EntitySetProcessor(_ProcessorBase):
     kind: Literal["entity_set"]
+    entity: str
+    entities: EntitiesSpec | None = None
 
 
 class FunnelProcessor(_ProcessorBase):
     kind: Literal["funnel"]
+    stages: list[FunnelStageSpec] = Field(min_length=1)
+    entity: str | None = None
 
 
 class SnapshotProcessor(_ProcessorBase):
     kind: Literal["snapshot"]
     snapshot_kind: Literal["periodic", "accumulating"]
     cadence: Literal["daily", "weekly", "monthly"] | None = None
+    entity: str
+    as_of_property: str | None = None
+    milestones: list[SnapshotMilestoneSpec] = Field(default_factory=list)
 
 
 Processor = Annotated[
@@ -433,6 +550,7 @@ Processor = Annotated[
 class Processors(_StrictModel):
     """Top-level shape for ``processors.yaml``."""
 
+    catalog_version: Literal[2]
     processors: list[Processor]
 
 
@@ -447,230 +565,58 @@ DEFAULT_STATE_PARAMETERS: dict[str, dict[str, int]] = {
 
 
 def effective_processor_states(processor: Processor) -> dict[str, StateSpec]:
-    """Return the state columns the ingestion engine computes for a processor.
+    """Return the processor's explicit catalog output contract."""
 
-    Single source of truth shared by the engine processors, catalog
-    validation, the KPI recipe library, and the UI. Explicit ``states``
-    replace the kind defaults for ``binary_outcome``, ``score_distribution``,
-    ``snapshot``, and ``entity_set`` processors, and merge with the derived
-    states for ``numeric_distribution``, ``entity_lifecycle``, and ``funnel``
-    processors.
-    """
-    if isinstance(processor, NumericDistributionProcessor):
-        return _numeric_distribution_states(processor)
-    if isinstance(processor, EntityLifecycleProcessor):
-        return _entity_lifecycle_states(processor)
-    if isinstance(processor, FunnelProcessor):
-        return _funnel_states(processor)
-    if processor.states:
-        return processor.states
-    return _default_kind_states(processor)
-
-
-def _default_kind_states(processor: Processor) -> dict[str, StateSpec]:
-    if isinstance(processor, BinaryOutcomeProcessor):
-        states = {
-            "Count": StateSpec.model_validate({"type": "count"}),
-            "Positives": StateSpec.model_validate({"type": "count"}),
-            "Negatives": StateSpec.model_validate({"type": "count"}),
-        }
-        subject = _entity_subject(processor)
-        if subject:
-            states["UniqueSubjects_cpc"] = _sketch_state("cpc", subject)
-        return states
-    if isinstance(processor, ScoreDistributionProcessor):
-        return _score_distribution_states(processor)
-    if isinstance(processor, SnapshotProcessor):
-        return {"Count": StateSpec.model_validate({"type": "count"})}
-    if isinstance(processor, EntitySetProcessor):
-        entity = entity_set_column(processor)
-        return {
-            "ActiveUsers_cpc": _sketch_state("cpc", entity),
-            "ActiveUsers_theta": _sketch_state("theta", entity),
-        }
-    return {}
+    return processor.states
 
 
 def entity_lifecycle_keys(processor: Processor) -> dict[str, str]:
-    """Return the configured lifecycle key columns with engine defaults."""
-    raw = _processor_extra(processor).get("keys", {})
-    keys = raw if isinstance(raw, dict) else {}
-    return {
-        "customer_id": str(keys.get("customer_id", "CustomerID")),
-        "order_id": str(keys.get("order_id", "OrderID")),
-        "monetary": str(keys.get("monetary", "Monetary")),
-        "purchase_date": str(keys.get("purchase_date", "PurchaseDate")),
-    }
+    """Return the configured lifecycle key columns."""
+
+    if not isinstance(processor, EntityLifecycleProcessor):
+        return {}
+    return processor.keys.model_dump()
 
 
 def funnel_stage_names(processor: Processor) -> list[str]:
     """Return configured funnel stage names in stage order."""
-    raw = _processor_extra(processor).get("stages", [])
-    if not isinstance(raw, list):
+    if not isinstance(processor, FunnelProcessor):
         return []
-    return [str(item["name"]) for item in raw if isinstance(item, dict) and item.get("name")]
+    return [stage.name for stage in processor.stages]
 
 
 def entity_set_column(processor: Processor) -> str:
-    """Return the entity column an entity_set processor sketches by default."""
-    return str(_processor_extra(processor).get("entity", "CustomerID"))
+    """Return the explicitly configured entity column."""
+
+    if not isinstance(processor, EntitySetProcessor):
+        raise TypeError("entity_set_column requires an entity_set processor")
+    return processor.entity
 
 
-def _sketch_state(state_type: str, source_column: str) -> StateSpec:
-    return StateSpec.model_validate(
-        {
-            "type": state_type,
-            "source_column": source_column,
-            **DEFAULT_STATE_PARAMETERS[state_type],
-        }
-    )
+def processor_settings(processor: Processor) -> dict[str, Any]:
+    """Return only kind-specific, explicitly typed processor settings."""
+
+    payload = processor.model_dump(mode="python", by_alias=True, exclude_none=True)
+    for field_name in (
+        "id",
+        "source",
+        "kind",
+        "description",
+        "group_by",
+        "time",
+        "states",
+        "filter",
+    ):
+        payload.pop(field_name, None)
+    return payload
 
 
-def _entity_lifecycle_states(processor: EntityLifecycleProcessor) -> dict[str, StateSpec]:
-    keys = entity_lifecycle_keys(processor)
-    states = {
-        "unique_holdings": StateSpec.model_validate(
-            {"type": "count", "source_column": keys["order_id"]}
-        ),
-        "lifetime_value": StateSpec.model_validate(
-            {"type": "value_sum", "source_column": keys["monetary"]}
-        ),
-        "MinPurchasedDate": StateSpec.model_validate(
-            {"type": "min", "source_column": keys["purchase_date"]}
-        ),
-        "MaxPurchasedDate": StateSpec.model_validate(
-            {"type": "max", "source_column": keys["purchase_date"]}
-        ),
-    }
-    if not {"UniquePurchasers_cpc", "UniquePurchasers_hll"} & processor.states.keys():
-        states["UniquePurchasers_cpc"] = _sketch_state("cpc", keys["customer_id"])
-    states.update(processor.states)
-    return states
+def state_settings(spec: StateSpec) -> dict[str, Any]:
+    """Return explicitly typed settings for one state, excluding its discriminator."""
 
-
-def _funnel_states(processor: FunnelProcessor) -> dict[str, StateSpec]:
-    entity = _processor_extra(processor).get("entity")
-    states: dict[str, StateSpec] = {}
-    for stage_name in funnel_stage_names(processor):
-        states[f"{stage_name}_Count"] = StateSpec.model_validate({"type": "count"})
-        if entity is None:
-            continue
-        cardinality_names = {f"{stage_name}_Customers_cpc", f"{stage_name}_Customers_hll"}
-        if not cardinality_names & processor.states.keys():
-            states[f"{stage_name}_Customers_cpc"] = _sketch_state("cpc", str(entity))
-    states.update(processor.states)
-    return states
-
-
-def _numeric_distribution_states(processor: NumericDistributionProcessor) -> dict[str, StateSpec]:
-    properties = _extra_list(processor, "properties")
-    engine = str(_processor_extra(processor).get("quantile_engine", "tdigest"))
-    states: dict[str, StateSpec] = {}
-    for prop in properties:
-        for name, spec in _numeric_distribution_templates(engine).items():
-            states[name.replace("{prop}", prop)] = _expand_property_spec(spec, prop)
-    for name, spec in processor.states.items():
-        if _uses_property_template(name, spec):
-            for prop in properties:
-                states[name.replace("{prop}", prop)] = _expand_property_spec(spec, prop)
-        else:
-            states[name] = spec
-    return states
-
-
-def _numeric_distribution_templates(engine: str) -> dict[str, StateSpec]:
-    sketch_type = "kll" if engine == "kll" else "tdigest"
-    return {
-        "{prop}_Count": StateSpec.model_validate({"type": "count", "per_property": True}),
-        "{prop}_Sum": StateSpec.model_validate({"type": "value_sum", "per_property": True}),
-        "{prop}_Mean": StateSpec.model_validate(
-            {"type": "pooled_mean", "per_property": True, "weight": "{prop}_Count"}
-        ),
-        "{prop}_Var": StateSpec.model_validate({"type": "pooled_variance", "per_property": True}),
-        "{prop}_Min": StateSpec.model_validate({"type": "min", "per_property": True}),
-        "{prop}_Max": StateSpec.model_validate({"type": "max", "per_property": True}),
-        f"{{prop}}_{sketch_type}": StateSpec.model_validate(
-            {"type": sketch_type, "per_property": True}
-        ),
-    }
-
-
-def _expand_property_spec(spec: StateSpec, prop: str) -> StateSpec:
-    payload = spec.model_dump(by_alias=True)
-    for key, value in list(payload.items()):
-        if isinstance(value, str):
-            payload[key] = value.replace("{prop}", prop)
-    return StateSpec.model_validate(payload)
-
-
-def _uses_property_template(name: str, spec: StateSpec) -> bool:
-    if "{prop}" in name:
-        return True
-    return any(
-        isinstance(value, str) and "{prop}" in value
-        for value in spec.model_dump(mode="python").values()
-    )
-
-
-def _score_distribution_states(processor: ScoreDistributionProcessor) -> dict[str, StateSpec]:
-    properties = _score_properties(processor)
-    subject = _entity_subject(processor) or "CustomerID"
-    unique_state = "UniqueCustomers_cpc" if subject == "CustomerID" else "UniqueSubjects_cpc"
-    states = {
-        "Count": StateSpec.model_validate({"type": "count"}),
-        "personalization": StateSpec.model_validate({"type": "pooled_mean", "weight": "Count"}),
-        "novelty": StateSpec.model_validate({"type": "pooled_mean", "weight": "Count"}),
-        unique_state: _sketch_state("cpc", subject),
-    }
-    for prop in properties:
-        for outcome in ("positive", "negative"):
-            states[f"{prop}_tdigest_{outcome}s"] = StateSpec.model_validate(
-                {
-                    "type": "tdigest",
-                    "source_column": prop,
-                    "outcome": outcome,
-                    "score_property": prop,
-                    **DEFAULT_STATE_PARAMETERS["tdigest"],
-                }
-            )
-    return states
-
-
-def _score_properties(processor: ScoreDistributionProcessor) -> list[str]:
-    extra = _processor_extra(processor)
-    properties = _extra_list(processor, "score_properties")
-    if properties:
-        return _dedupe(properties)
-    legacy = _score_properties_from_legacy(extra.get("score_columns"))
-    return legacy or ["Propensity"]
-
-
-def _score_properties_from_legacy(value: Any) -> list[str]:
-    if isinstance(value, dict):
-        return _dedupe([str(item) for item in value.values() if str(item).strip()])
-    if isinstance(value, list):
-        return _dedupe([str(item) for item in value if str(item).strip()])
-    return []
-
-
-def _entity_subject(processor: Processor) -> str:
-    entities = _processor_extra(processor).get("entities")
-    if isinstance(entities, dict):
-        subject = entities.get("subject")
-        if subject:
-            return str(subject)
-    return ""
-
-
-def _processor_extra(processor: Processor) -> dict[str, Any]:
-    return dict(processor.model_extra or {})
-
-
-def _extra_list(processor: Processor, key: str) -> list[str]:
-    raw = _processor_extra(processor).get(key, [])
-    if isinstance(raw, list):
-        return [str(item) for item in raw]
-    return []
+    payload = spec.model_dump(mode="python", by_alias=True, exclude_none=True)
+    payload.pop("type", None)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -687,18 +633,20 @@ class MetricDisplaySpec(_StrictModel):
     direction: Literal["higher_is_better", "lower_is_better", "neutral"] = "neutral"
 
 
-class _MetricBase(_PermissiveModel):
-    """Base shape for every derived-metric kind.
+class MetricRecipeSpec(_StrictModel):
+    id: str
+    version: int = Field(ge=1)
 
-    Per docs/reference/processors.md §1, metrics carry ``kind``, a ``source``
-    pointing to a Processor, and any kind-specific knobs.
-    """
 
-    source: str
+class _MetricBase(_StrictModel):
+    """Base shape for every catalog-v2 metric."""
+
+    processor: str
     kind: str
     description: str = ""
     depends_on: list[str] = Field(default_factory=list)
     display: MetricDisplaySpec | None = None
+    recipe: MetricRecipeSpec | None = None
 
 
 class FormulaMetric(_MetricBase):
@@ -718,17 +666,19 @@ class TopKItemsMetric(_MetricBase):
     error_type: Literal["NO_FALSE_POSITIVES", "NO_FALSE_NEGATIVES"] = "NO_FALSE_POSITIVES"
 
 
-class TdigestQuantileMetric(_MetricBase):
-    """Quantile read over a digest state.
+class DistributionMetric(_MetricBase):
+    """Full distribution exposed by one t-digest or KLL state."""
 
-    ``quantile`` is optional: omitting it defines a distribution metric that
-    reads the median by default while exposing the full quantile suite to
-    distribution charts such as boxplots.
-    """
-
-    kind: Literal["tdigest_quantile"]
+    kind: Literal["distribution"]
     state: str
-    quantile: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class QuantileMetric(_MetricBase):
+    """One explicitly selected quantile from a t-digest or KLL state."""
+
+    kind: Literal["quantile"]
+    state: str
+    quantile: float = Field(ge=0.0, le=1.0)
 
 
 class VariantCompareMetric(_MetricBase):
@@ -768,28 +718,61 @@ class ProportionTestMetric(_MetricBase):
     outputs: list[str] = Field(default_factory=list)
 
 
+LifecycleOutput = Literal[
+    "customers_count",
+    "unique_holdings",
+    "lifetime_value",
+    "frequency",
+    "recency",
+    "monetary_value",
+    "rfm_segment",
+    "rfm_score",
+]
+
+
 class LifecycleSummaryMetric(_MetricBase):
     kind: Literal["lifecycle_summary"]
-    outputs: list[str] = Field(default_factory=list)
+    holdings_state: str
+    monetary_state: str
+    first_purchase_state: str
+    last_purchase_state: str
+    outputs: list[LifecycleOutput] = Field(default_factory=list)
+    segment_preset: Literal["default", "rfm", "lifecycle"] = "default"
+    entity_column: str
 
 
-class SetOpOperand(_PermissiveModel):
+class SetOpTimeWindow(_StrictModel):
+    last: str | None = None
+    between: tuple[str, str] | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_window(self) -> SetOpTimeWindow:
+        if (self.last is None) == (self.between is None):
+            raise ValueError("set-operation window requires exactly one of last or between")
+        return self
+
+
+class SetOpOperand(_StrictModel):
     state: str
-    time_window: dict[str, Any] | None = None
+    time_window: SetOpTimeWindow | None = None
 
 
 class SetOpMetric(_MetricBase):
     kind: Literal["set_op"]
-    op: Literal["union", "intersection", "a_not_b", "diff"]
-    operands: list[SetOpOperand] = Field(default_factory=list)
-    states: list[str] = Field(default_factory=list)
-    output: Literal["count"] = "count"
+    operation: Literal["union", "intersection", "minus"]
+    operands: list[SetOpOperand] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def _minus_has_two_operands(self) -> SetOpMetric:
+        if self.operation == "minus" and len(self.operands) != 2:
+            raise ValueError("minus requires exactly two operands")
+        return self
 
 
 class FunnelDropoffMetric(_MetricBase):
     kind: Literal["funnel_dropoff"]
-    from_stage: str
-    to_stage: str
+    from_state: str
+    to_state: str
     output: Literal["rate", "count"] = "rate"
 
 
@@ -797,7 +780,8 @@ Metric = Annotated[
     FormulaMetric
     | ApproxDistinctCountMetric
     | TopKItemsMetric
-    | TdigestQuantileMetric
+    | DistributionMetric
+    | QuantileMetric
     | VariantCompareMetric
     | CurveFromDigestsMetric
     | CalibrationFromDigestsMetric
@@ -808,11 +792,19 @@ Metric = Annotated[
     | FunnelDropoffMetric,
     Field(discriminator="kind"),
 ]
+_METRIC_ADAPTER = TypeAdapter(Metric)
+
+
+def validate_metric(value: Any) -> Metric:
+    """Validate one metric definition against the canonical metric union."""
+
+    return _METRIC_ADAPTER.validate_python(value)
 
 
 class Metrics(_StrictModel):
     """Top-level shape for ``metrics.yaml``."""
 
+    catalog_version: Literal[2]
     metrics: dict[str, Metric]
 
 
@@ -879,15 +871,7 @@ class KpiSpec(_StrictModel):
     target: float | None = None
 
 
-class Tile(_PermissiveModel):
-    """One tile on a dashboard page.
-
-    Required and optional fields per chart kind are documented in
-    ``docs/reference/chart-catalog.md`` §3. We allow extras here so chart-specific
-    keys (``x``, ``y``, ``color``, ``facets``, ``path``, ``references``,
-    ``value``) don't need their own per-kind schemas at Phase 0.
-    """
-
+class _TileBase(_StrictModel):
     id: str
     title: str
     metric: str
@@ -896,44 +880,238 @@ class Tile(_PermissiveModel):
     kpi: KpiSpec | None = None
     scale_mode: Literal["absolute", "index_100", "percent_change"] = "absolute"
     value_format: Literal["percent", "integer", "number", "currency"] | None = None
+    metric_output: str | None = None
+    group_by: list[str] | None = None
+    goal_line: float | dict[str, Any] | None = None
+    show_trend_delta: bool = False
+    sort_by: str | None = None
+    sort_direction: Literal["ascending", "descending"] | None = None
+    top_n: int | None = Field(default=None, ge=1)
+    labels: dict[str, str] | None = None
+    theme: dict[str, Any] | None = None
+    conditional_formatting: list[dict[str, Any]] | None = None
+    bins: int | None = Field(default=None, ge=1)
+    hole: float | None = Field(default=None, ge=0.0, le=1.0)
+    height: int | None = Field(default=None, ge=1)
+    width: int | None = Field(default=None, ge=1)
+    log_x: bool = False
+    log_y: bool = False
+    showlegend: bool | None = None
+    horizon: int | None = Field(default=None, ge=1)
+    x_axis_title: str | None = None
+    y_axis_title: str | None = None
+
+
+class _FacetedTile(_TileBase):
+    color: str | None = None
+    facet_row: str | None = None
+    facet_col: str | None = None
+
+
+class MetricAxisTile(_FacetedTile):
+    chart: Literal["line", "bar", "pareto"]
+    x: str
+
+
+class StackedAreaTile(_FacetedTile):
+    chart: Literal["stacked_area"]
+    x: str
+    color: str
+
+
+class WaterfallTile(_TileBase):
+    chart: Literal["waterfall"]
+    x: str
+
+
+class ScalarTile(_TileBase):
+    chart: Literal["kpi_card"]
+
+
+class GaugeTile(_FacetedTile):
+    chart: Literal["gauge"]
+    reference: float | str | None = None
+    references: dict[str, float] | None = None
+
+
+class TreemapTile(_TileBase):
+    chart: Literal["treemap", "clv_treemap"]
+    path: list[str] = Field(min_length=1)
+
+
+class HeatmapTile(_TileBase):
+    chart: Literal["heatmap"]
+    x: str
+    y: str | None = None
+
+
+class ScatterTile(_FacetedTile):
+    chart: Literal["scatter"]
+    x: str
+    y: str
+    size: str | None = None
+    animation_frame: str | None = None
+    animation_group: str | None = None
+
+
+class ComboTile(_FacetedTile):
+    chart: Literal["combo"]
+    x: str
+    secondary_metric: str
+    y2_axis_title: str | None = None
+
+
+class IntervalTile(_FacetedTile):
+    chart: Literal["interval"]
+    x: str
+    metric_output: str
+    lower_output: str | None = None
+    upper_output: str | None = None
+
+    @model_validator(mode="after")
+    def _paired_bounds(self) -> IntervalTile:
+        if (self.lower_output is None) != (self.upper_output is None):
+            raise ValueError("interval lower_output and upper_output must be configured together")
+        return self
+
+
+class DonutTile(_TileBase):
+    chart: Literal["donut"]
+    names: str
+    color: str | None = None
+    hole: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class GeoMapTile(_TileBase):
+    chart: Literal["geo_map"]
+    locations: str | None = None
+    lat: str | None = None
+    lon: str | None = None
+    color: str | None = None
+    size: str | None = None
+    locationmode: str | None = None
+
+    @model_validator(mode="after")
+    def _location_role(self) -> GeoMapTile:
+        if not self.locations and not self.lat:
+            raise ValueError("geo_map requires locations or lat")
+        return self
+
+
+class TableTile(_TileBase):
+    chart: Literal["table"]
+    columns: list[str] | None = None
+
+
+class PolarTile(_TileBase):
+    chart: Literal["bar_polar"]
+    theta: str
+    color: str | None = None
+
+
+class SankeyTile(_TileBase):
+    chart: Literal["sankey"]
+    path: list[str] = Field(min_length=2)
+
+
+class FunnelTile(_FacetedTile):
+    chart: Literal["funnel"]
+    stages: list[str] = Field(min_length=1)
+    x: str | None = None
+
+
+class DistributionTile(_FacetedTile):
+    chart: Literal["boxplot"]
+    x: str | None = None
+
+
+class HistogramTile(_FacetedTile):
+    chart: Literal["histogram"]
+    property: str
+
+
+class CurveTile(_FacetedTile):
     chart: Literal[
-        "line",
-        "stacked_area",
-        "bar",
-        "kpi_card",
-        "waterfall",
-        "pareto",
-        "treemap",
-        "heatmap",
-        "cohort_heatmap",
-        "scatter",
-        "combo",
-        "interval",
-        "donut",
-        "geo_map",
-        "table",
-        "calendar_heatmap",
-        "bar_polar",
-        "sankey",
-        "gauge",
-        "funnel",
-        "boxplot",
-        "histogram",
         "calibration_curve",
         "roc_curve",
         "precision_recall_curve",
         "gain_curve",
         "lift_curve",
-        "rfm_density",
-        "exposure",
-        "corr",
-        "model",
-        "descriptive_line",
-        "descriptive_heatmap",
-        "experiment_z_score",
-        "experiment_odds_ratio",
-        "clv_treemap",
     ]
+
+
+class RfmDensityTile(_TileBase):
+    chart: Literal["rfm_density"]
+    x: str | None = None
+    y: str | None = None
+    color: str | None = None
+
+
+class ExposureTile(_TileBase):
+    chart: Literal["exposure"]
+    color: str | None = None
+
+
+class CorrelationTile(_TileBase):
+    chart: Literal["corr"]
+    x: str
+    y: str
+    color: str | None = None
+
+
+class ModelTile(_TileBase):
+    chart: Literal["model"]
+    color: str | None = None
+
+
+class DescriptiveLineTile(_FacetedTile):
+    chart: Literal["descriptive_line"]
+    x: str
+    property: str
+    score: str
+
+
+class ExperimentTile(_FacetedTile):
+    chart: Literal["experiment_z_score", "experiment_odds_ratio"]
+    x: str
+    y: str
+
+
+Tile = Annotated[
+    MetricAxisTile
+    | StackedAreaTile
+    | WaterfallTile
+    | ScalarTile
+    | GaugeTile
+    | TreemapTile
+    | HeatmapTile
+    | ScatterTile
+    | ComboTile
+    | IntervalTile
+    | DonutTile
+    | GeoMapTile
+    | TableTile
+    | PolarTile
+    | SankeyTile
+    | FunnelTile
+    | DistributionTile
+    | HistogramTile
+    | CurveTile
+    | RfmDensityTile
+    | ExposureTile
+    | CorrelationTile
+    | ModelTile
+    | DescriptiveLineTile
+    | ExperimentTile,
+    Field(discriminator="chart"),
+]
+_TILE_ADAPTER = TypeAdapter(Tile)
+
+
+def validate_tile(value: Any) -> Tile:
+    """Validate one chart-specific tile definition."""
+
+    return _TILE_ADAPTER.validate_python(value)
 
 
 class DashboardPage(_StrictModel):
@@ -954,6 +1132,7 @@ class Dashboard(_StrictModel):
 class Dashboards(_StrictModel):
     """Top-level shape for ``dashboards.yaml``."""
 
+    catalog_version: Literal[2]
     theme: dict[str, Any] = Field(default_factory=dict)
     dashboards: list[Dashboard]
 
@@ -992,6 +1171,7 @@ __all__ = [
     "DeriveActionId",
     "DeriveCalendar",
     "DeriveColumn",
+    "DistributionMetric",
     "DropColumns",
     "EntityLifecycleProcessor",
     "EntitySetProcessor",
@@ -1011,19 +1191,21 @@ __all__ = [
     "PegaDsExportReader",
     "Pipelines",
     "Processor",
+    "ProcessorCalendar",
     "ProcessorTime",
     "Processors",
     "ProportionTestMetric",
+    "QuantileMetric",
     "Reader",
     "RenameCapitalize",
     "ScoreDistributionProcessor",
     "SetOpMetric",
     "SetOpOperand",
+    "SetOpTimeWindow",
     "SnapshotProcessor",
     "Source",
     "SourceSchema",
     "StateSpec",
-    "TdigestQuantileMetric",
     "Tile",
     "TimeFilterSpec",
     "TopKItemsMetric",
@@ -1037,4 +1219,7 @@ __all__ = [
     "funnel_stage_names",
     "normalize_grain_name",
     "normalize_grains",
+    "processor_settings",
+    "state_settings",
+    "validate_tile",
 ]

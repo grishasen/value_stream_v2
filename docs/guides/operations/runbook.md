@@ -2,9 +2,7 @@
 
 This runbook gives repeatable procedures for operating a Value Stream
 workspace. It is intended for data engineers, operators, and support
-engineers. Migration and backfill procedures live in
-[Migration & backfill](migration.md); symptom lookup lives in
-[Troubleshooting](troubleshooting.md).
+engineers. Symptom lookup lives in [Troubleshooting](troubleshooting.md).
 
 ## Standard Operating Loop
 
@@ -189,8 +187,6 @@ normalized correctness digest.
 
 ## Related Procedures
 
-- [Migration & backfill](migration.md) — legacy TOML translation, DuckDB
-  backfill, and parity sign-off.
 - [Troubleshooting](troubleshooting.md) — symptom table and escalation data.
 - [Deployment](deployment.md) — hosting the UI, API, and scheduled ingestion.
 - [Security](security.md) — tokens, governed SQL, and the aggregate-only

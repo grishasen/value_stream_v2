@@ -296,7 +296,7 @@ def build_recipe_install_request(
     metric_def = instantiate_metric(recipe, configured_processor, metric_id, bindings)
     processor_def = _processor_yaml_definition(configured_processor) if state_additions else None
     tile_def = (
-        instantiate_tile(recipe, metric_id, tile_id, bindings)
+        instantiate_tile(recipe, configured_processor, metric_id, tile_id, bindings)
         if report_target is not None and tile_id
         else None
     )
@@ -324,9 +324,6 @@ def _processor_yaml_definition(processor: model.Processor) -> dict[str, Any]:
     """Serialize a processor exactly as the shared installer will write it."""
 
     data = processor.model_dump(mode="json", by_alias=True, exclude_none=True)
-    group_by = data.pop("group_by", None)
-    if group_by:
-        data["dimensions"] = group_by
     if not processor.states:
         data.pop("states", None)
     return data

@@ -122,12 +122,30 @@
       "type": "object"
     },
     "BinaryOutcomeProcessor": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "dedup_keys": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dedup Keys",
+          "type": "array"
+        },
         "description": {
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "entities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntitiesSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "filter": {
           "anyOf": [
@@ -248,33 +266,98 @@
           "title": "Kind",
           "type": "string"
         },
+        "outcome": {
+          "$ref": "#/$defs/OutcomeSpec"
+        },
         "source": {
           "title": "Source",
           "type": "string"
         },
         "states": {
           "additionalProperties": {
-            "$ref": "#/$defs/StateSpec"
+            "discriminator": {
+              "mapping": {
+                "count": "#/$defs/CountState",
+                "cpc": "#/$defs/CpcState",
+                "hll": "#/$defs/HllState",
+                "kll": "#/$defs/KllState",
+                "max": "#/$defs/MaxState",
+                "min": "#/$defs/MinState",
+                "pooled_mean": "#/$defs/PooledMeanState",
+                "pooled_variance": "#/$defs/PooledVarianceState",
+                "tdigest": "#/$defs/TDigestState",
+                "theta": "#/$defs/ThetaState",
+                "topk": "#/$defs/TopKState",
+                "value_sum": "#/$defs/ValueSumState"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CountState"
+              },
+              {
+                "$ref": "#/$defs/ValueSumState"
+              },
+              {
+                "$ref": "#/$defs/MinState"
+              },
+              {
+                "$ref": "#/$defs/MaxState"
+              },
+              {
+                "$ref": "#/$defs/PooledMeanState"
+              },
+              {
+                "$ref": "#/$defs/PooledVarianceState"
+              },
+              {
+                "$ref": "#/$defs/TDigestState"
+              },
+              {
+                "$ref": "#/$defs/KllState"
+              },
+              {
+                "$ref": "#/$defs/CpcState"
+              },
+              {
+                "$ref": "#/$defs/HllState"
+              },
+              {
+                "$ref": "#/$defs/ThetaState"
+              },
+              {
+                "$ref": "#/$defs/TopKState"
+              }
+            ]
           },
+          "minProperties": 1,
           "title": "States",
           "type": "object"
         },
         "time": {
+          "$ref": "#/$defs/ProcessorTime"
+        },
+        "variant_column": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ProcessorTime"
+              "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Variant Column"
         }
       },
       "required": [
         "id",
         "source",
-        "kind"
+        "kind",
+        "time",
+        "states",
+        "outcome"
       ],
       "title": "BinaryOutcomeProcessor",
       "type": "object"
@@ -675,8 +758,334 @@
       "title": "ComparisonColumn",
       "type": "object"
     },
+    "CountState": {
+      "additionalProperties": false,
+      "properties": {
+        "distinct": {
+          "default": false,
+          "title": "Distinct",
+          "type": "boolean"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "positive",
+                "negative"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "source_column": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Column"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "type": {
+          "const": "count",
+          "title": "Type",
+          "type": "string"
+        },
+        "where": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Col"
+                },
+                {
+                  "$ref": "#/$defs/Lit"
+                },
+                {
+                  "$ref": "#/$defs/Param"
+                },
+                {
+                  "$ref": "#/$defs/PolarsExpr"
+                },
+                {
+                  "$ref": "#/$defs/UnaryArg"
+                },
+                {
+                  "$ref": "#/$defs/OpLog"
+                },
+                {
+                  "$ref": "#/$defs/OpRound"
+                },
+                {
+                  "$ref": "#/$defs/OpCast"
+                },
+                {
+                  "$ref": "#/$defs/LogicalNary"
+                },
+                {
+                  "$ref": "#/$defs/ArithmeticNary"
+                },
+                {
+                  "$ref": "#/$defs/OpSafeDiv"
+                },
+                {
+                  "$ref": "#/$defs/OpConcat"
+                },
+                {
+                  "$ref": "#/$defs/MinMaxNary"
+                },
+                {
+                  "$ref": "#/$defs/OpCoalesce"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonColumn"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonArgs"
+                },
+                {
+                  "$ref": "#/$defs/OpIn"
+                },
+                {
+                  "$ref": "#/$defs/OpNotIn"
+                },
+                {
+                  "$ref": "#/$defs/OpBetween"
+                },
+                {
+                  "$ref": "#/$defs/NullCheck"
+                },
+                {
+                  "$ref": "#/$defs/OpMatches"
+                },
+                {
+                  "$ref": "#/$defs/StrPrefixSuffix"
+                },
+                {
+                  "$ref": "#/$defs/OpCase"
+                },
+                {
+                  "$ref": "#/$defs/OpWhenThen"
+                },
+                {
+                  "$ref": "#/$defs/OpDateTrunc"
+                },
+                {
+                  "$ref": "#/$defs/OpDateDiff"
+                },
+                {
+                  "$ref": "#/$defs/OpDatePart"
+                },
+                {
+                  "$ref": "#/$defs/OpNow"
+                },
+                {
+                  "$ref": "#/$defs/OpStrftime"
+                },
+                {
+                  "$ref": "#/$defs/OpStrptime"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Where"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "CountState",
+      "type": "object"
+    },
+    "CpcState": {
+      "additionalProperties": false,
+      "properties": {
+        "lg_k": {
+          "anyOf": [
+            {
+              "maximum": 26,
+              "minimum": 4,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lg K"
+        },
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "type": {
+          "const": "cpc",
+          "title": "Type",
+          "type": "string"
+        },
+        "where": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Col"
+                },
+                {
+                  "$ref": "#/$defs/Lit"
+                },
+                {
+                  "$ref": "#/$defs/Param"
+                },
+                {
+                  "$ref": "#/$defs/PolarsExpr"
+                },
+                {
+                  "$ref": "#/$defs/UnaryArg"
+                },
+                {
+                  "$ref": "#/$defs/OpLog"
+                },
+                {
+                  "$ref": "#/$defs/OpRound"
+                },
+                {
+                  "$ref": "#/$defs/OpCast"
+                },
+                {
+                  "$ref": "#/$defs/LogicalNary"
+                },
+                {
+                  "$ref": "#/$defs/ArithmeticNary"
+                },
+                {
+                  "$ref": "#/$defs/OpSafeDiv"
+                },
+                {
+                  "$ref": "#/$defs/OpConcat"
+                },
+                {
+                  "$ref": "#/$defs/MinMaxNary"
+                },
+                {
+                  "$ref": "#/$defs/OpCoalesce"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonColumn"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonArgs"
+                },
+                {
+                  "$ref": "#/$defs/OpIn"
+                },
+                {
+                  "$ref": "#/$defs/OpNotIn"
+                },
+                {
+                  "$ref": "#/$defs/OpBetween"
+                },
+                {
+                  "$ref": "#/$defs/NullCheck"
+                },
+                {
+                  "$ref": "#/$defs/OpMatches"
+                },
+                {
+                  "$ref": "#/$defs/StrPrefixSuffix"
+                },
+                {
+                  "$ref": "#/$defs/OpCase"
+                },
+                {
+                  "$ref": "#/$defs/OpWhenThen"
+                },
+                {
+                  "$ref": "#/$defs/OpDateTrunc"
+                },
+                {
+                  "$ref": "#/$defs/OpDateDiff"
+                },
+                {
+                  "$ref": "#/$defs/OpDatePart"
+                },
+                {
+                  "$ref": "#/$defs/OpNow"
+                },
+                {
+                  "$ref": "#/$defs/OpStrftime"
+                },
+                {
+                  "$ref": "#/$defs/OpStrptime"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Where"
+        }
+      },
+      "required": [
+        "source_column",
+        "type"
+      ],
+      "title": "CpcState",
+      "type": "object"
+    },
+    "EntitiesSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject"
+      ],
+      "title": "EntitiesSpec",
+      "type": "object"
+    },
     "EntityLifecycleProcessor": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "description": {
           "default": "",
@@ -797,10 +1206,26 @@
           "title": "Id",
           "type": "string"
         },
+        "keys": {
+          "$ref": "#/$defs/LifecycleKeysSpec"
+        },
         "kind": {
           "const": "entity_lifecycle",
           "title": "Kind",
           "type": "string"
+        },
+        "lifespan_years": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lifespan Years"
         },
         "source": {
           "title": "Source",
@@ -808,37 +1233,102 @@
         },
         "states": {
           "additionalProperties": {
-            "$ref": "#/$defs/StateSpec"
+            "discriminator": {
+              "mapping": {
+                "count": "#/$defs/CountState",
+                "cpc": "#/$defs/CpcState",
+                "hll": "#/$defs/HllState",
+                "kll": "#/$defs/KllState",
+                "max": "#/$defs/MaxState",
+                "min": "#/$defs/MinState",
+                "pooled_mean": "#/$defs/PooledMeanState",
+                "pooled_variance": "#/$defs/PooledVarianceState",
+                "tdigest": "#/$defs/TDigestState",
+                "theta": "#/$defs/ThetaState",
+                "topk": "#/$defs/TopKState",
+                "value_sum": "#/$defs/ValueSumState"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CountState"
+              },
+              {
+                "$ref": "#/$defs/ValueSumState"
+              },
+              {
+                "$ref": "#/$defs/MinState"
+              },
+              {
+                "$ref": "#/$defs/MaxState"
+              },
+              {
+                "$ref": "#/$defs/PooledMeanState"
+              },
+              {
+                "$ref": "#/$defs/PooledVarianceState"
+              },
+              {
+                "$ref": "#/$defs/TDigestState"
+              },
+              {
+                "$ref": "#/$defs/KllState"
+              },
+              {
+                "$ref": "#/$defs/CpcState"
+              },
+              {
+                "$ref": "#/$defs/HllState"
+              },
+              {
+                "$ref": "#/$defs/ThetaState"
+              },
+              {
+                "$ref": "#/$defs/TopKState"
+              }
+            ]
           },
+          "minProperties": 1,
           "title": "States",
           "type": "object"
         },
         "time": {
+          "$ref": "#/$defs/ProcessorTime"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "kind",
+        "time",
+        "states",
+        "keys"
+      ],
+      "title": "EntityLifecycleProcessor",
+      "type": "object"
+    },
+    "EntitySetProcessor": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "entities": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ProcessorTime"
+              "$ref": "#/$defs/EntitiesSpec"
             },
             {
               "type": "null"
             }
           ],
           "default": null
-        }
-      },
-      "required": [
-        "id",
-        "source",
-        "kind"
-      ],
-      "title": "EntityLifecycleProcessor",
-      "type": "object"
-    },
-    "EntitySetProcessor": {
-      "additionalProperties": true,
-      "properties": {
-        "description": {
-          "default": "",
-          "title": "Description",
+        },
+        "entity": {
+          "title": "Entity",
           "type": "string"
         },
         "filter": {
@@ -966,38 +1456,100 @@
         },
         "states": {
           "additionalProperties": {
-            "$ref": "#/$defs/StateSpec"
+            "discriminator": {
+              "mapping": {
+                "count": "#/$defs/CountState",
+                "cpc": "#/$defs/CpcState",
+                "hll": "#/$defs/HllState",
+                "kll": "#/$defs/KllState",
+                "max": "#/$defs/MaxState",
+                "min": "#/$defs/MinState",
+                "pooled_mean": "#/$defs/PooledMeanState",
+                "pooled_variance": "#/$defs/PooledVarianceState",
+                "tdigest": "#/$defs/TDigestState",
+                "theta": "#/$defs/ThetaState",
+                "topk": "#/$defs/TopKState",
+                "value_sum": "#/$defs/ValueSumState"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CountState"
+              },
+              {
+                "$ref": "#/$defs/ValueSumState"
+              },
+              {
+                "$ref": "#/$defs/MinState"
+              },
+              {
+                "$ref": "#/$defs/MaxState"
+              },
+              {
+                "$ref": "#/$defs/PooledMeanState"
+              },
+              {
+                "$ref": "#/$defs/PooledVarianceState"
+              },
+              {
+                "$ref": "#/$defs/TDigestState"
+              },
+              {
+                "$ref": "#/$defs/KllState"
+              },
+              {
+                "$ref": "#/$defs/CpcState"
+              },
+              {
+                "$ref": "#/$defs/HllState"
+              },
+              {
+                "$ref": "#/$defs/ThetaState"
+              },
+              {
+                "$ref": "#/$defs/TopKState"
+              }
+            ]
           },
+          "minProperties": 1,
           "title": "States",
           "type": "object"
         },
         "time": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProcessorTime"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "$ref": "#/$defs/ProcessorTime"
         }
       },
       "required": [
         "id",
         "source",
-        "kind"
+        "kind",
+        "time",
+        "states",
+        "entity"
       ],
       "title": "EntitySetProcessor",
       "type": "object"
     },
     "FunnelProcessor": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "description": {
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "entity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entity"
         },
         "filter": {
           "anyOf": [
@@ -1122,31 +1674,438 @@
           "title": "Source",
           "type": "string"
         },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/FunnelStageSpec"
+          },
+          "minItems": 1,
+          "title": "Stages",
+          "type": "array"
+        },
         "states": {
           "additionalProperties": {
-            "$ref": "#/$defs/StateSpec"
+            "discriminator": {
+              "mapping": {
+                "count": "#/$defs/CountState",
+                "cpc": "#/$defs/CpcState",
+                "hll": "#/$defs/HllState",
+                "kll": "#/$defs/KllState",
+                "max": "#/$defs/MaxState",
+                "min": "#/$defs/MinState",
+                "pooled_mean": "#/$defs/PooledMeanState",
+                "pooled_variance": "#/$defs/PooledVarianceState",
+                "tdigest": "#/$defs/TDigestState",
+                "theta": "#/$defs/ThetaState",
+                "topk": "#/$defs/TopKState",
+                "value_sum": "#/$defs/ValueSumState"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CountState"
+              },
+              {
+                "$ref": "#/$defs/ValueSumState"
+              },
+              {
+                "$ref": "#/$defs/MinState"
+              },
+              {
+                "$ref": "#/$defs/MaxState"
+              },
+              {
+                "$ref": "#/$defs/PooledMeanState"
+              },
+              {
+                "$ref": "#/$defs/PooledVarianceState"
+              },
+              {
+                "$ref": "#/$defs/TDigestState"
+              },
+              {
+                "$ref": "#/$defs/KllState"
+              },
+              {
+                "$ref": "#/$defs/CpcState"
+              },
+              {
+                "$ref": "#/$defs/HllState"
+              },
+              {
+                "$ref": "#/$defs/ThetaState"
+              },
+              {
+                "$ref": "#/$defs/TopKState"
+              }
+            ]
           },
+          "minProperties": 1,
           "title": "States",
           "type": "object"
         },
         "time": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProcessorTime"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "$ref": "#/$defs/ProcessorTime"
         }
       },
       "required": [
         "id",
         "source",
-        "kind"
+        "kind",
+        "time",
+        "states",
+        "stages"
       ],
       "title": "FunnelProcessor",
+      "type": "object"
+    },
+    "FunnelStageSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "when": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Col"
+            },
+            {
+              "$ref": "#/$defs/Lit"
+            },
+            {
+              "$ref": "#/$defs/Param"
+            },
+            {
+              "$ref": "#/$defs/PolarsExpr"
+            },
+            {
+              "$ref": "#/$defs/UnaryArg"
+            },
+            {
+              "$ref": "#/$defs/OpLog"
+            },
+            {
+              "$ref": "#/$defs/OpRound"
+            },
+            {
+              "$ref": "#/$defs/OpCast"
+            },
+            {
+              "$ref": "#/$defs/LogicalNary"
+            },
+            {
+              "$ref": "#/$defs/ArithmeticNary"
+            },
+            {
+              "$ref": "#/$defs/OpSafeDiv"
+            },
+            {
+              "$ref": "#/$defs/OpConcat"
+            },
+            {
+              "$ref": "#/$defs/MinMaxNary"
+            },
+            {
+              "$ref": "#/$defs/OpCoalesce"
+            },
+            {
+              "$ref": "#/$defs/ComparisonColumn"
+            },
+            {
+              "$ref": "#/$defs/ComparisonArgs"
+            },
+            {
+              "$ref": "#/$defs/OpIn"
+            },
+            {
+              "$ref": "#/$defs/OpNotIn"
+            },
+            {
+              "$ref": "#/$defs/OpBetween"
+            },
+            {
+              "$ref": "#/$defs/NullCheck"
+            },
+            {
+              "$ref": "#/$defs/OpMatches"
+            },
+            {
+              "$ref": "#/$defs/StrPrefixSuffix"
+            },
+            {
+              "$ref": "#/$defs/OpCase"
+            },
+            {
+              "$ref": "#/$defs/OpWhenThen"
+            },
+            {
+              "$ref": "#/$defs/OpDateTrunc"
+            },
+            {
+              "$ref": "#/$defs/OpDateDiff"
+            },
+            {
+              "$ref": "#/$defs/OpDatePart"
+            },
+            {
+              "$ref": "#/$defs/OpNow"
+            },
+            {
+              "$ref": "#/$defs/OpStrftime"
+            },
+            {
+              "$ref": "#/$defs/OpStrptime"
+            }
+          ],
+          "title": "When"
+        }
+      },
+      "required": [
+        "name",
+        "when"
+      ],
+      "title": "FunnelStageSpec",
+      "type": "object"
+    },
+    "HllState": {
+      "additionalProperties": false,
+      "properties": {
+        "lg_k": {
+          "anyOf": [
+            {
+              "maximum": 26,
+              "minimum": 4,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lg K"
+        },
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "type": {
+          "const": "hll",
+          "title": "Type",
+          "type": "string"
+        },
+        "where": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Col"
+                },
+                {
+                  "$ref": "#/$defs/Lit"
+                },
+                {
+                  "$ref": "#/$defs/Param"
+                },
+                {
+                  "$ref": "#/$defs/PolarsExpr"
+                },
+                {
+                  "$ref": "#/$defs/UnaryArg"
+                },
+                {
+                  "$ref": "#/$defs/OpLog"
+                },
+                {
+                  "$ref": "#/$defs/OpRound"
+                },
+                {
+                  "$ref": "#/$defs/OpCast"
+                },
+                {
+                  "$ref": "#/$defs/LogicalNary"
+                },
+                {
+                  "$ref": "#/$defs/ArithmeticNary"
+                },
+                {
+                  "$ref": "#/$defs/OpSafeDiv"
+                },
+                {
+                  "$ref": "#/$defs/OpConcat"
+                },
+                {
+                  "$ref": "#/$defs/MinMaxNary"
+                },
+                {
+                  "$ref": "#/$defs/OpCoalesce"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonColumn"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonArgs"
+                },
+                {
+                  "$ref": "#/$defs/OpIn"
+                },
+                {
+                  "$ref": "#/$defs/OpNotIn"
+                },
+                {
+                  "$ref": "#/$defs/OpBetween"
+                },
+                {
+                  "$ref": "#/$defs/NullCheck"
+                },
+                {
+                  "$ref": "#/$defs/OpMatches"
+                },
+                {
+                  "$ref": "#/$defs/StrPrefixSuffix"
+                },
+                {
+                  "$ref": "#/$defs/OpCase"
+                },
+                {
+                  "$ref": "#/$defs/OpWhenThen"
+                },
+                {
+                  "$ref": "#/$defs/OpDateTrunc"
+                },
+                {
+                  "$ref": "#/$defs/OpDateDiff"
+                },
+                {
+                  "$ref": "#/$defs/OpDatePart"
+                },
+                {
+                  "$ref": "#/$defs/OpNow"
+                },
+                {
+                  "$ref": "#/$defs/OpStrftime"
+                },
+                {
+                  "$ref": "#/$defs/OpStrptime"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Where"
+        }
+      },
+      "required": [
+        "source_column",
+        "type"
+      ],
+      "title": "HllState",
+      "type": "object"
+    },
+    "KllState": {
+      "additionalProperties": false,
+      "properties": {
+        "k": {
+          "anyOf": [
+            {
+              "minimum": 8,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "K"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "positive",
+                "negative"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "score_property": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score Property"
+        },
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "type": {
+          "const": "kll",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_column",
+        "type"
+      ],
+      "title": "KllState",
+      "type": "object"
+    },
+    "LifecycleKeysSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "customer_id": {
+          "title": "Customer Id",
+          "type": "string"
+        },
+        "monetary": {
+          "title": "Monetary",
+          "type": "string"
+        },
+        "order_id": {
+          "title": "Order Id",
+          "type": "string"
+        },
+        "purchase_date": {
+          "title": "Purchase Date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "customer_id",
+        "order_id",
+        "monetary",
+        "purchase_date"
+      ],
+      "title": "LifecycleKeysSpec",
       "type": "object"
     },
     "Lit": {
@@ -1303,6 +2262,26 @@
       "title": "LogicalNary",
       "type": "object"
     },
+    "MaxState": {
+      "additionalProperties": false,
+      "properties": {
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "type": {
+          "const": "max",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "source_column"
+      ],
+      "title": "MaxState",
+      "type": "object"
+    },
     "MinMaxNary": {
       "additionalProperties": false,
       "description": "``{op: least|greatest, args: [...]}``.",
@@ -1422,6 +2401,26 @@
       "title": "MinMaxNary",
       "type": "object"
     },
+    "MinState": {
+      "additionalProperties": false,
+      "properties": {
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "type": {
+          "const": "min",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "source_column"
+      ],
+      "title": "MinState",
+      "type": "object"
+    },
     "NullCheck": {
       "additionalProperties": false,
       "description": "``is_null`` / ``not_null`` over a column.",
@@ -1448,7 +2447,7 @@
       "type": "object"
     },
     "NumericDistributionProcessor": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "description": {
           "default": "",
@@ -1574,13 +2573,21 @@
           "title": "Kind",
           "type": "string"
         },
-        "sketch_build_mode": {
-          "default": "bulk",
+        "properties": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Properties",
+          "type": "array"
+        },
+        "quantile_engine": {
+          "default": "tdigest",
           "enum": [
-            "legacy",
-            "bulk"
+            "tdigest",
+            "kll"
           ],
-          "title": "Sketch Build Mode",
+          "title": "Quantile Engine",
           "type": "string"
         },
         "source": {
@@ -1589,27 +2596,77 @@
         },
         "states": {
           "additionalProperties": {
-            "$ref": "#/$defs/StateSpec"
+            "discriminator": {
+              "mapping": {
+                "count": "#/$defs/CountState",
+                "cpc": "#/$defs/CpcState",
+                "hll": "#/$defs/HllState",
+                "kll": "#/$defs/KllState",
+                "max": "#/$defs/MaxState",
+                "min": "#/$defs/MinState",
+                "pooled_mean": "#/$defs/PooledMeanState",
+                "pooled_variance": "#/$defs/PooledVarianceState",
+                "tdigest": "#/$defs/TDigestState",
+                "theta": "#/$defs/ThetaState",
+                "topk": "#/$defs/TopKState",
+                "value_sum": "#/$defs/ValueSumState"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CountState"
+              },
+              {
+                "$ref": "#/$defs/ValueSumState"
+              },
+              {
+                "$ref": "#/$defs/MinState"
+              },
+              {
+                "$ref": "#/$defs/MaxState"
+              },
+              {
+                "$ref": "#/$defs/PooledMeanState"
+              },
+              {
+                "$ref": "#/$defs/PooledVarianceState"
+              },
+              {
+                "$ref": "#/$defs/TDigestState"
+              },
+              {
+                "$ref": "#/$defs/KllState"
+              },
+              {
+                "$ref": "#/$defs/CpcState"
+              },
+              {
+                "$ref": "#/$defs/HllState"
+              },
+              {
+                "$ref": "#/$defs/ThetaState"
+              },
+              {
+                "$ref": "#/$defs/TopKState"
+              }
+            ]
           },
+          "minProperties": 1,
           "title": "States",
           "type": "object"
         },
         "time": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProcessorTime"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "$ref": "#/$defs/ProcessorTime"
         }
       },
       "required": [
         "id",
         "source",
-        "kind"
+        "kind",
+        "time",
+        "states",
+        "properties"
       ],
       "title": "NumericDistributionProcessor",
       "type": "object"
@@ -3778,6 +4835,32 @@
       "title": "OpWhenThen",
       "type": "object"
     },
+    "OutcomeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "title": "Column",
+          "type": "string"
+        },
+        "negative_values": {
+          "items": {},
+          "title": "Negative Values",
+          "type": "array"
+        },
+        "positive_values": {
+          "items": {},
+          "title": "Positive Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "column",
+        "positive_values",
+        "negative_values"
+      ],
+      "title": "OutcomeSpec",
+      "type": "object"
+    },
     "Param": {
       "additionalProperties": false,
       "description": "``{param: <ident>}`` \u2014 workspace-level parameter reference.",
@@ -3810,18 +4893,26 @@
       "title": "PolarsExpr",
       "type": "object"
     },
-    "ProcessorTime": {
-      "additionalProperties": true,
-      "description": "Processor time contract.\n\n``column`` is the source timestamp used to derive calendar fields.\n``grains`` are user-facing calendar grains. They are normalized to the\ninternal aggregate names on the parent processor. ``aggregation_levels``\ncontrols the physical row level stored for each grain.",
+    "PooledMeanState": {
+      "additionalProperties": false,
       "properties": {
-        "aggregation_levels": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Aggregation Levels",
-          "type": "object"
+        "recipe": {
+          "anyOf": [
+            {
+              "enum": [
+                "personalization",
+                "novelty"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipe"
         },
-        "column": {
+        "source_column": {
           "anyOf": [
             {
               "type": "string"
@@ -3831,26 +4922,140 @@
             }
           ],
           "default": null,
-          "title": "Column"
+          "title": "Source Column"
         },
-        "grains": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Grains",
-          "type": "array"
+        "type": {
+          "const": "pooled_mean",
+          "title": "Type",
+          "type": "string"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "string"
         }
       },
+      "required": [
+        "type",
+        "weight"
+      ],
+      "title": "PooledMeanState",
+      "type": "object"
+    },
+    "PooledVarianceState": {
+      "additionalProperties": false,
+      "properties": {
+        "mean": {
+          "title": "Mean",
+          "type": "string"
+        },
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "type": {
+          "const": "pooled_variance",
+          "title": "Type",
+          "type": "string"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "source_column",
+        "mean",
+        "weight"
+      ],
+      "title": "PooledVarianceState",
+      "type": "object"
+    },
+    "ProcessorCalendar": {
+      "additionalProperties": false,
+      "properties": {
+        "fiscal_year_start_month": {
+          "default": 1,
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Fiscal Year Start Month",
+          "type": "integer"
+        },
+        "timezone": {
+          "default": "UTC",
+          "title": "Timezone",
+          "type": "string"
+        },
+        "week_start": {
+          "default": "monday",
+          "enum": [
+            "monday",
+            "sunday"
+          ],
+          "title": "Week Start",
+          "type": "string"
+        }
+      },
+      "title": "ProcessorCalendar",
+      "type": "object"
+    },
+    "ProcessorTime": {
+      "additionalProperties": false,
+      "description": "Canonical semantic time contract for one processor.",
+      "properties": {
+        "calendar": {
+          "$ref": "#/$defs/ProcessorCalendar"
+        },
+        "grain": {
+          "enum": [
+            "hourly",
+            "daily",
+            "weekly",
+            "monthly",
+            "quarterly",
+            "yearly",
+            "summary"
+          ],
+          "title": "Grain",
+          "type": "string"
+        },
+        "property": {
+          "title": "Property",
+          "type": "string"
+        }
+      },
+      "required": [
+        "property",
+        "grain"
+      ],
       "title": "ProcessorTime",
       "type": "object"
     },
     "ScoreDistributionProcessor": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "dedup_keys": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dedup Keys",
+          "type": "array"
+        },
         "description": {
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "entities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntitiesSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "filter": {
           "anyOf": [
@@ -3971,14 +5176,16 @@
           "title": "Kind",
           "type": "string"
         },
-        "sketch_build_mode": {
-          "default": "bulk",
-          "enum": [
-            "legacy",
-            "bulk"
-          ],
-          "title": "Sketch Build Mode",
-          "type": "string"
+        "outcome": {
+          "$ref": "#/$defs/OutcomeSpec"
+        },
+        "score_properties": {
+          "items": {
+            "$ref": "#/$defs/ScorePropertySpec"
+          },
+          "minItems": 1,
+          "title": "Score Properties",
+          "type": "array"
         },
         "source": {
           "title": "Source",
@@ -3986,34 +5193,140 @@
         },
         "states": {
           "additionalProperties": {
-            "$ref": "#/$defs/StateSpec"
+            "discriminator": {
+              "mapping": {
+                "count": "#/$defs/CountState",
+                "cpc": "#/$defs/CpcState",
+                "hll": "#/$defs/HllState",
+                "kll": "#/$defs/KllState",
+                "max": "#/$defs/MaxState",
+                "min": "#/$defs/MinState",
+                "pooled_mean": "#/$defs/PooledMeanState",
+                "pooled_variance": "#/$defs/PooledVarianceState",
+                "tdigest": "#/$defs/TDigestState",
+                "theta": "#/$defs/ThetaState",
+                "topk": "#/$defs/TopKState",
+                "value_sum": "#/$defs/ValueSumState"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CountState"
+              },
+              {
+                "$ref": "#/$defs/ValueSumState"
+              },
+              {
+                "$ref": "#/$defs/MinState"
+              },
+              {
+                "$ref": "#/$defs/MaxState"
+              },
+              {
+                "$ref": "#/$defs/PooledMeanState"
+              },
+              {
+                "$ref": "#/$defs/PooledVarianceState"
+              },
+              {
+                "$ref": "#/$defs/TDigestState"
+              },
+              {
+                "$ref": "#/$defs/KllState"
+              },
+              {
+                "$ref": "#/$defs/CpcState"
+              },
+              {
+                "$ref": "#/$defs/HllState"
+              },
+              {
+                "$ref": "#/$defs/ThetaState"
+              },
+              {
+                "$ref": "#/$defs/TopKState"
+              }
+            ]
           },
+          "minProperties": 1,
           "title": "States",
           "type": "object"
         },
         "time": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProcessorTime"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "$ref": "#/$defs/ProcessorTime"
         }
       },
       "required": [
         "id",
         "source",
-        "kind"
+        "kind",
+        "time",
+        "states",
+        "score_properties",
+        "outcome"
       ],
       "title": "ScoreDistributionProcessor",
       "type": "object"
     },
-    "SnapshotProcessor": {
-      "additionalProperties": true,
+    "ScorePropertySpec": {
+      "additionalProperties": false,
       "properties": {
+        "column": {
+          "title": "Column",
+          "type": "string"
+        },
+        "role": {
+          "default": "auxiliary",
+          "enum": [
+            "primary",
+            "calibrated",
+            "auxiliary"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "column"
+      ],
+      "title": "ScorePropertySpec",
+      "type": "object"
+    },
+    "SnapshotMilestoneSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "property": {
+          "title": "Property",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "property"
+      ],
+      "title": "SnapshotMilestoneSpec",
+      "type": "object"
+    },
+    "SnapshotProcessor": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of_property": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of Property"
+        },
         "cadence": {
           "anyOf": [
             {
@@ -4034,6 +5347,10 @@
         "description": {
           "default": "",
           "title": "Description",
+          "type": "string"
+        },
+        "entity": {
+          "title": "Entity",
           "type": "string"
         },
         "filter": {
@@ -4155,6 +5472,13 @@
           "title": "Kind",
           "type": "string"
         },
+        "milestones": {
+          "items": {
+            "$ref": "#/$defs/SnapshotMilestoneSpec"
+          },
+          "title": "Milestones",
+          "type": "array"
+        },
         "snapshot_kind": {
           "enum": [
             "periodic",
@@ -4169,59 +5493,80 @@
         },
         "states": {
           "additionalProperties": {
-            "$ref": "#/$defs/StateSpec"
+            "discriminator": {
+              "mapping": {
+                "count": "#/$defs/CountState",
+                "cpc": "#/$defs/CpcState",
+                "hll": "#/$defs/HllState",
+                "kll": "#/$defs/KllState",
+                "max": "#/$defs/MaxState",
+                "min": "#/$defs/MinState",
+                "pooled_mean": "#/$defs/PooledMeanState",
+                "pooled_variance": "#/$defs/PooledVarianceState",
+                "tdigest": "#/$defs/TDigestState",
+                "theta": "#/$defs/ThetaState",
+                "topk": "#/$defs/TopKState",
+                "value_sum": "#/$defs/ValueSumState"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CountState"
+              },
+              {
+                "$ref": "#/$defs/ValueSumState"
+              },
+              {
+                "$ref": "#/$defs/MinState"
+              },
+              {
+                "$ref": "#/$defs/MaxState"
+              },
+              {
+                "$ref": "#/$defs/PooledMeanState"
+              },
+              {
+                "$ref": "#/$defs/PooledVarianceState"
+              },
+              {
+                "$ref": "#/$defs/TDigestState"
+              },
+              {
+                "$ref": "#/$defs/KllState"
+              },
+              {
+                "$ref": "#/$defs/CpcState"
+              },
+              {
+                "$ref": "#/$defs/HllState"
+              },
+              {
+                "$ref": "#/$defs/ThetaState"
+              },
+              {
+                "$ref": "#/$defs/TopKState"
+              }
+            ]
           },
+          "minProperties": 1,
           "title": "States",
           "type": "object"
         },
         "time": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProcessorTime"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "$ref": "#/$defs/ProcessorTime"
         }
       },
       "required": [
         "id",
         "source",
         "kind",
-        "snapshot_kind"
+        "time",
+        "states",
+        "snapshot_kind",
+        "entity"
       ],
       "title": "SnapshotProcessor",
-      "type": "object"
-    },
-    "StateSpec": {
-      "additionalProperties": true,
-      "description": "A state column on a processor's aggregate output.\n\nKind-specific fields (``source_column``, ``lg_k``, ``per_property``,\netc.) are tracked via ``extra='allow'`` for Phase 0.",
-      "properties": {
-        "type": {
-          "enum": [
-            "count",
-            "value_sum",
-            "min",
-            "max",
-            "pooled_mean",
-            "pooled_variance",
-            "tdigest",
-            "kll",
-            "cpc",
-            "hll",
-            "theta",
-            "topk"
-          ],
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type"
-      ],
-      "title": "StateSpec",
       "type": "object"
     },
     "StrPrefixSuffix": {
@@ -4252,6 +5597,249 @@
         "value"
       ],
       "title": "StrPrefixSuffix",
+      "type": "object"
+    },
+    "TDigestState": {
+      "additionalProperties": false,
+      "properties": {
+        "k": {
+          "anyOf": [
+            {
+              "minimum": 8,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "K"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "positive",
+                "negative"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "score_property": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score Property"
+        },
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "type": {
+          "const": "tdigest",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_column",
+        "type"
+      ],
+      "title": "TDigestState",
+      "type": "object"
+    },
+    "ThetaState": {
+      "additionalProperties": false,
+      "properties": {
+        "lg_k": {
+          "anyOf": [
+            {
+              "maximum": 26,
+              "minimum": 4,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lg K"
+        },
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "type": {
+          "const": "theta",
+          "title": "Type",
+          "type": "string"
+        },
+        "where": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Col"
+                },
+                {
+                  "$ref": "#/$defs/Lit"
+                },
+                {
+                  "$ref": "#/$defs/Param"
+                },
+                {
+                  "$ref": "#/$defs/PolarsExpr"
+                },
+                {
+                  "$ref": "#/$defs/UnaryArg"
+                },
+                {
+                  "$ref": "#/$defs/OpLog"
+                },
+                {
+                  "$ref": "#/$defs/OpRound"
+                },
+                {
+                  "$ref": "#/$defs/OpCast"
+                },
+                {
+                  "$ref": "#/$defs/LogicalNary"
+                },
+                {
+                  "$ref": "#/$defs/ArithmeticNary"
+                },
+                {
+                  "$ref": "#/$defs/OpSafeDiv"
+                },
+                {
+                  "$ref": "#/$defs/OpConcat"
+                },
+                {
+                  "$ref": "#/$defs/MinMaxNary"
+                },
+                {
+                  "$ref": "#/$defs/OpCoalesce"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonColumn"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonArgs"
+                },
+                {
+                  "$ref": "#/$defs/OpIn"
+                },
+                {
+                  "$ref": "#/$defs/OpNotIn"
+                },
+                {
+                  "$ref": "#/$defs/OpBetween"
+                },
+                {
+                  "$ref": "#/$defs/NullCheck"
+                },
+                {
+                  "$ref": "#/$defs/OpMatches"
+                },
+                {
+                  "$ref": "#/$defs/StrPrefixSuffix"
+                },
+                {
+                  "$ref": "#/$defs/OpCase"
+                },
+                {
+                  "$ref": "#/$defs/OpWhenThen"
+                },
+                {
+                  "$ref": "#/$defs/OpDateTrunc"
+                },
+                {
+                  "$ref": "#/$defs/OpDateDiff"
+                },
+                {
+                  "$ref": "#/$defs/OpDatePart"
+                },
+                {
+                  "$ref": "#/$defs/OpNow"
+                },
+                {
+                  "$ref": "#/$defs/OpStrftime"
+                },
+                {
+                  "$ref": "#/$defs/OpStrptime"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Where"
+        }
+      },
+      "required": [
+        "source_column",
+        "type"
+      ],
+      "title": "ThetaState",
+      "type": "object"
+    },
+    "TopKState": {
+      "additionalProperties": false,
+      "properties": {
+        "lg_max_map_size": {
+          "anyOf": [
+            {
+              "minimum": 3,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lg Max Map Size"
+        },
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "type": {
+          "const": "topk",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "source_column"
+      ],
+      "title": "TopKState",
       "type": "object"
     },
     "UnaryArg": {
@@ -4373,6 +5961,129 @@
       ],
       "title": "UnaryArg",
       "type": "object"
+    },
+    "ValueSumState": {
+      "additionalProperties": false,
+      "properties": {
+        "source_column": {
+          "title": "Source Column",
+          "type": "string"
+        },
+        "type": {
+          "const": "value_sum",
+          "title": "Type",
+          "type": "string"
+        },
+        "where": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Col"
+                },
+                {
+                  "$ref": "#/$defs/Lit"
+                },
+                {
+                  "$ref": "#/$defs/Param"
+                },
+                {
+                  "$ref": "#/$defs/PolarsExpr"
+                },
+                {
+                  "$ref": "#/$defs/UnaryArg"
+                },
+                {
+                  "$ref": "#/$defs/OpLog"
+                },
+                {
+                  "$ref": "#/$defs/OpRound"
+                },
+                {
+                  "$ref": "#/$defs/OpCast"
+                },
+                {
+                  "$ref": "#/$defs/LogicalNary"
+                },
+                {
+                  "$ref": "#/$defs/ArithmeticNary"
+                },
+                {
+                  "$ref": "#/$defs/OpSafeDiv"
+                },
+                {
+                  "$ref": "#/$defs/OpConcat"
+                },
+                {
+                  "$ref": "#/$defs/MinMaxNary"
+                },
+                {
+                  "$ref": "#/$defs/OpCoalesce"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonColumn"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonArgs"
+                },
+                {
+                  "$ref": "#/$defs/OpIn"
+                },
+                {
+                  "$ref": "#/$defs/OpNotIn"
+                },
+                {
+                  "$ref": "#/$defs/OpBetween"
+                },
+                {
+                  "$ref": "#/$defs/NullCheck"
+                },
+                {
+                  "$ref": "#/$defs/OpMatches"
+                },
+                {
+                  "$ref": "#/$defs/StrPrefixSuffix"
+                },
+                {
+                  "$ref": "#/$defs/OpCase"
+                },
+                {
+                  "$ref": "#/$defs/OpWhenThen"
+                },
+                {
+                  "$ref": "#/$defs/OpDateTrunc"
+                },
+                {
+                  "$ref": "#/$defs/OpDateDiff"
+                },
+                {
+                  "$ref": "#/$defs/OpDatePart"
+                },
+                {
+                  "$ref": "#/$defs/OpNow"
+                },
+                {
+                  "$ref": "#/$defs/OpStrftime"
+                },
+                {
+                  "$ref": "#/$defs/OpStrptime"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Where"
+        }
+      },
+      "required": [
+        "type",
+        "source_column"
+      ],
+      "title": "ValueSumState",
+      "type": "object"
     }
   },
   "$id": "https://valuestream.dev/schemas/processors.json",
@@ -4380,6 +6091,11 @@
   "additionalProperties": false,
   "description": "Top-level shape for ``processors.yaml``.",
   "properties": {
+    "catalog_version": {
+      "const": 2,
+      "title": "Catalog Version",
+      "type": "integer"
+    },
     "processors": {
       "items": {
         "discriminator": {
@@ -4423,6 +6139,7 @@
     }
   },
   "required": [
+    "catalog_version",
     "processors"
   ],
   "title": "Value Stream Processors",

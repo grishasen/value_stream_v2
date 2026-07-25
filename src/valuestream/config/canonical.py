@@ -191,7 +191,7 @@ def _source_computation_fields(source: model.Source) -> dict[str, Any]:
 
 def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
     payload = processor.model_dump(by_alias=True, exclude_none=True)
-    for field in ("description", "sketch_build_mode"):
+    for field in ("description",):
         payload.pop(field, None)
     if isinstance(processor, model.ScoreDistributionProcessor) and {
         "personalization",

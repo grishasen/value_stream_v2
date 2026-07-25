@@ -142,20 +142,17 @@ def processor_kind_guide(kind: str) -> ProcessorKindGuide | None:
     return PROCESSOR_KIND_GUIDE.get(str(kind))
 
 
-PROCESSOR_GRAIN_OPTIONS = ("Day", "Month", "Quarter", "Year", "Summary")
+PROCESSOR_GRAIN_OPTIONS = ("Day", "Week", "Month", "Quarter", "Year", "Summary")
 QUANTILE_ENGINE_OPTIONS = ("tdigest", "kll")
-SKETCH_BUILD_MODE_OPTIONS = ("bulk", "legacy")
 SNAPSHOT_KIND_OPTIONS = ("periodic", "accumulating")
 SNAPSHOT_CADENCE_OPTIONS = ("", "daily", "weekly", "monthly")
 TOPK_ERROR_TYPE_OPTIONS = ("NO_FALSE_POSITIVES", "NO_FALSE_NEGATIVES")
 CONTINGENCY_TEST_OPTIONS = ("chi2", "g", "z")
-# "diff" stays valid in the schema as an engine alias of "a_not_b", but the
-# picker offers only the canonical value and shows it as "Minus".
-SET_OP_OPTIONS = ("intersection", "union", "a_not_b")
+SET_OP_OPTIONS = ("intersection", "union", "minus")
 SET_OP_LABELS = {
     "intersection": "Intersection — entities in every set (in A and B)",
     "union": "Union — entities in any set (in A or B)",
-    "a_not_b": "Minus — entities in the first set only (A - B)",
+    "minus": "Minus — entities in the first set only (A - B)",
 }
 FUNNEL_OUTPUT_OPTIONS = ("rate", "count")
 CURVE_OUTPUT_OPTIONS = ("roc_auc", "average_precision")
@@ -181,13 +178,9 @@ PROCESSOR_KIND_MANAGED_FIELDS = frozenset(
         "entity",
         "keys",
         "outcome",
-        "outcome_column",
-        "positive_values",
-        "negative_values",
         "variant_column",
         "properties",
         "quantile_engine",
-        "sketch_build_mode",
         "score_properties",
         "stages",
         "snapshot_kind",
@@ -195,7 +188,9 @@ PROCESSOR_KIND_MANAGED_FIELDS = frozenset(
     }
 )
 
-METRIC_BASE_FIELDS = frozenset({"source", "kind", "description", "depends_on", "display"})
+METRIC_BASE_FIELDS = frozenset(
+    {"processor", "kind", "description", "depends_on", "display", "recipe"}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +416,7 @@ def _outcome_fields(
         column = select_or_text(
             "Outcome Column",
             field_options,
-            str(outcome.get("column", processor_def.get("outcome_column", "")) or "")
+            str(outcome.get("column", "") or "")
             or first_preferred_field(field_options, OUTCOME_PREFERRED_FIELDS),
             key=f"{key_prefix}_outcome_column",
             help_key="processor.outcome_column",
@@ -430,7 +425,7 @@ def _outcome_fields(
         positive_values = csv_list_field(
             "Positive Values",
             builder.string_list(
-                outcome.get("positive_values", processor_def.get("positive_values"))
+                outcome.get("positive_values")
             )
             or positive_defaults,
             key=f"{key_prefix}_positive_values",
@@ -440,7 +435,7 @@ def _outcome_fields(
         negative_values = csv_list_field(
             "Negative Values",
             builder.string_list(
-                outcome.get("negative_values", processor_def.get("negative_values"))
+                outcome.get("negative_values")
             )
             or negative_defaults,
             key=f"{key_prefix}_negative_values",
@@ -501,8 +496,8 @@ def _score_distribution_fields(
     property_source_options = numeric_options or field_options
     current_properties = _score_properties_for_editor(processor_def, property_source_options)
     property_choices = with_current(property_source_options, current_properties)
-    properties_col, subject_col, build_mode_col = st.columns(
-        [2, 1, 1], gap="xsmall", vertical_alignment="bottom"
+    properties_col, subject_col = st.columns(
+        [2, 1], gap="xsmall", vertical_alignment="bottom"
     )
     with properties_col:
         properties = st.multiselect(
@@ -515,23 +510,23 @@ def _score_distribution_fields(
         )
     settings: dict[str, Any] = {}
     if properties:
-        settings["score_properties"] = builder.dedupe([str(item) for item in properties])
+        settings["score_properties"] = [
+            {
+                "column": str(item),
+                "role": (
+                    "primary"
+                    if index == 0
+                    else "calibrated"
+                    if index == 1
+                    else "auxiliary"
+                ),
+            }
+            for index, item in enumerate(builder.dedupe([str(item) for item in properties]))
+        ]
     with subject_col:
         subject = _subject_field(processor_def, field_options, key_prefix)
     if subject:
         settings["entities"] = {"subject": subject}
-    with build_mode_col:
-        build_mode = st.selectbox(
-            "Sketch Build Mode",
-            list(SKETCH_BUILD_MODE_OPTIONS),
-            index=builder.option_index(
-                SKETCH_BUILD_MODE_OPTIONS,
-                processor_def.get("sketch_build_mode") or "bulk",
-            ),
-            key=f"{key_prefix}_sketch_build_mode",
-            help=config_help.field_help("processor.sketch_build_mode"),
-        )
-    settings["sketch_build_mode"] = build_mode
     settings.update(
         _outcome_fields(
             processor_def,
@@ -566,15 +561,10 @@ def _score_properties_for_editor(
 
 
 def _has_configured_score_properties(processor_def: dict[str, Any]) -> bool:
-    if builder.string_list(processor_def.get("score_properties")):
-        return True
-    for key in ("score_columns", "scores"):
-        value = processor_def.get(key)
-        if isinstance(value, dict) and any(str(item).strip() for item in value.values()):
-            return True
-        if isinstance(value, list) and any(str(item).strip() for item in value):
-            return True
-    return False
+    value = processor_def.get("score_properties")
+    return isinstance(value, list) and any(
+        isinstance(item, dict) and str(item.get("column", "")).strip() for item in value
+    )
 
 
 def _numeric_distribution_fields(
@@ -585,8 +575,8 @@ def _numeric_distribution_fields(
     st.write("### Distribution Processor Settings")
     current = builder.string_list(processor_def.get("properties"))
     choices = with_current(numeric_options, current)
-    properties_col, engine_col, build_mode_col = st.columns(
-        [2, 1, 1], gap="xsmall", vertical_alignment="bottom"
+    properties_col, engine_col = st.columns(
+        [2, 1], gap="xsmall", vertical_alignment="bottom"
     )
     properties = properties_col.multiselect(
         "Numeric Properties",
@@ -603,20 +593,7 @@ def _numeric_distribution_fields(
         key=f"{key_prefix}_quantile_engine",
         help=config_help.field_help("processor.quantile_engine"),
     )
-    build_mode = build_mode_col.selectbox(
-        "Sketch Build Mode",
-        list(SKETCH_BUILD_MODE_OPTIONS),
-        index=builder.option_index(
-            SKETCH_BUILD_MODE_OPTIONS,
-            processor_def.get("sketch_build_mode") or "bulk",
-        ),
-        key=f"{key_prefix}_sketch_build_mode",
-        help=config_help.field_help("processor.sketch_build_mode"),
-    )
-    settings: dict[str, Any] = {
-        "quantile_engine": engine,
-        "sketch_build_mode": build_mode,
-    }
+    settings: dict[str, Any] = {"quantile_engine": engine}
     if properties:
         settings["properties"] = list(properties)
     return settings
@@ -842,6 +819,7 @@ class MetricFormContext:
     funnel_stages: list[str] = field(default_factory=list)
     default_variant_column: str = ""
     variant_roles: dict[str, str] = field(default_factory=dict)
+    default_entity_column: str = ""
     state_label: Callable[[str], str] | None = None
     default_digest_pair: Callable[[bool], tuple[str, str] | None] | None = None
 
@@ -875,7 +853,9 @@ def metric_kind_fields(  # noqa: PLR0911, PLR0912 — dispatch table over the me
         return {"state": state}
     if kind == "topk_items":
         return _topk_fields(seed, ctx, key_prefix)
-    if kind == "tdigest_quantile":
+    if kind == "distribution":
+        return _distribution_fields(seed, ctx, key_prefix)
+    if kind == "quantile":
         return _quantile_fields(seed, ctx, key_prefix)
     if kind == "curve_from_digests":
         pair = _digest_pair_fields(seed, ctx, key_prefix, final=False)
@@ -898,7 +878,7 @@ def metric_kind_fields(  # noqa: PLR0911, PLR0912 — dispatch table over the me
     if kind == "proportion_test":
         return _variant_compare_fields(seed, ctx, f"{key_prefix}_proportion")
     if kind == "lifecycle_summary":
-        return _lifecycle_fields(seed, key_prefix)
+        return _lifecycle_fields(seed, ctx, key_prefix)
     if kind == "set_op":
         return _set_op_fields(seed, ctx, key_prefix)
     if kind == "funnel_dropoff":
@@ -1084,7 +1064,7 @@ def _topk_fields(
     return fields
 
 
-def _quantile_fields(
+def _distribution_fields(
     seed: dict[str, Any],
     ctx: MetricFormContext,
     key_prefix: str,
@@ -1094,40 +1074,38 @@ def _quantile_fields(
         seed.get("state"),
         ctx,
         {"tdigest", "kll"},
-        f"{key_prefix}_quantile_state",
+        f"{key_prefix}_distribution_state",
         help_key="metric.state",
     )
-    distribution_only = st.checkbox(
-        "Distribution metric (no single quantile)",
-        value=bool(seed) and "quantile" not in seed,
-        key=f"{key_prefix}_quantile_distribution",
-        help=config_help.field_help("metric.distribution_only"),
-    )
-    if distribution_only:
-        st.caption(
-            "Reads the median by default and exposes the full quantile suite "
-            "(min, p05 to p95, max) to distribution charts such as boxplots."
-        )
-        quantile = None
-    else:
-        quantile = st.number_input(
-            "Quantile",
-            min_value=0.0,
-            max_value=1.0,
-            value=builder.float_in_range(
-                seed.get("quantile"), default=0.5, minimum=0.0, maximum=1.0
-            ),
-            step=0.05,
-            format="%.2f",
-            key=f"{key_prefix}_quantile_value",
-            help=config_help.field_help("metric.quantile"),
-        )
     if not state:
-        st.warning("Digest quantiles require a t-digest or KLL state.")
+        st.warning("Distributions require a t-digest or KLL state.")
         return None
-    if quantile is None:
-        return {"state": state}
-    return {"state": state, "quantile": float(quantile)}
+    st.caption("Exposes the complete quantile suite to box plots and distribution charts.")
+    return {"state": state}
+
+
+def _quantile_fields(
+    seed: dict[str, Any],
+    ctx: MetricFormContext,
+    key_prefix: str,
+) -> dict[str, Any] | None:
+    fields = _distribution_fields(seed, ctx, key_prefix)
+    if fields is None:
+        return None
+    quantile = st.number_input(
+        "Quantile",
+        min_value=0.0,
+        max_value=1.0,
+        value=builder.float_in_range(
+            seed.get("quantile"), default=0.5, minimum=0.0, maximum=1.0
+        ),
+        step=0.05,
+        format="%.2f",
+        key=f"{key_prefix}_quantile_value",
+        help=config_help.field_help("metric.quantile"),
+    )
+    fields["quantile"] = float(quantile)
+    return fields
 
 
 def _digest_pair_fields(
@@ -1230,12 +1208,6 @@ def _variant_compare_fields(
         key=f"{key_prefix}_confidence_level",
         help=config_help.field_help("metric.confidence_level"),
     )
-    outputs = csv_list_field(
-        "Outputs",
-        seed.get("outputs"),
-        key=f"{key_prefix}_variant_outputs",
-        help_key="metric.outputs",
-    )
     if not variant_column:
         st.warning("Variant comparison requires a variant column.")
         return None
@@ -1245,8 +1217,8 @@ def _variant_compare_fields(
         "control_role": control_role or "Control",
         "confidence_level": float(confidence_level),
     }
-    if outputs:
-        fields["outputs"] = outputs
+    if seed_outputs := builder.string_list(seed.get("outputs")):
+        fields["outputs"] = seed_outputs
     return fields
 
 
@@ -1271,39 +1243,87 @@ def _contingency_fields(
         key=f"{key_prefix}_contingency_tests",
         help=config_help.field_help("metric.tests"),
     )
-    outputs = csv_list_field(
-        "Outputs",
-        seed.get("outputs"),
-        key=f"{key_prefix}_contingency_outputs",
-        help_key="metric.outputs",
-    )
     if not variant_column:
         st.warning("Contingency tests require a variant column.")
         return None
     fields: dict[str, Any] = {"variant_column": variant_column, "tests": tests}
-    if outputs:
-        fields["outputs"] = outputs
+    if seed_outputs := builder.string_list(seed.get("outputs")):
+        fields["outputs"] = seed_outputs
     return fields
 
 
-def _lifecycle_fields(seed: dict[str, Any], key_prefix: str) -> dict[str, Any]:
-    default_outputs = [
-        output
-        for output in (
-            builder.string_list(seed.get("outputs"))
-            if seed
-            else ["frequency", "monetary_value", "rfm_segment", "rfm_score"]
+def _lifecycle_fields(
+    seed: dict[str, Any],
+    ctx: MetricFormContext,
+    key_prefix: str,
+) -> dict[str, Any] | None:
+    entity_column = st.text_input(
+        "Entity Column",
+        value=str(seed.get("entity_column") or ctx.default_entity_column or ""),
+        key=f"{key_prefix}_lifecycle_entity",
+        help="Exact aggregate dimension that identifies one lifecycle entity.",
+    ).strip()
+    holdings_state = _state_field(
+        "Distinct Holdings State",
+        seed.get("holdings_state"),
+        ctx,
+        {"count"},
+        f"{key_prefix}_lifecycle_holdings",
+        help_key="metric.state",
+    )
+    monetary_state = _state_field(
+        "Monetary Value State",
+        seed.get("monetary_state"),
+        ctx,
+        {"value_sum"},
+        f"{key_prefix}_lifecycle_monetary",
+        help_key="metric.state",
+    )
+    first_purchase_state = _state_field(
+        "First Purchase State",
+        seed.get("first_purchase_state"),
+        ctx,
+        {"min"},
+        f"{key_prefix}_lifecycle_first_purchase",
+        help_key="metric.state",
+    )
+    last_purchase_state = _state_field(
+        "Last Purchase State",
+        seed.get("last_purchase_state"),
+        ctx,
+        {"max"},
+        f"{key_prefix}_lifecycle_last_purchase",
+        help_key="metric.state",
+    )
+    if not all(
+        (
+            entity_column,
+            holdings_state,
+            monetary_state,
+            first_purchase_state,
+            last_purchase_state,
         )
+    ):
+        st.warning(
+            "Lifecycle summary requires an entity column and explicit holdings, monetary, "
+            "first-purchase, and last-purchase states."
+        )
+        return None
+    fields: dict[str, Any] = {
+        "entity_column": entity_column,
+        "holdings_state": holdings_state,
+        "monetary_state": monetary_state,
+        "first_purchase_state": first_purchase_state,
+        "last_purchase_state": last_purchase_state,
+    }
+    seed_outputs = [
+        output
+        for output in builder.string_list(seed.get("outputs"))
         if output in LIFECYCLE_OUTPUT_OPTIONS
     ]
-    outputs = st.multiselect(
-        "Output Columns",
-        list(LIFECYCLE_OUTPUT_OPTIONS),
-        default=default_outputs,
-        key=f"{key_prefix}_lifecycle_outputs",
-        help=config_help.field_help("metric.lifecycle_outputs"),
-    )
-    return {"outputs": outputs} if outputs else {}
+    if seed_outputs:
+        fields["outputs"] = seed_outputs
+    return fields
 
 
 _SET_OPERAND_MODES = ("Theta states", "Time windows")
@@ -1311,7 +1331,7 @@ _SET_WINDOW_KINDS = ("All time", "Last", "Between")
 _SET_DURATION_PATTERN = re.compile(r"^([+-]?)(\d+)([dDwW])$")
 
 
-def _set_op_fields(  # noqa: PLR0911
+def _set_op_fields(
     seed: dict[str, Any],
     ctx: MetricFormContext,
     key_prefix: str,
@@ -1327,12 +1347,10 @@ def _set_op_fields(  # noqa: PLR0911
         else []
     )
     windowed_seed = any(operand.get("time_window") for operand in seed_operands)
-    # "diff" is an engine alias of "a_not_b"; edit it as Minus and save canonically.
-    seed_op = "a_not_b" if seed.get("op") == "diff" else seed.get("op")
-    op = st.selectbox(
+    operation = st.selectbox(
         "Operation",
         list(SET_OP_OPTIONS),
-        index=builder.option_index(SET_OP_OPTIONS, seed_op),
+        index=builder.option_index(SET_OP_OPTIONS, seed.get("operation")),
         format_func=lambda value: SET_OP_LABELS.get(value, value),
         key=f"{key_prefix}_set_op",
         help=config_help.field_help("metric.set_operation"),
@@ -1349,7 +1367,9 @@ def _set_op_fields(  # noqa: PLR0911
         or default_mode
     )
     if mode == "Time windows":
-        return _windowed_set_op_fields(seed, seed_operands, states, op, key_prefix)
+        return _windowed_set_op_fields(
+            seed, seed_operands, states, operation, key_prefix
+        )
     if len(states) < 2:
         st.warning(
             "State-vs-state operations need at least two theta states. With a "
@@ -1357,9 +1377,7 @@ def _set_op_fields(  # noqa: PLR0911
             "same state."
         )
         return None
-    default_states = (
-        builder.string_list(seed.get("states")) or builder.operand_states(seed) or states[:2]
-    )
+    default_states = builder.operand_states(seed) or states[:2]
     selected = st.multiselect(
         "Theta States",
         states,
@@ -1367,27 +1385,28 @@ def _set_op_fields(  # noqa: PLR0911
         key=f"{key_prefix}_set_states",
         help=config_help.field_help("metric.theta_states"),
     )
-    if op in {"a_not_b", "diff"} and len(selected) != 2:
+    if operation == "minus" and len(selected) != 2:
         st.warning("Minus requires exactly two theta states: the first minus the second.")
         return None
-    if not selected:
-        st.warning("Choose at least one theta state.")
+    if len(selected) < 2:
+        st.warning("Choose at least two theta states.")
         return None
-    if seed_operands and op == seed.get("op") and list(selected) == builder.operand_states(seed):
-        return {key: seed[key] for key in ("op", "operands", "states", "output") if key in seed}
-    return {"op": op, "states": list(selected)}
+    return {
+        "operation": operation,
+        "operands": [{"state": state} for state in selected],
+    }
 
 
 def _windowed_set_op_fields(
     seed: dict[str, Any],
     seed_operands: list[dict[str, Any]],
     states: list[str],
-    op: str,
+    operation: str,
     key_prefix: str,
 ) -> dict[str, Any] | None:
     """Editable operand rows for time-window set operations."""
 
-    if op in {"a_not_b", "diff"}:
+    if operation == "minus":
         count = 2
         st.caption("Minus uses exactly two operands: the first minus the second.")
     else:
@@ -1418,9 +1437,8 @@ def _windowed_set_op_fields(
     if problems:
         return None
     return {
-        "op": op,
+        "operation": operation,
         "operands": operands,
-        "output": str(seed.get("output", "count") or "count"),
     }
 
 
@@ -1528,22 +1546,22 @@ def _funnel_dropoff_fields(
     if len(stages) < 2:
         st.warning("Funnel drop-off requires at least two configured stages.")
         return None
-    from_stage = st.selectbox(
-        "From Stage",
+    from_state = st.selectbox(
+        "From State",
         stages,
-        index=builder.option_index(stages, str(seed.get("from_stage", "") or "")),
+        index=builder.option_index(stages, str(seed.get("from_state", "") or "")),
         key=f"{key_prefix}_funnel_from",
-        help=config_help.field_help("metric.from_stage"),
+        help=config_help.field_help("metric.from_state"),
     )
-    to_stage_default = str(seed.get("to_stage", "") or "")
-    to_stage = st.selectbox(
-        "To Stage",
+    to_state_default = str(seed.get("to_state", "") or "")
+    to_state = st.selectbox(
+        "To State",
         stages,
-        index=builder.option_index(stages, to_stage_default)
-        if to_stage_default
+        index=builder.option_index(stages, to_state_default)
+        if to_state_default
         else (1 if len(stages) > 1 else 0),
         key=f"{key_prefix}_funnel_to",
-        help=config_help.field_help("metric.to_stage"),
+        help=config_help.field_help("metric.to_state"),
     )
     output = st.selectbox(
         "Output",
@@ -1552,7 +1570,7 @@ def _funnel_dropoff_fields(
         key=f"{key_prefix}_funnel_output",
         help=config_help.field_help("metric.funnel_output"),
     )
-    return {"from_stage": from_stage, "to_stage": to_stage, "output": output}
+    return {"from_state": from_state, "to_state": to_state, "output": output}
 
 
 __all__ = [
@@ -1569,7 +1587,6 @@ __all__ = [
     "QUANTILE_ENGINE_OPTIONS",
     "SET_OP_LABELS",
     "SET_OP_OPTIONS",
-    "SKETCH_BUILD_MODE_OPTIONS",
     "SNAPSHOT_CADENCE_OPTIONS",
     "SNAPSHOT_KIND_OPTIONS",
     "SUBJECT_PREFERRED_FIELDS",

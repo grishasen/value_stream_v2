@@ -73,9 +73,13 @@ def test_candidate_validation_failure_never_logs_issue_or_response_content(
 ) -> None:
     raw_response = """\
 metrics:
+  catalog_version: 2
   metrics:
     PRIVATE-METRIC-ID:
-      source: PRIVATE-SOURCE-ID
+      processor: PRIVATE-PROCESSOR-ID
+      kind: formula
+      expression:
+        col: Count
 """
     issues = [
         "processors.processors.0.PRIVATE-ID: invalid /Users/alice/private.yaml",
@@ -114,8 +118,16 @@ def test_candidate_repair_logs_share_reference_without_catalog_identifiers(
 ) -> None:
     responses = iter(
         [
-            "metrics: {metrics: {PRIVATE-REJECTED-METRIC: {}}}",
-            "metrics: {metrics: {PRIVATE-ACCEPTED-METRIC: {}}}",
+            (
+                "metrics: {catalog_version: 2, metrics: "
+                "{PRIVATE-REJECTED-METRIC: {processor: p, kind: formula, "
+                "expression: {col: Count}}}}"
+            ),
+            (
+                "metrics: {catalog_version: 2, metrics: "
+                "{PRIVATE-ACCEPTED-METRIC: {processor: p, kind: formula, "
+                "expression: {col: Count}}}}"
+            ),
         ]
     )
     validation_calls = 0

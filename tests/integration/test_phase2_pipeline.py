@@ -17,7 +17,7 @@ def _write_catalog(ws: Path) -> None:
     catalog.mkdir(parents=True)
     (catalog / "pipelines.yaml").write_text(
         """
-version: 1
+catalog_version: 2
 workspace: phase2_test
 sources:
   - id: ih
@@ -37,23 +37,62 @@ sources:
     )
     (catalog / "processors.yaml").write_text(
         """
+catalog_version: 2
 processors:
   - id: descriptive
     source: ih
     kind: numeric_distribution
     group_by: [Channel]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
+      property: OutcomeTime
+      grain: daily
     properties: [Propensity, FinalPropensity]
+    states:
+      Propensity_tdigest:
+        type: tdigest
+        source_column: Propensity
+      Propensity_Min:
+        type: min
+        source_column: Propensity
+      Propensity_Max:
+        type: max
+        source_column: Propensity
+      FinalPropensity_tdigest:
+        type: tdigest
+        source_column: FinalPropensity
   - id: scores
     source: ih
     kind: score_distribution
     group_by: [Channel]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
-    score_properties: [Propensity, FinalPropensity]
+      property: OutcomeTime
+      grain: daily
+    score_properties:
+      - column: Propensity
+        role: primary
+      - column: FinalPropensity
+        role: calibrated
+    states:
+      Propensity_tdigest_positives:
+        type: tdigest
+        source_column: Propensity
+        score_property: Propensity
+        outcome: positive
+      Propensity_tdigest_negatives:
+        type: tdigest
+        source_column: Propensity
+        score_property: Propensity
+        outcome: negative
+      FinalPropensity_tdigest_positives:
+        type: tdigest
+        source_column: FinalPropensity
+        score_property: FinalPropensity
+        outcome: positive
+      FinalPropensity_tdigest_negatives:
+        type: tdigest
+        source_column: FinalPropensity
+        score_property: FinalPropensity
+        outcome: negative
     outcome:
       column: Outcome
       positive_values: [Clicked]
@@ -64,33 +103,41 @@ processors:
     )
     (catalog / "metrics.yaml").write_text(
         """
+catalog_version: 2
 metrics:
   MedianPropensity:
-    source: descriptive
-    kind: tdigest_quantile
+    processor: descriptive
+    kind: quantile
     state: Propensity_tdigest
     quantile: 0.5
+  PropensityDistribution:
+    processor: descriptive
+    kind: distribution
+    state: Propensity_tdigest
   ROC_AUC:
-    source: scores
+    processor: scores
     kind: curve_from_digests
     positive_state: Propensity_tdigest_positives
     negative_state: Propensity_tdigest_negatives
     output: roc_auc
   AvgPrecision:
-    source: scores
+    processor: scores
     kind: curve_from_digests
     positive_state: Propensity_tdigest_positives
     negative_state: Propensity_tdigest_negatives
     output: average_precision
   Calibration:
-    source: scores
+    processor: scores
     kind: calibration_from_digests
     positive_state: FinalPropensity_tdigest_positives
     negative_state: FinalPropensity_tdigest_negatives
 """,
         encoding="utf-8",
     )
-    (catalog / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
+    (catalog / "dashboards.yaml").write_text(
+        "catalog_version: 2\ndashboards: []\n",
+        encoding="utf-8",
+    )
 
 
 def _write_data(ws: Path) -> None:
@@ -176,14 +223,14 @@ def test_curve_metric_can_include_curve_arrays(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_quantile_query_can_include_boxplot_suite(tmp_path: Path) -> None:
+def test_distribution_query_can_include_boxplot_suite(tmp_path: Path) -> None:
     _write_catalog(tmp_path)
     _write_data(tmp_path)
     run_source(tmp_path, "ih")
 
     rows = query_metric(
         tmp_path,
-        "MedianPropensity",
+        "PropensityDistribution",
         group_by=["Channel"],
         grain="summary",
         include_quantile_suite=True,

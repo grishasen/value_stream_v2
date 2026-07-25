@@ -67,20 +67,25 @@ def test_active_navigation_section_uses_fallback_or_first_section() -> None:
     assert shell._active_navigation_section(sections, "", fallback="Missing") == "Home"
 
 
-def test_navigation_exposes_top_level_build_section(monkeypatch) -> None:
+def test_navigation_exposes_authoring_tools_under_configuration(monkeypatch) -> None:
     monkeypatch.setattr(shell, "authoring_v2_enabled", lambda: True)
     context = object()
 
     pages = shell._navigation_pages(context)  # type: ignore[arg-type]
 
-    build_pages = [page.title for page in pages if page.section == "Build"]
-    assert build_pages == ["Build", "Configuration Builder", "AI Configuration Studio"]
+    configuration_pages = [page.title for page in pages if page.section == "Configuration"]
+    assert configuration_pages == [
+        "Build",
+        "Configuration Builder",
+        "AI Configuration Studio",
+        "Catalog",
+    ]
     assert not [
         page for page in pages if page.section == "Settings" and "Configuration" in page.title
     ]
 
 
-def test_navigation_flag_restores_legacy_authoring_group(monkeypatch) -> None:
+def test_navigation_flag_hides_build_landing_page(monkeypatch) -> None:
     monkeypatch.setattr(shell, "authoring_v2_enabled", lambda: False)
     context = object()
 
@@ -88,7 +93,8 @@ def test_navigation_flag_restores_legacy_authoring_group(monkeypatch) -> None:
 
     assert not [page for page in pages if page.section == "Build"]
     settings = [page.title for page in pages if page.section == "Settings"]
-    assert settings == ["Configuration Builder", "AI Configuration Studio", "Catalog"]
+    assert settings == ["Configuration Builder", "AI Configuration Studio"]
+    assert [page.title for page in pages if page.section == "Configuration"] == ["Catalog"]
 
 
 def test_workspace_identity_label_includes_catalog_name_and_directory() -> None:

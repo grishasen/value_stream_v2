@@ -8,6 +8,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel
+
 from valuestream.config import model
 
 
@@ -26,7 +28,7 @@ def resolve_tile_presentation(  # noqa: PLR0912
 ) -> dict[str, Any]:
     """Merge metric display defaults into a tile while preserving tile overrides."""
 
-    if isinstance(tile, model.Tile):
+    if isinstance(tile, BaseModel):
         out = tile.model_dump(mode="python", exclude_none=True)
     else:
         out = dict(tile)
@@ -56,8 +58,8 @@ def resolve_tile_presentation(  # noqa: PLR0912
         labels.setdefault(metric_name, _field_label(metric_name, metric_name, display))
     out["labels"] = labels
 
-    x = out.get("x", out.get("date"))
-    y = out.get("y", out.get("value", out.get("values")))
+    x = out.get("x")
+    y = out.get("y") or out.get("metric_output") or metric_name
     color = out.get("color")
     if isinstance(x, str):
         out.setdefault("x_axis_title", labels.get(x, humanize_identifier(x)))
@@ -88,7 +90,7 @@ def metric_quality(catalog: model.Catalog, metric_name: str) -> MetricQuality:
     if metric is None:
         return MetricQuality()
     processor = next(
-        (candidate for candidate in catalog.processors.processors if candidate.id == metric.source),
+        (candidate for candidate in catalog.processors.processors if candidate.id == metric.processor),
         None,
     )
     if isinstance(metric, model.ApproxDistinctCountMetric):
@@ -97,7 +99,7 @@ def metric_quality(catalog: model.Catalog, metric_name: str) -> MetricQuality:
             if processor is not None
             else None
         )
-        lg_k = int((state.model_extra or {}).get("lg_k", 12)) if state is not None else 12
+        lg_k = int(getattr(state, "lg_k", None) or 12) if state is not None else 12
         relative_error = 1.04 / math.sqrt(2**lg_k)
         return MetricQuality(
             label="Approximate",
@@ -109,7 +111,8 @@ def metric_quality(catalog: model.Catalog, metric_name: str) -> MetricQuality:
         )
     if isinstance(
         metric,
-        model.TdigestQuantileMetric
+        model.DistributionMetric
+        | model.QuantileMetric
         | model.CurveFromDigestsMetric
         | model.CalibrationFromDigestsMetric,
     ):
@@ -160,15 +163,18 @@ def _label_with_unit(label: str, unit: str) -> str:
 _PRESENTATION_FIELDS = (
     "x",
     "y",
-    "y2",
-    "value",
-    "values",
+    "secondary_metric",
+    "metric_output",
+    "lower_output",
+    "upper_output",
     "color",
-    "date",
     "names",
     "locations",
-    "source",
-    "target",
+    "lat",
+    "lon",
+    "theta",
+    "property",
+    "score",
     "columns",
     "path",
 )

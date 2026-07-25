@@ -94,7 +94,7 @@ def metrics_for_processor(ctx: ValueStreamContext, processor_id: str) -> list[st
     return [
         name
         for name, metric in ctx.catalog.metrics.metrics.items()
-        if metric.source == processor_id
+        if metric.processor == processor_id
     ]
 
 
@@ -104,14 +104,13 @@ def metrics_for_source(ctx: ValueStreamContext, source_id: str) -> list[str]:
     return [
         name
         for name, metric in ctx.catalog.metrics.metrics.items()
-        if metric.source in processor_ids
+        if metric.processor in processor_ids
     ]
 
 
 def source_root(ctx: ValueStreamContext, source: model.Source) -> Path:
     """Resolve a source reader root relative to the workspace."""
-    extra = dict(source.reader.model_extra or {})
-    raw = extra.get("root") or extra.get("base_dir") or "."
+    raw = source.reader.root or "."
     root = Path(str(raw))
     if not root.is_absolute():
         root = ctx.workspace / root

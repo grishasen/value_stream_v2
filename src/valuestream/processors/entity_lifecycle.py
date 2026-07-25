@@ -59,6 +59,20 @@ class EntityLifecycleProcessor:
     def state_specs(self) -> dict[str, model.StateSpec]:
         return model.effective_processor_states(self.config)
 
+    @property
+    def latest_purchase_state(self) -> str:
+        matches = [
+            name
+            for name, spec in self.state_specs.items()
+            if isinstance(spec, model.MaxState) and spec.source_column == self.keys.purchase_date
+        ]
+        if not matches:
+            raise ValueError(
+                f"entity_lifecycle processor {self.id!r} requires a max state sourced "
+                f"from purchase date {self.keys.purchase_date!r}"
+            )
+        return matches[0]
+
     @timed
     def chunk_aggregate(self, frame: pl.LazyFrame, ctx: ChunkContext) -> pl.DataFrame:
         """Return lifecycle state rows for one source chunk."""
@@ -98,7 +112,7 @@ class EntityLifecycleProcessor:
             grouped,
             self.config_hash,
             ctx,
-            period=pl.col("MaxPurchasedDate").cast(pl.String).str.slice(0, 7),
+            period=pl.col(self.latest_purchase_state).cast(pl.String).str.slice(0, 7),
         )
 
     @timed
@@ -141,20 +155,11 @@ class EntityLifecycleProcessor:
         return p3.merge_for_query(self.merge, frame, group_columns, self.config_hash)
 
     def _agg_exprs(self, existing: set[str], source_schema: pl.Schema) -> list[pl.Expr]:
-        keys = self.keys
         exprs: list[pl.Expr] = []
         for name, spec in self.state_specs.items():
             raw_extra = p3.spec_extra(spec)
-            source_column = str(raw_extra.get("source_column", name))
-            if name == "unique_holdings" and keys.order_id in existing:
-                exprs.append(pl.col(keys.order_id).n_unique().alias(name))
-            elif name == "lifetime_value":
-                exprs.append(pl.col("__lifecycle_monetary").sum().alias(name))
-            elif name == "MinPurchasedDate" and keys.purchase_date in existing:
-                exprs.append(pl.col(keys.purchase_date).min().alias(name))
-            elif name == "MaxPurchasedDate" and keys.purchase_date in existing:
-                exprs.append(pl.col(keys.purchase_date).max().alias(name))
-            elif spec.type == "count":
+            source_column = str(getattr(spec, "source_column", "") or "")
+            if spec.type == "count":
                 exprs.append(p3.count_expr(raw_extra, alias=name))
             elif spec.type == "value_sum" and source_column in existing:
                 exprs.append(p3.value_sum_expr(source_column, raw_extra, alias=name))
@@ -167,7 +172,6 @@ class EntityLifecycleProcessor:
                     name,
                     spec,
                     existing=existing,
-                    default_source_column=keys.customer_id,
                     source_dtypes=source_schema,
                 )
                 if expr is not None:
@@ -183,13 +187,12 @@ class EntityLifecycleProcessor:
                 name,
                 spec,
                 existing=existing,
-                default_source_column=self.keys.customer_id,
             )
             columns.append(meta)
         return columns
 
     def _apply_lifespan_filter(self, frame: pl.LazyFrame, purchase_date: str) -> pl.LazyFrame:
-        lifespan_years = p3.extra(self.config).get("lifespan_years")
+        lifespan_years = self.config.lifespan_years
         if lifespan_years is None:
             return frame
         cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=365 * int(lifespan_years))

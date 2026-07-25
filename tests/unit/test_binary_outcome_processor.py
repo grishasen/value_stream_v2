@@ -21,18 +21,42 @@ def _ctx() -> ChunkContext:
 
 
 def _processor(config: dict[str, object]) -> BinaryOutcomeProcessor:
-    return BinaryOutcomeProcessor(model.BinaryOutcomeProcessor.model_validate(config))
+    payload: dict[str, object] = {
+        "id": "p",
+        "source": "ih",
+        "kind": "binary_outcome",
+        "time": {"property": "OutcomeTime", "grain": "summary"},
+        "states": {
+            "Count": {"type": "count"},
+            "Positives": {"type": "count", "outcome": "positive"},
+            "Negatives": {"type": "count", "outcome": "negative"},
+        },
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": ["Clicked"],
+            "negative_values": ["Impression"],
+        },
+    }
+    payload.update(config)
+    return BinaryOutcomeProcessor(model.BinaryOutcomeProcessor.model_validate(payload))
 
 
 def test_rejects_non_binary_processor() -> None:
     processor = model.NumericDistributionProcessor.model_validate(
-        {"id": "p", "source": "ih", "kind": "numeric_distribution"}
+        {
+            "id": "p",
+            "source": "ih",
+            "kind": "numeric_distribution",
+            "time": {"property": "OutcomeTime", "grain": "summary"},
+            "states": {"Value_Count": {"type": "count"}},
+            "properties": ["Value"],
+        }
     )
     with pytest.raises(TypeError):
         BinaryOutcomeProcessor(processor)
 
 
-def test_default_states_and_default_outcome_without_time_column() -> None:
+def test_explicit_states_and_outcome_without_time_column() -> None:
     processor = _processor({"id": "p", "source": "ih", "kind": "binary_outcome"})
     frame = pl.DataFrame(
         {
@@ -86,8 +110,8 @@ def test_filter_dedup_variant_group_by_and_value_states() -> None:
             },
             "states": {
                 "Count": {"type": "count"},
-                "Positives": {"type": "count"},
-                "Negatives": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "Negatives": {"type": "count", "outcome": "negative"},
                 "Revenue": {"type": "value_sum", "source_column": "Revenue"},
                 "MinScore": {"type": "min", "source_column": "Score"},
                 "MaxScore": {"type": "max", "source_column": "Score"},
@@ -154,8 +178,8 @@ def test_topk_recipe_state_builds_from_any_configured_source_field() -> None:
             "kind": "binary_outcome",
             "states": {
                 "Count": {"type": "count"},
-                "Positives": {"type": "count"},
-                "Negatives": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "Negatives": {"type": "count", "outcome": "negative"},
                 "Category_topk": {
                     "type": "topk",
                     "source_column": "Category",
@@ -183,10 +207,11 @@ def test_compact_and_merge_edge_branches() -> None:
             "source": "ih",
             "kind": "binary_outcome",
             "group_by": ["Channel"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "states": {
                 "Count": {"type": "count"},
-                "Positives": {"type": "count"},
-                "Negatives": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "Negatives": {"type": "count", "outcome": "negative"},
             },
         }
     )
@@ -205,9 +230,8 @@ def test_compact_and_merge_edge_branches() -> None:
         }
     )
 
-    assert processor.compact(pl.DataFrame(), "summary", _ctx()).is_empty()
+    assert processor.compact(pl.DataFrame(), "daily", _ctx()).is_empty()
     assert processor.compact(daily, "daily", _ctx()).select("Count", "Positives").row(0) == (2, 1)
-    assert processor.compact(daily, "summary", _ctx())["period"].to_list() == ["2024-01"]
     with pytest.raises(ValueError, match="unsupported compact grain"):
         processor.compact(daily, "weekly", _ctx())
 
@@ -222,10 +246,11 @@ def test_daily_compaction_fast_path_restamps_provenance() -> None:
             "source": "ih",
             "kind": "binary_outcome",
             "group_by": ["Channel"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
             "states": {
                 "Count": {"type": "count"},
-                "Positives": {"type": "count"},
-                "Negatives": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "Negatives": {"type": "count", "outcome": "negative"},
             },
         }
     )
@@ -251,7 +276,7 @@ def test_daily_compaction_fast_path_restamps_provenance() -> None:
 
     compacted = processor.compact(daily, "daily", ctx)
 
-    assert compacted.select("Count", "Positives", "Negatives").row(0) == (2, 1, 1)
+    assert compacted.select("Count", "Positives", "Negatives").row(0) == (2, 1, 999)
     assert compacted["period"].to_list() == ["2024-01"]
     assert compacted["pipeline_run_id"].to_list() == ["new-run"]
     assert compacted["chunk_id"].to_list() == ["new-chunk"]

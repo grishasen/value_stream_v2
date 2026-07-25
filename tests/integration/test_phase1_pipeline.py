@@ -32,7 +32,7 @@ def _write_catalog(ws: Path) -> None:
     catalog.mkdir(parents=True)
     (catalog / "pipelines.yaml").write_text(
         """
-version: 1
+catalog_version: 2
 workspace: phase1_test
 sources:
   - id: ih
@@ -52,22 +52,23 @@ sources:
     )
     (catalog / "processors.yaml").write_text(
         """
+catalog_version: 2
 processors:
   - id: engagement
     source: ih
     kind: binary_outcome
     group_by: [Channel, Group]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
+      property: OutcomeTime
+      grain: daily
     outcome:
       column: Outcome
       positive_values: [Clicked]
       negative_values: [Impression, Pending]
     states:
       Count: {type: count}
-      Positives: {type: count}
-      Negatives: {type: count}
+      Positives: {type: count, outcome: positive}
+      Negatives: {type: count, outcome: negative}
       UniqueCustomers_hll:
         type: hll
         source_column: CustomerID
@@ -77,9 +78,10 @@ processors:
     )
     (catalog / "metrics.yaml").write_text(
         """
+catalog_version: 2
 metrics:
   CTR:
-    source: engagement
+    processor: engagement
     kind: formula
     expression:
       op: safe_div
@@ -88,13 +90,16 @@ metrics:
         op: add
         args: [{col: Positives}, {col: Negatives}]
   UniqueCustomers:
-    source: engagement
+    processor: engagement
     kind: approx_distinct_count
     state: UniqueCustomers_hll
 """,
         encoding="utf-8",
     )
-    (catalog / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
+    (catalog / "dashboards.yaml").write_text(
+        "catalog_version: 2\ndashboards: []\n",
+        encoding="utf-8",
+    )
 
 
 def _write_data(ws: Path, filename: str, rows: list[dict[str, object]]) -> None:
@@ -387,16 +392,15 @@ def test_summary_query_without_group_by_collapses_all_rows_and_sketches(tmp_path
     _seed_workspace(tmp_path)
     run_source(tmp_path, "ih")
 
-    summary = scan_aggregate(
+    ctr = query_metric(tmp_path, "CTR", grain="summary")
+    unique = query_metric(tmp_path, "UniqueCustomers", grain="summary")
+
+    assert not aggregate_dir(
         tmp_path,
         source_id="ih",
         processor_id="engagement",
         grain="summary",
-    ).collect()
-    ctr = query_metric(tmp_path, "CTR", grain="summary")
-    unique = query_metric(tmp_path, "UniqueCustomers", grain="summary")
-
-    assert summary["period"].unique().to_list() == ["2024-01"]
+    ).exists()
     assert ctr.height == 1
     assert ctr["CTR"][0] == pytest.approx(0.5)
     assert unique.height == 1
@@ -404,35 +408,7 @@ def test_summary_query_without_group_by_collapses_all_rows_and_sketches(tmp_path
 
 
 @pytest.mark.integration
-def test_summary_physical_aggregation_level_is_configurable(tmp_path: Path) -> None:
-    _seed_workspace(tmp_path)
-    processors = tmp_path / "catalog" / "processors.yaml"
-    processors.write_text(
-        processors.read_text(encoding="utf-8").replace(
-            "      grains: [Day, Month, Summary]\n",
-            "      grains: [Day, Month, Summary]\n"
-            "      aggregation_levels:\n"
-            "        Summary: Quarter\n",
-        ),
-        encoding="utf-8",
-    )
-
-    run_source(tmp_path, "ih")
-
-    summary = scan_aggregate(
-        tmp_path,
-        source_id="ih",
-        processor_id="engagement",
-        grain="summary",
-    ).collect()
-    ctr = query_metric(tmp_path, "CTR", grain="summary")
-
-    assert summary["period"].unique().to_list() == ["2024_Q1"]
-    assert ctr["CTR"][0] == pytest.approx(0.5)
-
-
-@pytest.mark.integration
-def test_quarterly_query_falls_back_to_monthly_aggregate(tmp_path: Path) -> None:
+def test_quarterly_query_rolls_up_the_base_aggregate(tmp_path: Path) -> None:
     _seed_workspace(tmp_path)
     run_source(tmp_path, "ih")
 
@@ -444,7 +420,7 @@ def test_quarterly_query_falls_back_to_monthly_aggregate(tmp_path: Path) -> None
 
 
 @pytest.mark.integration
-def test_optional_quarterly_and_yearly_aggregates_are_materialized(tmp_path: Path) -> None:
+def test_quarterly_and_yearly_queries_use_derived_time_dimensions(tmp_path: Path) -> None:
     _seed_workspace(tmp_path)
     pipelines = tmp_path / "catalog" / "pipelines.yaml"
     pipelines.write_text(
@@ -454,31 +430,24 @@ def test_optional_quarterly_and_yearly_aggregates_are_materialized(tmp_path: Pat
         ),
         encoding="utf-8",
     )
-    processors = tmp_path / "catalog" / "processors.yaml"
-    processors.write_text(
-        processors.read_text(encoding="utf-8").replace(
-            "      grains: [Day, Month, Summary]\n",
-            "      grains: [Day, Month, Quarter, Year, Summary]\n",
-        ),
-        encoding="utf-8",
-    )
-
     run_source(tmp_path, "ih")
 
-    quarterly = scan_aggregate(
+    quarterly = query_metric(tmp_path, "CTR", grain="quarterly")
+    yearly = query_metric(tmp_path, "CTR", grain="yearly")
+    assert quarterly["Quarter"].unique().to_list() == ["2024_Q1"]
+    assert yearly["Year"].unique().to_list() == [2024]
+    assert not aggregate_dir(
         tmp_path,
         source_id="ih",
         processor_id="engagement",
         grain="quarterly",
-    ).collect()
-    yearly = scan_aggregate(
+    ).exists()
+    assert not aggregate_dir(
         tmp_path,
         source_id="ih",
         processor_id="engagement",
         grain="yearly",
-    ).collect()
-    assert quarterly["Quarter"].unique().to_list() == ["2024_Q1"]
-    assert yearly["Year"].unique().to_list() == [2024]
+    ).exists()
 
 
 @pytest.mark.integration
@@ -486,7 +455,12 @@ def test_variant_and_contingency_metrics_emit_complete_outputs(tmp_path: Path) -
     _write_catalog(tmp_path)
     processors = tmp_path / "catalog" / "processors.yaml"
     processors.write_text(
-        processors.read_text(encoding="utf-8").replace(
+        processors.read_text(encoding="utf-8")
+        .replace(
+            "    group_by: [Channel, Group]\n",
+            "    group_by: [Channel, Group, ModelControlGroup]\n",
+        )
+        .replace(
             "    states:\n",
             "    variant_column: ModelControlGroup\n    states:\n",
         ),
@@ -497,14 +471,14 @@ def test_variant_and_contingency_metrics_emit_complete_outputs(tmp_path: Path) -
         metrics.read_text(encoding="utf-8")
         + """
   Lift:
-    source: engagement
+    processor: engagement
     kind: variant_compare
     variant_column: ModelControlGroup
     test_role: Test
     control_role: Control
     outputs: [TestCTR, ControlCTR, Lift, Lift_Z_Score, Lift_P_Val, StdErr]
   Significance:
-    source: engagement
+    processor: engagement
     kind: contingency_test
     variant_column: ModelControlGroup
     tests: [chi2, g, z]
@@ -654,7 +628,7 @@ def test_query_uses_current_lineage_across_processor_state_schema_changes(
         metrics.read_text(encoding="utf-8")
         + """
   UniqueChannels:
-    source: engagement
+    processor: engagement
     kind: approx_distinct_count
     state: Channel_cpc
 """,
@@ -701,7 +675,8 @@ def test_presentation_only_changes_do_not_reprocess_source(tmp_path: Path) -> No
     )
     dashboards = tmp_path / "catalog" / "dashboards.yaml"
     dashboards.write_text(
-        "dashboards:\n  - id: overview\n    title: New title\n    pages: []\n",
+        "catalog_version: 2\ndashboards:\n"
+        "  - id: overview\n    title: New title\n    pages: []\n",
         encoding="utf-8",
     )
 
@@ -724,15 +699,16 @@ def test_failed_chunk_writes_are_not_visible_to_metric_queries(tmp_path: Path) -
     kind: binary_outcome
     group_by: [Channel]
     time:
-      grains: [Summary]
+      property: OutcomeTime
+      grain: summary
     outcome:
       column: MissingOutcome
       positive_values: [Clicked]
       negative_values: [Impression]
     states:
       Count: {type: count}
-      Positives: {type: count}
-      Negatives: {type: count}
+      Positives: {type: count, outcome: positive}
+      Negatives: {type: count, outcome: negative}
 """,
         encoding="utf-8",
     )
@@ -833,7 +809,7 @@ def test_run_records_config_history_and_file_lineage(tmp_path: Path) -> None:
     assert result.status == "ok"
     assert len(versions) == 3
     assert all(config_hash and yaml.startswith("{") for config_hash, yaml in versions)
-    assert len(lineage) == 3
+    assert len(lineage) == 1
     assert all(str(run_id) == result.run_id for run_id, *_ in lineage)
     assert all(Path(path).is_file() for _, _, path, _, _ in lineage)
     assert all(config_hash and rows > 0 for _, _, _, config_hash, rows in lineage)
@@ -852,7 +828,7 @@ def test_metric_query_result_exposes_stable_provenance(tmp_path: Path) -> None:
     assert provenance.source_id == "ih"
     assert provenance.processor_id == "engagement"
     assert provenance.requested_grain == "summary"
-    assert provenance.stored_grain == "summary"
+    assert provenance.stored_grain == "daily"
     assert provenance.pipeline_run_ids == (run.run_id,)
     assert provenance.chunk_ids == ("20240101", "20240102")
     assert provenance.aggregate_rows_scanned == 3
@@ -1165,7 +1141,7 @@ def test_chunk_ok_is_not_committed_when_chunk_ledger_insert_fails_after_lineage(
     with duckdb.connect(str(tmp_path / "meta" / "chunks.duckdb"), read_only=True) as conn:
         assert conn.execute("SELECT COUNT(*) FROM chunks").fetchone() == (0,)
     with duckdb.connect(str(tmp_path / "meta" / "lineage.duckdb"), read_only=True) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM lineage").fetchone() == (3,)
+        assert conn.execute("SELECT COUNT(*) FROM lineage").fetchone() == (1,)
     with duckdb.connect(str(tmp_path / "meta" / "pipeline_runs.duckdb"), read_only=True) as conn:
         assert conn.execute("SELECT status FROM pipeline_runs").fetchone() == ("failed",)
 
@@ -1247,10 +1223,10 @@ def test_stale_recovery_batches_deep_verification_by_processor_and_grain(
     assert resumed.chunks_skipped == 2
     assert lineage_calls == 1
     assert path_index_calls == 1
-    assert scan_batch_sizes == [2, 2, 2]
+    assert scan_batch_sizes == [2]
     recovery_events = [event for event in events if event.status == "recovering"]
-    assert [event.chunk_order for event in recovery_events] == [1, 2, 3]
-    assert all(event.chunks_total == 3 for event in recovery_events)
+    assert [event.chunk_order for event in recovery_events] == [1]
+    assert all(event.chunks_total == 1 for event in recovery_events)
     assert all(event.files for event in recovery_events)
 
 
@@ -1447,9 +1423,9 @@ def test_vacuum_removes_superseded_successful_partials_after_forced_run(tmp_path
     after_files = list((tmp_path / "aggregates").glob("*/*/*/period=*/*.parquet"))
     after = query_metric(tmp_path, "CTR", grain="summary")
 
-    assert len(aggregate_files) == 12
-    assert result.files_deleted == 6
-    assert len(after_files) == 6
+    assert len(aggregate_files) == 4
+    assert result.files_deleted == 2
+    assert len(after_files) == 2
     assert before["CTR"].to_list() == after["CTR"].to_list()
 
 

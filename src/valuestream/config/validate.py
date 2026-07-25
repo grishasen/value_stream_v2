@@ -39,8 +39,6 @@ from valuestream.config.report_fields import (
     report_field_options,
 )
 from valuestream.expr import ast as expr_ast
-from valuestream.expr.parser import ParseError
-from valuestream.expr.parser import parse as parse_expr
 from valuestream.expr.validator import (
     Issue,
     ValidationError,
@@ -113,9 +111,9 @@ def validate_catalog(  # noqa: PLR0915
     processor_ids = {p.id for p in catalog.processors.processors}
     metric_names = set(catalog.metrics.metrics.keys())
     metric_processor_kinds = {
-        name: processor_by_id[metric.source].kind
+        name: processor_by_id[metric.processor].kind
         for name, metric in catalog.metrics.metrics.items()
-        if metric.source in processor_by_id
+        if metric.processor in processor_by_id
     }
     report_fields_by_metric = {
         name: frozenset(report_field_options(catalog, name)) for name in catalog.metrics.metrics
@@ -160,13 +158,13 @@ def validate_catalog(  # noqa: PLR0915
             issues,
         )
 
-    # 2. metric.source must resolve to a Processor.
+    # 2. metric.processor must resolve to a Processor.
     for name, metric in catalog.metrics.metrics.items():
-        if metric.source not in processor_ids:
+        if metric.processor not in processor_ids:
             issues.append(
                 CatalogIssue(
-                    location=f"metrics.{name}.source",
-                    message=f"unknown processor {metric.source!r}",
+                    location=f"metrics.{name}.processor",
+                    message=f"unknown processor {metric.processor!r}",
                 )
             )
         for dep in metric.depends_on:
@@ -177,7 +175,7 @@ def validate_catalog(  # noqa: PLR0915
                         message=f"unknown metric {dep!r}",
                     )
                 )
-        bound = processor_by_id.get(metric.source)
+        bound = processor_by_id.get(metric.processor)
         if bound is not None:
             _validate_metric_state_references(name, metric, bound, issues)
             _validate_metric_dimensions(name, metric, bound, issues)
@@ -240,7 +238,7 @@ def validate_catalog(  # noqa: PLR0915
     for name, metric in catalog.metrics.metrics.items():
         if not isinstance(metric, model.FormulaMetric):
             continue
-        bound = processor_by_id.get(metric.source)
+        bound = processor_by_id.get(metric.processor)
         if bound is None:
             continue  # missing-source error already reported above
         schema = _state_schema(bound)
@@ -311,7 +309,7 @@ def _append_duplicate_ids(
         seen.add(value)
 
 
-def _validate_tile_config(
+def _validate_tile_config(  # noqa: PLR0915
     dashboard_id: str,
     page_id: str,
     tile: model.Tile,
@@ -356,7 +354,7 @@ def _validate_tile_config(
         "precision_recall_curve": {"curve_from_digests"},
         "gain_curve": {"curve_from_digests"},
         "lift_curve": {"curve_from_digests"},
-        "boxplot": {"tdigest_quantile"},
+        "boxplot": {"distribution"},
     }
     allowed_metric_kinds = required_metric_kinds.get(tile.chart)
     if metric_kind and allowed_metric_kinds and metric_kind not in allowed_metric_kinds:
@@ -384,11 +382,34 @@ def _validate_tile_config(
             )
         )
     _validate_tile_field_shapes(values, location, issues)
+    if tile.chart == "sankey":
+        raw_path = values.get("path")
+        if isinstance(raw_path, list) and len(raw_path) < 2:
+            issues.append(
+                CatalogIssue(
+                    location=f"{location}.path",
+                    message="sankey path must contain at least two ordered dimensions",
+                )
+            )
+        flow_fields = raw_path if isinstance(raw_path, list) else []
+        if report_axes is not None:
+            for selected in flow_fields:
+                if not isinstance(selected, str) or not selected or selected in report_axes:
+                    continue
+                issues.append(
+                    CatalogIssue(
+                        location=f"{location}.path",
+                        message=(
+                            "sankey path steps must reference configured time grains "
+                            f"or processor dimensions, got {selected!r}"
+                        ),
+                    )
+                )
     field_references = dict(values)
     if tile.chart == "combo":
         # Combo Y is metric-owned and Y2 is a metric reference, not a column
         # reference in the primary metric result.
-        for field_name in ("y", "y2", "line_y"):
+        for field_name in ("y", "secondary_metric"):
             field_references.pop(field_name, None)
     _validate_tile_field_references(
         field_references,
@@ -398,7 +419,7 @@ def _validate_tile_config(
         issues,
     )
     if tile.chart in HEATMAP_CHARTS and report_axes is not None:
-        for field_name in ("x", "y", "date"):
+        for field_name in ("x", "y"):
             selected = values.get(field_name)
             if not isinstance(selected, str) or not selected or selected in report_axes:
                 continue
@@ -432,19 +453,25 @@ def _validate_tile_config(
                 message="kpi_card must be scalar and cannot define group_by",
             )
         )
-    if values.get("summary_aggregation") not in (None, ""):
-        issues.append(
-            CatalogIssue(
-                location=f"{location}.summary_aggregation",
-                message=(
-                    "summary_aggregation is deprecated; configure an ungrouped KPI metric "
-                    "instead of reducing rendered chart rows"
-                ),
-                severity="warning",
-            )
-        )
     if tile.chart == "combo":
         _validate_combo_metrics(tile, values, location, metrics or {}, issues)
+    metric = (metrics or {}).get(tile.metric)
+    if metric is not None:
+        outputs = set(metric_output_columns(tile.metric, metric))
+        for field_name in ("metric_output", "lower_output", "upper_output"):
+            selected_output = values.get(field_name)
+            if selected_output is None:
+                continue
+            if str(selected_output) not in outputs:
+                issues.append(
+                    CatalogIssue(
+                        location=f"{location}.{field_name}",
+                        message=(
+                            f"selected metric output {selected_output!r} does not exist; "
+                            f"expected one of {sorted(outputs)!r}"
+                        ),
+                    )
+                )
     if tile.scale_mode != "absolute" and tile.chart not in {"line", "stacked_area"}:
         issues.append(
             CatalogIssue(
@@ -462,35 +489,23 @@ def _validate_combo_metrics(
     issues: list[CatalogIssue],
 ) -> None:
     primary = metrics.get(tile.metric)
-    secondary_name = str(values.get("y2") or values.get("line_y") or "")
+    secondary_name = str(tile.secondary_metric or "")
     secondary = metrics.get(secondary_name)
-    if values.get("y") not in (None, ""):
-        issues.append(
-            CatalogIssue(
-                location=f"{location}.y",
-                message="combo y is derived from the selected metric; the authored y is ignored",
-                severity="warning",
-            )
-        )
     if not secondary_name:
         return
     if secondary is None:
         issues.append(
             CatalogIssue(
-                location=f"{location}.y2",
-                message=(
-                    f"legacy combo y2 column {secondary_name!r} should be replaced with "
-                    "a compatible metric ID"
-                ),
-                severity="warning",
+                location=f"{location}.secondary_metric",
+                message=f"unknown secondary metric {secondary_name!r}",
             )
         )
         return
     if secondary_name == tile.metric:
         issues.append(
             CatalogIssue(
-                location=f"{location}.y2",
-                message="combo y2 must reference a different metric",
+                location=f"{location}.secondary_metric",
+                message="combo secondary_metric must reference a different metric",
             )
         )
     if primary is None:
@@ -498,18 +513,18 @@ def _validate_combo_metrics(
     if secondary.kind != primary.kind:
         issues.append(
             CatalogIssue(
-                location=f"{location}.y2",
+                location=f"{location}.secondary_metric",
                 message=(
-                    f"combo y2 metric kind {secondary.kind!r} must match primary "
+                    f"combo secondary metric kind {secondary.kind!r} must match primary "
                     f"metric kind {primary.kind!r}"
                 ),
             )
         )
-    if secondary.source != primary.source:
+    if secondary.processor != primary.processor:
         issues.append(
             CatalogIssue(
-                location=f"{location}.y2",
-                message="combo y2 must use the same backing processor as the primary metric",
+                location=f"{location}.secondary_metric",
+                message="combo secondary metric must use the same backing processor",
             )
         )
     if metric_output_columns(tile.metric, primary) != [tile.metric]:
@@ -522,8 +537,8 @@ def _validate_combo_metrics(
     if metric_output_columns(secondary_name, secondary) != [secondary_name]:
         issues.append(
             CatalogIssue(
-                location=f"{location}.y2",
-                message="combo y2 metric must expose one scalar output",
+                location=f"{location}.secondary_metric",
+                message="combo secondary metric must expose one scalar output",
             )
         )
 
@@ -548,7 +563,7 @@ def _validate_tile_field_shapes(
                     message=f"{field_name} must be a list of non-empty strings",
                 )
             )
-    for field_name in ("filters", "facets", "labels", "theme", "references"):
+    for field_name in ("filters", "labels", "theme", "references"):
         value = values.get(field_name)
         if value is not None and not isinstance(value, Mapping):
             issues.append(
@@ -581,37 +596,23 @@ _TILE_COLUMN_FIELDS = (
     "animation_group",
     "color",
     "columns",
-    "date",
-    "error_y",
-    "error_y_lower",
-    "error_y_minus",
-    "error_y_plus",
-    "error_y_upper",
     "facet_col",
-    "facet_column",
     "facet_row",
-    "field",
     "group_by",
-    "hover_name",
     "lat",
-    "line_y",
     "locations",
+    "lower_output",
     "lon",
+    "metric_output",
     "names",
     "path",
     "property",
-    "r",
     "size",
     "sort_by",
-    "source",
-    "target",
     "theta",
-    "value",
-    "values",
+    "upper_output",
     "x",
     "y",
-    "y2",
-    "z",
 )
 
 
@@ -642,17 +643,6 @@ def _validate_tile_field_references(
                     message=(f"field {selected_field!r} is not exposed by metric {metric_name!r}"),
                 )
             )
-    facets = values.get("facets")
-    if isinstance(facets, Mapping):
-        for role in ("row", "col", "column"):
-            field = facets.get(role)
-            if isinstance(field, str) and field and field not in report_fields:
-                issues.append(
-                    CatalogIssue(
-                        location=f"{location}.facets.{role}",
-                        message=f"field {field!r} is not exposed by metric {metric_name!r}",
-                    )
-                )
     filters = values.get("filters")
     if isinstance(filters, Mapping):
         for selected_field in filters:
@@ -683,11 +673,11 @@ def _validate_page_filters(
     seen: set[str] = set()
     for index, filter_spec in enumerate(page.filters):
         location = f"dashboards[{dashboard_id}].pages[{page.id}].filters[{index}]"
-        normalized = _dimension_key(filter_spec.field)
-        if not normalized:
+        field = filter_spec.field.strip()
+        if not field:
             issues.append(CatalogIssue(location=f"{location}.field", message="field is required"))
             continue
-        if normalized in seen:
+        if field in seen:
             issues.append(
                 CatalogIssue(
                     location=f"{location}.field",
@@ -695,12 +685,12 @@ def _validate_page_filters(
                 )
             )
             continue
-        seen.add(normalized)
+        seen.add(field)
 
         supported: list[str] = []
         for tile in page.tiles:
             metric = metrics.get(tile.metric)
-            processor = processors.get(metric.source) if metric is not None else None
+            processor = processors.get(metric.processor) if metric is not None else None
             if processor is not None and _dimension_matches(filter_spec.field, processor.group_by):
                 supported.append(tile.id)
 
@@ -766,12 +756,7 @@ def _validate_category_colors(
 
 
 def _dimension_matches(field: str, columns: list[str]) -> bool:
-    key = _dimension_key(field)
-    return any(_dimension_key(column) == key for column in columns)
-
-
-def _dimension_key(value: str) -> str:
-    return "".join(character for character in value.casefold() if character.isalnum())
+    return field in columns
 
 
 def _configured_tile_value(value: object) -> bool:
@@ -787,13 +772,14 @@ def _validate_metric_dependencies(
     for name, metric in metrics.items():
         for dependency in metric.depends_on:
             bound = metrics.get(dependency)
-            if bound is not None and bound.source != metric.source:
+            if bound is not None and bound.processor != metric.processor:
                 issues.append(
                     CatalogIssue(
                         location=f"metrics.{name}.depends_on",
                         message=(
-                            f"metric dependency {dependency!r} uses processor {bound.source!r}; "
-                            f"expected {metric.source!r}"
+                            f"metric dependency {dependency!r} uses processor "
+                            f"{bound.processor!r}; "
+                            f"expected {metric.processor!r}"
                         ),
                     )
                 )
@@ -842,9 +828,6 @@ def _validate_metric_dimensions(
     ):
         return
     dimensions = set(processor.group_by)
-    extra_variant = (processor.model_extra or {}).get("variant_column")
-    if isinstance(extra_variant, str):
-        dimensions.add(extra_variant)
     if metric.variant_column not in dimensions:
         issues.append(
             CatalogIssue(
@@ -930,37 +913,33 @@ def _processor_source_columns(processor: model.Processor) -> set[str]:
     """Return source fields declared outside expressions on one processor."""
 
     columns = {str(column) for column in processor.group_by if str(column).strip()}
-    if processor.time is not None and processor.time.column:
+    if processor.time.column:
         columns.add(processor.time.column)
-    raw = processor.model_dump(mode="python", by_alias=True, exclude_none=True)
-    for key in ("outcome_column", "variant_column"):
-        value = raw.get(key)
-        if isinstance(value, str) and value.strip():
-            columns.add(value)
-    for key in ("properties", "score_properties"):
-        values = raw.get(key)
-        if isinstance(values, list):
-            columns.update(str(value) for value in values if str(value).strip())
-    for key in ("score_columns", "scores"):
-        values = raw.get(key)
-        if isinstance(values, dict):
-            columns.update(str(value) for value in values.values() if str(value).strip())
-    for key in ("outcome", "entities"):
-        values = raw.get(key)
-        if not isinstance(values, dict):
-            continue
-        for field_key in ("column", "subject"):
-            value = values.get(field_key)
-            if isinstance(value, str) and value.strip():
-                columns.add(value)
-    states = raw.get("states")
-    if isinstance(states, dict):
-        for state in states.values():
-            if not isinstance(state, dict):
-                continue
-            source_column = state.get("source_column")
-            if isinstance(source_column, str) and source_column.strip():
-                columns.add(source_column)
+    if isinstance(processor, model.BinaryOutcomeProcessor | model.ScoreDistributionProcessor):
+        columns.add(processor.outcome.column)
+        columns.update(processor.dedup_keys)
+    if isinstance(processor, model.BinaryOutcomeProcessor) and processor.variant_column:
+        columns.add(processor.variant_column)
+    if isinstance(processor, model.NumericDistributionProcessor):
+        columns.update(processor.properties)
+    if isinstance(processor, model.ScoreDistributionProcessor):
+        columns.update(item.column for item in processor.score_properties)
+    if isinstance(processor, model.EntityLifecycleProcessor):
+        columns.update(processor.keys.model_dump().values())
+    if isinstance(processor, model.EntitySetProcessor):
+        columns.add(processor.entity)
+    if isinstance(processor, model.FunnelProcessor) and processor.entity:
+        columns.add(processor.entity)
+    if isinstance(processor, model.SnapshotProcessor):
+        columns.add(processor.entity)
+        if processor.as_of_property:
+            columns.add(processor.as_of_property)
+        columns.update(item.property for item in processor.milestones)
+    columns.update(
+        source_column
+        for state in processor.states.values()
+        if (source_column := state.model_dump().get("source_column"))
+    )
     return columns
 
 
@@ -1055,22 +1034,27 @@ def _state_schema(processor: model.Processor) -> dict[str, expr_ast.Dtype]:
     }
 
 
-def _validate_metric_state_references(
+def _validate_metric_state_references(  # noqa: PLR0911
     metric_name: str,
     metric: model.Metric,
     processor: model.Processor,
     issues: list[CatalogIssue],
 ) -> None:
     if isinstance(metric, model.FunnelDropoffMetric):
-        stages = _funnel_stage_names(processor)
-        for field_name in ("from_stage", "to_stage"):
-            stage_name = getattr(metric, field_name)
-            if stage_name not in stages:
+        states = {
+            name
+            for name, state in processor.states.items()
+            if isinstance(state, model.CountState) and state.stage
+        }
+        for field_name in ("from_state", "to_state"):
+            state_name = getattr(metric, field_name)
+            if state_name not in states:
                 issues.append(
                     CatalogIssue(
                         location=f"metrics.{metric_name}.{field_name}",
                         message=(
-                            f"unknown funnel stage {stage_name!r} on processor {processor.id!r}"
+                            f"unknown funnel stage-count state {state_name!r} "
+                            f"on processor {processor.id!r}"
                         ),
                     )
                 )
@@ -1095,7 +1079,7 @@ def _validate_metric_state_references(
             issues,
         )
         return
-    if isinstance(metric, model.TdigestQuantileMetric):
+    if isinstance(metric, model.DistributionMetric | model.QuantileMetric):
         _require_state_type(
             metric_name,
             processor,
@@ -1107,6 +1091,78 @@ def _validate_metric_state_references(
         return
     if isinstance(metric, model.SetOpMetric):
         _validate_set_op_metric(metric_name, metric, processor, issues)
+        return
+    if isinstance(metric, model.LifecycleSummaryMetric):
+        for field_name, allowed_types in (
+            ("holdings_state", {"count"}),
+            ("monetary_state", {"value_sum"}),
+            ("first_purchase_state", {"min"}),
+            ("last_purchase_state", {"max"}),
+        ):
+            _require_state_type(
+                metric_name,
+                processor,
+                field_name,
+                getattr(metric, field_name),
+                allowed_types,
+                issues,
+            )
+        if isinstance(processor, model.EntityLifecycleProcessor):
+            if metric.entity_column != processor.keys.customer_id:
+                issues.append(
+                    CatalogIssue(
+                        location=f"metrics.{metric_name}.entity_column",
+                        message=(
+                            f"must match entity lifecycle customer key "
+                            f"{processor.keys.customer_id!r}"
+                        ),
+                    )
+                )
+            expected = (
+                (
+                    "holdings_state",
+                    processor.keys.order_id,
+                    lambda state: isinstance(state, model.CountState) and state.distinct,
+                    "a distinct count",
+                ),
+                (
+                    "monetary_state",
+                    processor.keys.monetary,
+                    lambda state: isinstance(state, model.ValueSumState),
+                    "a value sum",
+                ),
+                (
+                    "first_purchase_state",
+                    processor.keys.purchase_date,
+                    lambda state: isinstance(state, model.MinState),
+                    "a minimum",
+                ),
+                (
+                    "last_purchase_state",
+                    processor.keys.purchase_date,
+                    lambda state: isinstance(state, model.MaxState),
+                    "a maximum",
+                ),
+            )
+            for field_name, source_column, predicate, label in expected:
+                state_name = getattr(metric, field_name)
+                state = processor.states.get(state_name)
+                if (
+                    state is not None
+                    and (
+                        not predicate(state)
+                        or getattr(state, "source_column", None) != source_column
+                    )
+                ):
+                    issues.append(
+                        CatalogIssue(
+                            location=f"metrics.{metric_name}.{field_name}",
+                            message=(
+                                f"must reference {label} state sourced from "
+                                f"{source_column!r}"
+                            ),
+                        )
+                    )
         return
     if not isinstance(metric, model.CurveFromDigestsMetric | model.CalibrationFromDigestsMetric):
         return
@@ -1127,56 +1183,41 @@ def _validate_set_op_metric(
     processor: model.Processor,
     issues: list[CatalogIssue],
 ) -> None:
-    if metric.states and metric.operands:
+    states = [operand.state for operand in metric.operands]
+    if metric.operation == "minus" and len(states) != 2:
         issues.append(
             CatalogIssue(
                 location=f"metrics.{metric_name}",
-                message="set_op must define either states or operands, not both",
-            )
-        )
-    states = metric.states or [operand.state for operand in metric.operands]
-    if not states:
-        issues.append(
-            CatalogIssue(
-                location=f"metrics.{metric_name}",
-                message="set_op must define at least one state or operand",
-            )
-        )
-    if metric.op in {"a_not_b", "diff"} and len(states) != 2:
-        issues.append(
-            CatalogIssue(
-                location=f"metrics.{metric_name}",
-                message="set_op diff/a_not_b requires exactly two operands",
+                message="set_op minus requires exactly two operands",
             )
         )
     for index, state in enumerate(states):
         _require_state_type(
             metric_name,
             processor,
-            f"operands[{index}].state" if metric.operands else f"states[{index}]",
+            f"operands[{index}].state",
             state,
             {"theta"},
             issues,
         )
     for index, operand in enumerate(metric.operands):
-        if operand.time_window is not None:
-            _validate_set_time_window(metric_name, index, operand.time_window, issues)
+        _validate_set_time_window(metric_name, index, operand.time_window, issues)
 
 
 def _validate_set_time_window(
     metric_name: str,
     operand_index: int,
-    window: dict[str, Any],
+    window: model.SetOpTimeWindow | None,
     issues: list[CatalogIssue],
 ) -> None:
-    location = f"metrics.{metric_name}.operands[{operand_index}].time_window"
-    if set(window) == {"last"} and _is_duration(window["last"], positive=True):
+    if window is None:
         return
-    between = window.get("between")
+    location = f"metrics.{metric_name}.operands[{operand_index}].time_window"
+    if window.last is not None and _is_duration(window.last, positive=True):
+        return
+    between = window.between
     if (
-        set(window) == {"between"}
-        and isinstance(between, list | tuple)
-        and len(between) == 2
+        between is not None
         and all(_is_duration(value, positive=False) for value in between)
     ):
         return
@@ -1233,66 +1274,96 @@ def _validate_processor_config(
     source_schema: Mapping[str, expr_ast.Dtype],
     issues: list[CatalogIssue],
 ) -> None:
-    variant_column = (processor.model_extra or {}).get("variant_column")
-    if isinstance(variant_column, str) and any(
-        _dimension_key(variant_column) == _dimension_key(column) for column in processor.group_by
-    ):
+    state_names = set(processor.states)
+    for state_name, state in processor.states.items():
+        location = f"processors[{processor.id}].states[{state_name}]"
+        if isinstance(state, model.PooledMeanState) and state.weight not in state_names:
+            issues.append(
+                CatalogIssue(
+                    location=f"{location}.weight",
+                    message=f"weight state {state.weight!r} does not exist",
+                )
+            )
+        if isinstance(state, model.PooledVarianceState):
+            for field_name, referenced in (("mean", state.mean), ("weight", state.weight)):
+                if referenced not in state_names:
+                    issues.append(
+                        CatalogIssue(
+                            location=f"{location}.{field_name}",
+                            message=f"{field_name} state {referenced!r} does not exist",
+                        )
+                    )
+        if (
+            isinstance(state, model.CountState)
+            and state.outcome is not None
+            and not isinstance(
+                processor,
+                model.BinaryOutcomeProcessor | model.ScoreDistributionProcessor,
+            )
+        ):
+            issues.append(
+                CatalogIssue(
+                    location=f"{location}.outcome",
+                    message="outcome count selectors require an outcome processor",
+                )
+            )
+        stage = getattr(state, "stage", None)
+        if stage is not None and not isinstance(processor, model.FunnelProcessor):
+            issues.append(
+                CatalogIssue(
+                    location=f"{location}.stage",
+                    message="stage selectors require a funnel processor",
+                )
+            )
+
+    variant_column = (
+        processor.variant_column
+        if isinstance(processor, model.BinaryOutcomeProcessor)
+        else None
+    )
+    if variant_column and variant_column not in processor.group_by:
         issues.append(
             CatalogIssue(
                 location=f"processors[{processor.id}].variant_column",
                 message=(
-                    f"variant column {variant_column!r} is already present in group_by; "
-                    "keep it only as variant_column because the processor persists it automatically"
+                    f"variant column {variant_column!r} must also be present in group_by "
+                    "because catalog v2 persists no implicit dimensions"
                 ),
             )
         )
 
+    if isinstance(processor, model.EntityLifecycleProcessor):
+        purchase_date = processor.keys.purchase_date
+        has_latest_purchase = any(
+            isinstance(state, model.MaxState) and state.source_column == purchase_date
+            for state in processor.states.values()
+        )
+        if not has_latest_purchase:
+            issues.append(
+                CatalogIssue(
+                    location=f"processors[{processor.id}].states",
+                    message=(
+                        "entity_lifecycle requires a max state sourced from purchase date "
+                        f"{purchase_date!r}"
+                    ),
+                )
+            )
+
     if not isinstance(processor, model.FunnelProcessor):
         return
-    raw_stages = (processor.model_extra or {}).get("stages")
-    if not isinstance(raw_stages, list) or not raw_stages:
-        issues.append(
-            CatalogIssue(
-                location=f"processors[{processor.id}].stages",
-                message="funnel processor must define at least one stage",
+    configured_stages = {stage.name for stage in processor.stages}
+    for state_name, state in processor.states.items():
+        stage = getattr(state, "stage", None)
+        if stage is not None and stage not in configured_stages:
+            issues.append(
+                CatalogIssue(
+                    location=f"processors[{processor.id}].states[{state_name}].stage",
+                    message=f"unknown funnel stage {stage!r}",
+                )
             )
-        )
-        return
-    for index, stage in enumerate(raw_stages):
+    for index, stage_spec in enumerate(processor.stages):
         location = f"processors[{processor.id}].stages[{index}]"
-        if not isinstance(stage, Mapping):
-            issues.append(
-                CatalogIssue(
-                    location=location,
-                    message="funnel stage must be a mapping",
-                )
-            )
-            continue
-        if not stage.get("name"):
-            issues.append(
-                CatalogIssue(
-                    location=f"{location}.name",
-                    message="field required",
-                )
-            )
-        if "when" not in stage:
-            issues.append(
-                CatalogIssue(
-                    location=f"{location}.when",
-                    message="field required",
-                )
-            )
-            continue
-        try:
-            when = parse_expr(stage["when"])
-        except ParseError as exc:
-            issues.append(
-                CatalogIssue(
-                    location=f"{location}.when",
-                    message=str(exc),
-                )
-            )
-            continue
+        when = stage_spec.when
         dtype = _validate_expr_collect(
             when,
             source_schema,
@@ -1306,19 +1377,6 @@ def _validate_processor_config(
                     message=f"funnel stage condition must be Boolean, got {dtype}",
                 )
             )
-
-
-def _funnel_stage_names(processor: model.Processor) -> set[str]:
-    if not isinstance(processor, model.FunnelProcessor):
-        return set()
-    raw_stages = (processor.model_extra or {}).get("stages")
-    if not isinstance(raw_stages, list):
-        return set()
-    names: set[str] = set()
-    for stage in raw_stages:
-        if isinstance(stage, Mapping) and stage.get("name"):
-            names.add(str(stage["name"]))
-    return names
 
 
 def _to_catalog_issue(ev: Issue, prefix: str) -> CatalogIssue:

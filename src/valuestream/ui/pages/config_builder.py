@@ -66,6 +66,10 @@ ENTITY_SUBJECT_PROCESSOR_KINDS = frozenset(
 )
 METRIC_ACTION_CREATE = "Create Metric"
 METRIC_ACTION_EDIT = "Edit Existing Metric"
+METRIC_EDIT_SYNC_KEY = "builder_metric_edit_sync"
+METRIC_EDIT_SELECTOR_KEY = "builder_metric_select"
+METRIC_EDIT_PROCESSOR_KEY = "builder_metric_processor_edit"
+METRIC_EDIT_KIND_KEY = "builder_metric_kind_edit"
 SOURCE_ACTION_CREATE = "Create New Source"
 SOURCE_ACTION_EDIT = "Edit Existing Source"
 
@@ -81,6 +85,10 @@ _MODE_BUTTON_ICONS = {
 
 def _set_builder_mode(state_key: str, option: str) -> None:
     st.session_state[state_key] = option
+
+
+def _mark_metric_edit_sync(source: str) -> None:
+    st.session_state[METRIC_EDIT_SYNC_KEY] = source
 
 
 def _mode_button_selector(
@@ -1240,15 +1248,9 @@ def _render_immediate_config_warnings(ctx: ValueStreamContext) -> None:
 def _funnel_stage_warnings(catalog: model.Catalog) -> list[str]:
     warnings: list[str] = []
     for processor in catalog.processors.processors:
-        if processor.kind != "funnel":
+        if not isinstance(processor, model.FunnelProcessor):
             continue
-        stages = dict(processor.model_extra or {}).get("stages")
-        if not isinstance(stages, list) or not stages:
-            warnings.append(
-                f"`{processor.id}` is a funnel processor but has no stages. "
-                "Add at least one `stages` entry with a name and Boolean `when` expression."
-            )
-            continue
+        stages = [stage.model_dump(mode="json") for stage in processor.stages]
         missing = builder.stage_names_missing_when(stages)
         if missing:
             warnings.append(
@@ -3083,17 +3085,14 @@ def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any
 
 
 def _dimension_identity_key(value: str) -> str:
-    """Dimension identity used by catalog validation: casefolded alphanumerics."""
+    """Dimension identity is the exact transformed aggregate column name."""
 
-    return "".join(character for character in value.casefold() if character.isalnum())
+    return value
 
 
 def _processor_auto_persisted_columns(processor: model.Processor) -> list[str]:
-    """Columns the processor persists as dimensions without listing in group_by."""
+    """Catalog v2 persists no implicit business dimensions."""
 
-    variant_column = (processor.model_extra or {}).get("variant_column")
-    if isinstance(variant_column, str) and variant_column.strip():
-        return [variant_column.strip()]
     return []
 
 
@@ -3145,10 +3144,9 @@ def _dimension_processor_coverage_panel(
         )
         if missing:
             processor_def = builder.processor_to_dict(processor)
-            processor_def["dimensions"] = builder.dedupe(
+            processor_def["group_by"] = builder.dedupe(
                 [*[str(field) for field in processor.group_by], *missing]
             )
-            processor_def.pop("group_by", None)
             updates[processor.id] = processor_def
     with components.bordered_panel(
         "Processor Coverage",
@@ -3730,9 +3728,8 @@ def _exploration_lifecycle_controls(ctx: ValueStreamContext, source_id: str) -> 
 
 
 def _exploration_meta(processor: model.Processor) -> dict[str, Any]:
-    extra = dict(processor.model_extra or {})
-    metadata = extra.get("exploration")
-    return dict(metadata) if isinstance(metadata, dict) else {}
+    del processor
+    return {}
 
 
 def _exploration_status(processor: model.Processor) -> str:
@@ -3907,23 +3904,6 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             help=config_help.field_help("processor.description"),
         )
         _render_processor_kind_guide(kind)
-        group_by = st.multiselect(
-            "Group By",
-            field_options,
-            default=[
-                field
-                for field in field_remap.remap_field_list(processor.group_by, field_mapping)
-                if field in field_options
-            ],
-            accept_new_options=True,
-            key=f"builder_proc_group_{processor.id}",
-            help=config_help.field_help("processor.group_by"),
-        )
-        if creating and processor.group_by:
-            st.caption(
-                "Pre-filled from the workspace common dimensions (Dimensions step). "
-                "Extend or trim freely for this processor."
-            )
         time_col, grain_col = st.columns(2)
         time_column = time_col.text_input(
             "Time Column",
@@ -3934,23 +3914,47 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             key=f"builder_proc_time_{processor.id}",
             help=config_help.field_help("processor.time_column"),
         )
-        grains = grain_col.multiselect(
-            "Grains",
+        base_grain = grain_col.selectbox(
+            "Base Grain",
             list(forms.PROCESSOR_GRAIN_OPTIONS),
-            default=[
-                builder.display_grain(grain)
-                for grain in processor.grains
-                if builder.display_grain(grain) in forms.PROCESSOR_GRAIN_OPTIONS
-            ],
-            key=f"builder_proc_grains_{processor.id}",
-            help=config_help.field_help("processor.grains"),
+            index=builder.option_index(
+                forms.PROCESSOR_GRAIN_OPTIONS,
+                builder.display_grain(processor.time.grain),
+            ),
+            key=f"builder_proc_grain_{processor.id}",
+            help=(
+                "Finest stored time grain. Calendar dimensions at this grain and above "
+                "are available for Group By and report fields."
+            ),
         )
+        calendar_dimensions = builder.calendar_dimensions_for_grain(base_grain)
+        group_options = builder.dedupe([*field_options, *calendar_dimensions])
+        group_by = st.multiselect(
+            "Group By",
+            group_options,
+            default=[
+                field
+                for field in field_remap.remap_field_list(processor.group_by, field_mapping)
+                if field in group_options
+            ],
+            accept_new_options=True,
+            key=f"builder_proc_group_{processor.id}",
+            help=(
+                "Persisted report dimensions. Selecting a daily grain makes Day, Week, "
+                "Month, Quarter, and Year available here."
+            ),
+        )
+        if creating and processor.group_by:
+            st.caption(
+                "Pre-filled from the workspace common dimensions (Dimensions step). "
+                "Extend or trim freely for this processor."
+            )
         dedup_keys: list[str] = []
         if builder.processor_supports_dedup(kind):
             seed_dedup_keys = [
                 field
                 for field in field_remap.remap_field_list(
-                    [str(value) for value in (processor.model_extra or {}).get("dedup_keys") or []],
+                    [str(value) for value in getattr(processor, "dedup_keys", [])],
                     field_mapping,
                 )
                 if field
@@ -4073,20 +4077,19 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     if source is not None and not creating and kind == "entity_set":
         _sketch_states_panel(ctx, source, processor, field_options, state_key)
 
-    time_def = dict(processor_def.get("time", {}))
-    time_def.update(
-        {
-            "column": time_column.strip() or None,
-            "grains": grains or ["Summary"],
-        }
-    )
+    existing_time = processor.time.model_dump(mode="json", exclude_none=True)
+    time_def = {
+        "property": time_column.strip(),
+        "grain": model.normalize_grain_name(base_grain),
+        "calendar": existing_time.get("calendar", {}),
+    }
     processor_def.update(
         {
             "id": processor_id.strip(),
             "source": source_id,
             "kind": kind,
             "description": description.strip(),
-            "dimensions": group_by,
+            "group_by": group_by,
             "time": time_def,
         }
     )
@@ -4100,7 +4103,6 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     for managed_key in forms.PROCESSOR_KIND_MANAGED_FIELDS:
         processor_def.pop(managed_key, None)
     processor_def.update(kind_settings)
-    processor_def.pop("group_by", None)
     state_rows_valid = True
     try:
         processor_def["states"] = _build_state_defs(
@@ -4165,10 +4167,9 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
                 with builder.validated_catalog_transaction(
                     ctx.workspace, source_columns_by_id=_observed_source_columns()
                 ):
-                    builder.write_processor_definition(ctx.workspace, processor_def)
-                    created_metric_ids = builder.ensure_digest_distribution_metrics(
+                    created_metric_ids = builder.write_processor_definition(
                         ctx.workspace,
-                        processor_id.strip(),
+                        processor_def,
                     )
             if creating:
                 message = "Processor created."
@@ -4258,7 +4259,9 @@ def _kind_candidate_processor(
     candidate_def["kind"] = kind
     candidate_def.pop("states", None)
     try:
-        return model.Processors.model_validate({"processors": [candidate_def]}).processors[0]
+        return model.Processors.model_validate(
+            {"catalog_version": 2, "processors": [candidate_def]}
+        ).processors[0]
     except Exception:  # incomplete kind settings keep the prior shape
         return processor
 
@@ -4331,13 +4334,20 @@ def _remap_processor_def_fields(
     outcome = out.get("outcome")
     if isinstance(outcome, dict) and outcome.get("column"):
         outcome["column"] = field_remap.remap_field_name(str(outcome["column"]), field_mapping)
-    for key in ("outcome_column", "variant_column"):
+    for key in ("variant_column",):
         if out.get(key):
             out[key] = field_remap.remap_field_name(str(out[key]), field_mapping)
-    for key in ("properties", "score_properties"):
+    for key in ("properties",):
         values = out.get(key)
         if isinstance(values, list):
             out[key] = field_remap.remap_field_list([str(item) for item in values], field_mapping)
+    score_properties = out.get("score_properties")
+    if isinstance(score_properties, list):
+        for item in score_properties:
+            if isinstance(item, dict) and item.get("column"):
+                item["column"] = field_remap.remap_field_name(
+                    str(item["column"]), field_mapping
+                )
     return out
 
 
@@ -4404,7 +4414,10 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                     "Choose a processor and metric kind, then define the calculation directly."
                 )
         else:
-            st.caption("Choose an existing metric by processor and kind to inspect or edit it.")
+            st.caption(
+                "Search for a metric directly, or use processor and kind to move through "
+                "compatible metrics."
+            )
 
     if mode == METRIC_ACTION_CREATE:
         pending_token = f"create_{int(st.session_state.get('builder_metric_create_counter', 0))}"
@@ -4428,16 +4441,19 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             with builder.validated_catalog_transaction(
                 workspace, source_columns_by_id=_observed_source_columns()
             ):
-                if recipe_request.processor_def:
-                    builder.write_processor_definition(
-                        workspace,
-                        recipe_request.processor_def,
-                    )
+                # Write the explicitly authored metric first. Processor writing
+                # then sees its digest binding and creates defaults only for
+                # otherwise-unexposed digest states.
                 builder.write_metric_definition(
                     workspace,
                     recipe_request.metric_id,
                     recipe_request.metric_def,
                 )
+                if recipe_request.processor_def:
+                    builder.write_processor_definition(
+                        workspace,
+                        recipe_request.processor_def,
+                    )
                 if recipe_request.report_target and recipe_request.tile_def:
                     target = recipe_request.report_target
                     builder.write_tile_definition(
@@ -4484,7 +4500,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             st.error(str(exc))
             return
 
-    left, right = st.columns([1.05, 1.2], gap="large")
+    left, right = st.columns([1.05, 1.2], gap="small")
     with left, st.container(border=True):
         editing = mode == METRIC_ACTION_EDIT
         st.write("### Edit Metric" if editing else "### Create Metric From Scratch")
@@ -4508,64 +4524,24 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 st.info("No editable metrics are available.")
                 _render_continue_primary(save_slot)
                 return
-            current_metric = st.session_state.get(
-                "builder_metric_selected_id",
-                st.session_state.get("builder_metric_select"),
+            editable_metric_names = _sync_metric_edit_controls(
+                st.session_state,
+                metric_defs_by_name,
+                [processor.id for processor in editable_processors],
             )
-            current_metric_def = (
-                metric_defs_by_name.get(str(current_metric), {})
-                if isinstance(current_metric, str)
-                else {}
-            )
-            processor = st.selectbox(
-                "Processor",
-                editable_processors,
-                index=_processor_index_by_id(
-                    editable_processors,
-                    str(current_metric_def.get("source", "") or ""),
-                ),
-                format_func=_processor_choice_label_human,
-                key="builder_metric_processor_edit",
-                help=config_help.field_help("metric.processor"),
-            )
-            metric_kinds = _metric_kinds_for_source(metric_defs_by_name, processor.id)
-            if not metric_kinds:
-                st.info("Selected processor has no editable metric kinds.")
+            if not editable_metric_names:
+                st.info("No editable metrics are available.")
                 _render_continue_primary(save_slot)
                 return
-            current_kind = (
-                str(current_metric_def.get("kind", "") or "")
-                if current_metric_def.get("source") == processor.id
-                else ""
-            )
-            metric_kind = st.selectbox(
-                "Metric Kind",
-                metric_kinds,
-                index=builder.option_index(metric_kinds, current_kind),
-                format_func=builder.metric_kind_label,
-                key=f"builder_metric_kind_edit_{processor.id}",
-                help=config_help.field_help("metric.kind"),
-            )
-            st.caption(builder.metric_kind_help(metric_kind))
-            metric_choices = _metric_names_for_source_kind(
-                metric_defs_by_name, processor.id, metric_kind
-            )
-            if not metric_choices:
-                st.info("Selected processor and kind have no editable metrics.")
-                _render_continue_primary(save_slot)
-                return
-            metric_key = f"builder_metric_select_{processor.id}_{metric_kind}"
-            if st.session_state.get(metric_key) not in metric_choices:
-                st.session_state.pop(metric_key, None)
-                current_metric = None
             metric_col, delete_col = st.columns([3, 1], vertical_alignment="bottom")
             selected_metric_name = metric_col.selectbox(
                 "Metric",
-                metric_choices,
-                index=builder.option_index(metric_choices, current_metric),
+                editable_metric_names,
                 format_func=lambda name: _metric_choice_label(catalog, name),
-                key=metric_key,
+                key=METRIC_EDIT_SELECTOR_KEY,
                 help=config_help.field_help("metric.selector"),
+                on_change=_mark_metric_edit_sync,
+                args=("metric",),
             )
             if delete_col.button(
                 "Delete metric",
@@ -4580,13 +4556,43 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 st.session_state[f"builder_delete_metric_confirm_{selected_metric_name}"] = False
                 st.session_state[f"builder_delete_metric_tiles_{selected_metric_name}"] = False
                 _delete_metric_dialog(workspace, catalog, selected_metric_name)
+            st.caption(f"Metric ID: `{selected_metric_name}`")
+            editable_processors_by_id = {
+                editable_processor.id: editable_processor
+                for editable_processor in editable_processors
+            }
+            processor_id = st.selectbox(
+                "Processor",
+                list(editable_processors_by_id),
+                format_func=lambda value: _processor_choice_label(
+                    value, editable_processors_by_id
+                ),
+                key=METRIC_EDIT_PROCESSOR_KEY,
+                help=config_help.field_help("metric.processor"),
+                on_change=_mark_metric_edit_sync,
+                args=("processor",),
+            )
+            processor = editable_processors_by_id[str(processor_id)]
+            metric_kinds = _metric_kinds_for_source(metric_defs_by_name, processor.id)
+            if not metric_kinds:
+                st.info("Selected processor has no editable metric kinds.")
+                _render_continue_primary(save_slot)
+                return
+            metric_kind = st.selectbox(
+                "Metric Kind",
+                metric_kinds,
+                format_func=builder.metric_kind_label,
+                key=METRIC_EDIT_KIND_KEY,
+                help=config_help.field_help("metric.kind"),
+                on_change=_mark_metric_edit_sync,
+                args=("kind",),
+            )
+            st.caption(builder.metric_kind_help(metric_kind))
             st.session_state["builder_metric_selected_id"] = selected_metric_name
             seed_metric_def = metric_defs_by_name[selected_metric_name]
             seed_kind = metric_kind
-            metric_label = selected_metric_name
             metric_name = selected_metric_name
             metric_token = f"edit_{selected_metric_name}"
-            st.caption(f"Metric ID: `{metric_name}`")
         else:
             create_counter = int(st.session_state.get("builder_metric_create_counter", 0))
             create_token = f"create_{create_counter}"
@@ -4661,6 +4667,19 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                     "Metric ID must start with an ASCII letter and contain only ASCII "
                     "letters, numbers, and underscores."
                 )
+        if editing:
+            seed_display = seed_metric_def.get("display")
+            seed_display = dict(seed_display) if isinstance(seed_display, Mapping) else {}
+            metric_label = st.text_input(
+                "Metric Label",
+                value=str(seed_display.get("label", "") or ""),
+                placeholder=humanize_identifier(metric_name),
+                key=f"builder_metric_label_{metric_token}_{processor.id}_{metric_kind}",
+                help=(
+                    "Human-readable name used in reports and selectors. "
+                    "Leave blank to derive it from the Metric ID."
+                ),
+            )
         description = st.text_area(
             "Description",
             value=str(seed_metric_def.get("description", "") or ""),
@@ -4677,6 +4696,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
         )
         display = _metric_display_controls(
             seed_metric_def.get("display"),
+            label=metric_label,
             key_suffix=f"{metric_token}_{processor.id}_{metric_kind}",
         )
         metric_def = _metric_definition_form(
@@ -4699,6 +4719,27 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             metric_display = dict(metric_def.get("display", {}))
             metric_display.setdefault("label", metric_label.strip())
             metric_def["display"] = metric_display
+        output_metric_name = metric_name.strip() or "metric_id"
+        try:
+            metric_outputs = builder.metric_outputs_from_definition(
+                output_metric_name,
+                metric_def,
+            )
+        except ValueError:
+            metric_outputs = []
+        st.text_input(
+            "Outputs",
+            value=", ".join(metric_outputs),
+            disabled=True,
+            key=(
+                f"builder_metric_outputs_{metric_token}_"
+                f"{builder.widget_key_fragment('|'.join(metric_outputs))}"
+            ),
+            help=(
+                "Read-only columns produced by this metric. Report controls that consume "
+                "a metric output can select only from this list."
+            ),
+        )
         if editing:
             metric_def = _preserve_untouched_metric_definition(seed_metric_def, metric_def)
         metric_display_name = str(
@@ -4831,14 +4872,14 @@ def _metric_definition_form(
 ) -> dict[str, Any] | None:
     seed = seed or {}
     suffix = key_suffix or f"{processor.id}_{metric_kind}"
-    extra = dict(processor.model_extra or {})
-    roles = extra.get("variant_role_map", {})
+    extra = model.processor_settings(processor)
+    lifecycle_keys = model.entity_lifecycle_keys(processor)
     ctx = forms.MetricFormContext(
         state_options=lambda types: builder.state_columns_by_type(processor, *sorted(types)),
         digest_pairs=builder.digest_state_pair_options(processor),
-        funnel_stages=builder.funnel_stage_names(processor),
+        funnel_stages=builder.funnel_count_states(processor),
         default_variant_column=str(extra.get("variant_column", "") or ""),
-        variant_roles=dict(roles) if isinstance(roles, dict) else {},
+        default_entity_column=str(lifecycle_keys.get("customer_id", "") or ""),
         state_label=lambda state: _digest_state_label(processor, state),
         default_digest_pair=lambda final: builder.default_curve_digest_states(
             processor, final=final
@@ -4852,10 +4893,15 @@ def _metric_definition_form(
     )
     if fields is None:
         return None
-    return {"source": processor.id, "kind": metric_kind, **fields}
+    return {"processor": processor.id, "kind": metric_kind, **fields}
 
 
-def _metric_display_controls(raw: Any, *, key_suffix: str) -> dict[str, Any]:
+def _metric_display_controls(
+    raw: Any,
+    *,
+    label: str,
+    key_suffix: str,
+) -> dict[str, Any]:
     seed = dict(raw) if isinstance(raw, Mapping) else {}
     # A keyed expander keeps its open state across fragment reruns, so typing
     # the unit/format fields no longer fights an auto-collapsing section.
@@ -4864,12 +4910,6 @@ def _metric_display_controls(raw: Any, *, key_suffix: str) -> dict[str, Any]:
         expanded=False,
         key=f"builder_metric_display_expander_{key_suffix}",
     ):
-        label = st.text_input(
-            "Display label",
-            value=str(seed.get("label", "") or ""),
-            key=f"builder_metric_display_label_{key_suffix}",
-            help=config_help.field_help("metric.display_label"),
-        )
         unit = st.text_input(
             "Unit",
             value=str(seed.get("unit", "") or ""),
@@ -4915,12 +4955,12 @@ def _preserve_untouched_metric_definition(
     """Keep the exact authored metric when the visual form is semantically unchanged."""
 
     try:
-        baseline = model.Metrics.model_validate({"metrics": {"metric": seed_metric_def}}).metrics[
-            "metric"
-        ]
-        candidate = model.Metrics.model_validate({"metrics": {"metric": metric_def}}).metrics[
-            "metric"
-        ]
+        baseline = model.Metrics.model_validate(
+            {"catalog_version": 2, "metrics": {"metric": seed_metric_def}}
+        ).metrics["metric"]
+        candidate = model.Metrics.model_validate(
+            {"catalog_version": 2, "metrics": {"metric": metric_def}}
+        ).metrics["metric"]
     except ValueError:
         return metric_def
     status = builder.builder_draft_status(
@@ -5006,10 +5046,9 @@ def _report_library_options(
 
 
 def _library_chart_kind(chart_kind: Any) -> str:
-    """Group legacy heatmaps under the single Heatmap authoring choice."""
+    """Return the strict catalog-v2 chart kind."""
 
-    value = str(chart_kind or "")
-    return "heatmap" if value in builder.LEGACY_HEATMAP_CHARTS else value
+    return str(chart_kind or "")
 
 
 def _tile_option_key(option: TileOption) -> str:
@@ -5411,14 +5450,7 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
             )
         )
         figure.update_layout(yaxis2={"overlaying": "y", "side": "right", "visible": False})
-    elif chart_type in {
-        "calendar_heatmap",
-        "heatmap",
-        "cohort_heatmap",
-        "corr",
-        "rfm_density",
-        "descriptive_heatmap",
-    }:
+    elif chart_type in {"heatmap", "corr", "rfm_density"}:
         figure.add_trace(
             go.Heatmap(
                 z=[[1, 2, 4, 3], [2, 5, 3, 1], [4, 3, 2, 5]],
@@ -5526,8 +5558,16 @@ def _chart_library_preview(  # noqa: PLR0912, PLR0915
     elif chart_type == "sankey":
         figure.add_trace(
             go.Sankey(
-                node={"label": ["A", "B", "C"], "color": colors[:3], "pad": 8},
-                link={"source": [0, 0, 1], "target": [1, 2, 2], "value": [5, 2, 3]},
+                node={
+                    "label": ["Email", "Search", "Known", "Anonymous", "Web", "Mobile"],
+                    "color": [*colors[:2], *colors[:2], *colors[:2]],
+                    "pad": 8,
+                },
+                link={
+                    "source": [0, 0, 1, 1, 2, 2, 3, 3],
+                    "target": [2, 3, 2, 3, 4, 5, 4, 5],
+                    "value": [5, 2, 3, 4, 4, 4, 2, 3],
+                },
             )
         )
     elif chart_type == "funnel":
@@ -5744,9 +5784,7 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
             ["Visual", "Raw YAML"],
             **editing_mode_kwargs,
         )
-        visual_seed_tile = (
-            builder.canonicalize_heatmap_tile(seed_tile) if mode == "Visual" else seed_tile
-        )
+        visual_seed_tile = seed_tile
         seed_metric = (
             visual_seed_tile.get("metric")
             if visual_seed_tile.get("metric") in metric_names
@@ -5783,8 +5821,6 @@ def _tile_builder(  # noqa: PLR0912, PLR0915
         if seed_chart is None and chart_choices and not is_new_tile:
             seed_chart = chart_choices[0]
         chart_state_key = f"builder_tile_chart_{editor_token}"
-        if st.session_state.get(chart_state_key) in builder.LEGACY_HEATMAP_CHARTS:
-            st.session_state[chart_state_key] = "heatmap"
         if (
             seed_chart is not None
             and chart_state_key in st.session_state
@@ -6318,24 +6354,23 @@ def _visual_tile_control_keys(chart_kind: str) -> set[str]:
 
     keys = set(builder.chart_field_controls(chart_kind))
     if chart_kind in builder.METRIC_OWNED_VALUE_CHARTS:
-        # The selected metric supplies the plotted/displayed value; own both
-        # legacy aliases so Visual mode removes them instead of passing through.
         keys.update({"value", "y"})
     if chart_kind == "heatmap":
-        # Intensity is metric-owned. Own the retired fields and the calendar
-        # date alias so editing any legacy heatmap migrates it cleanly.
-        keys.update({"color", "value", "date"})
+        keys.update({"color", "value", "property", "score"})
+    if chart_kind == "sankey":
+        keys.update({"source", "target"})
     if chart_kind == "boxplot":
-        # A legacy/manual Y is meaningless for digest-backed boxes. Treat it as
-        # controlled so the visual editor removes it instead of passing it through.
-        keys.add("y")
+        # Manual value bindings are meaningless for digest-backed boxes. Treat
+        # them as controlled so the visual editor removes stale draft values
+        # instead of passing them through.
+        keys.update({"property", "y"})
     # Own chart-specific metric bindings so Visual mode removes legacy overrides.
     keys.update(
         {
             "bar_polar": {"r"},
             "donut": {"values", "value", "y"},
             "treemap": {"color"},
-            "waterfall": {"color", "facet_row", "facet_col", "facet_column", "facets"},
+            "waterfall": {"color", "facet_row", "facet_col"},
         }.get(chart_kind, set())
     )
     keys.update(
@@ -6391,29 +6426,6 @@ def _merge_visual_tile_definition(
     passthrough = {key: value for key, value in seed_tile.items() if key not in controlled}
     if "stages" in seed_tile and _stage_values(seed_tile.get("stages")) == built_tile.get("stages"):
         built_tile["stages"] = seed_tile["stages"]
-    facets = seed_tile.get("facets")
-    if isinstance(facets, Mapping):
-        if "facet_row" not in seed_tile and built_tile.get("facet_row") == facets.get("row"):
-            built_tile.pop("facet_row", None)
-        expected_col = facets.get("col", facets.get("column"))
-        if "facet_col" not in seed_tile and built_tile.get("facet_col") == expected_col:
-            built_tile.pop("facet_col", None)
-    if (
-        "facet_column" in seed_tile
-        and "facet_col" not in seed_tile
-        and built_tile.get("facet_col") == seed_tile.get("facet_column")
-    ):
-        built_tile.pop("facet_col", None)
-    group_by = seed_tile.get("group_by")
-    if isinstance(group_by, list):
-        if "facet_row" not in seed_tile and group_by and built_tile.get("facet_row") == group_by[0]:
-            built_tile.pop("facet_row", None)
-        if (
-            "facet_col" not in seed_tile
-            and len(group_by) > 1
-            and built_tile.get("facet_col") == group_by[1]
-        ):
-            built_tile.pop("facet_col", None)
     return {**passthrough, **built_tile}
 
 
@@ -6424,37 +6436,12 @@ def _preserve_untouched_tile_definition(
     """Keep exact tile YAML when the visual editor preserves effective behavior."""
 
     try:
-        baseline = model.Tile.model_validate(seed_tile)
-        candidate = model.Tile.model_validate(built_tile)
+        baseline = model.validate_tile(seed_tile)
+        candidate = model.validate_tile(built_tile)
     except ValueError:
         return built_tile
     baseline_payload = baseline.model_dump(mode="json", by_alias=True, exclude_none=True)
     candidate_payload = candidate.model_dump(mode="json", by_alias=True, exclude_none=True)
-    if baseline.chart == candidate.chart and baseline.chart in builder.METRIC_OWNED_VALUE_CHARTS:
-        # Legacy value/y overrides no longer affect metric-owned displays. Ignore
-        # them for clean/dirty detection so merely opening an existing tile does
-        # not create a draft; a subsequent real edit still saves without them.
-        for payload in (baseline_payload, candidate_payload):
-            payload.pop("value", None)
-            payload.pop("y", None)
-            if baseline.chart in builder.METRIC_OWNED_RADIAL_CHARTS:
-                payload.pop("r", None)
-    if baseline.chart == candidate.chart and baseline.chart in builder.METRIC_OWNED_COLOR_CHARTS:
-        # Preserve clean-on-open behavior for legacy treemap color overrides.
-        for payload in (baseline_payload, candidate_payload):
-            payload.pop("color", None)
-    if baseline.chart == candidate.chart == "waterfall":
-        # Color and facets were exposed by the generic editor but never had
-        # rendering semantics for the single-trace waterfall.
-        for payload in (baseline_payload, candidate_payload):
-            for field_name in ("color", "facet_row", "facet_col", "facet_column", "facets"):
-                payload.pop(field_name, None)
-    if baseline.chart == candidate.chart and baseline.chart in builder.METRIC_OWNED_VALUES_CHARTS:
-        # Preserve clean-on-open behavior for legacy donut value overrides.
-        for payload in (baseline_payload, candidate_payload):
-            payload.pop("values", None)
-            payload.pop("value", None)
-            payload.pop("y", None)
     status = builder.builder_draft_status(
         f"tile-editor:{baseline.id}",
         baseline_payload,
@@ -6578,19 +6565,12 @@ def _tile_field_controls(
 ) -> dict[str, Any]:
     defaults = dict(defaults)
     if chart_kind == "combo" and catalog is not None and metric_name:
-        defaults["y2"] = builder.combo_secondary_metric_default(
+        defaults["secondary_metric"] = builder.combo_secondary_metric_default(
             catalog,
             metric_name,
-            defaults.get("y2", defaults.get("line_y")),
+            defaults.get("secondary_metric"),
         )
     control_keys = builder.chart_field_controls(chart_kind)
-    if (
-        chart_kind == "heatmap"
-        and catalog is not None
-        and metric_name
-        and not builder.descriptive_property_options(catalog, metric_name)
-    ):
-        control_keys = tuple(key for key in control_keys if key not in {"property", "score"})
     fields = _field_controls_for_keys(
         control_keys,
         chart_kind,
@@ -6619,13 +6599,28 @@ def _field_controls_for_keys(
             fields[key] = _stage_list_control(defaults.get("stages"), key_suffix)
         elif key in {"path", "columns", "group_by"}:
             current_values = _default_multiselect_values(defaults.get(key))
-            options = builder.dedupe([*field_options[1:], *current_values])
+            available_fields = field_options[1:]
+            label = _field_label(key)
+            help_text = config_help.field_help("report.field")
+            if key == "path" and chart_kind == "sankey":
+                available_fields = (
+                    builder.chart_axis_options(catalog, metric_name)
+                    if catalog is not None and metric_name
+                    else available_fields
+                )
+                label = "Flow Path (in order)"
+                help_text = (
+                    "Choose two or more time/dimension fields. Each adjacent pair "
+                    "becomes one Sankey step; drag selections by removing and "
+                    "re-adding them in the desired order."
+                )
+            options = builder.dedupe([*available_fields, *current_values])
             fields[key] = st.multiselect(
-                _field_label(key),
+                label,
                 options,
                 default=current_values,
                 key=f"builder_tile_{key}_{key_suffix}",
-                help=config_help.field_help("report.field"),
+                help=help_text,
             )
         else:
             options = _tile_field_options(
@@ -6638,7 +6633,13 @@ def _field_controls_for_keys(
                 metric_name,
             )
             fields[key] = st.selectbox(
-                "Y2 Metric" if chart_kind == "combo" and key == "y2" else _field_label(key),
+                (
+                    "Secondary Metric"
+                    if chart_kind == "combo" and key == "secondary_metric"
+                    else _metric_output_field_label(chart_kind)
+                    if key == "metric_output"
+                    else _field_label(key)
+                ),
                 options,
                 index=builder.option_index(options, _tile_field_default(defaults, key)),
                 key=f"builder_tile_{key}_{key_suffix}",
@@ -6649,6 +6650,18 @@ def _field_controls_for_keys(
 
 def _field_label(key: str) -> str:
     return key.upper() if len(key) == 1 else key.title()
+
+
+def _metric_output_field_label(chart_kind: str) -> str:
+    if chart_kind in builder.METRIC_OWNED_Y_CHARTS or chart_kind == "interval":
+        return "Y (Metric Output)"
+    if chart_kind in builder.METRIC_OWNED_RADIAL_CHARTS:
+        return "R (Metric Output)"
+    if chart_kind in builder.METRIC_OWNED_COLOR_CHARTS:
+        return "Color / Value (Metric Output)"
+    if chart_kind in builder.METRIC_OWNED_INTENSITY_CHARTS:
+        return "Intensity (Metric Output)"
+    return "Value (Metric Output)"
 
 
 def _default_multiselect_values(value: Any) -> list[str]:
@@ -6666,14 +6679,23 @@ def _tile_field_options(  # noqa: PLR0911
     catalog: model.Catalog | None,
     metric_name: str | None,
 ) -> list[str]:
-    if chart_kind == "interval" and key in builder.INTERVAL_METRIC_OUTPUT_FIELDS:
+    if key == "metric_output" and (
+        chart_kind in builder.METRIC_OUTPUT_SELECTABLE_CHARTS or chart_kind == "interval"
+    ):
+        outputs = (
+            builder.metric_output_options(catalog, metric_name)
+            if catalog is not None and metric_name
+            else []
+        )
+        return outputs
+    if chart_kind == "interval" and key in {"lower_output", "upper_output"}:
         outputs = (
             builder.metric_output_options(catalog, metric_name)
             if catalog is not None and metric_name
             else []
         )
         return ["", *outputs]
-    if chart_kind == "combo" and key == "y2":
+    if chart_kind == "combo" and key == "secondary_metric":
         metrics = (
             builder.combo_secondary_metric_options(catalog, metric_name)
             if catalog is not None and metric_name
@@ -6687,13 +6709,6 @@ def _tile_field_options(  # noqa: PLR0911
             else []
         )
         return _options_with_current(["", *axes], defaults.get(key))
-    if chart_kind == "boxplot" and key == "property":
-        properties = (
-            builder.distribution_property_options(catalog, metric_name)
-            if catalog is not None and metric_name
-            else []
-        )
-        return properties or [""]
     if chart_kind == "histogram" and key == "property":
         properties = (
             builder.distribution_property_options(catalog, metric_name)
@@ -6701,14 +6716,14 @@ def _tile_field_options(  # noqa: PLR0911
             else []
         )
         return _options_with_current(properties or field_options, defaults.get(key))
-    if (chart_kind.startswith("descriptive_") or chart_kind == "heatmap") and key == "property":
+    if chart_kind.startswith("descriptive_") and key == "property":
         properties = (
             builder.descriptive_property_options(catalog, metric_name)
             if catalog is not None and metric_name
             else []
         )
         return _options_with_current(properties or field_options, defaults.get(key))
-    if (chart_kind.startswith("descriptive_") or chart_kind == "heatmap") and key == "score":
+    if chart_kind.startswith("descriptive_") and key == "score":
         property_name = str(selected_fields.get("property") or defaults.get("property") or "")
         scores = (
             builder.descriptive_score_options(catalog, metric_name, property_name)
@@ -7125,25 +7140,7 @@ def _kpi_card_settings(defaults: dict[str, Any], key_suffix: str) -> dict[str, A
 
 def _tile_field_default(defaults: dict[str, Any], key: str) -> Any:
     value = defaults.get(key)
-    if value not in (None, ""):
-        return value
-    if key == "facet_col":
-        value = defaults.get("facet_column")
-        if value not in (None, ""):
-            return value
-    facets = defaults.get("facets")
-    if isinstance(facets, dict):
-        if key == "facet_row":
-            return facets.get("row")
-        if key == "facet_col":
-            return facets.get("col", facets.get("column"))
-    group_by = defaults.get("group_by")
-    if isinstance(group_by, (list, tuple)):
-        if key == "facet_row" and group_by:
-            value = group_by[0]
-        elif key == "facet_col" and len(group_by) > 1:
-            value = group_by[1]
-    return value
+    return value if value not in (None, "") else None
 
 
 def _goal_line_defaults(raw: Any) -> tuple[float, str, str]:
@@ -7227,7 +7224,7 @@ def _conditional_formatting_text(raw: Any) -> str:
 
 def _preview_tile(workspace: Path, catalog: model.Catalog, tile: dict[str, Any]) -> None:
     try:
-        parsed = model.Tile.model_validate(tile)
+        parsed = model.validate_tile(tile)
         rows = query_tile(workspace, catalog, parsed)
         figure = render_chart(
             rows,
@@ -7250,7 +7247,7 @@ def _chat_metric_rows(catalog: model.Catalog) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for metric_name, metric in sorted(catalog.metrics.metrics.items(), key=lambda item: item[0]):
         metric_def = builder.metric_to_dict(metric)
-        processor_id = str(metric_def.get("source", "") or "")
+        processor_id = str(metric_def.get("processor", "") or "")
         processor = processors.get(processor_id)
         rows.append(
             {
@@ -7479,7 +7476,7 @@ def _settings_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any) 
     _claim_fragment_action_slots(save_slot, draft_slot)
     defaults = ctx.catalog.pipelines.defaults
     calendar = defaults.calendar
-    known_grains = ["Day", "Month", "Quarter", "Year", "Summary"]
+    known_grains = ["Day", "Week", "Month", "Quarter", "Year", "Summary"]
     grain_options = builder.dedupe([*known_grains, *calendar.grains])
     with components.bordered_panel(
         "Workspace Defaults",
@@ -7663,7 +7660,7 @@ def _queue_metric_refresh(
     """Queue a full-catalog refresh and open the written metric afterwards."""
     session_state["builder_metric_pending_refresh"] = {
         "metric_id": metric_id,
-        "source": str(metric_def.get("source", "") or ""),
+        "processor": str(metric_def.get("processor", "") or ""),
         "kind": str(metric_def.get("kind", "") or ""),
         "message": message,
         "issues": list(issues),
@@ -7684,13 +7681,17 @@ def _consume_pending_metric_refresh(
     metric_def = metric_defs_by_name.get(metric_id)
     if metric_def is None:
         return feedback
-    source = str(metric_def.get("source", feedback.get("source", "")) or "")
+    source = str(
+        metric_def.get("processor", feedback.get("processor", "")) or ""
+    )
     kind = str(metric_def.get("kind", feedback.get("kind", "")) or "")
     session_state["builder_metric_mode"] = METRIC_ACTION_EDIT
     session_state["builder_metric_selected_id"] = metric_id
+    session_state[METRIC_EDIT_SELECTOR_KEY] = metric_id
     if source:
-        session_state["builder_metric_processor_edit"] = source
+        session_state[METRIC_EDIT_PROCESSOR_KEY] = source
     if source and kind:
+        session_state[METRIC_EDIT_KIND_KEY] = kind
         session_state[f"builder_metric_kind_edit_{source}"] = kind
         session_state[f"builder_metric_select_{source}_{kind}"] = metric_id
     return feedback
@@ -7816,9 +7817,107 @@ def _metric_processors_for_definitions(
     metric_defs_by_name: Mapping[str, Mapping[str, Any]],
 ) -> list[model.Processor]:
     metric_sources = {
-        str(metric_def.get("source", "") or "") for metric_def in metric_defs_by_name.values()
+        str(metric_def.get("processor", "") or "")
+        for metric_def in metric_defs_by_name.values()
     }
     return [processor for processor in processors if processor.id in metric_sources]
+
+
+def _metric_edit_source_kind(
+    metric_defs_by_name: Mapping[str, Mapping[str, Any]], metric_name: str
+) -> tuple[str, str]:
+    metric_def = metric_defs_by_name[metric_name]
+    return (
+        str(metric_def.get("processor", "") or ""),
+        str(metric_def.get("kind", "") or ""),
+    )
+
+
+def _metric_edit_choice_for_filters(
+    metric_defs_by_name: Mapping[str, Mapping[str, Any]],
+    valid_processors: set[str],
+    fallback_metric: str,
+    selected_metric: str,
+    source: str,
+    kind: str,
+) -> tuple[str, str, str]:
+    if source not in valid_processors:
+        source = ""
+    if not source and selected_metric in metric_defs_by_name:
+        candidate_source, _ = _metric_edit_source_kind(metric_defs_by_name, selected_metric)
+        if candidate_source in valid_processors:
+            source = candidate_source
+    if not source:
+        source, _ = _metric_edit_source_kind(metric_defs_by_name, fallback_metric)
+    kinds = _metric_kinds_for_source(metric_defs_by_name, source)
+    if kind not in kinds:
+        kind = kinds[0]
+    matching_metrics = _metric_names_for_source_kind(metric_defs_by_name, source, kind)
+    if selected_metric not in matching_metrics:
+        selected_metric = matching_metrics[0]
+    return selected_metric, source, kind
+
+
+def _sync_metric_edit_controls(
+    session_state: MutableMapping[str, Any],
+    metric_defs_by_name: Mapping[str, Mapping[str, Any]],
+    processor_ids: list[str],
+) -> list[str]:
+    """Keep the metric-first selector and its processor/kind filters in sync."""
+
+    valid_processors = set(processor_ids)
+    editable_metric_names = sorted(
+        [
+            name
+            for name, metric_def in metric_defs_by_name.items()
+            if str(metric_def.get("processor", "") or "") in valid_processors
+            and str(metric_def.get("kind", "") or "")
+        ],
+        key=str.casefold,
+    )
+    if not editable_metric_names:
+        return []
+
+    trigger = str(session_state.pop(METRIC_EDIT_SYNC_KEY, "") or "")
+    selected_metric = str(
+        session_state.get(METRIC_EDIT_SELECTOR_KEY)
+        or session_state.get("builder_metric_selected_id")
+        or ""
+    )
+    source = str(session_state.get(METRIC_EDIT_PROCESSOR_KEY, "") or "")
+    kind = str(session_state.get(METRIC_EDIT_KIND_KEY, "") or "")
+
+    if trigger == "metric" and selected_metric in editable_metric_names:
+        source, kind = _metric_edit_source_kind(metric_defs_by_name, selected_metric)
+    elif trigger in {"processor", "kind"}:
+        selected_metric, source, kind = _metric_edit_choice_for_filters(
+            metric_defs_by_name,
+            valid_processors,
+            editable_metric_names[0],
+            selected_metric,
+            source,
+            kind,
+        )
+    elif selected_metric in editable_metric_names:
+        source, kind = _metric_edit_source_kind(metric_defs_by_name, selected_metric)
+    elif source in valid_processors:
+        selected_metric, source, kind = _metric_edit_choice_for_filters(
+            metric_defs_by_name,
+            valid_processors,
+            editable_metric_names[0],
+            selected_metric,
+            source,
+            kind,
+        )
+    else:
+        selected_metric = editable_metric_names[0]
+        source, kind = _metric_edit_source_kind(metric_defs_by_name, selected_metric)
+
+    session_state[METRIC_EDIT_SELECTOR_KEY] = selected_metric
+    session_state["builder_metric_selected_id"] = selected_metric
+    session_state[METRIC_EDIT_PROCESSOR_KEY] = source
+    session_state[METRIC_EDIT_KIND_KEY] = kind
+    return editable_metric_names
 
 
 def _metric_kinds_for_source(
@@ -7827,7 +7926,7 @@ def _metric_kinds_for_source(
     kinds = [
         str(metric_def.get("kind", "") or "")
         for metric_def in metric_defs_by_name.values()
-        if metric_def.get("source") == source
+        if metric_def.get("processor") == source
     ]
     return sorted(builder.dedupe([kind for kind in kinds if kind]), key=builder.metric_kind_label)
 
@@ -7839,7 +7938,7 @@ def _metric_names_for_source_kind(
         [
             name
             for name, metric_def in metric_defs_by_name.items()
-            if metric_def.get("source") == source and metric_def.get("kind") == kind
+            if metric_def.get("processor") == source and metric_def.get("kind") == kind
         ],
         key=str.casefold,
     )
@@ -7864,7 +7963,7 @@ def _metric_choice_label(catalog: model.Catalog, metric_name: str) -> str:
     if metric is None:
         return metric_name
     metric_def = builder.metric_to_dict(metric)
-    source = str(metric_def.get("source", "") or "unknown")
+    source = str(metric_def.get("processor", "") or "unknown")
     kind = str(metric_def.get("kind", "") or "unknown")
     display = metric_def.get("display")
     display_label = str(display.get("label", "") or "") if isinstance(display, dict) else ""
@@ -7876,9 +7975,10 @@ def _digest_state_label(processor: model.Processor, state_name: str) -> str:
     spec = model.effective_processor_states(processor).get(state_name)
     if spec is None:
         return state_name
-    extra = dict(spec.model_extra or {})
-    source = str(extra.get("source_column") or extra.get("score") or "")
-    outcome = str(extra.get("outcome", "") or "")
+    source = str(
+        getattr(spec, "source_column", None) or getattr(spec, "score_property", None) or ""
+    )
+    outcome = str(getattr(spec, "outcome", None) or "")
     details = ", ".join(item for item in (source, outcome) if item)
     return f"{state_name} ({details})" if details else state_name
 
@@ -8326,8 +8426,7 @@ def _render_source_inspection_failure_once(
 
 
 def _source_path_pattern(source: model.Source) -> str:
-    extra = dict(source.reader.model_extra or {})
-    root = str(extra.get("root") or extra.get("base_dir") or "").strip().rstrip("/")
+    root = str(source.reader.root or "").strip().rstrip("/")
     pattern = str(source.reader.file_pattern or "").strip()
     return f"{root}/{pattern}" if root else pattern
 
@@ -8464,30 +8563,40 @@ def _new_processor_template(
         "source": source.id,
         "kind": "binary_outcome",
         "description": "",
-        "group_by": dimension_profile.applicable_dimensions(
-            builder.workspace_dimension_defaults(ctx.catalog),
-            seed_fields,
+        "group_by": builder.dedupe(
+            [
+                *dimension_profile.applicable_dimensions(
+                    builder.workspace_dimension_defaults(ctx.catalog),
+                    seed_fields,
+                ),
+                *(
+                    builder.calendar_dimensions_for_grain("daily")
+                    if time_column
+                    else []
+                ),
+            ]
         ),
         "time": {
-            "column": time_column,
-            # Day and Month by default; Quarter, Year, and Summary stay
-            # selectable in the editor and summary queries roll up from Month.
-            "grains": ["Day", "Month"] if time_column else ["Summary"],
+            "property": time_column,
+            "grain": "daily" if time_column else "summary",
+            "calendar": {
+                "timezone": ctx.catalog.pipelines.defaults.time_zone,
+                "week_start": ctx.catalog.pipelines.defaults.calendar.week_start,
+            },
         },
         "states": {
             "Count": {"type": "count"},
-            "Positives": {"type": "count"},
-            "Negatives": {"type": "count"},
+            "Positives": {"type": "count", "outcome": "positive"},
+            "Negatives": {"type": "count", "outcome": "negative"},
         },
     }
     if subject_field:
         data["entities"] = {"subject": subject_field}
-    if outcome_column:
-        data["outcome"] = {
-            "column": outcome_column,
-            "positive_values": [1, "Clicked", "Conversion"],
-            "negative_values": [0, "Impression", "Pending"],
-        }
+    data["outcome"] = {
+        "column": outcome_column or "Outcome",
+        "positive_values": [1, "Clicked", "Conversion"],
+        "negative_values": [0, "Impression", "Pending"],
+    }
     return model.BinaryOutcomeProcessor.model_validate(data)
 
 
@@ -8730,7 +8839,7 @@ def _automatic_outcome_transforms(
         {
             "kind": "derive_calendar",
             "from": timestamp,
-            "outputs": ["Day", "Month", "Quarter", "Year"],
+            "outputs": ["Day", "Week", "Month", "Quarter", "Year"],
         },
     ]
     action_parts = ["Issue", "Group", "Name"]
@@ -8787,7 +8896,9 @@ def _preserve_untouched_processor_definition(
     """Keep exact catalog YAML when the processor editor made no semantic change."""
 
     try:
-        candidate = model.Processors.model_validate({"processors": [processor_def]}).processors[0]
+        candidate = model.Processors.model_validate(
+            {"catalog_version": 2, "processors": [processor_def]}
+        ).processors[0]
     except ValueError:
         return processor_def
     status = builder.builder_draft_status(
@@ -8801,21 +8912,9 @@ def _preserve_untouched_processor_definition(
 
 
 def _processor_editor_projection(processor: model.Processor) -> dict[str, Any]:
-    """Normalize implicit processor defaults to the values exposed by the editor."""
+    """Return the exact strict catalog-v2 processor contract."""
 
-    processor_def = builder.processor_to_dict(processor)
-    raw_time = dict(processor_def.pop("time", {}) or {})
-    fixed_time = {key: value for key, value in raw_time.items() if key not in {"column", "grains"}}
-    processor_def["time"] = {
-        "column": processor.time.column if processor.time else None,
-        "grains": [builder.display_grain(grain) for grain in processor.grains],
-        "fixed": fixed_time,
-    }
-    processor_def["states"] = {
-        name: spec.model_dump(mode="json", by_alias=True, exclude_none=True)
-        for name, spec in model.effective_processor_states(processor).items()
-    }
-    return processor_def
+    return builder.processor_to_dict(processor)
 
 
 def _state_rows(
@@ -8825,7 +8924,7 @@ def _state_rows(
     mapping = field_mapping or {}
     rows: list[dict[str, Any]] = []
     for name, spec in model.effective_processor_states(processor).items():
-        extra = dict(spec.model_extra or {})
+        extra = model.state_settings(spec)
         rows.append(
             {
                 "State": name,
@@ -8867,9 +8966,13 @@ def _state_derivation(  # noqa: PLR0911
     state_name: str,
     spec: model.StateSpec,
 ) -> str:
-    extra = dict(spec.model_extra or {})
-    processor_extra = dict(processor.model_extra or {})
-    outcome = processor_extra.get("outcome")
+    extra = model.state_settings(spec)
+    outcome_spec = getattr(processor, "outcome", None)
+    outcome = (
+        outcome_spec.model_dump(mode="python")
+        if isinstance(outcome_spec, model.OutcomeSpec)
+        else None
+    )
     outcome_column = "Outcome"
     positives: list[Any] = ["Clicked", "Conversion"]
     negatives: list[Any] = ["Impression", "Pending"]
@@ -8877,13 +8980,15 @@ def _state_derivation(  # noqa: PLR0911
         outcome_column = str(outcome.get("column", outcome_column))
         positives = list(outcome.get("positive_values", positives))
         negatives = list(outcome.get("negative_values", negatives))
-    if state_name == "Count":
-        return f"{outcome_column} in {_compact_values([*positives, *negatives])}"
-    if state_name == "Positives":
+    if isinstance(spec, model.CountState) and spec.outcome == "positive":
         return f"{outcome_column} in {_compact_values(positives)}"
-    if state_name == "Negatives":
+    if isinstance(spec, model.CountState) and spec.outcome == "negative":
         return f"{outcome_column} in {_compact_values(negatives)}"
+    if isinstance(spec, model.CountState) and spec.stage:
+        return f"rows matching funnel stage {spec.stage}"
     source_column = str(extra.get("source_column", "") or "")
+    if isinstance(spec, model.CountState):
+        return f"non-null {source_column}" if source_column else "included rows"
     if spec.type in {"cpc", "hll", "theta"}:
         return f"approx distinct {source_column}" if source_column else "approx distinct values"
     if spec.type in {"tdigest", "kll"}:

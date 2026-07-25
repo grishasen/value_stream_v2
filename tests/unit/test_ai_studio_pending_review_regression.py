@@ -15,7 +15,7 @@ import pytest
 def _draft_for_source(source_id: str) -> dict:
     return {
         "pipelines": {
-            "version": 1,
+            "catalog_version": 2,
             "workspace": "pending-review-regression",
             "sources": [
                 {
@@ -29,13 +29,19 @@ def _draft_for_source(source_id: str) -> dict:
             ],
         },
         "processors": {
+            "catalog_version": 2,
             "processors": [
                 {
                     "id": "engagement",
                     "source": source_id,
                     "kind": "binary_outcome",
-                    "dimensions": ["Channel"],
-                    "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+                    "group_by": ["Channel", "Day", "Month", "Quarter", "Year"],
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "states": {
+                        "Count": {"type": "count"},
+                        "Positives": {"type": "count", "outcome": "positive"},
+                        "Negatives": {"type": "count", "outcome": "negative"},
+                    },
                     "outcome": {
                         "column": "Outcome",
                         "positive_values": ["Clicked"],
@@ -45,9 +51,10 @@ def _draft_for_source(source_id: str) -> dict:
             ]
         },
         "metrics": {
+            "catalog_version": 2,
             "metrics": {
                 "CTR": {
-                    "source": "engagement",
+                    "processor": "engagement",
                     "kind": "formula",
                     "expression": {
                         "op": "safe_div",
@@ -58,6 +65,7 @@ def _draft_for_source(source_id: str) -> dict:
             }
         },
         "dashboards": {
+            "catalog_version": 2,
             "dashboards": [
                 {
                     "id": "overview",
@@ -73,7 +81,6 @@ def _draft_for_source(source_id: str) -> dict:
                                     "metric": "CTR",
                                     "chart": "line",
                                     "x": "Day",
-                                    "y": "CTR",
                                 }
                             ],
                         }

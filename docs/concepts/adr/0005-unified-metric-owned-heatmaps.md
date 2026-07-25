@@ -21,10 +21,8 @@ grains or persisted processor dimensions:
 - another `x` without `y` renders a one-row intensity strip;
 - numeric-distribution heatmaps may select `property` and `score`.
 
-The legacy `calendar_heatmap`, `cohort_heatmap`, and
-`descriptive_heatmap` kinds remain loadable and renderable. Visual or Advanced
-editing normalizes them to `heatmap`; Raw YAML remains available for explicit
-legacy maintenance.
+Catalog v2 accepts only `heatmap`; the retired calendar, cohort, and
+descriptive aliases are rejected.
 
 ## Consequences
 
@@ -32,6 +30,4 @@ legacy maintenance.
 - Heatmap axes stay within the aggregate query contract.
 - The Builder and Reports Advanced mode have one heatmap choice and one field
   model.
-- Existing catalogs remain readable without a forced bulk migration.
-- Runtime compatibility aliases must remain covered until a future catalog
-  version explicitly removes them.
+- Every editor and runtime path uses the same strict chart contract.

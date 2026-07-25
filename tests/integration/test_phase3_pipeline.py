@@ -17,7 +17,7 @@ def _write_catalog(ws: Path) -> None:
     catalog.mkdir(parents=True)
     (catalog / "pipelines.yaml").write_text(
         """
-version: 1
+catalog_version: 2
 workspace: phase3_test
 sources:
   - id: events
@@ -61,14 +61,16 @@ sources:
     )
     (catalog / "processors.yaml").write_text(
         """
+catalog_version: 2
 processors:
   - id: unique_users
     source: events
     kind: entity_set
     group_by: [Channel]
     time:
-      column: EventTime
-      grains: [Day, Month, Summary]
+      property: EventTime
+      grain: daily
+    entity: CustomerID
     states:
       ActiveUsers_hll: {type: hll, source_column: CustomerID, lg_k: 12}
       Visitors_theta: {type: theta, source_column: CustomerID, lg_k: 12}
@@ -87,26 +89,41 @@ processors:
     kind: funnel
     group_by: [Channel]
     time:
-      column: EventTime
-      grains: [Day, Month, Summary]
+      property: EventTime
+      grain: daily
     entity: CustomerID
     stages:
       - {name: Impression, when: {op: eq, column: Outcome, value: Impression}}
       - {name: Clicked, when: {op: eq, column: Outcome, value: Clicked}}
       - {name: Conversion, when: {op: eq, column: Outcome, value: Conversion}}
+    states:
+      Impression_Count: {type: count, stage: Impression}
+      Clicked_Count: {type: count, stage: Clicked}
+      Conversion_Count: {type: count, stage: Conversion}
+      Impression_Customers_cpc:
+        {type: cpc, source_column: CustomerID, stage: Impression}
+      Clicked_Customers_cpc:
+        {type: cpc, source_column: CustomerID, stage: Clicked}
+      Conversion_Customers_cpc:
+        {type: cpc, source_column: CustomerID, stage: Conversion}
   - id: customer_lifecycle
     source: events
     kind: entity_lifecycle
     group_by: [Channel]
     time:
-      column: EventTime
-      grains: [Summary]
+      property: EventTime
+      grain: summary
     filter: {op: eq, column: Outcome, value: Conversion}
     keys:
       customer_id: CustomerID
       order_id: OrderID
       monetary: Amount
       purchase_date: EventTime
+    states:
+      unique_holdings: {type: count, source_column: OrderID, distinct: true}
+      lifetime_value: {type: value_sum, source_column: Amount}
+      MinPurchasedDate: {type: min, source_column: EventTime}
+      MaxPurchasedDate: {type: max, source_column: EventTime}
   - id: subscription_state
     source: subscriptions
     kind: snapshot
@@ -114,9 +131,10 @@ processors:
     cadence: daily
     group_by: [Plan]
     time:
-      column: SnapshotTime
-      grains: [Day, Month, Summary]
-    as_of_column: Day
+      property: SnapshotTime
+      grain: daily
+    entity: SubscriptionID
+    as_of_property: Day
     states:
       ActiveSubs:
         type: count
@@ -133,42 +151,55 @@ processors:
     )
     (catalog / "metrics.yaml").write_text(
         """
+catalog_version: 2
 metrics:
   ActiveUsers:
-    source: unique_users
+    processor: unique_users
     kind: approx_distinct_count
     state: ActiveUsers_hll
   ClickedAndConverted:
-    source: unique_users
+    processor: unique_users
     kind: set_op
-    op: intersection
-    states: [Clickers_theta, Converters_theta]
+    operation: intersection
+    operands:
+      - {state: Clickers_theta}
+      - {state: Converters_theta}
   ClickedNotConverted:
-    source: unique_users
+    processor: unique_users
     kind: set_op
-    op: a_not_b
-    states: [Clickers_theta, Converters_theta]
+    operation: minus
+    operands:
+      - {state: Clickers_theta}
+      - {state: Converters_theta}
   ClickDropoff:
-    source: action_funnel
+    processor: action_funnel
     kind: funnel_dropoff
-    from_stage: Impression
-    to_stage: Clicked
+    from_state: Impression_Count
+    to_state: Clicked_Count
   LifecycleSummary:
-    source: customer_lifecycle
+    processor: customer_lifecycle
     kind: lifecycle_summary
-    outputs: [frequency, monetary_value, rfm_seg, rfm_segment, rfm_score]
+    holdings_state: unique_holdings
+    monetary_state: lifetime_value
+    first_purchase_state: MinPurchasedDate
+    last_purchase_state: MaxPurchasedDate
+    entity_column: CustomerID
+    outputs: [frequency, monetary_value, rfm_segment, rfm_score]
   ActiveMRR:
-    source: subscription_state
+    processor: subscription_state
     kind: formula
     expression: {col: MRR}
   ActiveSubCount:
-    source: subscription_state
+    processor: subscription_state
     kind: formula
     expression: {col: ActiveSubs}
 """,
         encoding="utf-8",
     )
-    (catalog / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
+    (catalog / "dashboards.yaml").write_text(
+        "catalog_version: 2\ndashboards: []\n",
+        encoding="utf-8",
+    )
 
 
 def _write_data(ws: Path) -> None:
@@ -280,9 +311,9 @@ def test_set_op_operands_apply_relative_time_windows(tmp_path: Path) -> None:
         metrics.read_text(encoding="utf-8")
         + """
   RetainedFromPriorDay:
-    source: unique_users
+    processor: unique_users
     kind: set_op
-    op: intersection
+    operation: intersection
     operands:
       - state: Visitors_theta
         time_window: {last: 1d}

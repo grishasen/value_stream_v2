@@ -19,82 +19,116 @@ from valuestream.processors.registry import create_processor
 _PROCESSOR_ADAPTER = TypeAdapter(model.Processor)
 
 _PARITY_CONFIGS: list[dict[str, Any]] = [
-    {"id": "engagement", "source": "events", "kind": "binary_outcome"},
     {
-        "id": "engagement_entities",
+        "id": "engagement",
         "source": "events",
         "kind": "binary_outcome",
+        "time": {"property": "OutcomeTime", "grain": "daily"},
+        "states": {
+            "Count": {"type": "count"},
+            "Positives": {"type": "count", "outcome": "positive"},
+            "Negatives": {"type": "count", "outcome": "negative"},
+        },
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": [1],
+            "negative_values": [0],
+        },
         "entities": {"subject": "SubjectID"},
-    },
-    {
-        "id": "engagement_explicit",
-        "source": "events",
-        "kind": "binary_outcome",
-        "states": {"Accepted": {"type": "count"}},
     },
     {
         "id": "latency",
         "source": "events",
         "kind": "numeric_distribution",
+        "time": {"property": "EventTime", "grain": "daily"},
         "properties": ["ResponseTime", "Cost"],
+        "states": {
+            "ResponseTime_tdigest": {
+                "type": "tdigest",
+                "source_column": "ResponseTime",
+            },
+            "Cost_tdigest": {"type": "tdigest", "source_column": "Cost"},
+        },
     },
     {
-        "id": "latency_kll",
-        "source": "events",
-        "kind": "numeric_distribution",
-        "properties": ["ResponseTime"],
-        "quantile_engine": "kll",
-        "states": {"{prop}_topk": {"type": "topk", "source_column": "{prop}"}},
-    },
-    {"id": "scores", "source": "events", "kind": "score_distribution"},
-    {
-        "id": "scores_properties",
+        "id": "scores",
         "source": "events",
         "kind": "score_distribution",
-        "score_properties": ["Propensity", "Priority"],
+        "time": {"property": "OutcomeTime", "grain": "daily"},
+        "score_properties": [{"column": "Propensity", "role": "primary"}],
+        "states": {
+            "Count": {"type": "count"},
+            "Propensity_tdigest": {
+                "type": "tdigest",
+                "source_column": "Propensity",
+            },
+        },
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": [1],
+            "negative_values": [0],
+        },
     },
-    {"id": "lifecycle", "source": "orders", "kind": "entity_lifecycle"},
     {
-        "id": "lifecycle_custom",
+        "id": "lifecycle",
         "source": "orders",
         "kind": "entity_lifecycle",
-        "keys": {"customer_id": "BuyerID", "monetary": "Amount"},
-        "states": {"Channel_topk": {"type": "topk", "source_column": "Channel"}},
+        "time": {"property": "PurchasedDate", "grain": "daily"},
+        "keys": {
+            "customer_id": "CustomerID",
+            "order_id": "OrderID",
+            "monetary": "Amount",
+            "purchase_date": "PurchasedDate",
+        },
+        "states": {
+            "unique_holdings": {
+                "type": "count",
+                "source_column": "OrderID",
+                "distinct": True,
+            },
+            "lifetime_value": {
+                "type": "value_sum",
+                "source_column": "Amount",
+            },
+            "MaxPurchasedDate": {
+                "type": "max",
+                "source_column": "PurchasedDate",
+            },
+        },
     },
-    {"id": "cohort", "source": "events", "kind": "entity_set"},
     {
-        "id": "cohort_explicit",
+        "id": "cohort",
         "source": "events",
         "kind": "entity_set",
+        "time": {"property": "EventTime", "grain": "daily"},
         "entity": "SubjectID",
-        "states": {"Weekly_theta": {"type": "theta", "source_column": "SubjectID"}},
+        "states": {
+            "Customers_theta": {
+                "type": "theta",
+                "source_column": "SubjectID",
+            }
+        },
     },
     {
         "id": "funnel",
         "source": "events",
         "kind": "funnel",
+        "time": {"property": "EventTime", "grain": "daily"},
         "stages": [
             {"name": "Impression", "when": {"col": "Impression"}},
             {"name": "Conversion", "when": {"col": "Conversion"}},
         ],
+        "states": {
+            "Impression_Count": {"type": "count", "stage": "Impression"},
+            "Conversion_Count": {"type": "count", "stage": "Conversion"},
+        },
     },
     {
-        "id": "funnel_entity",
-        "source": "events",
-        "kind": "funnel",
-        "entity": "SubjectID",
-        "stages": [
-            {"name": "Impression", "when": {"col": "Impression"}},
-            {"name": "Conversion", "when": {"col": "Conversion"}},
-        ],
-        "states": {"Impression_Customers_hll": {"type": "hll", "source_column": "SubjectID"}},
-    },
-    {"id": "book", "source": "holdings", "kind": "snapshot", "snapshot_kind": "periodic"},
-    {
-        "id": "book_explicit",
+        "id": "book",
         "source": "holdings",
         "kind": "snapshot",
-        "snapshot_kind": "accumulating",
+        "time": {"property": "SnapshotDate", "grain": "daily"},
+        "snapshot_kind": "periodic",
         "entity": "AccountID",
         "states": {"Balance_Sum": {"type": "value_sum", "source_column": "Balance"}},
     },
@@ -108,39 +142,3 @@ def test_engine_state_specs_match_model_effective_states(config: dict[str, Any])
     runtime = create_processor(processor)
 
     assert runtime.state_specs == model.effective_processor_states(processor)
-
-
-@pytest.mark.unit
-def test_model_layer_reports_engine_derived_funnel_and_lifecycle_states() -> None:
-    funnel = _PROCESSOR_ADAPTER.validate_python(
-        {
-            "id": "funnel",
-            "source": "events",
-            "kind": "funnel",
-            "entity": "SubjectID",
-            "stages": [
-                {"name": "Impression", "when": {"col": "Impression"}},
-                {"name": "Conversion", "when": {"col": "Conversion"}},
-            ],
-        }
-    )
-    lifecycle = _PROCESSOR_ADAPTER.validate_python(
-        {"id": "lifecycle", "source": "orders", "kind": "entity_lifecycle"}
-    )
-
-    funnel_states = model.effective_processor_states(funnel)
-    lifecycle_states = model.effective_processor_states(lifecycle)
-
-    assert {
-        "Impression_Count",
-        "Conversion_Count",
-        "Impression_Customers_cpc",
-        "Conversion_Customers_cpc",
-    } <= set(funnel_states)
-    assert {
-        "unique_holdings",
-        "lifetime_value",
-        "MinPurchasedDate",
-        "MaxPurchasedDate",
-        "UniquePurchasers_cpc",
-    } <= set(lifecycle_states)

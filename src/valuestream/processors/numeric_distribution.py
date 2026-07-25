@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
-from typing import Any
-
 import polars as pl
 
 import valuestream.processors.processors_helper as p3
@@ -13,7 +10,6 @@ from valuestream.config.canonical import processor_config_hash
 from valuestream.expr.translator import translate
 from valuestream.processors import grain_levels
 from valuestream.processors.context import ChunkContext
-from valuestream.states import kll, tdigest
 from valuestream.utils.timer import timed
 
 
@@ -40,11 +36,11 @@ class NumericDistributionProcessor:
 
     @property
     def properties(self) -> list[str]:
-        return p3.list_extra(p3.extra(self.config), "properties")
+        return list(self.config.properties)
 
     @property
     def quantile_engine(self) -> str:
-        return str(p3.extra(self.config).get("quantile_engine", "tdigest"))
+        return self.config.quantile_engine
 
     @property
     def state_specs(self) -> dict[str, model.StateSpec]:
@@ -56,7 +52,9 @@ class NumericDistributionProcessor:
         return self.chunk_aggregate_lazy(frame, ctx).collect()
 
     @timed
-    def chunk_aggregate_lazy(self, frame: pl.LazyFrame, ctx: ChunkContext) -> pl.LazyFrame:
+    def chunk_aggregate_lazy(  # noqa: PLR0912
+        self, frame: pl.LazyFrame, ctx: ChunkContext
+    ) -> pl.LazyFrame:
         """Return a lazy daily descriptive aggregate plan for one source chunk."""
         source = frame
         if self.config.filter is not None:
@@ -64,57 +62,64 @@ class NumericDistributionProcessor:
 
         schema = source.collect_schema()
         existing = set(schema.names())
-        properties = [prop for prop in self.properties if prop in existing]
-        numeric_props = [prop for prop in properties if schema[prop].is_numeric()]
         time_columns = grain_levels.chunk_time_group_columns(existing, self.config)
-        group_keys = [
-            column
-            for column in [*self.group_by_columns, *time_columns]
-            if column and column in existing
-        ]
+        group_keys = list(
+            dict.fromkeys(
+                column
+                for column in [*self.group_by_columns, *time_columns]
+                if column and column in existing
+            )
+        )
 
         agg_exprs: list[pl.Expr] = []
-        for prop in properties:
-            agg_exprs.append(pl.col(prop).count().alias(f"{prop}_Count"))
-        for prop in numeric_props:
-            agg_exprs.extend(
-                [
-                    pl.col(prop).sum().cast(pl.Float64).alias(f"{prop}_Sum"),
-                    pl.col(prop).mean().alias(f"{prop}_Mean"),
-                    pl.col(prop).var().alias(f"{prop}_Var"),
-                    pl.col(prop).min().alias(f"{prop}_Min"),
-                    pl.col(prop).max().alias(f"{prop}_Max"),
-                ]
-            )
-            if self.config.sketch_build_mode == "legacy":
-                agg_exprs.append(pl.col(prop).drop_nulls().alias(f"__values_{prop}"))
-        generic_sketches = self._generic_sketch_columns(existing, numeric_props, schema)
-        remaining_sketches = generic_sketches
-        if self.config.sketch_build_mode == "bulk":
-            distribution_sketches: list[p3.DistributionSketchSpec] = [
-                (
-                    f"{prop}_{self.quantile_engine}",
-                    self.quantile_engine,
-                    _sketch_k(self.state_specs[f"{prop}_{self.quantile_engine}"]),
-                    pl.col(prop).drop_nulls(),
-                )
-                for prop in numeric_props
-            ]
-            remaining_sketches = []
-            for expression, metadata in generic_sketches:
-                name, state_type, sketch_k = metadata
-                if state_type in {"tdigest", "kll"}:
-                    distribution_sketches.append((name, state_type, sketch_k, expression))
+        distribution_sketches: list[p3.DistributionSketchSpec] = []
+        remaining_sketches: list[tuple[pl.Expr, tuple[str, str, int]]] = []
+        for name, spec in self.state_specs.items():
+            if spec.type == "count":
+                if spec.source_column:
+                    _require_source_column(self.id, name, spec.source_column, existing)
+                    agg_exprs.append(pl.col(spec.source_column).count().alias(name))
                 else:
+                    agg_exprs.append(pl.len().alias(name))
+            elif spec.type == "value_sum":
+                _require_source_column(self.id, name, spec.source_column, existing)
+                agg_exprs.append(pl.col(spec.source_column).sum().cast(pl.Float64).alias(name))
+            elif spec.type == "pooled_mean":
+                if spec.source_column is None:
+                    raise ValueError(
+                        f"numeric_distribution processor {self.id!r} state {name!r} "
+                        "requires source_column"
+                    )
+                _require_source_column(self.id, name, spec.source_column, existing)
+                agg_exprs.append(pl.col(spec.source_column).mean().alias(name))
+            elif spec.type == "pooled_variance":
+                _require_source_column(self.id, name, spec.source_column, existing)
+                agg_exprs.append(pl.col(spec.source_column).var().alias(name))
+            elif spec.type == "min":
+                _require_source_column(self.id, name, spec.source_column, existing)
+                agg_exprs.append(pl.col(spec.source_column).min().alias(name))
+            elif spec.type == "max":
+                _require_source_column(self.id, name, spec.source_column, existing)
+                agg_exprs.append(pl.col(spec.source_column).max().alias(name))
+            elif spec.type in {"tdigest", "kll"}:
+                _require_source_column(self.id, name, spec.source_column, existing)
+                distribution_sketches.append(
+                    (name, spec.type, _sketch_k(spec), pl.col(spec.source_column).drop_nulls())
+                )
+            elif spec.type in {"cpc", "hll", "theta", "topk"}:
+                expression, metadata = p3.sketch_build_expr(
+                    name,
+                    spec,
+                    existing=existing,
+                    source_dtypes=schema,
+                )
+                if expression is not None:
                     remaining_sketches.append((expression, metadata))
-            if distribution_sketches:
-                agg_exprs.append(p3.distribution_sketch_expr(distribution_sketches))
+        if distribution_sketches:
+            agg_exprs.append(p3.distribution_sketch_expr(distribution_sketches))
         agg_exprs.extend(expression for expression, _ in remaining_sketches)
         grouped = source.group_by(group_keys).agg(agg_exprs)
-        if self.config.sketch_build_mode == "bulk":
-            grouped = p3.unnest_distribution_sketches(grouped)
-        else:
-            grouped = self._postprocess_sketches(grouped, numeric_props)
+        grouped = p3.unnest_distribution_sketches(grouped)
         grouped = p3.postprocess_sketches(
             grouped,
             [metadata for _, metadata in remaining_sketches],
@@ -166,73 +171,25 @@ class NumericDistributionProcessor:
         """Merge rows and preserve config hash for query-time metrics."""
         return p3.merge_for_query(self.merge, frame, group_columns, self.config_hash)
 
-    def _postprocess_sketches(self, frame: pl.LazyFrame, numeric_props: list[str]) -> pl.LazyFrame:
-        out = frame
-        columns = set(out.collect_schema().names())
-        for prop in numeric_props:
-            helper = f"__values_{prop}"
-            if helper not in columns:
-                continue
-            state_name = f"{prop}_{self.quantile_engine}"
-            build = _build_kll if self.quantile_engine == "kll" else _build_tdigest
-            out = out.with_columns(
-                pl.col(helper)
-                .map_elements(
-                    partial(build, k=_sketch_k(self.state_specs[state_name])),
-                    return_dtype=pl.Binary,
-                )
-                .alias(state_name)
-            ).drop(helper)
-        return out
-
     def _ensure_state_columns(self, frame: pl.LazyFrame) -> pl.LazyFrame:
         return p3.ensure_state_columns(frame, self.state_specs)
 
-    def _generic_sketch_columns(
-        self,
-        existing: set[str],
-        numeric_props: list[str],
-        source_schema: pl.Schema,
-    ) -> list[tuple[pl.Expr, tuple[str, str, int]]]:
-        columns: list[tuple[pl.Expr, tuple[str, str, int]]] = []
-        standard_digest_names = {f"{prop}_{self.quantile_engine}" for prop in numeric_props}
-        for name, spec in self.state_specs.items():
-            if spec.type not in {"tdigest", "kll", "cpc", "hll", "theta", "topk"}:
-                continue
-            if name in standard_digest_names:
-                continue
-            expression, metadata = p3.sketch_build_expr(
-                name,
-                spec,
-                existing=existing,
-                default_source_column=_state_source_column(name, spec),
-                source_dtypes=source_schema,
-            )
-            if expression is not None:
-                columns.append((expression, metadata))
-        return columns
-
-
-def _state_source_column(name: str, spec: model.StateSpec) -> str:
-    if source_column := p3.spec_extra(spec).get("source_column"):
-        return str(source_column)
-    for suffix in ("_tdigest", "_kll", "_cpc", "_hll", "_theta", "_topk"):
-        if name.endswith(suffix):
-            return name.removesuffix(suffix)
-    return name
-
 
 def _sketch_k(spec: model.StateSpec) -> int:
-    extra = dict(spec.model_extra or {})
-    return int(extra.get("k", 500 if spec.type == "tdigest" else 200))
+    return int(getattr(spec, "k", None) or (500 if spec.type == "tdigest" else 200))
 
 
-def _build_tdigest(values: Any, k: int) -> bytes:
-    return tdigest.build(values if values is not None else [], k=k)
-
-
-def _build_kll(values: Any, k: int) -> bytes:
-    return kll.build(values if values is not None else [], k=k)
+def _require_source_column(
+    processor_id: str,
+    state_name: str,
+    source_column: str,
+    existing: set[str],
+) -> None:
+    if source_column not in existing:
+        raise ValueError(
+            f"numeric_distribution processor {processor_id!r} state {state_name!r} "
+            f"requires missing source column {source_column!r}"
+        )
 
 
 __all__ = ["NumericDistributionProcessor"]

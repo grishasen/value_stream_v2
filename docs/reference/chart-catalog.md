@@ -74,48 +74,51 @@ The chart factory receives `(rows: pl.DataFrame, tile: dict, plan: PlanInfo)` an
 | Field | Type | Used by | Meaning |
 |---|---|---|---|
 | `x` | str | most | column name on x axis |
-| `y` | str / list[str] | most | column name(s) on y axis |
-| `y2` | str | combo | compatible secondary metric ID; it must have the same metric kind and backing processor as `metric` |
+| `y` | str | scatter, corr, descriptive_line, experiment charts | explicit second dimension or specialist output |
+| `secondary_metric` | str | combo | compatible scalar metric ID with the same kind and backing processor as `metric` |
 | `x_axis_title` / `y_axis_title` | str | cartesian charts | explicit primary-axis labels |
-| `y2_axis_title` | str | combo | explicit secondary-axis label; otherwise the `y2` display label is used |
+| `y2_axis_title` | str | combo | explicit secondary-axis label; otherwise the secondary metric label is used |
 | `color` | str | most | column name to map to color; treemap color comes from `metric` |
 | `size` | str | scatter | column name for marker size |
 | `path` | list[str] | treemap | hierarchy of group-by columns |
-| `value` | str | gauge | scalar column to display |
 | `description` | str | any | plain-language context; falls back to metric description |
 | `placement` | str | kpi_card | `content` or explicit `kpi_strip` placement |
 | `kpi` | dict | kpi_card | comparison period, target, sparkline grain/points |
 | `scale_mode` | str | line, stacked_area | `absolute`, `index_100`, or `percent_change` |
-| `r` | str | bar_polar | legacy radius override; Visual mode derives radius from `metric` |
 | `theta` | str | bar_polar | angle column |
 | `facet_row` | str | most | column for facet rows |
 | `facet_col` | str | most | column for facet columns |
-| `facets` | dict | most | shorthand: `{row: x, col: y}` |
 | `animation_frame` | str | scatter | column for play axis |
 | `animation_group` | str | scatter | column to group across frames |
 | `log_x` / `log_y` | bool | line, scatter | log axis toggle |
 | `reference` | number | gauge | scalar reference level for all gauges |
 | `references` | dict | gauge | reference levels per (row's join-key) |
 | `stages` | list[str] | funnel | ordered stage names |
-| `property` | str | descriptive_* | numeric property column |
+| `property` | str | histogram, descriptive_* | numeric property column |
 | `score` | str | descriptive_line | which score (Mean/Median/p95/…) to plot |
 | `showlegend` | bool | any | Plotly `showlegend` |
 | `value_format` | str | most | display format: `percent`, `integer`, `number`, or `currency` |
 | `goal_line` | number / dict | cartesian charts | horizontal reference line, e.g. `{value: 0.12, label: Target}` |
 | `show_trend_delta` | bool | line, bar | show latest-vs-first delta annotation |
 | `sort_by` | str | bar | column used to sort bars; defaults to `y` |
-| `sort_direction` | str | bar | `asc` or `desc` |
+| `sort_direction` | str | bar | `ascending` or `descending` |
 | `top_n` | int | bar | keep the top N rows after sorting |
 | `barmode` | str | bar | `group`, `stack`, `relative`, or `percent` / `stacked_percent` |
 | `conditional_formatting` | list[dict] | bar, scatter | per-row colors when no explicit `color` field is set |
-| `error_y_lower` / `error_y_upper` | str | interval | absolute lower/upper confidence-bound columns |
+| `metric_output` | str | metric-owned measure charts | selected column from the metric's read-only output contract |
+| `lower_output` / `upper_output` | str | interval | lower/upper confidence-bound outputs from the selected metric |
+
+Every metric exposes its computed output contract in the Metric editor as a
+read-only list. The report editor uses that same list for `metric_output`;
+dimensions, time fields, and processor states are never offered in that
+selector. Scalar metrics have one selectable output, normally their Metric ID.
 
 Interval confidence-bound columns are coerced to nullable numeric values before
 the renderer calculates positive and negative error lengths. A comparison group
 with no eligible rows can therefore render null bounds without raising a
-storage-type error. In both report editors, `y`, `error_y`,
-`error_y_lower`, and `error_y_upper` can select only outputs produced by the
-tile's selected metric; processor dimensions and time fields are excluded.
+storage-type error. In both report editors, `metric_output`, `lower_output`,
+and `upper_output` can select only outputs produced by the tile's selected
+metric; processor dimensions and time fields are excluded.
 
 ---
 
@@ -228,8 +231,7 @@ fig = px.treemap(
 
 ### 3.4 `heatmap`
 
-Required: `x`. Optional: `y`, plus `property` and `score` for a
-`numeric_distribution` processor.
+Required: `x`. Optional: `y`.
 
 The selected metric owns the cell intensity. `value` and `color` are not
 selectable roles and are removed when the tile is saved through an editor.
@@ -243,8 +245,9 @@ The one chart adapts to the configured axes:
   and cohort layouts.
 - daily `x` without `y` renders the calendar layout.
 - another one-dimensional `x` without `y` renders a one-row intensity strip.
-- `property` plus `score` chooses a descriptive aggregate such as
-  `ResponseTime_p95`; otherwise the selected metric's primary output is used.
+- Intensity always comes from the explicitly selected metric output. To show a
+  descriptive statistic such as `ResponseTime_p95`, select the corresponding
+  metric and output instead of binding a second property or score.
 
 ```python
 value = selected_metric_output
@@ -257,10 +260,8 @@ fig = px.imshow(
 )
 ```
 
-`calendar_heatmap`, `cohort_heatmap`, and `descriptive_heatmap` remain accepted
-as read/runtime compatibility aliases. They are no longer offered as separate
-Builder choices; editing one in Visual or Advanced mode migrates it to
-`chart: heatmap`.
+The retired calendar, cohort, and descriptive heatmap aliases are rejected.
+Use `chart: heatmap` with `x`, optional `y`, and the selected metric.
 
 ### 3.5 `scatter`
 
@@ -337,16 +338,14 @@ fig = px.funnel(
 
 ### 3.9 `boxplot`
 
-Required: a `tdigest_quantile` metric. Optional: `property, x, color,
-facet_row, facet_col`. `property` is a constrained selector containing only
-properties backed by an unconditioned t-digest or KLL metric on the same
-processor. Changing it transparently queries that property's distribution
-metric. Without `x`, the renderer produces one overall distribution box; set
-`x` to compare the distribution across time or another persisted dimension.
+Required: a `distribution` metric. Optional: `x, color, facet_row, facet_col`.
+The metric binds one unconditioned t-digest or KLL state and therefore owns the
+numeric property. There is no second Property, Y, or Value field. To change
+the measured property, select its automatically persisted distribution metric.
+Without `x`, the renderer produces one overall distribution box; set `x` to
+compare the distribution across time or another persisted dimension.
 
-There is no `y` field: the selected distribution property owns the sketch and
-supplies the quantile values. Scalar processor outputs such as `<prop>_Count`
-are therefore not offered. Boxplots are reconstructed from
+Scalar processor outputs such as `<prop>_Count` are not offered. Boxplots are reconstructed from
 `<prop>_p25, <prop>_Median, <prop>_p75, <prop>_Min, <prop>_Max` (or t-digest
 quantiles) already exposed by that metric.
 
@@ -471,7 +470,7 @@ The chart factory pulls `<property>_<score>` from the metric output; see
 reference/processors.md §4 for the column naming convention. Score names are
 case-insensitive (`P95` and `p95` both resolve to the canonical `_p95` column).
 Use `histogram` for a digest-backed distribution and the unified `heatmap` with
-`property` and `score` for a descriptive matrix.
+the corresponding metric output for a descriptive matrix.
 
 ### 3.18 `experiment_z_score` / `experiment_odds_ratio`
 
@@ -508,9 +507,9 @@ primitives except for the native Streamlit table on the Reports surface:
 | `waterfall` | `x`; Y comes from `metric` | Single-trace contribution or change decomposition; no color grouping or facets |
 | `pareto` | `x`; Y comes from `metric` | Top campaigns/offers plus cumulative share |
 | `heatmap` | `x` and optional `y`; intensity comes from `metric` | Matrix, cohort, descriptive, or daily calendar intensity |
-| `sankey` | `source, target`; value comes from `metric` | Journey/path flow between stages or channels |
-| `combo` | `x, y2`; Y comes from `metric` | Bar + line dual-axis comparison of two compatible scalar metrics; use `y2_axis_title` to override the secondary-axis label |
-| `interval` | `x, y` plus optional error fields; Y/error roles use metric outputs only | Lift/estimate with uncertainty interval |
+| `sankey` | ordered `path` of 2+ dimensions; value comes from `metric` | Multi-step journey/path flow between stages or channels |
+| `combo` | `x, secondary_metric`; Y comes from `metric` | Bar + line dual-axis comparison of two compatible scalar metrics; use `y2_axis_title` to override the secondary-axis label |
+| `interval` | `x, metric_output` plus optional `lower_output`/`upper_output` | Lift/estimate with uncertainty interval |
 | `donut` | `names`; values come from `metric` | Simple share-of-total for small category sets |
 | `geo_map` | `locations, value` or `lat, lon, value` | Country/region/city performance |
 | `table` | optional `columns` | Native sortable and scrollable report table with optional conditional formatting; a selected `topk_items` list is expanded into rank, item, estimate, and lower/upper-bound columns |
@@ -522,7 +521,18 @@ primitives except for the native Streamlit table on the Reports surface:
   chart: pareto
   x: Campaign
   top_n: 12
+
+- id: customer_journey
+  title: Customer journey
+  metric: Clicks
+  chart: sankey
+  path: [Channel, CustomerType, Placement]
 ```
+
+For Sankey, every adjacent pair in `path` becomes a link layer. Nodes are
+stage-scoped, so the same label may appear independently at different steps.
+Legacy `source` and `target` fields remain readable as a two-step path, but
+Builder writes the canonical `path` form.
 
 ---
 
@@ -547,10 +557,10 @@ The Builder UI uses the following metadata table to filter chart kinds by the me
 | `geo_map` | binary_outcome, score_distribution, snapshot | location dim | metric.outputs[0] |
 | `table` | aggregate metrics | — | — |
 | `bar_polar` | binary_outcome | theta: first dimension | radius: selected metric's primary output |
-| `sankey` | aggregate metrics | source/target dims | selected metric's primary output |
+| `sankey` | aggregate metrics | ordered processor dimension path | selected metric's primary output |
 | `gauge` | binary_outcome, snapshot | — | selected metric's primary output |
 | `funnel` | funnel, numeric_distribution | optional first dimension | stage counts |
-| `boxplot` | numeric_distribution | optional first time-grain dim | digest/KLL-backed `property` (no `y`) |
+| `boxplot` | numeric_distribution, score_distribution | optional first time-grain dim | selected `distribution` metric (no `property` or `y`) |
 | `histogram` | numeric_distribution, entity_lifecycle | — | — |
 | `calibration_curve` | score_distribution (Calibration metric) | — | — |
 | `roc_curve` | score_distribution (`curve_from_digests`) | — | — |

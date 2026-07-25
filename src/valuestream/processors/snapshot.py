@@ -36,8 +36,7 @@ class SnapshotProcessor:
 
     @property
     def entity_column(self) -> str | None:
-        raw = p3.extra(self.config).get("entity")
-        return str(raw) if raw is not None else None
+        return self.config.entity
 
     @property
     def state_specs(self) -> dict[str, model.StateSpec]:
@@ -125,7 +124,7 @@ class SnapshotProcessor:
         exprs: list[pl.Expr] = []
         for name, spec in self.state_specs.items():
             raw_extra = p3.spec_extra(spec)
-            source_column = str(raw_extra.get("source_column", name))
+            source_column = str(getattr(spec, "source_column", "") or "")
             if spec.type == "count":
                 exprs.append(p3.count_expr(raw_extra, alias=name))
             elif spec.type == "value_sum" and source_column in existing:
@@ -139,7 +138,6 @@ class SnapshotProcessor:
                     name,
                     spec,
                     existing=existing,
-                    default_source_column=self.entity_column or "CustomerID",
                     source_dtypes=source_schema,
                 )
                 if expr is not None:
@@ -155,7 +153,6 @@ class SnapshotProcessor:
                 name,
                 spec,
                 existing=existing,
-                default_source_column=self.entity_column or "CustomerID",
             )
             columns.append(meta)
         return columns
@@ -169,10 +166,8 @@ class SnapshotProcessor:
     def _with_periodic_as_of(self, frame: pl.LazyFrame, ctx: ChunkContext) -> pl.LazyFrame:
         existing = set(frame.collect_schema().names())
         as_of_column = str(
-            p3.extra(self.config).get(
-                "as_of_column",
-                next((column for column in ("as_of_date", "Day", "day") if column in existing), ""),
-            )
+            self.config.as_of_property
+            or next((column for column in ("as_of_date", "Day", "day") if column in existing), "")
         )
         if as_of_column and as_of_column in existing:
             return frame.with_columns(pl.col(as_of_column).cast(pl.Date).alias("as_of_date"))
@@ -188,12 +183,7 @@ class SnapshotProcessor:
         return frame.sort("as_of_date").unique(subset=[entity], keep="last")
 
     def _accumulating_as_of_expr(self, ctx: ChunkContext) -> pl.Expr:
-        raw_milestones = p3.extra(self.config).get("milestones", [])
-        columns = [
-            str(item["column"])
-            for item in raw_milestones
-            if isinstance(item, dict) and "column" in item
-        ]
+        columns = [milestone.property for milestone in self.config.milestones]
         if columns:
             return pl.max_horizontal([pl.col(column) for column in columns]).cast(pl.Date)
         return pl.lit(ctx.created_at.date())

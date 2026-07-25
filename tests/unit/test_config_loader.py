@@ -48,7 +48,8 @@ class TestDemoWorkspace:
         expected = {
             "formula",
             "approx_distinct_count",
-            "tdigest_quantile",
+            "distribution",
+            "quantile",
             "variant_compare",
             "curve_from_digests",
             "calibration_from_digests",
@@ -97,16 +98,15 @@ class TestFatWorkspace:
         result = validate_catalog(catalog)
 
         assert result.ok, [f"{issue.location}: {issue.message}" for issue in result.issues]
-        assert {source.id for source in catalog.pipelines.sources} == {"ih", "holdings"}
+        assert {source.id for source in catalog.pipelines.sources} == {"ih"}
 
-    def test_covers_viable_legacy_processor_and_metric_kinds(self) -> None:
+    def test_covers_supported_processor_and_metric_kinds(self) -> None:
         catalog = load(FAT_WS)
 
         assert {processor.kind for processor in catalog.processors.processors} == {
             "binary_outcome",
             "numeric_distribution",
             "score_distribution",
-            "entity_lifecycle",
             "entity_set",
             "funnel",
         }
@@ -114,13 +114,13 @@ class TestFatWorkspace:
             "formula",
             "approx_distinct_count",
             "topk_items",
-            "tdigest_quantile",
+            "distribution",
+            "quantile",
             "variant_compare",
             "curve_from_digests",
             "calibration_from_digests",
             "contingency_test",
             "proportion_test",
-            "lifecycle_summary",
             "set_op",
             "funnel_dropoff",
         }
@@ -137,30 +137,18 @@ class TestFatWorkspace:
             "fat_business_value": [
                 "executive_overview",
                 "engagement",
-                "reach_and_frequency",
                 "conversion_and_revenue",
+                "efficiency_and_unit_economics",
                 "outcome_funnel",
+                "reach_and_frequency",
             ],
-            "fat_model_quality": ["model_quality", "distributions"],
-            "fat_experiments": ["experiments", "distributions"],
-            "fat_clv": ["customer_lifecycle"],
-        }
-
-    def test_enables_bulk_sketch_build_only_for_quantile_processors(self) -> None:
-        catalog = load(FAT_WS)
-
-        quantile_processors = {
-            processor.id: processor.sketch_build_mode
-            for processor in catalog.processors.processors
-            if isinstance(
-                processor,
-                model.NumericDistributionProcessor | model.ScoreDistributionProcessor,
-            )
-        }
-
-        assert quantile_processors == {
-            "descriptive": "bulk",
-            "model_ml_scores": "bulk",
+            "fat_model_quality": [
+                "model_quality",
+                "model_comparison",
+                "distributions",
+                "response_time_health",
+            ],
+            "fat_experiments": ["experiments"],
         }
 
 
@@ -179,7 +167,9 @@ class TestErrorPaths:
         catalog_dir = tmp_path / "catalog"
         catalog_dir.mkdir()
         # Create only one of the four required files.
-        (catalog_dir / "pipelines.yaml").write_text("version: 1\nworkspace: foo\nsources: []\n")
+        (catalog_dir / "pipelines.yaml").write_text(
+            "catalog_version: 2\nworkspace: foo\nsources: []\n"
+        )
         with pytest.raises(CatalogLoadError, match="missing catalog file"):
             load(tmp_path)
 
@@ -224,7 +214,7 @@ class TestErrorPaths:
         (catalog_dir / "pipelines.yaml").write_text(
             yaml.safe_dump(
                 {
-                    "version": 1,
+                    "catalog_version": 2,
                     "workspace": "x",
                     "sources": [
                         {
@@ -238,6 +228,7 @@ class TestErrorPaths:
         (catalog_dir / "processors.yaml").write_text(
             yaml.safe_dump(
                 {
+                    "catalog_version": 2,
                     "processors": [
                         {
                             "id": "p",
@@ -249,100 +240,36 @@ class TestErrorPaths:
                 }
             )
         )
-        (catalog_dir / "metrics.yaml").write_text("metrics: {}\n")
-        (catalog_dir / "dashboards.yaml").write_text("dashboards: []\n")
+        (catalog_dir / "metrics.yaml").write_text("catalog_version: 2\nmetrics: {}\n")
+        (catalog_dir / "dashboards.yaml").write_text(
+            "catalog_version: 2\ndashboards: []\n"
+        )
         with pytest.raises(CatalogLoadError):
             load(tmp_path)
 
     def test_legacy_processor_grouping_fields_are_rejected(self) -> None:
-        base = {"id": "p", "source": "s", "kind": "binary_outcome"}
+        base = {
+            "id": "p",
+            "source": "s",
+            "kind": "binary_outcome",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {"Count": {"type": "count"}},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
+        }
         for field in ("grains", "extra_dimensions"):
-            with pytest.raises(ValueError, match="legacy processor field"):
+            with pytest.raises(ValueError, match="Extra inputs are not permitted"):
                 model.BinaryOutcomeProcessor.model_validate({**base, field: ["Channel"]})
-
-    def test_dimensions_alias_maps_to_group_by(self) -> None:
-        processor = model.BinaryOutcomeProcessor.model_validate(
-            {
-                "id": "p",
-                "source": "s",
-                "kind": "binary_outcome",
-                "dimensions": ["Channel", "Issue"],
-            }
-        )
-
-        assert processor.group_by == ["Channel", "Issue"]
-
-    def test_binary_processor_derives_default_states_without_yaml_states(self) -> None:
-        processor = model.BinaryOutcomeProcessor.model_validate(
-            {
-                "id": "p",
-                "source": "s",
-                "kind": "binary_outcome",
-                "entities": {"subject": "CustomerID"},
-            }
-        )
-
-        assert processor.states == {}
-        assert set(model.effective_processor_states(processor)) == {
-            "Count",
-            "Positives",
-            "Negatives",
-            "UniqueSubjects_cpc",
-        }
-
-    def test_numeric_processor_explicit_states_overlay_defaults(self) -> None:
-        processor = model.NumericDistributionProcessor.model_validate(
-            {
-                "id": "p",
-                "source": "s",
-                "kind": "numeric_distribution",
-                "properties": ["ResponseTime"],
-                "states": {"ResponseTime_tdigest": {"type": "tdigest"}},
-            }
-        )
-
-        states = model.effective_processor_states(processor)
-
-        assert set(states) >= {
-            "ResponseTime_Count",
-            "ResponseTime_Sum",
-            "ResponseTime_Mean",
-            "ResponseTime_Var",
-            "ResponseTime_Min",
-            "ResponseTime_Max",
-            "ResponseTime_tdigest",
-        }
-
-    @pytest.mark.parametrize(
-        ("processor_type", "kind"),
-        [
-            (model.NumericDistributionProcessor, "numeric_distribution"),
-            (model.ScoreDistributionProcessor, "score_distribution"),
-        ],
-    )
-    def test_quantile_processor_sketch_build_mode_is_typed(
-        self,
-        processor_type: type[model.NumericDistributionProcessor | model.ScoreDistributionProcessor],
-        kind: str,
-    ) -> None:
-        base = {"id": "p", "source": "s", "kind": kind}
-
-        assert processor_type.model_validate(base).sketch_build_mode == "bulk"
-        assert (
-            processor_type.model_validate({**base, "sketch_build_mode": "bulk"}).sketch_build_mode
-            == "bulk"
-        )
-        assert (
-            processor_type.model_validate({**base, "sketch_build_mode": "legacy"}).sketch_build_mode
-            == "legacy"
-        )
-        with pytest.raises(ValueError, match=r"legacy.*bulk"):
-            processor_type.model_validate({**base, "sketch_build_mode": "adaptive"})
 
     def test_semantic_binary_processor_validates_formula_metrics(self) -> None:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
+                    "catalog_version": 2,
                     "workspace": "semantic",
                     "sources": [
                         {
@@ -356,13 +283,23 @@ class TestErrorPaths:
                     ],
                 },
                 "processors": {
+                    "catalog_version": 2,
                     "processors": [
                         {
                             "id": "engagement",
                             "source": "ih",
                             "kind": "binary_outcome",
-                            "dimensions": ["Channel"],
-                            "time": {"column": "OutcomeTime", "grains": ["Day", "Summary"]},
+                            "group_by": ["Channel"],
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
+                            "states": {
+                                "Count": {"type": "count"},
+                                "Positives": {"type": "count", "outcome": "positive"},
+                                "Negatives": {"type": "count", "outcome": "negative"},
+                                "UniqueSubjects_cpc": {
+                                    "type": "cpc",
+                                    "source_column": "CustomerID",
+                                },
+                            },
                             "entities": {"subject": "CustomerID"},
                             "outcome": {
                                 "column": "Outcome",
@@ -373,9 +310,10 @@ class TestErrorPaths:
                     ]
                 },
                 "metrics": {
+                    "catalog_version": 2,
                     "metrics": {
                         "CTR": {
-                            "source": "engagement",
+                            "processor": "engagement",
                             "kind": "formula",
                             "expression": {
                                 "op": "safe_div",
@@ -385,7 +323,7 @@ class TestErrorPaths:
                         }
                     }
                 },
-                "dashboards": {"dashboards": []},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
@@ -395,6 +333,7 @@ class TestErrorPaths:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "semantic",
                     "sources": [
                         {
@@ -408,28 +347,39 @@ class TestErrorPaths:
                     ],
                 },
                 "processors": {
+                    "catalog_version": 2,
                     "processors": [
                         {
                             "id": "engagement",
                             "source": "ih",
                             "kind": "binary_outcome",
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
                             "states": {
                                 "Count": {"type": "count"},
-                                "UniqueCustomers_hll": {"type": "hll"},
+                                "UniqueCustomers_hll": {
+                                    "type": "hll",
+                                    "source_column": "CustomerID",
+                                },
+                            },
+                            "outcome": {
+                                "column": "Outcome",
+                                "positive_values": ["Clicked"],
+                                "negative_values": ["Impression"],
                             },
                         }
                     ]
                 },
                 "metrics": {
+                    "catalog_version": 2,
                     "metrics": {
                         "UniqueCustomers": {
-                            "source": "engagement",
+                            "processor": "engagement",
                             "kind": "approx_distinct_count",
                             "state": "Missing_hll",
                         }
                     }
                 },
-                "dashboards": {"dashboards": []},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
@@ -446,6 +396,7 @@ class TestErrorPaths:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "semantic",
                     "sources": [
                         {
@@ -459,11 +410,14 @@ class TestErrorPaths:
                     ],
                 },
                 "processors": {
+                    "catalog_version": 2,
                     "processors": [
                         {
                             "id": "audience",
                             "source": "ih",
                             "kind": "entity_set",
+                            "entity": "CustomerID",
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
                             "states": {
                                 "Audience_theta": {
                                     "type": "theta",
@@ -474,15 +428,16 @@ class TestErrorPaths:
                     ]
                 },
                 "metrics": {
+                    "catalog_version": 2,
                     "metrics": {
                         "UniqueCustomers": {
-                            "source": "audience",
+                            "processor": "audience",
                             "kind": "approx_distinct_count",
                             "state": "Audience_theta",
                         }
                     }
                 },
-                "dashboards": {"dashboards": []},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
@@ -494,6 +449,7 @@ class TestErrorPaths:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "semantic",
                     "sources": [
                         {
@@ -504,26 +460,35 @@ class TestErrorPaths:
                     ],
                 },
                 "processors": {
+                    "catalog_version": 2,
                     "processors": [
                         {
                             "id": "response_time",
                             "source": "ih",
                             "kind": "numeric_distribution",
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
                             "properties": ["ResponseTime"],
+                            "states": {
+                                "ResponseTime_Count": {
+                                    "type": "count",
+                                    "source_column": "ResponseTime",
+                                }
+                            },
                         }
                     ]
                 },
                 "metrics": {
+                    "catalog_version": 2,
                     "metrics": {
                         "ResponseTimeP95": {
-                            "source": "response_time",
-                            "kind": "tdigest_quantile",
+                            "processor": "response_time",
+                            "kind": "quantile",
                             "state": "ResponseTime_Count",
                             "quantile": 0.95,
                         }
                     }
                 },
-                "dashboards": {"dashboards": []},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
@@ -537,47 +502,11 @@ class TestErrorPaths:
             for issue in result.issues
         )
 
-    def test_semantic_funnel_requires_stage_conditions(self) -> None:
-        catalog = model.Catalog.model_validate(
-            {
-                "pipelines": {
-                    "workspace": "semantic",
-                    "sources": [
-                        {
-                            "id": "ih",
-                            "reader": {"kind": "csv", "file_pattern": "*.csv"},
-                            "schema": {"timestamp_column": "OutcomeTime"},
-                        }
-                    ],
-                },
-                "processors": {
-                    "processors": [
-                        {
-                            "id": "outcome_funnel",
-                            "source": "ih",
-                            "kind": "funnel",
-                            "stages": [{"name": "Impression"}],
-                        }
-                    ]
-                },
-                "metrics": {"metrics": {}},
-                "dashboards": {"dashboards": []},
-            }
-        )
-
-        result = validate_catalog(catalog)
-
-        assert not result.ok
-        assert any(
-            issue.location == "processors[outcome_funnel].stages[0].when"
-            and issue.message == "field required"
-            for issue in result.issues
-        )
-
     def test_semantic_funnel_dropoff_validates_stage_names(self) -> None:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "semantic",
                     "sources": [
                         {
@@ -591,11 +520,17 @@ class TestErrorPaths:
                     ],
                 },
                 "processors": {
+                    "catalog_version": 2,
                     "processors": [
                         {
                             "id": "outcome_funnel",
                             "source": "ih",
                             "kind": "funnel",
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
+                            "states": {
+                                "Impression": {"type": "count", "stage": "Impression"},
+                                "Clicked": {"type": "count", "stage": "Clicked"},
+                            },
                             "stages": [
                                 {
                                     "name": "Impression",
@@ -618,16 +553,17 @@ class TestErrorPaths:
                     ]
                 },
                 "metrics": {
+                    "catalog_version": 2,
                     "metrics": {
                         "Dropoff": {
-                            "source": "outcome_funnel",
+                            "processor": "outcome_funnel",
                             "kind": "funnel_dropoff",
-                            "from_stage": "Impression",
-                            "to_stage": "Conversion",
+                            "from_state": "Impression",
+                            "to_state": "Conversion",
                         }
                     }
                 },
-                "dashboards": {"dashboards": []},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
@@ -635,8 +571,8 @@ class TestErrorPaths:
 
         assert not result.ok
         assert any(
-            issue.location == "metrics.Dropoff.to_stage"
-            and "unknown funnel stage 'Conversion'" in issue.message
+            issue.location == "metrics.Dropoff.to_state"
+            and "unknown funnel stage-count state 'Conversion'" in issue.message
             for issue in result.issues
         )
 
@@ -644,6 +580,7 @@ class TestErrorPaths:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "renamed",
                     "sources": [
                         {
@@ -660,9 +597,9 @@ class TestErrorPaths:
                         }
                     ],
                 },
-                "processors": {"processors": []},
-                "metrics": {"metrics": {}},
-                "dashboards": {"dashboards": []},
+                "processors": {"catalog_version": 2, "processors": []},
+                "metrics": {"catalog_version": 2, "metrics": {}},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
@@ -672,6 +609,7 @@ class TestErrorPaths:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "source_filter",
                     "sources": [
                         {
@@ -692,12 +630,14 @@ class TestErrorPaths:
                     ],
                 },
                 "processors": {
+                    "catalog_version": 2,
                     "processors": [
                         {
                             "id": "engagement",
                             "source": "ih",
                             "kind": "binary_outcome",
-                            "time": {"column": "OutcomeTime"},
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
+                            "states": {"Count": {"type": "count"}},
                             "outcome": {
                                 "column": "Outcome",
                                 "positive_values": ["Clicked"],
@@ -706,64 +646,18 @@ class TestErrorPaths:
                         }
                     ]
                 },
-                "metrics": {"metrics": {}},
-                "dashboards": {"dashboards": []},
+                "metrics": {"catalog_version": 2, "metrics": {}},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
         assert validate_catalog(catalog).ok
 
-    def test_score_processor_accepts_scores_alias(self) -> None:
-        processor = model.ScoreDistributionProcessor.model_validate(
-            {
-                "id": "scores",
-                "source": "ih",
-                "kind": "score_distribution",
-                "scores": {"primary": "final_propensity"},
-            }
-        )
-
-        states = model.effective_processor_states(processor)
-        assert processor.model_extra["score_columns"]["primary"] == "final_propensity"
-        assert processor.model_extra["score_properties"] == ["final_propensity"]
-        assert (
-            states["final_propensity_tdigest_positives"].model_extra["source_column"]
-            == "final_propensity"
-        )
-
-    def test_processor_time_aggregation_levels_are_normalized(self) -> None:
-        processor = model.BinaryOutcomeProcessor.model_validate(
-            {
-                "id": "p",
-                "source": "s",
-                "kind": "binary_outcome",
-                "time": {
-                    "grains": ["Day", "Month", "Summary"],
-                    "aggregation_levels": {"Summary": "Quarter", "Month": "Day"},
-                },
-            }
-        )
-
-        assert processor.aggregation_level_for("Summary") == "quarterly"
-        assert processor.aggregation_level_for("Month") == "daily"
-        assert processor.aggregation_level_for("Day") == "daily"
-
-    def test_processor_time_rejects_invalid_aggregation_level(self) -> None:
-        with pytest.raises(ValueError, match="not valid for grain"):
-            model.BinaryOutcomeProcessor.model_validate(
-                {
-                    "id": "p",
-                    "source": "s",
-                    "kind": "binary_outcome",
-                    "time": {"aggregation_levels": {"Summary": "Day"}},
-                }
-            )
-
     def test_loader_rejects_duplicate_yaml_keys(self, tmp_path: Path) -> None:
         catalog_dir = tmp_path / "catalog"
         catalog_dir.mkdir()
         (catalog_dir / "pipelines.yaml").write_text(
-            "version: 1\nworkspace: first\nworkspace: second\nsources: []\n",
+            "catalog_version: 2\nworkspace: first\nworkspace: second\nsources: []\n",
             encoding="utf-8",
         )
 
@@ -778,12 +672,13 @@ class TestErrorPaths:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "duplicates",
                     "sources": [source, source],
                 },
-                "processors": {"processors": []},
-                "metrics": {"metrics": {}},
-                "dashboards": {"dashboards": []},
+                "processors": {"catalog_version": 2, "processors": []},
+                "metrics": {"catalog_version": 2, "metrics": {}},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
@@ -799,6 +694,7 @@ class TestErrorPaths:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "dependencies",
                     "sources": [
                         {
@@ -808,28 +704,52 @@ class TestErrorPaths:
                     ],
                 },
                 "processors": {
+                    "catalog_version": 2,
                     "processors": [
-                        {"id": "first", "source": "events", "kind": "binary_outcome"},
-                        {"id": "second", "source": "events", "kind": "binary_outcome"},
+                        {
+                            "id": "first",
+                            "source": "events",
+                            "kind": "binary_outcome",
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
+                            "states": {"Count": {"type": "count"}},
+                            "outcome": {
+                                "column": "Outcome",
+                                "positive_values": ["Clicked"],
+                                "negative_values": ["Impression"],
+                            },
+                        },
+                        {
+                            "id": "second",
+                            "source": "events",
+                            "kind": "binary_outcome",
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
+                            "states": {"Count": {"type": "count"}},
+                            "outcome": {
+                                "column": "Outcome",
+                                "positive_values": ["Clicked"],
+                                "negative_values": ["Impression"],
+                            },
+                        },
                     ]
                 },
                 "metrics": {
+                    "catalog_version": 2,
                     "metrics": {
                         "A": {
-                            "source": "first",
+                            "processor": "first",
                             "kind": "formula",
                             "depends_on": ["B"],
                             "expression": {"col": "B"},
                         },
                         "B": {
-                            "source": "second",
+                            "processor": "second",
                             "kind": "formula",
                             "depends_on": ["A"],
                             "expression": {"col": "A"},
                         },
                     }
                 },
-                "dashboards": {"dashboards": []},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
@@ -845,6 +765,7 @@ class TestErrorPaths:
         catalog = model.Catalog.model_validate(
             {
                 "pipelines": {
+                    "catalog_version": 2,
                     "workspace": "experiment",
                     "sources": [
                         {
@@ -854,19 +775,32 @@ class TestErrorPaths:
                     ],
                 },
                 "processors": {
+                    "catalog_version": 2,
                     "processors": [
                         {
                             "id": "engagement",
                             "source": "events",
                             "kind": "binary_outcome",
                             "group_by": ["Channel"],
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
+                            "states": {
+                                "Count": {"type": "count"},
+                                "Positives": {"type": "count", "outcome": "positive"},
+                                "Negatives": {"type": "count", "outcome": "negative"},
+                            },
+                            "outcome": {
+                                "column": "Outcome",
+                                "positive_values": ["Clicked"],
+                                "negative_values": ["Impression"],
+                            },
                         }
                     ]
                 },
                 "metrics": {
+                    "catalog_version": 2,
                     "metrics": {
                         "Lift": {
-                            "source": "engagement",
+                            "processor": "engagement",
                             "kind": "variant_compare",
                             "variant_column": "ModelControlGroup",
                             "test_role": "Test",
@@ -874,7 +808,7 @@ class TestErrorPaths:
                         }
                     }
                 },
-                "dashboards": {"dashboards": []},
+                "dashboards": {"catalog_version": 2, "dashboards": []},
             }
         )
 
@@ -886,77 +820,18 @@ class TestErrorPaths:
             for issue in result.issues
         )
 
-    def test_validator_requires_chart_role_fields(self) -> None:
-        catalog = model.Catalog.model_validate(
-            {
-                "pipelines": {
-                    "workspace": "charts",
-                    "sources": [
-                        {
-                            "id": "events",
-                            "reader": {"kind": "parquet", "file_pattern": "*.parquet"},
-                        }
-                    ],
-                },
-                "processors": {
-                    "processors": [
-                        {"id": "engagement", "source": "events", "kind": "binary_outcome"}
-                    ]
-                },
-                "metrics": {
-                    "metrics": {
-                        "Count": {
-                            "source": "engagement",
-                            "kind": "formula",
-                            "expression": {"col": "Count"},
-                        }
-                    }
-                },
-                "dashboards": {
-                    "dashboards": [
-                        {
-                            "id": "overview",
-                            "title": "Overview",
-                            "pages": [
-                                {
-                                    "id": "main",
-                                    "title": "Main",
-                                    "tiles": [
-                                        {
-                                            "id": "broken_line",
-                                            "title": "Broken",
-                                            "metric": "Count",
-                                            "chart": "line",
-                                        }
-                                    ],
-                                }
-                            ],
-                        }
-                    ]
-                },
-            }
-        )
-
-        result = validate_catalog(catalog)
-
-        assert not result.ok
-        assert any(
-            issue.location.endswith("tiles[broken_line].x")
-            and "chart 'line' requires 'x'" in issue.message
-            for issue in result.issues
-        )
-
-
 # ---------------------------------------------------------------------------
 # Schema-on-disk parity.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_validator_rejects_variant_column_duplicated_in_group_by() -> None:
+def test_validator_accepts_explicit_variant_column_in_group_by() -> None:
     catalog = model.Catalog.model_validate(
         {
             "pipelines": {
+                "catalog_version": 2,
+                "catalog_version": 2,
                 "workspace": "duplicate_variant",
                 "sources": [
                     {
@@ -966,29 +841,32 @@ def test_validator_rejects_variant_column_duplicated_in_group_by() -> None:
                 ],
             },
             "processors": {
+                "catalog_version": 2,
                 "processors": [
                     {
                         "id": "engagement",
                         "source": "events",
                         "kind": "binary_outcome",
                         "group_by": ["Channel", "ModelControlGroup"],
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
+                        "states": {"Count": {"type": "count"}},
+                        "outcome": {
+                            "column": "Outcome",
+                            "positive_values": ["Clicked"],
+                            "negative_values": ["Impression"],
+                        },
                         "variant_column": "ModelControlGroup",
                     }
                 ]
             },
-            "metrics": {"metrics": {}},
-            "dashboards": {"dashboards": []},
+            "metrics": {"catalog_version": 2, "metrics": {}},
+            "dashboards": {"catalog_version": 2, "dashboards": []},
         }
     )
 
     result = validate_catalog(catalog)
 
-    assert not result.ok
-    assert any(
-        issue.location == "processors[engagement].variant_column"
-        and "already present in group_by" in issue.message
-        for issue in result.issues
-    )
+    assert result.ok, result.issues
 
 
 @pytest.mark.unit
@@ -996,6 +874,7 @@ def test_validator_evolves_observed_source_columns_through_rename_capitalize() -
     catalog = model.Catalog.model_validate(
         {
             "pipelines": {
+                "catalog_version": 2,
                 "workspace": "sample_backed",
                 "sources": [
                     {
@@ -1015,9 +894,9 @@ def test_validator_evolves_observed_source_columns_through_rename_capitalize() -
                     }
                 ],
             },
-            "processors": {"processors": []},
-            "metrics": {"metrics": {}},
-            "dashboards": {"dashboards": []},
+            "processors": {"catalog_version": 2, "processors": []},
+            "metrics": {"catalog_version": 2, "metrics": {}},
+            "dashboards": {"catalog_version": 2, "dashboards": []},
         }
     )
 
@@ -1054,6 +933,7 @@ def test_validator_accepts_boxplot_without_axes_for_distribution_metrics() -> No
     catalog = model.Catalog.model_validate(
         {
             "pipelines": {
+                "catalog_version": 2,
                 "workspace": "charts",
                 "sources": [
                     {
@@ -1063,30 +943,45 @@ def test_validator_accepts_boxplot_without_axes_for_distribution_metrics() -> No
                 ],
             },
             "processors": {
+                "catalog_version": 2,
                 "processors": [
                     {
                         "id": "descriptive",
                         "source": "events",
                         "kind": "numeric_distribution",
+                        "group_by": ["Year"],
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
                         "properties": ["Propensity"],
+                        "states": {
+                            "Propensity_Count": {
+                                "type": "count",
+                                "source_column": "Propensity",
+                            },
+                            "Propensity_tdigest": {
+                                "type": "tdigest",
+                                "source_column": "Propensity",
+                            },
+                        },
                     }
                 ]
             },
             "metrics": {
+                "catalog_version": 2,
                 "metrics": {
                     "PropensityDistribution": {
-                        "source": "descriptive",
-                        "kind": "tdigest_quantile",
+                        "processor": "descriptive",
+                        "kind": "distribution",
                         "state": "Propensity_tdigest",
                     },
                     "PropensityCount": {
-                        "source": "descriptive",
+                        "processor": "descriptive",
                         "kind": "formula",
                         "expression": {"col": "Propensity_Count"},
                     },
                 }
             },
             "dashboards": {
+                "catalog_version": 2,
                 "dashboards": [
                     {
                         "id": "overview",
@@ -1101,7 +996,6 @@ def test_validator_accepts_boxplot_without_axes_for_distribution_metrics() -> No
                                         "title": "Distribution",
                                         "metric": "PropensityDistribution",
                                         "chart": "boxplot",
-                                        "property": "Propensity",
                                     },
                                     {
                                         "id": "scalar_box",
@@ -1123,6 +1017,6 @@ def test_validator_accepts_boxplot_without_axes_for_distribution_metrics() -> No
 
     assert not any("distribution_box" in issue.location for issue in result.issues)
     assert any(
-        "scalar_box" in issue.location and "requires metric kind 'tdigest_quantile'" in issue.message
+        "scalar_box" in issue.location and "requires metric kind 'distribution'" in issue.message
         for issue in result.issues
     )

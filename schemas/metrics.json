@@ -1,7 +1,7 @@
 {
   "$defs": {
     "ApproxDistinctCountMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "depends_on": {
           "items": {
@@ -31,9 +31,20 @@
           "title": "Kind",
           "type": "string"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "state": {
           "title": "State",
@@ -41,7 +52,7 @@
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind",
         "state"
       ],
@@ -170,7 +181,7 @@
       "type": "object"
     },
     "CalibrationFromDigestsMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "depends_on": {
           "items": {
@@ -208,13 +219,24 @@
           "title": "Positive State",
           "type": "string"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind",
         "positive_state",
         "negative_state"
@@ -619,7 +641,7 @@
       "type": "object"
     },
     "ContingencyTestMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "depends_on": {
           "items": {
@@ -656,9 +678,20 @@
           "title": "Outputs",
           "type": "array"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "tests": {
           "items": {
@@ -678,7 +711,7 @@
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind",
         "variant_column",
         "tests"
@@ -687,7 +720,7 @@
       "type": "object"
     },
     "CurveFromDigestsMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "depends_on": {
           "items": {
@@ -734,13 +767,24 @@
           "title": "Positive State",
           "type": "string"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind",
         "positive_state",
         "negative_state"
@@ -748,8 +792,68 @@
       "title": "CurveFromDigestsMetric",
       "type": "object"
     },
+    "DistributionMetric": {
+      "additionalProperties": false,
+      "description": "Full distribution exposed by one t-digest or KLL state.",
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "distribution",
+          "title": "Kind",
+          "type": "string"
+        },
+        "processor": {
+          "title": "Processor",
+          "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "processor",
+        "kind",
+        "state"
+      ],
+      "title": "DistributionMetric",
+      "type": "object"
+    },
     "FormulaMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "depends_on": {
           "items": {
@@ -874,13 +978,24 @@
           "title": "Kind",
           "type": "string"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind",
         "expression"
       ],
@@ -888,7 +1003,7 @@
       "type": "object"
     },
     "FunnelDropoffMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "depends_on": {
           "items": {
@@ -913,8 +1028,8 @@
           ],
           "default": null
         },
-        "from_stage": {
-          "title": "From Stage",
+        "from_state": {
+          "title": "From State",
           "type": "string"
         },
         "kind": {
@@ -931,26 +1046,37 @@
           "title": "Output",
           "type": "string"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
         },
-        "to_stage": {
-          "title": "To Stage",
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "to_state": {
+          "title": "To State",
           "type": "string"
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind",
-        "from_stage",
-        "to_stage"
+        "from_state",
+        "to_state"
       ],
       "title": "FunnelDropoffMetric",
       "type": "object"
     },
     "LifecycleSummaryMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "depends_on": {
           "items": {
@@ -975,26 +1101,82 @@
           ],
           "default": null
         },
+        "entity_column": {
+          "title": "Entity Column",
+          "type": "string"
+        },
+        "first_purchase_state": {
+          "title": "First Purchase State",
+          "type": "string"
+        },
+        "holdings_state": {
+          "title": "Holdings State",
+          "type": "string"
+        },
         "kind": {
           "const": "lifecycle_summary",
           "title": "Kind",
           "type": "string"
         },
+        "last_purchase_state": {
+          "title": "Last Purchase State",
+          "type": "string"
+        },
+        "monetary_state": {
+          "title": "Monetary State",
+          "type": "string"
+        },
         "outputs": {
           "items": {
+            "enum": [
+              "customers_count",
+              "unique_holdings",
+              "lifetime_value",
+              "frequency",
+              "recency",
+              "monetary_value",
+              "rfm_segment",
+              "rfm_score"
+            ],
             "type": "string"
           },
           "title": "Outputs",
           "type": "array"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
+          "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "segment_preset": {
+          "default": "default",
+          "enum": [
+            "default",
+            "rfm",
+            "lifecycle"
+          ],
+          "title": "Segment Preset",
           "type": "string"
         }
       },
       "required": [
-        "source",
-        "kind"
+        "processor",
+        "kind",
+        "holdings_state",
+        "monetary_state",
+        "first_purchase_state",
+        "last_purchase_state",
+        "entity_column"
       ],
       "title": "LifecycleSummaryMetric",
       "type": "object"
@@ -1197,6 +1379,26 @@
         }
       },
       "title": "MetricDisplaySpec",
+      "type": "object"
+    },
+    "MetricRecipeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "MetricRecipeSpec",
       "type": "object"
     },
     "MinMaxNary": {
@@ -3540,7 +3742,7 @@
       "type": "object"
     },
     "ProportionTestMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "control_role": {
           "default": "Control",
@@ -3582,9 +3784,20 @@
           "title": "Outputs",
           "type": "array"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "test_role": {
           "default": "Test",
@@ -3598,14 +3811,81 @@
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind"
       ],
       "title": "ProportionTestMetric",
       "type": "object"
     },
+    "QuantileMetric": {
+      "additionalProperties": false,
+      "description": "One explicitly selected quantile from a t-digest or KLL state.",
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "quantile",
+          "title": "Kind",
+          "type": "string"
+        },
+        "processor": {
+          "title": "Processor",
+          "type": "string"
+        },
+        "quantile": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Quantile",
+          "type": "number"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "processor",
+        "kind",
+        "state",
+        "quantile"
+      ],
+      "title": "QuantileMetric",
+      "type": "object"
+    },
     "SetOpMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "depends_on": {
           "items": {
@@ -3635,51 +3915,50 @@
           "title": "Kind",
           "type": "string"
         },
-        "op": {
-          "enum": [
-            "union",
-            "intersection",
-            "a_not_b",
-            "diff"
-          ],
-          "title": "Op",
-          "type": "string"
-        },
         "operands": {
           "items": {
             "$ref": "#/$defs/SetOpOperand"
           },
+          "minItems": 2,
           "title": "Operands",
           "type": "array"
         },
-        "output": {
-          "const": "count",
-          "default": "count",
-          "title": "Output",
+        "operation": {
+          "enum": [
+            "union",
+            "intersection",
+            "minus"
+          ],
+          "title": "Operation",
           "type": "string"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
         },
-        "states": {
-          "items": {
-            "type": "string"
-          },
-          "title": "States",
-          "type": "array"
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind",
-        "op"
+        "operation",
+        "operands"
       ],
       "title": "SetOpMetric",
       "type": "object"
     },
     "SetOpOperand": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "state": {
           "title": "State",
@@ -3688,21 +3967,60 @@
         "time_window": {
           "anyOf": [
             {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/$defs/SetOpTimeWindow"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Time Window"
+          "default": null
         }
       },
       "required": [
         "state"
       ],
       "title": "SetOpOperand",
+      "type": "object"
+    },
+    "SetOpTimeWindow": {
+      "additionalProperties": false,
+      "properties": {
+        "between": {
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Between"
+        },
+        "last": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last"
+        }
+      },
+      "title": "SetOpTimeWindow",
       "type": "object"
     },
     "StrPrefixSuffix": {
@@ -3735,64 +4053,8 @@
       "title": "StrPrefixSuffix",
       "type": "object"
     },
-    "TdigestQuantileMetric": {
-      "additionalProperties": true,
-      "description": "Quantile read over a digest state.\n\n``quantile`` is optional: omitting it defines a distribution metric that\nreads the median by default while exposing the full quantile suite to\ndistribution charts such as boxplots.",
-      "properties": {
-        "depends_on": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Depends On",
-          "type": "array"
-        },
-        "description": {
-          "default": "",
-          "title": "Description",
-          "type": "string"
-        },
-        "display": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/MetricDisplaySpec"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "kind": {
-          "const": "tdigest_quantile",
-          "title": "Kind",
-          "type": "string"
-        },
-        "quantile": {
-          "default": 0.5,
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "Quantile",
-          "type": "number"
-        },
-        "source": {
-          "title": "Source",
-          "type": "string"
-        },
-        "state": {
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "source",
-        "kind",
-        "state"
-      ],
-      "title": "TdigestQuantileMetric",
-      "type": "object"
-    },
     "TopKItemsMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "depends_on": {
           "items": {
@@ -3836,9 +4098,20 @@
           "title": "Limit",
           "type": "integer"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "state": {
           "title": "State",
@@ -3846,7 +4119,7 @@
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind",
         "state"
       ],
@@ -3974,7 +4247,7 @@
       "type": "object"
     },
     "VariantCompareMetric": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "confidence_level": {
           "default": 0.95,
@@ -4022,9 +4295,20 @@
           "title": "Outputs",
           "type": "array"
         },
-        "source": {
-          "title": "Source",
+        "processor": {
+          "title": "Processor",
           "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "test_role": {
           "title": "Test Role",
@@ -4036,7 +4320,7 @@
         }
       },
       "required": [
-        "source",
+        "processor",
         "kind",
         "variant_column",
         "test_role",
@@ -4051,6 +4335,11 @@
   "additionalProperties": false,
   "description": "Top-level shape for ``metrics.yaml``.",
   "properties": {
+    "catalog_version": {
+      "const": 2,
+      "title": "Catalog Version",
+      "type": "integer"
+    },
     "metrics": {
       "additionalProperties": {
         "discriminator": {
@@ -4059,12 +4348,13 @@
             "calibration_from_digests": "#/$defs/CalibrationFromDigestsMetric",
             "contingency_test": "#/$defs/ContingencyTestMetric",
             "curve_from_digests": "#/$defs/CurveFromDigestsMetric",
+            "distribution": "#/$defs/DistributionMetric",
             "formula": "#/$defs/FormulaMetric",
             "funnel_dropoff": "#/$defs/FunnelDropoffMetric",
             "lifecycle_summary": "#/$defs/LifecycleSummaryMetric",
             "proportion_test": "#/$defs/ProportionTestMetric",
+            "quantile": "#/$defs/QuantileMetric",
             "set_op": "#/$defs/SetOpMetric",
-            "tdigest_quantile": "#/$defs/TdigestQuantileMetric",
             "topk_items": "#/$defs/TopKItemsMetric",
             "variant_compare": "#/$defs/VariantCompareMetric"
           },
@@ -4081,7 +4371,10 @@
             "$ref": "#/$defs/TopKItemsMetric"
           },
           {
-            "$ref": "#/$defs/TdigestQuantileMetric"
+            "$ref": "#/$defs/DistributionMetric"
+          },
+          {
+            "$ref": "#/$defs/QuantileMetric"
           },
           {
             "$ref": "#/$defs/VariantCompareMetric"
@@ -4114,6 +4407,7 @@
     }
   },
   "required": [
+    "catalog_version",
     "metrics"
   ],
   "title": "Value Stream Metrics",

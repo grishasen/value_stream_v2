@@ -84,8 +84,8 @@ class TestCanonicalize:
 
     def test_pydantic_model_canonicalizes(self) -> None:
         # A Pydantic model and an equivalent dict must hash the same.
-        m = model.StateSpec(type="count")
-        d = {"type": "count"}
+        m = model.CountState(type="count")
+        d = {"type": "count", "distinct": False}
         assert config_hash(m) == config_hash(d)
 
     def test_serialize_returns_bytes(self) -> None:
@@ -142,47 +142,6 @@ class TestCatalogHash:
             processor_computation_hash(presentation_changed, changed_processor) == processor_before
         )
         assert source_computation_hash(presentation_changed, "ih") == source_before
-
-    def test_computation_hash_excludes_sketch_build_mode(self) -> None:
-        catalog = load(DEMO_WS)
-        descriptive = next(
-            processor
-            for processor in catalog.processors.processors
-            if isinstance(processor, model.NumericDistributionProcessor)
-        )
-        processor_before = processor_computation_hash(catalog, descriptive)
-        source_before = source_computation_hash(catalog, descriptive.source)
-        catalog_before = catalog_config_hash(catalog)
-
-        changed = catalog.model_copy(deep=True)
-        changed_descriptive = next(
-            processor
-            for processor in changed.processors.processors
-            if processor.id == descriptive.id
-        )
-        assert isinstance(changed_descriptive, model.NumericDistributionProcessor)
-        changed_descriptive.sketch_build_mode = "legacy"
-
-        assert processor_computation_hash(changed, changed_descriptive) == processor_before
-        assert source_computation_hash(changed, changed_descriptive.source) == source_before
-        assert catalog_config_hash(changed) != catalog_before
-
-    def test_computation_hash_excludes_workspace_common_dimensions(self) -> None:
-        catalog = load(DEMO_WS)
-        engagement = next(p for p in catalog.processors.processors if p.id == "ih_engagement")
-        processor_before = processor_computation_hash(catalog, engagement)
-        source_before = source_computation_hash(catalog, "ih")
-        catalog_before = catalog_config_hash(catalog)
-
-        changed = catalog.model_copy(deep=True)
-        changed.pipelines.defaults.dimensions = ["Channel", "Issue"]
-        changed_engagement = next(
-            p for p in changed.processors.processors if p.id == "ih_engagement"
-        )
-
-        assert processor_computation_hash(changed, changed_engagement) == processor_before
-        assert source_computation_hash(changed, "ih") == source_before
-        assert catalog_config_hash(changed) != catalog_before
 
     def test_bounded_ml_order_revision_is_scoped_to_score_processors(self) -> None:
         catalog = load(DEMO_WS)
@@ -246,7 +205,7 @@ class TestCatalogHash:
         proc_text = (DEMO_WS / "catalog" / "processors.yaml").read_text()
         proc = yaml.safe_load(proc_text)
         engagement = next(p for p in proc["processors"] if p["id"] == "ih_engagement")
-        engagement["dimensions"] = engagement["dimensions"][:-1]
+        engagement["group_by"] = engagement["group_by"][:-1]
         (ws / "catalog" / "processors.yaml").write_text(yaml.safe_dump(proc))
 
         original = catalog_config_hash(load(DEMO_WS))

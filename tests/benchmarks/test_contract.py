@@ -245,7 +245,7 @@ def test_benchmark_worker_runs_in_clean_scratch_workspace(tmp_path: Path) -> Non
     data.mkdir()
     (catalog / "pipelines.yaml").write_text(
         """
-version: 1
+catalog_version: 2
 workspace: benchmark_test
 sources:
   - id: ih
@@ -266,52 +266,56 @@ sources:
     )
     (catalog / "processors.yaml").write_text(
         """
+catalog_version: 2
 processors:
   - id: engagement
     source: ih
     kind: binary_outcome
     group_by: [Channel]
     time:
-      column: OutcomeTime
-      grains: [Day]
+      property: OutcomeTime
+      grain: daily
     outcome:
       column: Outcome
       positive_values: [Clicked]
       negative_values: [Impression]
     states:
       Count: {type: count}
-      Positives: {type: count}
-      Negatives: {type: count}
+      Positives: {type: count, outcome: positive}
+      Negatives: {type: count, outcome: negative}
       UniqueCustomers_cpc: {type: cpc, source_column: CustomerID, lg_k: 11}
 
   - id: conversion
     source: ih
     kind: binary_outcome
     group_by: [Channel]
-    time: {column: OutcomeTime, grains: [Day]}
+    time: {property: OutcomeTime, grain: daily}
     outcome:
       column: Outcome
       positive_values: [Clicked]
       negative_values: [Impression]
     states:
       Count: {type: count}
-      Positives: {type: count}
-      Negatives: {type: count}
+      Positives: {type: count, outcome: positive}
+      Negatives: {type: count, outcome: negative}
 
   - id: descriptive
     source: ih
     kind: numeric_distribution
     group_by: [Channel]
-    time: {column: OutcomeTime, grains: [Day]}
+    time: {property: OutcomeTime, grain: daily}
     properties: [Score]
     quantile_engine: tdigest
+    states:
+      Score_tdigest: {type: tdigest, source_column: Score}
 
   - id: model_ml_scores
     source: ih
     kind: score_distribution
     group_by: [Channel]
-    time: {column: OutcomeTime, grains: [Day]}
-    score_properties: [Score]
+    time: {property: OutcomeTime, grain: daily}
+    score_properties:
+      - {column: Score, role: primary}
     outcome:
       column: Outcome
       positive_values: [Clicked]
@@ -319,9 +323,9 @@ processors:
     states:
       Count: {type: count}
       Score_tdigest_positives:
-        {type: tdigest, source_column: Score, outcome: positive}
+        {type: tdigest, source_column: Score, score_property: Score, outcome: positive}
       Score_tdigest_negatives:
-        {type: tdigest, source_column: Score, outcome: negative}
+        {type: tdigest, source_column: Score, score_property: Score, outcome: negative}
       Score_kll: {type: kll, source_column: Score, k: 1024}
       Category_topk: {type: topk, source_column: Category, lg_max_map_size: 10}
 
@@ -329,33 +333,37 @@ processors:
     source: ih
     kind: binary_outcome
     group_by: [Channel]
-    time: {column: OutcomeTime, grains: [Day]}
+    time: {property: OutcomeTime, grain: daily}
     outcome:
       column: Outcome
       positive_values: [Clicked]
       negative_values: [Impression]
     states:
       Count: {type: count}
-      Positives: {type: count}
-      Negatives: {type: count}
+      Positives: {type: count, outcome: positive}
+      Negatives: {type: count, outcome: negative}
 
   - id: action_funnel
     source: ih
     kind: funnel
     group_by: [Channel]
-    time: {column: OutcomeTime, grains: [Day]}
+    time: {property: OutcomeTime, grain: daily}
     entity: CustomerID
     stages:
       - name: Impression
         when: {op: eq, column: Outcome, value: Impression}
       - name: Clicked
         when: {op: eq, column: Outcome, value: Clicked}
+    states:
+      Impression_Count: {type: count, stage: Impression}
+      Clicked_Count: {type: count, stage: Clicked}
 
   - id: audience
     source: ih
     kind: entity_set
     group_by: [Channel]
-    time: {column: OutcomeTime, grains: [Day]}
+    time: {property: OutcomeTime, grain: daily}
+    entity: CustomerID
     states:
       Customers_cpc: {type: cpc, source_column: CustomerID, lg_k: 11}
       Customers_hll: {type: hll, source_column: CustomerID, lg_k: 12}
@@ -363,8 +371,14 @@ processors:
 """,
         encoding="utf-8",
     )
-    (catalog / "metrics.yaml").write_text("metrics: {}\n", encoding="utf-8")
-    (catalog / "dashboards.yaml").write_text("dashboards: []\n", encoding="utf-8")
+    (catalog / "metrics.yaml").write_text(
+        "catalog_version: 2\nmetrics: {}\n",
+        encoding="utf-8",
+    )
+    (catalog / "dashboards.yaml").write_text(
+        "catalog_version: 2\ndashboards: []\n",
+        encoding="utf-8",
+    )
     row_count = 512
     pl.DataFrame(
         {

@@ -16,7 +16,9 @@ guided order, or **Jump to step** when you already know where to work.
    comes before Processors because it defines the workspace's common business
    dimensions that new processors start from.
 3. In **Metrics**, create a metric from the recipe library or from scratch, or
-   maintain an existing metric.
+   maintain an existing metric. The edit workflow starts with a searchable
+   metric selector; metric selection synchronizes processor and kind, while
+   changing processor or kind selects a compatible metric.
 4. In **Reports / Tiles**, edit a tile and its page settings as one change.
 5. Review the aggregate context available to Chat With Data in **Chat Review**.
 6. Update shared defaults and report appearance in **Settings**.
@@ -239,7 +241,7 @@ After a state is added, the popover clears before the next state is authored.
 Sketch-size keys are checked against the selected type so, for example,
 `lg_max_map_size` cannot leak from a Top-K state into a CPC or theta state.
 
-Applying a processor automatically adds one distribution metric for every
+Applying or updating a processor automatically adds one distribution metric for every
 unconditioned t-digest or KLL state that does not already have one. The metric
 omits `quantile`, so it reads the median as its primary value and exposes the
 full quantile suite to distribution charts. Existing distribution metrics are
@@ -277,6 +279,12 @@ successful metric Apply, the Builder reloads the catalog and opens the saved
 metric for maintenance. See the
 [KPI recipe reference](../../reference/kpi-recipes.md).
 
+The main editor exposes **Metric Label** directly below the immutable Metric
+ID. This is the human-readable `display.label` used by report axes and
+selectors; leave it blank to fall back to a label derived from the Metric ID.
+Unit, number format, and favorable direction remain under **Report
+presentation**.
+
 A digest state is the mergeable binary accumulator persisted by a processor;
 it is not itself a public query result. Its automatically authored distribution
 metric is the stable catalog name that tells the query layer to decode that
@@ -299,6 +307,11 @@ page IDs, so changing a new dashboard name cannot reset the entered Page Name.
 The persisted dashboard and page titles are the exact trimmed values shown in
 the editor.
 
+Box plots bind only to a `distribution` metric. The selected metric already
+identifies its processor digest and source property, so the tile exposes no
+separate Property, Y, or Value control. Use X, Color, and optional facets only
+to group the selected distribution.
+
 The collapsed **Report inventory** is searchable and uses dashboard, page,
 tile, metric, and chart labels designed for recognition. Enable technical IDs
 only when exact catalog identity is needed. The visual report library groups
@@ -311,10 +324,9 @@ Heatmaps use one adaptive **Heatmap** choice. The selected metric supplies cell
 intensity, so there is no Value or Color field. X and optional Y contain only
 configured time grains and persisted processor dimensions. Leave Y empty with
 a daily X for a calendar layout; set both axes for a matrix or cohort layout.
-Numeric-distribution metrics additionally expose Property and Metric
-(statistic) controls. The retired `calendar_heatmap`, `cohort_heatmap`, and
-`descriptive_heatmap` kinds still render, but saving one through Visual mode
-migrates it to `heatmap`.
+Intensity is selected only from the chosen metric's read-only output contract;
+there are no separate Property or statistic controls. Retired heatmap aliases
+are rejected by catalog-v2 validation.
 
 Combo charts also use metric-owned values. The tile's selected **Metric**
 supplies the primary Y series, so no Y field is shown. **Y2 Metric** offers
@@ -339,8 +351,17 @@ hierarchy; advanced mode may optionally configure a separate size value.
 Donut charts derive slice values from the selected metric. Choose only the
 Names category and optional Color grouping.
 
-Sankey charts derive link values from the selected metric. Choose only the
-Source and Target dimensions.
+Sankey charts derive link values from the selected metric. Choose an ordered
+**Flow Path** containing at least two time/dimension fields. Every adjacent
+pair becomes another link layer; legacy Source/Target tiles remain readable
+and are migrated to Flow Path when edited visually.
+
+The Metric editor shows **Outputs** as a read-only list computed from the
+metric kind and its configuration. In report charts where the measure was
+previously implicit—KPI, Gauge, Line, Bar, Stacked Area, Waterfall, Pareto,
+Combo primary Y, Polar radius, Treemap value/color, Donut value, Sankey value,
+and Heatmap intensity—the visual and advanced editors show the corresponding
+role as a metric-output selector. It contains only that read-only output list.
 
 Interval charts separate category and numeric roles. Choose a time or dimension
 for X; Y and every Error field offer only outputs produced by the selected

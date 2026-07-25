@@ -79,7 +79,7 @@ def export_metric_tables_to_duckdb(
                 skipped.append(
                     SkippedMetricTable(
                         metric_name,
-                        f"metric references unknown processor {metric_def.source!r}",
+                        f"metric references unknown processor {metric_def.processor!r}",
                     )
                 )
                 continue
@@ -196,7 +196,7 @@ def _with_export_columns(
 
 def _processor_for_metric(catalog: model.Catalog, metric: model.Metric) -> model.Processor | None:
     return next(
-        (processor for processor in catalog.processors.processors if processor.id == metric.source),
+        (processor for processor in catalog.processors.processors if processor.id == metric.processor),
         None,
     )
 

@@ -271,10 +271,6 @@ FIELD_HELP: dict[str, str] = {
         "Mergeable sketch used for approximate percentiles. t-digest is strong near tails; KLL has rank guarantees.",
         "tdigest",
     ),
-    "processor.sketch_build_mode": _tip(
-        "How t-digest and KLL fields cross the Python callback boundary. Bulk is the optimized default; legacy remains available for comparison or rollback.",
-        "bulk",
-    ),
     "processor.stages": _tip(
         "Comma-separated funnel stage names in business order; define each stage's "
         "membership condition in the stage editors below.",
@@ -450,7 +446,7 @@ FIELD_HELP: dict[str, str] = {
         "present in every set (e.g. active in both periods). Union counts "
         "entities present in any set (combined reach). Minus counts entities "
         "in the first set but not the second (A - B, e.g. churned or new "
-        "entities; stored as a_not_b in YAML).",
+        "entities; stored as minus in YAML).",
         "Minus — entities in the first set only (A - B)",
     ),
     "metric.theta_states": _tip(
@@ -482,10 +478,12 @@ FIELD_HELP: dict[str, str] = {
         "Anchor-relative day/week offset; negative values look back.",
         "-30d",
     ),
-    "metric.from_stage": _tip(
-        "Earlier funnel stage used as the drop-off denominator.", "Presented"
+    "metric.from_state": _tip(
+        "Explicit stage-count state used as the drop-off denominator.", "PresentedCount"
     ),
-    "metric.to_stage": _tip("Later funnel stage compared with the starting stage.", "Clicked"),
+    "metric.to_state": _tip(
+        "Explicit later stage-count state compared with the starting state.", "ClickedCount"
+    ),
     "metric.funnel_output": _tip("Return the drop-off as a rate or an absolute count.", "rate"),
     # Reports and tiles.
     "report.editing_mode": _tip("Use the guided editor or edit the complete tile YAML definition."),

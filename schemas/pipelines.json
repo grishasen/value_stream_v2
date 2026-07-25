@@ -604,8 +604,25 @@
       "type": "object"
     },
     "CsvReader": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "archive_temp_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Archive Temp Dir"
+        },
+        "background": {
+          "default": false,
+          "title": "Background",
+          "type": "boolean"
+        },
         "delimiter": {
           "anyOf": [
             {
@@ -634,14 +651,61 @@
           "default": null,
           "title": "Group By Filename"
         },
+        "hive_partitioning": {
+          "default": false,
+          "title": "Hive Partitioning",
+          "type": "boolean"
+        },
+        "infer_schema_length": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Infer Schema Length"
+        },
         "kind": {
           "const": "csv",
           "title": "Kind",
           "type": "string"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root"
+        },
+        "separator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Separator"
+        },
         "streaming": {
           "default": false,
           "title": "Streaming",
+          "type": "boolean"
+        },
+        "try_parse_dates": {
+          "default": true,
+          "title": "Try Parse Dates",
           "type": "boolean"
         }
       },
@@ -3480,8 +3544,25 @@
       "type": "object"
     },
     "ParquetReader": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "archive_temp_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Archive Temp Dir"
+        },
+        "background": {
+          "default": false,
+          "title": "Background",
+          "type": "boolean"
+        },
         "file_pattern": {
           "title": "File Pattern",
           "type": "string"
@@ -3498,14 +3579,61 @@
           "default": null,
           "title": "Group By Filename"
         },
+        "hive_partitioning": {
+          "default": false,
+          "title": "Hive Partitioning",
+          "type": "boolean"
+        },
+        "infer_schema_length": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Infer Schema Length"
+        },
         "kind": {
           "const": "parquet",
           "title": "Kind",
           "type": "string"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root"
+        },
+        "separator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Separator"
+        },
         "streaming": {
           "default": false,
           "title": "Streaming",
+          "type": "boolean"
+        },
+        "try_parse_dates": {
+          "default": true,
+          "title": "Try Parse Dates",
           "type": "boolean"
         }
       },
@@ -3545,8 +3673,25 @@
       "type": "object"
     },
     "PegaDsExportReader": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "archive_temp_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Archive Temp Dir"
+        },
+        "background": {
+          "default": false,
+          "title": "Background",
+          "type": "boolean"
+        },
         "file_pattern": {
           "title": "File Pattern",
           "type": "string"
@@ -3563,14 +3708,61 @@
           "default": null,
           "title": "Group By Filename"
         },
+        "hive_partitioning": {
+          "default": false,
+          "title": "Hive Partitioning",
+          "type": "boolean"
+        },
+        "infer_schema_length": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Infer Schema Length"
+        },
         "kind": {
           "const": "pega_ds_export",
           "title": "Kind",
           "type": "string"
         },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root"
+        },
+        "separator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Separator"
+        },
         "streaming": {
           "default": false,
           "title": "Streaming",
+          "type": "boolean"
+        },
+        "try_parse_dates": {
+          "default": true,
+          "title": "Try Parse Dates",
           "type": "boolean"
         }
       },
@@ -3939,8 +4131,25 @@
       "type": "object"
     },
     "XlsxReader": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "archive_temp_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Archive Temp Dir"
+        },
+        "background": {
+          "default": false,
+          "title": "Background",
+          "type": "boolean"
+        },
         "file_pattern": {
           "title": "File Pattern",
           "type": "string"
@@ -3957,10 +4166,52 @@
           "default": null,
           "title": "Group By Filename"
         },
+        "hive_partitioning": {
+          "default": false,
+          "title": "Hive Partitioning",
+          "type": "boolean"
+        },
+        "infer_schema_length": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Infer Schema Length"
+        },
         "kind": {
           "const": "xlsx",
           "title": "Kind",
           "type": "string"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root"
+        },
+        "separator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Separator"
         },
         "sheet": {
           "anyOf": [
@@ -3981,6 +4232,11 @@
           "default": false,
           "title": "Streaming",
           "type": "boolean"
+        },
+        "try_parse_dates": {
+          "default": true,
+          "title": "Try Parse Dates",
+          "type": "boolean"
         }
       },
       "required": [
@@ -3996,6 +4252,11 @@
   "additionalProperties": false,
   "description": "Top-level shape for ``pipelines.yaml``.",
   "properties": {
+    "catalog_version": {
+      "const": 2,
+      "title": "Catalog Version",
+      "type": "integer"
+    },
     "defaults": {
       "$ref": "#/$defs/WorkspaceDefaults"
     },
@@ -4006,17 +4267,13 @@
       "title": "Sources",
       "type": "array"
     },
-    "version": {
-      "default": 1,
-      "title": "Version",
-      "type": "integer"
-    },
     "workspace": {
       "title": "Workspace",
       "type": "string"
     }
   },
   "required": [
+    "catalog_version",
     "workspace",
     "sources"
   ],

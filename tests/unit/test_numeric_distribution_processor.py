@@ -13,6 +13,36 @@ from valuestream.processors.numeric_distribution import NumericDistributionProce
 from valuestream.states import cpc, kll, tdigest
 
 
+def _distribution_states(
+    property_name: str,
+    *,
+    quantile_engine: str = "tdigest",
+) -> dict[str, dict[str, object]]:
+    count = f"{property_name}_Count"
+    mean = f"{property_name}_Mean"
+    return {
+        count: {"type": "count", "source_column": property_name},
+        f"{property_name}_Sum": {"type": "value_sum", "source_column": property_name},
+        mean: {
+            "type": "pooled_mean",
+            "source_column": property_name,
+            "weight": count,
+        },
+        f"{property_name}_Var": {
+            "type": "pooled_variance",
+            "source_column": property_name,
+            "mean": mean,
+            "weight": count,
+        },
+        f"{property_name}_Min": {"type": "min", "source_column": property_name},
+        f"{property_name}_Max": {"type": "max", "source_column": property_name},
+        f"{property_name}_{quantile_engine}": {
+            "type": quantile_engine,
+            "source_column": property_name,
+        },
+    }
+
+
 def _ctx() -> ChunkContext:
     return ChunkContext(
         pipeline_run_id="00000000-0000-0000-0000-000000000002",
@@ -29,7 +59,9 @@ def _processor() -> NumericDistributionProcessor:
                 "source": "ih",
                 "kind": "numeric_distribution",
                 "group_by": ["Channel"],
+                "time": {"property": "day", "grain": "daily"},
                 "properties": ["Propensity"],
+                "states": _distribution_states("Propensity"),
             }
         )
     )
@@ -37,7 +69,18 @@ def _processor() -> NumericDistributionProcessor:
 
 def test_rejects_non_numeric_processor() -> None:
     processor = model.BinaryOutcomeProcessor.model_validate(
-        {"id": "p", "source": "ih", "kind": "binary_outcome"}
+        {
+            "id": "p",
+            "source": "ih",
+            "kind": "binary_outcome",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {"Count": {"type": "count"}},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
+        }
     )
     with pytest.raises(TypeError):
         NumericDistributionProcessor(processor)
@@ -95,8 +138,9 @@ def test_partial_explicit_states_do_not_become_group_columns() -> None:
                 "source": "ih",
                 "kind": "numeric_distribution",
                 "group_by": ["Channel"],
+                "time": {"property": "day", "grain": "daily"},
                 "properties": ["ResponseTime"],
-                "states": {"ResponseTime_tdigest": {"type": "tdigest"}},
+                "states": _distribution_states("ResponseTime"),
             }
         )
     )
@@ -127,7 +171,7 @@ def test_partial_explicit_states_do_not_become_group_columns() -> None:
     ]
 
 
-def test_explicit_recipe_sketches_build_alongside_default_distribution_states() -> None:
+def test_explicit_recipe_sketches_build_alongside_distribution_states() -> None:
     processor = NumericDistributionProcessor(
         model.NumericDistributionProcessor.model_validate(
             {
@@ -135,8 +179,10 @@ def test_explicit_recipe_sketches_build_alongside_default_distribution_states() 
                 "source": "ih",
                 "kind": "numeric_distribution",
                 "group_by": ["Channel"],
+                "time": {"property": "day", "grain": "daily"},
                 "properties": ["ResponseTime"],
                 "states": {
+                    **_distribution_states("ResponseTime"),
                     "Channel_cpc": {
                         "type": "cpc",
                         "source_column": "Channel",
@@ -163,51 +209,3 @@ def test_explicit_recipe_sketches_build_alongside_default_distribution_states() 
     assert cpc.estimate(out["Channel_cpc"][0]) == pytest.approx(1, rel=0.02)
     assert kll.quantile(out["ResponseTime_kll"][0], 0.5) == pytest.approx(2.0)
     assert "ResponseTime_tdigest" in out.columns
-
-
-@pytest.mark.parametrize("quantile_engine", ["tdigest", "kll"])
-def test_bulk_sketch_mode_matches_legacy_distribution_semantics(
-    quantile_engine: str,
-) -> None:
-    base_config = {
-        "id": "descriptive",
-        "source": "ih",
-        "kind": "numeric_distribution",
-        "group_by": ["Channel"],
-        "properties": ["Value"],
-        "quantile_engine": quantile_engine,
-        "sketch_build_mode": "legacy",
-    }
-    legacy = NumericDistributionProcessor(
-        model.NumericDistributionProcessor.model_validate(base_config)
-    )
-    bulk = NumericDistributionProcessor(
-        model.NumericDistributionProcessor.model_validate(
-            {**base_config, "sketch_build_mode": "bulk"}
-        )
-    )
-    values = [float(value) for value in range(128)]
-    frame = pl.DataFrame(
-        {
-            "Channel": ["Web"] * 64 + ["Mobile"] * 64,
-            "Value": values,
-        }
-    )
-
-    legacy_out = legacy.chunk_aggregate(frame.lazy(), _ctx()).sort("Channel")
-    bulk_out = bulk.chunk_aggregate(frame.lazy(), _ctx()).sort("Channel")
-
-    assert bulk_out.select("Channel", "Value_Count", "Value_Sum").equals(
-        legacy_out.select("Channel", "Value_Count", "Value_Sum")
-    )
-    state_name = f"Value_{quantile_engine}"
-    for legacy_payload, bulk_payload in zip(
-        legacy_out[state_name], bulk_out[state_name], strict=True
-    ):
-        if quantile_engine == "tdigest":
-            assert tdigest.weight(bulk_payload) == tdigest.weight(legacy_payload)
-            quantile = tdigest.quantile
-        else:
-            assert kll.count(bulk_payload) == kll.count(legacy_payload)
-            quantile = kll.quantile
-        assert quantile(bulk_payload, 0.5) == pytest.approx(quantile(legacy_payload, 0.5), abs=1.0)

@@ -55,11 +55,13 @@ class EntitySetProcessor:
         source_schema = source.collect_schema()
         existing = set(source_schema.names())
         time_columns = grain_levels.chunk_time_group_columns(existing, self.config)
-        group_keys = [
-            column
-            for column in [*self.group_by_columns, *time_columns]
-            if column and column in existing
-        ]
+        group_keys = list(
+            dict.fromkeys(
+                column
+                for column in [*self.group_by_columns, *time_columns]
+                if column and column in existing
+            )
+        )
         grouped = source.group_by(group_keys).agg(self._agg_exprs(existing, source_schema))
         grouped = p3.postprocess_sketches(grouped, self._sketch_columns(existing))
         grouped = p3.ensure_state_columns(grouped, self.state_specs)
@@ -114,15 +116,15 @@ class EntitySetProcessor:
             if spec.type == "count":
                 exprs.append(p3.count_expr(raw_extra, alias=name))
             elif spec.type == "value_sum":
-                source_column = str(raw_extra.get("source_column", name))
+                source_column = spec.source_column
                 if source_column in existing:
                     exprs.append(p3.value_sum_expr(source_column, raw_extra, alias=name))
             elif spec.type == "min":
-                source_column = str(raw_extra.get("source_column", name))
+                source_column = spec.source_column
                 if source_column in existing:
                     exprs.append(p3.filtered_column(source_column, raw_extra).min().alias(name))
             elif spec.type == "max":
-                source_column = str(raw_extra.get("source_column", name))
+                source_column = spec.source_column
                 if source_column in existing:
                     exprs.append(p3.filtered_column(source_column, raw_extra).max().alias(name))
             elif spec.type in {"cpc", "hll", "theta", "topk"}:
@@ -130,7 +132,6 @@ class EntitySetProcessor:
                     name,
                     spec,
                     existing=existing,
-                    default_source_column=self.entity_column,
                     source_dtypes=source_schema,
                 )
                 if expr is not None:
@@ -146,7 +147,6 @@ class EntitySetProcessor:
                 name,
                 spec,
                 existing=existing,
-                default_source_column=self.entity_column,
             )
             columns.append(meta)
         return columns

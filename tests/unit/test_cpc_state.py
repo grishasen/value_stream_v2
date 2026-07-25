@@ -35,7 +35,7 @@ def test_cpc_merge_and_empty_payloads() -> None:
 def test_approx_distinct_metric_dispatches_to_cpc_state() -> None:
     state_name = "UniqueCustomers_cpc"
     metric = model.ApproxDistinctCountMetric.model_validate(
-        {"source": "engagement", "kind": "approx_distinct_count", "state": state_name}
+        {"processor": "engagement", "kind": "approx_distinct_count", "state": state_name}
     )
     frame = pl.DataFrame({state_name: [cpc.build(["a", "b", "c"])]})
 
@@ -44,7 +44,11 @@ def test_approx_distinct_metric_dispatches_to_cpc_state() -> None:
         "UniqueCustomers",
         metric,
         {"UniqueCustomers": metric},
-        state_specs={state_name: model.StateSpec.model_validate({"type": "cpc"})},
+        state_specs={
+            state_name: model.CpcState.model_validate(
+                {"type": "cpc", "source_column": "CustomerID"}
+            )
+        },
     )
 
     assert result["UniqueCustomers"][0] == pytest.approx(3, rel=0.02)
@@ -53,7 +57,7 @@ def test_approx_distinct_metric_dispatches_to_cpc_state() -> None:
 def test_approx_distinct_metric_dispatches_to_theta_state() -> None:
     state_name = "UniqueCustomers_theta"
     metric = model.ApproxDistinctCountMetric.model_validate(
-        {"source": "engagement", "kind": "approx_distinct_count", "state": state_name}
+        {"processor": "engagement", "kind": "approx_distinct_count", "state": state_name}
     )
     frame = pl.DataFrame({state_name: [theta.build(["a", "b", "c"])]})
 
@@ -62,7 +66,11 @@ def test_approx_distinct_metric_dispatches_to_theta_state() -> None:
         "UniqueCustomers",
         metric,
         {"UniqueCustomers": metric},
-        state_specs={state_name: model.StateSpec.model_validate({"type": "theta"})},
+        state_specs={
+            state_name: model.ThetaState.model_validate(
+                {"type": "theta", "source_column": "CustomerID"}
+            )
+        },
     )
 
     assert result["UniqueCustomers"][0] == pytest.approx(3, rel=0.02)

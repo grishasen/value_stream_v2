@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TypeVar
-
 import polars as pl
 
 import valuestream.processors.processors_helper as p3
@@ -14,8 +12,6 @@ from valuestream.processors import grain_levels
 from valuestream.processors.context import PROVENANCE_COLUMNS, ChunkContext
 from valuestream.processors.outcomes import compatible_values, is_in_values, parse_outcome
 from valuestream.utils.timer import timed
-
-_TFrame = TypeVar("_TFrame", pl.DataFrame, pl.LazyFrame)
 
 
 class BinaryOutcomeProcessor:
@@ -51,8 +47,7 @@ class BinaryOutcomeProcessor:
     @timed
     def chunk_aggregate_lazy(self, frame: pl.LazyFrame, ctx: ChunkContext) -> pl.LazyFrame:
         """Return a lazy daily partial aggregate plan for one transformed source chunk."""
-        extra = p3.extra(self.config)
-        outcome = parse_outcome(extra)
+        outcome = parse_outcome(self.config.outcome)
         source = frame
         if self.config.filter is not None:
             source = source.filter(translate(self.config.filter))
@@ -70,7 +65,7 @@ class BinaryOutcomeProcessor:
 
         dedup_keys = [
             key
-            for key in p3.list_extra(extra, "dedup_keys")
+            for key in self.config.dedup_keys
             if key in source.collect_schema().names()
         ]
         if dedup_keys:
@@ -89,7 +84,7 @@ class BinaryOutcomeProcessor:
                 if column and column in existing
             )
         )
-        variant_column = extra.get("variant_column")
+        variant_column = self.config.variant_column
         if (
             isinstance(variant_column, str)
             and variant_column in existing
@@ -101,7 +96,6 @@ class BinaryOutcomeProcessor:
         grouped_lazy = source.group_by(group_keys).agg(agg_exprs)
         grouped_lazy = p3.postprocess_sketches(grouped_lazy, self._sketch_columns(existing))
         grouped_lazy = self._ensure_state_columns(grouped_lazy)
-        grouped_lazy = self._with_negatives(grouped_lazy)
         return p3.with_provenance(
             grouped_lazy,
             self.config_hash,
@@ -133,7 +127,6 @@ class BinaryOutcomeProcessor:
                 == grain_levels.finest_configured_level(self.config)
             ),
         )
-        merged = self._with_negatives(merged)
         return p3.with_static_provenance(merged, self.config_hash, ctx)
 
     @timed
@@ -141,34 +134,53 @@ class BinaryOutcomeProcessor:
         """Merge partial aggregate rows using state-specific rules."""
         if frame.is_empty():
             return frame
-        return self._with_negatives(p3.merge_state_frame(frame, self.state_specs, group_columns))
+        return p3.merge_state_frame(frame, self.state_specs, group_columns)
 
     @timed
     def merge_for_query(self, frame: pl.DataFrame, group_columns: list[str]) -> pl.DataFrame:
         """Merge rows and preserve the current processor config hash for query-time formulas."""
         return p3.merge_for_query(self.merge, frame, group_columns, self.config_hash)
 
-    def _agg_exprs(self, existing: set[str], source_schema: pl.Schema) -> list[pl.Expr]:
+    def _agg_exprs(  # noqa: PLR0912
+        self, existing: set[str], source_schema: pl.Schema
+    ) -> list[pl.Expr]:
         exprs: list[pl.Expr] = []
         sketch_helpers: list[pl.Expr] = []
         for name, spec in self.state_specs.items():
-            extra = p3.spec_extra(spec)
-            if name == "Count":
-                exprs.append(pl.len().alias(name))
-            elif name == "Positives":
-                exprs.append(pl.col("__valuestream_positive").sum().alias(name))
-            elif name == "Negatives":
-                continue
+            if spec.type == "count":
+                if spec.outcome == "positive":
+                    exprs.append(pl.col("__valuestream_positive").sum().alias(name))
+                elif spec.outcome == "negative":
+                    exprs.append((1 - pl.col("__valuestream_positive")).sum().alias(name))
+                elif spec.source_column:
+                    if spec.source_column not in existing:
+                        raise ValueError(
+                            f"binary_outcome processor {self.id!r} state {name!r} "
+                            f"requires missing source column {spec.source_column!r}"
+                        )
+                    count = (
+                        pl.col(spec.source_column).n_unique()
+                        if spec.distinct
+                        else pl.col(spec.source_column).count()
+                    )
+                    exprs.append(count.alias(name))
+                elif spec.stage:
+                    raise ValueError(
+                        f"binary_outcome processor {self.id!r} state {name!r} "
+                        "cannot use a funnel stage selector"
+                    )
+                else:
+                    exprs.append(pl.len().alias(name))
             elif spec.type == "value_sum":
-                source_column = str(extra.get("source_column", name))
+                source_column = spec.source_column
                 if source_column in existing:
                     exprs.append(pl.col(source_column).sum().cast(pl.Float64).alias(name))
             elif spec.type == "min":
-                source_column = str(extra.get("source_column", name))
+                source_column = spec.source_column
                 if source_column in existing:
                     exprs.append(pl.col(source_column).min().alias(name))
             elif spec.type == "max":
-                source_column = str(extra.get("source_column", name))
+                source_column = spec.source_column
                 if source_column in existing:
                     exprs.append(pl.col(source_column).max().alias(name))
             elif spec.type in {"cpc", "hll", "theta", "topk"}:
@@ -176,7 +188,6 @@ class BinaryOutcomeProcessor:
                     name,
                     spec,
                     existing=existing,
-                    default_source_column=name,
                     source_dtypes=source_schema,
                 )
                 if sketch_expr is not None:
@@ -192,7 +203,6 @@ class BinaryOutcomeProcessor:
                 name,
                 spec,
                 existing=existing,
-                default_source_column=name,
             )
             columns.append(metadata)
         return columns
@@ -201,7 +211,7 @@ class BinaryOutcomeProcessor:
         out = frame
         columns = set(out.collect_schema().names())
         for name, spec in self.state_specs.items():
-            if name in columns or name == "Negatives":
+            if name in columns:
                 continue
             if spec.type in {"cpc", "hll", "theta", "topk"}:
                 out = p3.ensure_state_columns(out, {name: spec})
@@ -210,16 +220,5 @@ class BinaryOutcomeProcessor:
             else:
                 out = out.with_columns(pl.lit(0).alias(name))
         return out
-
-    def _with_negatives(self, frame: _TFrame) -> _TFrame:
-        columns = (
-            set(frame.collect_schema().names())
-            if isinstance(frame, pl.LazyFrame)
-            else set(frame.columns)
-        )
-        if {"Count", "Positives"} <= columns:
-            return frame.with_columns((pl.col("Count") - pl.col("Positives")).alias("Negatives"))
-        return frame
-
 
 __all__ = ["PROVENANCE_COLUMNS", "BinaryOutcomeProcessor", "ChunkContext"]

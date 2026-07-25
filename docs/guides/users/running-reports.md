@@ -73,9 +73,11 @@ under `meta/` remain available for audit.
 3. Use the compact toolbar for Presentation/Inspect mode, Advanced mode, and Filters.
 4. Choose a date preset and up to three primary business filters; open More filters for secondary controls.
    Relative presets such as Last 30 days and Year to date are anchored to the
-   latest available aggregate period when the workspace contains historical
-   data. Reports states when it has applied this clamp. Custom date ranges are
-   always used exactly as entered.
+   latest common data coverage when the workspace contains historical data.
+   When a metric uses relative daily set windows, Reports uses its exact last
+   covered day rather than rounding a partial month to month-end. Reports
+   states when it has applied this clamp. Custom date ranges are always used
+   exactly as entered.
 5. Read the highlighted calendar chip for the active date preset and exact date
    range (for example, `Last 90 days · Apr 16–Jul 14, 2026`). Click it to reset
    the time range to all time across every report page. Other active chips show
