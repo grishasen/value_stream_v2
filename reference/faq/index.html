@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -2544,13 +2516,13 @@ Use a <code>binary_outcome</code> processor with <code>variant_column</code> set
 
 <span class="nt">metrics</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">Lift</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
+<span class="w">    </span><span class="nt">processor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variant_compare</span>
 <span class="w">    </span><span class="nt">variant_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ModelControlGroup</span>
 <span class="w">    </span><span class="nt">test_role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Test</span>
 <span class="w">    </span><span class="nt">control_role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Control</span>
 <span class="w">  </span><span class="nt">Lift_Significance</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
+<span class="w">    </span><span class="nt">processor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">contingency_test</span>
 <span class="w">    </span><span class="nt">tests</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">chi2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">z</span><span class="p p-Indicator">]</span>
 </code></pre></div>
@@ -2561,18 +2533,21 @@ Use the <code>experiment</code> flavor of <code>binary_outcome</code>: include <
 Each numeric property gets a t-digest state (<code>&lt;prop&gt;_tdigest</code>). Percentiles are derived metrics:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">metrics</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">Median_ResponseTime</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">descriptive</span>
-<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tdigest_quantile</span>
+<span class="w">    </span><span class="nt">processor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">descriptive</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">quantile</span>
 <span class="w">    </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ResponseTime_tdigest</span>
 <span class="w">    </span><span class="nt">quantile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
 <span class="w">  </span><span class="nt">p95_ResponseTime</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">descriptive</span>
-<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tdigest_quantile</span>
+<span class="w">    </span><span class="nt">processor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">descriptive</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">quantile</span>
 <span class="w">    </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ResponseTime_tdigest</span>
 <span class="w">    </span><span class="nt">quantile</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.95</span>
 </code></pre></div>
 <p><strong>D9. How do I see ROC AUC over time?</strong>
-A <code>score_distribution</code> processor at <code>Day</code> grain stores <code>Propensity_tdigest_positives</code> and <code>Propensity_tdigest_negatives</code> per day for the selected score property. The <code>ROC_AUC</code> metric (kind <code>curve_from_digests</code>) reconstructs AUC at query time. A <code>line</code> chart with <code>x: Day, y: ROC_AUC, color: Channel</code> plots the trend.</p>
+A daily <code>score_distribution</code> processor stores
+<code>Propensity_tdigest_positives</code> and <code>Propensity_tdigest_negatives</code> per day. The
+<code>ROC_AUC</code> metric (kind <code>curve_from_digests</code>) reconstructs AUC at query time. A
+<code>line</code> chart with <code>x: Day, color: Channel</code> plots the metric-owned trend.</p>
 <p>For the actual model curves, use the same <code>curve_from_digests</code> metric with one
 of the curve chart kinds:</p>
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">roc_curve</span>
@@ -2637,10 +2612,11 @@ Size the machine with the ingestion benchmark, reduce the chunk interval when
 needed, and increase chunk-process parallelism only after measuring peak RSS.</p>
 <p><strong>E5. Can I run Value Stream against a remote object store?</strong>
 Yes — the workspace path can be <code>s3://...</code> or <code>gs://...</code>. Polars and DuckDB read Parquet from object stores natively. The metadata DBs need to be local (DuckDB's WAL doesn't live well on S3) — typically mounted from a local volume.</p>
-<p><strong>E6. How do I migrate from the current app?</strong>
-<code>valuestream migrate --from value_dashboard/config/&lt;variant&gt;.toml --to valuestream/&lt;variant&gt;/catalog/</code>. The migration tool translates legacy TOML, identifies expressions that need hand-conversion (and refuses to silently drop them), and emits a <code>migration_report.md</code>. Then <code>valuestream backfill</code> re-uses the existing DuckDB tables to populate the new aggregate store without recomputing from raw.</p>
-<p><strong>E7. Can the legacy app and Value Stream coexist during migration?</strong>
-Yes — they read from disjoint locations (<code>db/pov_data_&lt;variant&gt;.duckdb</code> vs <code>&lt;workspace&gt;/aggregates/</code>). Run them side-by-side; pin a banner in the legacy UI pointing to Value Stream.</p>
+<p><strong>E6. Can I load an older catalog format?</strong>
+No. Every catalog file must declare <code>catalog_version: 2</code> and satisfy the strict
+v2 schema. Re-author older configurations as v2 and populate aggregates from
+source data; the runtime does not translate aliases or import legacy aggregate
+stores.</p>
 <hr />
 <h2 id="f-security-and-compliance">F. Security and compliance<a class="headerlink" href="#f-security-and-compliance" title="Permanent link">&para;</a></h2>
 <p><strong>F1. Is PII safe?</strong>
@@ -2707,8 +2683,13 @@ Before:</p>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">binary_outcome</span>
 <span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PropensitySource</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
-<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">property</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
+<span class="w">      </span><span class="nt">grain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily</span>
+<span class="w">      </span><span class="nt">calendar</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">timezone</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">UTC</span>
+<span class="w">        </span><span class="nt">week_start</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">monday</span>
+<span class="w">        </span><span class="nt">fiscal_year_start_month</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PropensitySource</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">outcome</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Outcome</span>
 <span class="w">      </span><span class="nt">positive_values</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Clicked</span><span class="p p-Indicator">]</span>
@@ -2717,12 +2698,17 @@ Before:</p>
 <span class="w">    </span><span class="nt">variant_role_map</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">Test</span><span class="p">:</span><span class="w"> </span><span class="nv">Test</span><span class="p p-Indicator">,</span><span class="nt"> Control</span><span class="p">:</span><span class="w"> </span><span class="nv">Control</span><span class="p p-Indicator">}</span>
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">Count</span><span class="p">:</span><span class="w">     </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">Positives</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">Negatives</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">Positives</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> outcome</span><span class="p">:</span><span class="w"> </span><span class="nv">positive</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">Negatives</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> outcome</span><span class="p">:</span><span class="w"> </span><span class="nv">negative</span><span class="p p-Indicator">}</span>
 
 <span class="nt">metrics</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">CTR</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="nv">engagement</span><span class="p p-Indicator">,</span><span class="nt"> kind</span><span class="p">:</span><span class="w"> </span><span class="nv">formula</span><span class="p p-Indicator">,</span><span class="nt"> expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">safe_div</span><span class="p p-Indicator">,</span><span class="nt"> num</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Positives</span><span class="p p-Indicator">},</span><span class="nt"> den</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">add</span><span class="p p-Indicator">,</span><span class="nt"> args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Positives</span><span class="p p-Indicator">},</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Negatives</span><span class="p p-Indicator">}]}}}</span>
-<span class="w">  </span><span class="nt">Lift</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="nv">engagement</span><span class="p p-Indicator">,</span><span class="nt"> kind</span><span class="p">:</span><span class="w"> </span><span class="nv">variant_compare</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">CTR</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">processor</span><span class="p">:</span><span class="w"> </span><span class="nv">engagement</span><span class="p p-Indicator">,</span><span class="nt"> kind</span><span class="p">:</span><span class="w"> </span><span class="nv">formula</span><span class="p p-Indicator">,</span><span class="nt"> expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">safe_div</span><span class="p p-Indicator">,</span><span class="nt"> num</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Positives</span><span class="p p-Indicator">},</span><span class="nt"> den</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">add</span><span class="p p-Indicator">,</span><span class="nt"> args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Positives</span><span class="p p-Indicator">},</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Negatives</span><span class="p p-Indicator">}]}}}</span>
+<span class="w">  </span><span class="nt">Lift</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">processor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">variant_compare</span>
+<span class="w">    </span><span class="nt">variant_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ModelControlGroup</span>
+<span class="w">    </span><span class="nt">test_role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Test</span>
+<span class="w">    </span><span class="nt">control_role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Control</span>
 </code></pre></div>
 <p><strong>I2. Translating a <code>pl.col(...).is_in(...)</code> filter to AST.</strong>
 Before: <code>filter = "(pl.col(\"ModelControlGroup\").is_in([\"Test\",\"Control\"]))"</code>

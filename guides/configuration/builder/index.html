@@ -1281,34 +1281,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../operations/deployment/" class="md-nav__link">
         
   
@@ -2478,7 +2450,9 @@ guided order, or <strong>Jump to step</strong> when you already know where to wo
    comes before Processors because it defines the workspace's common business
    dimensions that new processors start from.</li>
 <li>In <strong>Metrics</strong>, create a metric from the recipe library or from scratch, or
-   maintain an existing metric.</li>
+   maintain an existing metric. The edit workflow starts with a searchable
+   metric selector; metric selection synchronizes processor and kind, while
+   changing processor or kind selects a compatible metric.</li>
 <li>In <strong>Reports / Tiles</strong>, edit a tile and its page settings as one change.</li>
 <li>Review the aggregate context available to Chat With Data in <strong>Chat Review</strong>.</li>
 <li>Update shared defaults and report appearance in <strong>Settings</strong>.</li>
@@ -2667,7 +2641,7 @@ and <strong>Source Column</strong> remain separate fields and cannot be redefine
 After a state is added, the popover clears before the next state is authored.
 Sketch-size keys are checked against the selected type so, for example,
 <code>lg_max_map_size</code> cannot leak from a Top-K state into a CPC or theta state.</p>
-<p>Applying a processor automatically adds one distribution metric for every
+<p>Applying or updating a processor automatically adds one distribution metric for every
 unconditioned t-digest or KLL state that does not already have one. The metric
 omits <code>quantile</code>, so it reads the median as its primary value and exposes the
 full quantile suite to distribution charts. Existing distribution metrics are
@@ -2698,6 +2672,11 @@ and offers <strong>Run data</strong>. The transaction does not start that run. A
 successful metric Apply, the Builder reloads the catalog and opens the saved
 metric for maintenance. See the
 <a href="../../../reference/kpi-recipes/">KPI recipe reference</a>.</p>
+<p>The main editor exposes <strong>Metric Label</strong> directly below the immutable Metric
+ID. This is the human-readable <code>display.label</code> used by report axes and
+selectors; leave it blank to fall back to a label derived from the Metric ID.
+Unit, number format, and favorable direction remain under <strong>Report
+presentation</strong>.</p>
 <p>A digest state is the mergeable binary accumulator persisted by a processor;
 it is not itself a public query result. Its automatically authored distribution
 metric is the stable catalog name that tells the query layer to decode that
@@ -2717,6 +2696,10 @@ New-page draft state is keyed independently from its generated dashboard and
 page IDs, so changing a new dashboard name cannot reset the entered Page Name.
 The persisted dashboard and page titles are the exact trimmed values shown in
 the editor.</p>
+<p>Box plots bind only to a <code>distribution</code> metric. The selected metric already
+identifies its processor digest and source property, so the tile exposes no
+separate Property, Y, or Value control. Use X, Color, and optional facets only
+to group the selected distribution.</p>
 <p>The collapsed <strong>Report inventory</strong> is searchable and uses dashboard, page,
 tile, metric, and chart labels designed for recognition. Enable technical IDs
 only when exact catalog identity is needed. The visual report library groups
@@ -2728,10 +2711,9 @@ normally round-trips unchanged.</p>
 intensity, so there is no Value or Color field. X and optional Y contain only
 configured time grains and persisted processor dimensions. Leave Y empty with
 a daily X for a calendar layout; set both axes for a matrix or cohort layout.
-Numeric-distribution metrics additionally expose Property and Metric
-(statistic) controls. The retired <code>calendar_heatmap</code>, <code>cohort_heatmap</code>, and
-<code>descriptive_heatmap</code> kinds still render, but saving one through Visual mode
-migrates it to <code>heatmap</code>.</p>
+Intensity is selected only from the chosen metric's read-only output contract;
+there are no separate Property or statistic controls. Retired heatmap aliases
+are rejected by catalog-v2 validation.</p>
 <p>Combo charts also use metric-owned values. The tile's selected <strong>Metric</strong>
 supplies the primary Y series, so no Y field is shown. <strong>Y2 Metric</strong> offers
 only other scalar metrics with the same metric kind and backing processor.
@@ -2749,8 +2731,16 @@ Theta category and optional Color grouping.</p>
 hierarchy; advanced mode may optionally configure a separate size value.</p>
 <p>Donut charts derive slice values from the selected metric. Choose only the
 Names category and optional Color grouping.</p>
-<p>Sankey charts derive link values from the selected metric. Choose only the
-Source and Target dimensions.</p>
+<p>Sankey charts derive link values from the selected metric. Choose an ordered
+<strong>Flow Path</strong> containing at least two time/dimension fields. Every adjacent
+pair becomes another link layer; legacy Source/Target tiles remain readable
+and are migrated to Flow Path when edited visually.</p>
+<p>The Metric editor shows <strong>Outputs</strong> as a read-only list computed from the
+metric kind and its configuration. In report charts where the measure was
+previously implicit—KPI, Gauge, Line, Bar, Stacked Area, Waterfall, Pareto,
+Combo primary Y, Polar radius, Treemap value/color, Donut value, Sankey value,
+and Heatmap intensity—the visual and advanced editors show the corresponding
+role as a metric-output selector. It contains only that read-only output list.</p>
 <p>Interval charts separate category and numeric roles. Choose a time or dimension
 for X; Y and every Error field offer only outputs produced by the selected
 metric. Variant comparison metrics therefore expose their estimates, confidence

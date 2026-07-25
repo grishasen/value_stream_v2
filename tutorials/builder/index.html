@@ -1229,34 +1229,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -2463,6 +2435,10 @@ The exact profile values remain in the collapsed <strong>Technical details</stro
 <p>The scratch editor begins empty for a new metric. Choose a processor and metric
 kind, then enter a display name. The Builder generates a stable technical ID;
 existing metrics retain their IDs during guided edits.</p>
+<p>For <strong>Edit Existing Metric</strong>, the searchable <strong>Metric</strong> selector comes first.
+Choosing a metric updates <strong>Processor</strong> and <strong>Metric Kind</strong> to match it. You can
+also change processor or kind directly; the Metric selection then moves to a
+compatible metric while the full searchable metric list remains available.</p>
 <p>For a recipe, read the business definition and accuracy notes, select a
 compatible processor, and resolve any field, algorithm, population, or stage
 mapping. Choose <strong>Review changes</strong> to inspect the exact processor, metric, and
@@ -2503,9 +2479,9 @@ confirmation is enabled. Cancel leaves the catalog unchanged.</p>
 </tr>
 </tbody>
 </table>
-<p>Open <strong>Report presentation</strong> to set the friendly label, unit, default number
-format, and whether higher or lower values are favorable. These fields affect
-Reports only and do not require reprocessing.</p>
+<p>Set <strong>Metric Label</strong> in the main editor. Open <strong>Report presentation</strong> to set
+the unit, default number format, and whether higher or lower values are
+favorable. These fields affect Reports only and do not require reprocessing.</p>
 <p>For ROC, average-precision, and calibration metrics, choose the backing digest
 property when the processor has positive and negative t-digest pairs. The
 editor fills both state references while preserving manual selection for custom
@@ -2544,8 +2520,9 @@ and Color to control the categorical arrangement.</p>
 the hierarchy; advanced mode can optionally set a separate size value.</p>
 <p>For a <strong>Donut</strong> chart, the selected metric supplies the slice values. Choose
 Names for the category labels; no separate Value field is needed.</p>
-<p>For a <strong>Sankey</strong> chart, the selected metric supplies link values. Choose only
-Source and Target for the flow endpoints.</p>
+<p>For a <strong>Sankey</strong> chart, the selected metric supplies link values. Choose an
+ordered <strong>Flow Path</strong> with at least two time/dimension fields. Every adjacent
+pair becomes another step, such as Channel → Customer Type → Placement.</p>
 <p>Choose the one <strong>Apply to workspace</strong> action. The tile and page settings are
 validated as a complete catalog before Apply, then written and validated
 together. Visual mode preserves chart settings it does not own; use Raw YAML

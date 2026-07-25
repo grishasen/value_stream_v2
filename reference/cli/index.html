@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -1848,28 +1820,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#migrate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        migrate
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#backfill" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        backfill
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#vacuum" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2389,28 +2339,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#migrate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        migrate
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#backfill" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        backfill
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#vacuum" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2743,19 +2671,6 @@ schema from a real export sample.</p>
 </tr>
 </tbody>
 </table>
-<h2 id="migrate">migrate<a class="headerlink" href="#migrate" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>migrate<span class="w"> </span>--from<span class="w"> </span>LEGACY.toml<span class="w"> </span>--to<span class="w"> </span>WORKSPACE/catalog
-</code></pre></div>
-<p>Translates a legacy TOML config into catalog YAML and writes a
-<code>migration_report.md</code> into the target directory. Prints generated files,
-mapped fields, and gaps; review the report before sign-off
-(<a href="../../guides/operations/migration/">migration guide</a>).</p>
-<h2 id="backfill">backfill<a class="headerlink" href="#backfill" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>backfill<span class="w"> </span>--workspace<span class="w"> </span>WORKSPACE<span class="w"> </span>--from-legacy-db<span class="w"> </span>LEGACY.duckdb
-</code></pre></div>
-<p>Imports legacy DuckDB aggregate tables into the partitioned parquet aggregate
-layout where they map to catalog targets. Prints per-table results and skipped
-targets.</p>
 <h2 id="vacuum">vacuum<a class="headerlink" href="#vacuum" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>vacuum<span class="w"> </span>WORKSPACE<span class="w"> </span><span class="o">[</span>--tmp/--no-tmp<span class="o">]</span><span class="w"> </span><span class="o">[</span>--dry-run<span class="o">]</span>
 </code></pre></div>

@@ -1072,34 +1072,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -2167,19 +2139,15 @@ grains or persisted processor dimensions:</p>
 <li>another <code>x</code> without <code>y</code> renders a one-row intensity strip;</li>
 <li>numeric-distribution heatmaps may select <code>property</code> and <code>score</code>.</li>
 </ul>
-<p>The legacy <code>calendar_heatmap</code>, <code>cohort_heatmap</code>, and
-<code>descriptive_heatmap</code> kinds remain loadable and renderable. Visual or Advanced
-editing normalizes them to <code>heatmap</code>; Raw YAML remains available for explicit
-legacy maintenance.</p>
+<p>Catalog v2 accepts only <code>heatmap</code>; the retired calendar, cohort, and
+descriptive aliases are rejected.</p>
 <h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Authors cannot redirect intensity to a dimension or unrelated state.</li>
 <li>Heatmap axes stay within the aggregate query contract.</li>
 <li>The Builder and Reports Advanced mode have one heatmap choice and one field
   model.</li>
-<li>Existing catalogs remain readable without a forced bulk migration.</li>
-<li>Runtime compatibility aliases must remain covered until a future catalog
-  version explicitly removes them.</li>
+<li>Every editor and runtime path uses the same strict chart contract.</li>
 </ul>
 
 

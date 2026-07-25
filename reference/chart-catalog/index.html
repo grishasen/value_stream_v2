@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -2921,15 +2893,15 @@ validation.</p>
 </tr>
 <tr>
 <td><code>y</code></td>
-<td>str / list[str]</td>
-<td>most</td>
-<td>column name(s) on y axis</td>
+<td>str</td>
+<td>scatter, corr, descriptive_line, experiment charts</td>
+<td>explicit second dimension or specialist output</td>
 </tr>
 <tr>
-<td><code>y2</code></td>
+<td><code>secondary_metric</code></td>
 <td>str</td>
 <td>combo</td>
-<td>compatible secondary metric ID; it must have the same metric kind and backing processor as <code>metric</code></td>
+<td>compatible scalar metric ID with the same kind and backing processor as <code>metric</code></td>
 </tr>
 <tr>
 <td><code>x_axis_title</code> / <code>y_axis_title</code></td>
@@ -2941,7 +2913,7 @@ validation.</p>
 <td><code>y2_axis_title</code></td>
 <td>str</td>
 <td>combo</td>
-<td>explicit secondary-axis label; otherwise the <code>y2</code> display label is used</td>
+<td>explicit secondary-axis label; otherwise the secondary metric label is used</td>
 </tr>
 <tr>
 <td><code>color</code></td>
@@ -2960,12 +2932,6 @@ validation.</p>
 <td>list[str]</td>
 <td>treemap</td>
 <td>hierarchy of group-by columns</td>
-</tr>
-<tr>
-<td><code>value</code></td>
-<td>str</td>
-<td>gauge</td>
-<td>scalar column to display</td>
 </tr>
 <tr>
 <td><code>description</code></td>
@@ -2992,12 +2958,6 @@ validation.</p>
 <td><code>absolute</code>, <code>index_100</code>, or <code>percent_change</code></td>
 </tr>
 <tr>
-<td><code>r</code></td>
-<td>str</td>
-<td>bar_polar</td>
-<td>legacy radius override; Visual mode derives radius from <code>metric</code></td>
-</tr>
-<tr>
 <td><code>theta</code></td>
 <td>str</td>
 <td>bar_polar</td>
@@ -3014,12 +2974,6 @@ validation.</p>
 <td>str</td>
 <td>most</td>
 <td>column for facet columns</td>
-</tr>
-<tr>
-<td><code>facets</code></td>
-<td>dict</td>
-<td>most</td>
-<td>shorthand: <code>{row: x, col: y}</code></td>
 </tr>
 <tr>
 <td><code>animation_frame</code></td>
@@ -3060,7 +3014,7 @@ validation.</p>
 <tr>
 <td><code>property</code></td>
 <td>str</td>
-<td>descriptive_*</td>
+<td>histogram, descriptive_*</td>
 <td>numeric property column</td>
 </tr>
 <tr>
@@ -3103,7 +3057,7 @@ validation.</p>
 <td><code>sort_direction</code></td>
 <td>str</td>
 <td>bar</td>
-<td><code>asc</code> or <code>desc</code></td>
+<td><code>ascending</code> or <code>descending</code></td>
 </tr>
 <tr>
 <td><code>top_n</code></td>
@@ -3124,19 +3078,29 @@ validation.</p>
 <td>per-row colors when no explicit <code>color</code> field is set</td>
 </tr>
 <tr>
-<td><code>error_y_lower</code> / <code>error_y_upper</code></td>
+<td><code>metric_output</code></td>
+<td>str</td>
+<td>metric-owned measure charts</td>
+<td>selected column from the metric's read-only output contract</td>
+</tr>
+<tr>
+<td><code>lower_output</code> / <code>upper_output</code></td>
 <td>str</td>
 <td>interval</td>
-<td>absolute lower/upper confidence-bound columns</td>
+<td>lower/upper confidence-bound outputs from the selected metric</td>
 </tr>
 </tbody>
 </table>
+<p>Every metric exposes its computed output contract in the Metric editor as a
+read-only list. The report editor uses that same list for <code>metric_output</code>;
+dimensions, time fields, and processor states are never offered in that
+selector. Scalar metrics have one selectable output, normally their Metric ID.</p>
 <p>Interval confidence-bound columns are coerced to nullable numeric values before
 the renderer calculates positive and negative error lengths. A comparison group
 with no eligible rows can therefore render null bounds without raising a
-storage-type error. In both report editors, <code>y</code>, <code>error_y</code>,
-<code>error_y_lower</code>, and <code>error_y_upper</code> can select only outputs produced by the
-tile's selected metric; processor dimensions and time fields are excluded.</p>
+storage-type error. In both report editors, <code>metric_output</code>, <code>lower_output</code>,
+and <code>upper_output</code> can select only outputs produced by the tile's selected
+metric; processor dimensions and time fields are excluded.</p>
 <hr />
 <h2 id="3-chart-catalog">3. Chart catalog<a class="headerlink" href="#3-chart-catalog" title="Permanent link">&para;</a></h2>
 <p>For each chart: required Tile fields, expected metric output shape, and an outline of the Plotly construction.</p>
@@ -3221,8 +3185,7 @@ output; <code>color</code> is not a configurable role.</p>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="34-heatmap">3.4 <code>heatmap</code><a class="headerlink" href="#34-heatmap" title="Permanent link">&para;</a></h3>
-<p>Required: <code>x</code>. Optional: <code>y</code>, plus <code>property</code> and <code>score</code> for a
-<code>numeric_distribution</code> processor.</p>
+<p>Required: <code>x</code>. Optional: <code>y</code>.</p>
 <p>The selected metric owns the cell intensity. <code>value</code> and <code>color</code> are not
 selectable roles and are removed when the tile is saved through an editor.
 Both axes are constrained to configured calendar grains or the metric
@@ -3234,8 +3197,9 @@ processor's persisted <code>group_by</code> dimensions, so aggregate states such
   and cohort layouts.</li>
 <li>daily <code>x</code> without <code>y</code> renders the calendar layout.</li>
 <li>another one-dimensional <code>x</code> without <code>y</code> renders a one-row intensity strip.</li>
-<li><code>property</code> plus <code>score</code> chooses a descriptive aggregate such as
-  <code>ResponseTime_p95</code>; otherwise the selected metric's primary output is used.</li>
+<li>Intensity always comes from the explicitly selected metric output. To show a
+  descriptive statistic such as <code>ResponseTime_p95</code>, select the corresponding
+  metric and output instead of binding a second property or score.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="n">value</span> <span class="o">=</span> <span class="n">selected_metric_output</span>
 <span class="n">matrix</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">pivot</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">],</span> <span class="n">columns</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">values</span><span class="o">=</span><span class="n">value</span><span class="p">)</span>
@@ -3246,10 +3210,8 @@ processor's persisted <code>group_by</code> dimensions, so aggregate states such
     <span class="n">aspect</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
-<p><code>calendar_heatmap</code>, <code>cohort_heatmap</code>, and <code>descriptive_heatmap</code> remain accepted
-as read/runtime compatibility aliases. They are no longer offered as separate
-Builder choices; editing one in Visual or Advanced mode migrates it to
-<code>chart: heatmap</code>.</p>
+<p>The retired calendar, cohort, and descriptive heatmap aliases are rejected.
+Use <code>chart: heatmap</code> with <code>x</code>, optional <code>y</code>, and the selected metric.</p>
 <h3 id="35-scatter">3.5 <code>scatter</code><a class="headerlink" href="#35-scatter" title="Permanent link">&para;</a></h3>
 <p>Required: <code>x, y</code>. Optional: <code>color, size, animation_frame, animation_group, facet_row, facet_col, log_x, log_y</code>.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span>
@@ -3305,15 +3267,13 @@ rows, set optional <code>x</code> to the stage dimension. Facet fields remain op
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="39-boxplot">3.9 <code>boxplot</code><a class="headerlink" href="#39-boxplot" title="Permanent link">&para;</a></h3>
-<p>Required: a <code>tdigest_quantile</code> metric. Optional: <code>property, x, color,
-facet_row, facet_col</code>. <code>property</code> is a constrained selector containing only
-properties backed by an unconditioned t-digest or KLL metric on the same
-processor. Changing it transparently queries that property's distribution
-metric. Without <code>x</code>, the renderer produces one overall distribution box; set
-<code>x</code> to compare the distribution across time or another persisted dimension.</p>
-<p>There is no <code>y</code> field: the selected distribution property owns the sketch and
-supplies the quantile values. Scalar processor outputs such as <code>&lt;prop&gt;_Count</code>
-are therefore not offered. Boxplots are reconstructed from
+<p>Required: a <code>distribution</code> metric. Optional: <code>x, color, facet_row, facet_col</code>.
+The metric binds one unconditioned t-digest or KLL state and therefore owns the
+numeric property. There is no second Property, Y, or Value field. To change
+the measured property, select its automatically persisted distribution metric.
+Without <code>x</code>, the renderer produces one overall distribution box; set <code>x</code> to
+compare the distribution across time or another persisted dimension.</p>
+<p>Scalar processor outputs such as <code>&lt;prop&gt;_Count</code> are not offered. Boxplots are reconstructed from
 <code>&lt;prop&gt;_p25, &lt;prop&gt;_Median, &lt;prop&gt;_p75, &lt;prop&gt;_Min, &lt;prop&gt;_Max</code> (or t-digest
 quantiles) already exposed by that metric.</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">go</span><span class="o">.</span><span class="n">Figure</span><span class="p">()</span>
@@ -3400,7 +3360,7 @@ projection horizon.</p>
 reference/processors.md §4 for the column naming convention. Score names are
 case-insensitive (<code>P95</code> and <code>p95</code> both resolve to the canonical <code>_p95</code> column).
 Use <code>histogram</code> for a digest-backed distribution and the unified <code>heatmap</code> with
-<code>property</code> and <code>score</code> for a descriptive matrix.</p>
+the corresponding metric output for a descriptive matrix.</p>
 <h3 id="318-experiment_z_score-experiment_odds_ratio">3.18 <code>experiment_z_score</code> / <code>experiment_odds_ratio</code><a class="headerlink" href="#318-experiment_z_score-experiment_odds_ratio" title="Permanent link">&para;</a></h3>
 <p>Specializations for <code>experiment</code> metrics. The Tile picks which experiment statistic to plot:</p>
 <table>
@@ -3474,17 +3434,17 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 </tr>
 <tr>
 <td><code>sankey</code></td>
-<td><code>source, target</code>; value comes from <code>metric</code></td>
-<td>Journey/path flow between stages or channels</td>
+<td>ordered <code>path</code> of 2+ dimensions; value comes from <code>metric</code></td>
+<td>Multi-step journey/path flow between stages or channels</td>
 </tr>
 <tr>
 <td><code>combo</code></td>
-<td><code>x, y2</code>; Y comes from <code>metric</code></td>
+<td><code>x, secondary_metric</code>; Y comes from <code>metric</code></td>
 <td>Bar + line dual-axis comparison of two compatible scalar metrics; use <code>y2_axis_title</code> to override the secondary-axis label</td>
 </tr>
 <tr>
 <td><code>interval</code></td>
-<td><code>x, y</code> plus optional error fields; Y/error roles use metric outputs only</td>
+<td><code>x, metric_output</code> plus optional <code>lower_output</code>/<code>upper_output</code></td>
 <td>Lift/estimate with uncertainty interval</td>
 </tr>
 <tr>
@@ -3510,7 +3470,17 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <span class="w">  </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pareto</span>
 <span class="w">  </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Campaign</span>
 <span class="w">  </span><span class="nt">top_n</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12</span>
+
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">customer_journey</span>
+<span class="w">  </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Customer journey</span>
+<span class="w">  </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Clicks</span>
+<span class="w">  </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sankey</span>
+<span class="w">  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">CustomerType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Placement</span><span class="p p-Indicator">]</span>
 </code></pre></div>
+<p>For Sankey, every adjacent pair in <code>path</code> becomes a link layer. Nodes are
+stage-scoped, so the same label may appear independently at different steps.
+Legacy <code>source</code> and <code>target</code> fields remain readable as a two-step path, but
+Builder writes the canonical <code>path</code> form.</p>
 <hr />
 <h2 id="4-recipe-metadata">4. Recipe metadata<a class="headerlink" href="#4-recipe-metadata" title="Permanent link">&para;</a></h2>
 <p>The Builder UI uses the following metadata table to filter chart kinds by the metric's underlying processor and to default required fields:</p>
@@ -3617,7 +3587,7 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <tr>
 <td><code>sankey</code></td>
 <td>aggregate metrics</td>
-<td>source/target dims</td>
+<td>ordered processor dimension path</td>
 <td>selected metric's primary output</td>
 </tr>
 <tr>
@@ -3634,9 +3604,9 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 </tr>
 <tr>
 <td><code>boxplot</code></td>
-<td>numeric_distribution</td>
+<td>numeric_distribution, score_distribution</td>
 <td>optional first time-grain dim</td>
-<td>digest/KLL-backed <code>property</code> (no <code>y</code>)</td>
+<td>selected <code>distribution</code> metric (no <code>property</code> or <code>y</code>)</td>
 </tr>
 <tr>
 <td><code>histogram</code></td>

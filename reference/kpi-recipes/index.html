@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -2450,11 +2422,15 @@ workspace</strong> writes the reviewed revision. Applying uses one rollback boun
 for all four catalog files plus <code>ai.yaml</code>, including post-write validation.
 Recipe confirmation and apply never start ingestion; the outcome links to Data
 Load when the processor contract requires materialization.</p>
-<p>An installed metric carries recipe provenance as ordinary permissive metric
-metadata:</p>
+<p>For recipe-created metrics, <code>display.label</code> is derived from the chosen Metric
+ID. The recipe still supplies units, formatting, direction, and calculation
+metadata, but it cannot replace the metric's identity with a generic recipe
+name.</p>
+<p>An installed metric carries recipe provenance in the strict typed metric
+contract:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">metrics</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">VS_Unique_Entities</span><span class="p">:</span>
-<span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih_engagement</span>
+<span class="w">    </span><span class="nt">processor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih_engagement</span>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">approx_distinct_count</span>
 <span class="w">    </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">UniqueCustomers_cpc</span>
 <span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Approximate distinct entity count from a persisted mergeable sketch.</span>

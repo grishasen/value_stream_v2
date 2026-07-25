@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -2726,9 +2698,9 @@
 <td><code>pipeline_run_id</code>, <code>chunk_id</code>, <code>period</code>, <code>created_at</code>, <code>config_hash</code> columns on every aggregate row</td>
 </tr>
 <tr>
-<td>Multi-grain</td>
-<td>Same metric available at <code>Day</code>, <code>Month</code>, and <code>Summary</code> grains</td>
-<td>Per-(source, processor, grain) physical aggregate; planner picks cheapest grain</td>
+<td>Multi-grain queries</td>
+<td>Same metric available at its base grain and every coarser calendar grain</td>
+<td>Each processor stores one base-grain aggregate; the query layer merges it to the requested coarser grain</td>
 </tr>
 <tr>
 <td>Operates on one node</td>
@@ -2835,12 +2807,12 @@
 <li><strong>Ingestion engine</strong> — turns files into aggregates. Reads files lazily via Polars, applies transforms, fans out to processors, writes Parquet partials, runs compactions, updates the chunks ledger.</li>
 <li><strong>Query layer</strong> — turns metric requests into reads from the aggregate store. Plans, scans Parquet via DuckDB, materializes Polars frames, applies derived metric DSL, returns rows.</li>
 <li><strong>Surfaces</strong> — current read clients on top of the same query layer are Streamlit UI, Python SDK, DuckDB export, Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API. Remote HTTP MCP and multi-user/OIDC deployment are deferred.</li>
-<li><strong>CLI</strong> — operator entry point: <code>run</code>, <code>validate</code>, <code>migrate</code>, <code>backfill</code>, <code>vacuum</code>, <code>serve</code>.</li>
+<li><strong>CLI</strong> — operator entry point: <code>run</code>, <code>validate</code>, <code>backfill</code>, <code>vacuum</code>, <code>serve</code>.</li>
 </ol>
 <p>The Streamlit reports surface reads typed page-filter definitions from
-<code>dashboards.yaml</code>, with a backward-compatible inference fallback over the
-processors that back the page's tiles. Because Value Stream is aggregate-first,
-only persisted processor <code>group_by</code> columns are eligible. Each filter declares
+<code>dashboards.yaml</code>. Omitted filters or <code>[]</code> mean no filters; no filters are
+inferred from processors. Because Value Stream is aggregate-first, only
+persisted processor <code>group_by</code> columns are eligible. Each filter declares
 <code>all_tiles</code> or <code>compatible_tiles</code> coverage. The capability matrix is validated,
 partial coverage is shown on the active chip, and every unsupported tile names
 the active filters it did not apply; filters are never skipped silently.</p>
@@ -3044,7 +3016,7 @@ persisting the index.</p>
 </tr>
 <tr>
 <td><code>processors.yaml</code></td>
-<td>Processors bound to sources, with <code>group_by</code>, <code>time.grains</code>, states, outcome rules</td>
+<td>Processors bound to sources, with <code>group_by</code>, one <code>time.grain</code>, states, outcome rules</td>
 </tr>
 <tr>
 <td><code>metrics.yaml</code></td>
@@ -3089,12 +3061,12 @@ Configuration Studio; <strong>Configure the current workspace</strong> enters Co
 Builder. The landing page chooses a workflow but does not create a third
 authoring store.</p>
 <ul>
-<li><strong>Configuration Builder</strong> is the catalog-first, validation-first editor for the active workspace. Its compact outline covers workspace health, sources, processors, dimensions, metrics, reports/tiles, chat review, settings, and <strong>Export current workspace</strong>. Each object editor compares a canonical session-local revision with the applied object. Internal navigation preserves a dirty revision until the user applies or discards it; simply visiting a step cannot make it dirty. A current object exposes exactly one <strong>Apply to workspace</strong> action, and apply never starts ingestion. Source steps create new sources or edit existing ones in place, including reader runtime settings, schema keys, defaults, dataset filters, calculated fields, and the in-memory <code>materialize_transforms</code> execution toggle; create mode rejects an existing Source ID rather than replacing it. Create mode also exposes an explicit, optional bounded sample inspection after reader settings are entered. Opening the editor performs no read, the preview persists only field names and types in session state, and the observed names seed later source-field controls without changing catalog configuration or starting ingestion. An <code>OutcomeDate</code> or <code>OutcomeTime</code> timestamp in create mode deterministically seeds the standard Pega datetime, calendar, action-ID, and numeric-cast transforms, constrained by observed optional fields when a sample was loaded. Filters are authored either as rule rows (<code>field</code>, <code>operator</code>, <code>value</code>, <code>enabled</code>) or editable, validated raw expression-AST YAML; calculated fields become <code>derive_column</code> transforms with typed AST expressions. Processor steps edit group-by dimensions, grains, states, and optional processor filters. Metric and report steps edit display metadata, page filters/time presets, KPI behavior, descriptions, and scales in addition to chart fields. Page-settings writes merge into the existing page and preserve its tiles, dashboard layout, and theme. Chat review shows which aggregate metrics will be available to Chat With Data and edits chat-only LLM prompt/description guidance in <code>ai.yaml</code>; settings edit workspace defaults plus dashboard theme.</li>
+<li><strong>Configuration Builder</strong> is the catalog-first, validation-first editor for the active workspace. Its compact outline covers workspace health, sources, processors, dimensions, metrics, reports/tiles, chat review, settings, and <strong>Export current workspace</strong>. Each object editor compares a canonical session-local revision with the applied object. Internal navigation preserves a dirty revision until the user applies or discards it; simply visiting a step cannot make it dirty. A current object exposes exactly one <strong>Apply to workspace</strong> action, and apply never starts ingestion. Source steps create new sources or edit existing ones in place, including reader runtime settings, schema keys, defaults, dataset filters, calculated fields, and the in-memory <code>materialize_transforms</code> execution toggle; create mode rejects an existing Source ID rather than replacing it. Create mode also exposes an explicit, optional bounded sample inspection after reader settings are entered. Opening the editor performs no read, the preview persists only field names and types in session state, and the observed names seed later source-field controls without changing catalog configuration or starting ingestion. An <code>OutcomeDate</code> or <code>OutcomeTime</code> timestamp in create mode deterministically seeds the standard Pega datetime, calendar, action-ID, and numeric-cast transforms, constrained by observed optional fields when a sample was loaded. Filters are authored either as rule rows (<code>field</code>, <code>operator</code>, <code>value</code>, <code>enabled</code>) or editable, validated raw expression-AST YAML; calculated fields become <code>derive_column</code> transforms with typed AST expressions. Processor steps edit group-by dimensions, one physical base grain, states, and optional processor filters. Metric editors show the computed output contract as a read-only list. Report controls that consume metric-owned measures select only from that list and persist the choice as <code>metric_output</code>; dimension roles remain separate. Page-settings writes merge into the existing page and preserve its tiles, dashboard layout, and theme. Chat review shows which aggregate metrics will be available to Chat With Data and edits chat-only LLM prompt/description guidance in <code>ai.yaml</code>; settings edit workspace defaults plus dashboard theme.</li>
 <li><strong>Digest state authoring</strong> keeps storage and query roles separate without
   making the user repeat them. An unconditioned t-digest or KLL state is the
-  persisted mergeable binary accumulator. Applying its processor through
-  Configuration Builder writes a quantile-less distribution metric in the same
-  catalog transaction when no equivalent binding exists. That metric supplies
+  persisted mergeable binary accumulator. Every structured processor-write
+  path persists a quantile-less distribution metric in the same catalog
+  transaction when no equivalent state binding exists. That metric supplies
   the stable public query/report identity and full distribution output;
   additional named percentiles remain optional. Outcome-specific positive and
   negative digests remain internal curve/calibration inputs and are not
@@ -3464,7 +3436,7 @@ only the chunks whose final durable marker is <code>ok</code>.</p>
 </tr>
 <tr>
 <td>Time grains</td>
-<td>Source transforms (<code>derive_calendar</code>); processor <code>time.grains</code>; planner</td>
+<td>Source transforms (<code>derive_calendar</code>); processor base <code>time.grain</code>; query-time rollup planner</td>
 </tr>
 <tr>
 <td>Sketch parameters</td>

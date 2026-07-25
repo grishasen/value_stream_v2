@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -1444,10 +1416,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#migration-functionality" class="md-nav__link">
+  <a href="#catalog-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Migration Functionality
+        Catalog contract
       
     </span>
   </a>
@@ -2315,10 +2287,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#migration-functionality" class="md-nav__link">
+  <a href="#catalog-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Migration Functionality
+        Catalog contract
       
     </span>
   </a>
@@ -2521,17 +2493,11 @@ are trusted.</p>
   coverage, and on-demand query output for inspection.</li>
 <li>Operations pages show run status and chunk-level detail.</li>
 </ul>
-<h2 id="migration-functionality">Migration Functionality<a class="headerlink" href="#migration-functionality" title="Permanent link">&para;</a></h2>
-<p>The migration tooling helps teams move from legacy dashboard assets:</p>
-<ul>
-<li><code>valuestream migrate</code> translates a legacy TOML configuration into Value
-  Stream catalog YAML and writes a migration report.</li>
-<li><code>valuestream backfill</code> imports existing legacy DuckDB aggregate tables into
-  the partitioned aggregate layout.</li>
-<li>Side-by-side validation compares old and new metrics before sign-off.</li>
-</ul>
-<p>Migration is not a blind import. The generated report should be reviewed for
-mapped fields, gaps, and assumptions.</p>
+<h2 id="catalog-contract">Catalog contract<a class="headerlink" href="#catalog-contract" title="Permanent link">&para;</a></h2>
+<p>Workspaces use only the strict catalog-v2 contract. All four catalog files
+must declare <code>catalog_version: 2</code>; unknown fields, retired aliases, and older
+catalog versions are rejected. A workspace moving from another system must be
+authored and validated as catalog v2, then populated from source data.</p>
 <h2 id="decision-rules-for-business-changes">Decision Rules for Business Changes<a class="headerlink" href="#decision-rules-for-business-changes" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2551,7 +2517,7 @@ mapped fields, gaps, and assumptions.</p>
 </tr>
 <tr>
 <td>Add a new processor</td>
-<td>Future runs populate the new aggregate; backfill may be needed</td>
+<td>Future runs populate the new aggregate; historical source replay may be needed</td>
 </tr>
 <tr>
 <td>Add a new group-by dimension</td>

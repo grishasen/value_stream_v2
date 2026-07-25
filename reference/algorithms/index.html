@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -3398,12 +3370,8 @@ return sketch.serialize()              # bytes
 </code></pre></div></p>
 <p>Nulls are removed before construction. The array path removes one Python-to-C
 call per value for non-trivial groups; the scalar path remains for tiny groups,
-where allocating and normalizing an array can cost more than it saves. The
-default <code>sketch_build_mode: bulk</code> is a separate optimization: it bundles all
-t-digest and KLL fields for one group into a single Polars Python callback
-before calling these native builders. <code>sketch_build_mode: legacy</code> retains the
-former per-field callback plan as an explicit comparison and rollback path;
-both modes emit merge-compatible sketch states.</p>
+where allocating and normalizing an array can cost more than it saves. All
+catalog-v2 distribution processors use the bulk construction plan.</p>
 <p><strong>Merge</strong>:
 <div class="highlight"><pre><span></span><code>merged = tdigest_double.deserialize(blobs[0])
 for b in blobs[1:]:
@@ -3631,7 +3599,10 @@ novelty = total_self_info / (unique_users · max_rec_length)
 <p>For Polars Series groups of at least 256 rows, distinct users, action
 frequencies, and interaction lengths are reduced with native Polars expressions;
 smaller or non-Series inputs retain the scalar compatibility path.</p>
-<p>Both metrics are stored as <code>pooled_mean</code> states with <code>Count</code> as the weight, so cross-chunk merging is just a weighted mean.</p>
+<p>Both metrics are stored as <code>pooled_mean</code> states with an explicit
+<code>recipe</code> (<code>personalization</code> or <code>novelty</code>) and <code>Count</code> as the weight, so
+cross-chunk merging is a weighted mean without deriving behavior from the
+state name.</p>
 <hr />
 <h2 id="6-approximate-set-algorithms">6. Approximate-set algorithms<a class="headerlink" href="#6-approximate-set-algorithms" title="Permanent link">&para;</a></h2>
 <h3 id="61-cpc-default-distinct-count-sketch">6.1 CPC (default distinct-count sketch)<a class="headerlink" href="#61-cpc-default-distinct-count-sketch" title="Permanent link">&para;</a></h3>
@@ -3701,13 +3672,12 @@ reused for union, intersection, or difference.</p>
 <p><strong>Build / Union</strong>: analogous to the cardinality-sketch procedures above.</p>
 <p><strong>Cohort retention example</strong> (in metric DSL):
 <div class="highlight"><pre><span></span><code><span class="nt">RetainedUsers_30d</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unique_users</span>
+<span class="w">  </span><span class="nt">processor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unique_users</span>
 <span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">set_op</span>
-<span class="w">  </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">intersection</span>
+<span class="w">  </span><span class="nt">operation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">intersection</span>
 <span class="w">  </span><span class="nt">operands</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="nv">ActiveUsers_theta</span><span class="p p-Indicator">,</span><span class="nt"> time_window</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">last</span><span class="p">:</span><span class="w"> </span><span class="nv">1d</span><span class="p p-Indicator">}}</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="nv">ActiveUsers_theta</span><span class="p p-Indicator">,</span><span class="nt"> time_window</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">between</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">-30d</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">-1d</span><span class="p p-Indicator">]}}</span>
-<span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">count</span>
 </code></pre></div></p>
 <p>The planner reads two theta blobs, runs <code>theta_intersection</code>, and reports <code>get_estimate()</code>.
 The implemented planner resolves relative windows against the explicit query

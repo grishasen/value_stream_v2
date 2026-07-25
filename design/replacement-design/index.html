@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -2266,10 +2238,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#66-multi-grain-materialization" class="md-nav__link">
+  <a href="#66-one-materialization-multiple-query-grains" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6.6 Multi-grain materialization
+        6.6 One materialization, multiple query grains
       
     </span>
   </a>
@@ -3189,10 +3161,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#66-multi-grain-materialization" class="md-nav__link">
+  <a href="#66-one-materialization-multiple-query-grains" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6.6 Multi-grain materialization
+        6.6 One materialization, multiple query grains
       
     </span>
   </a>
@@ -4009,7 +3981,9 @@
 <ol>
 <li><strong>Aggregate-first.</strong> Raw rows live only inside a single chunk's lazy pipeline; nothing raw is persisted, ever.</li>
 <li><strong>Configurable.</strong> A user with no Python skills can author a new metric and a new dashboard tile in YAML, with schema validation and useful errors.</li>
-<li><strong>Multi-grain.</strong> The same logical metric exists at multiple grains (daily, monthly, summary) and the query layer chooses the cheapest grain that still answers correctly.</li>
+<li><strong>Multi-grain queries.</strong> The same logical metric is queryable at the
+   processor's base grain and every coarser calendar grain; only the base
+   aggregate is physically stored.</li>
 <li><strong>Mergeable state catalog.</strong> Sum, min, max, weighted mean, pooled variance, t-digest, KLL, CPC, HLL, Theta sketches — and explicit rules for when each is correct.</li>
 <li><strong>Snapshot support.</strong> Periodic and accumulating snapshot tables for state KPIs (current pipeline, open tickets, subscription state).</li>
 <li><strong>Programmable.</strong> Current capabilities are reachable via CLI, Streamlit, Python SDK, DuckDB export, Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API. Remote HTTP MCP and multi-user/OIDC deployment are deferred.</li>
@@ -4273,7 +4247,7 @@
 <td><code>hll</code></td>
 <td><code>BLOB</code> (Apache DataSketches HLL_8)</td>
 <td><code>hll_union</code></td>
-<td>backward-compatible / opt-in distinct counts</td>
+<td>explicitly selected distinct-count alternative</td>
 </tr>
 <tr>
 <td><code>theta</code></td>
@@ -4296,15 +4270,16 @@
 </tbody>
 </table>
 <p>The state catalog is extensible — a processor declares which states it produces and by what type. The compaction engine looks up the merge rule from the type, not from the processor.</p>
-<h3 id="66-multi-grain-materialization">6.6 Multi-grain materialization<a class="headerlink" href="#66-multi-grain-materialization" title="Permanent link">&para;</a></h3>
-<p>Each processor is materialized at one or more grains. Three are reserved and always available when a calendar column is declared:</p>
-<ul>
-<li><code>daily</code> — one row per <code>(date, group_by_tuple)</code></li>
-<li><code>monthly</code> — one row per <code>(year-month, group_by_tuple)</code></li>
-<li><code>summary</code> — one row per <code>group_by_tuple</code> (no time)</li>
-</ul>
-<p>A processor may also declare custom grains, e.g. <code>weekly_iso</code>, <code>quarterly</code>, <code>hourly</code> — each materialized as its own physical table.</p>
-<p>Compaction across grains is automatic: monthly is compacted from daily, summary from monthly. Because state types are mergeable, this is a <code>groupby + merge</code> pass, not a re-aggregation from raw data.</p>
+<h3 id="66-one-materialization-multiple-query-grains">6.6 One materialization, multiple query grains<a class="headerlink" href="#66-one-materialization-multiple-query-grains" title="Permanent link">&para;</a></h3>
+<p>Each processor declares exactly one physical base grain in <code>time.grain</code>.
+Ingestion writes only that aggregate. The processor's mergeable state contract
+allows the query layer to answer any coarser calendar grain by grouping and
+merging the base rows. For a daily base, <code>Day</code>, <code>Week</code>, <code>Month</code>, <code>Quarter</code>,
+<code>Year</code>, and <code>Summary</code> remain available report dimensions without six physical
+copies.</p>
+<p>A request finer than the configured base grain is invalid because aggregate
+states cannot be disaggregated. Choosing a finer base grain is therefore the
+storage-versus-flexibility decision made in processor configuration.</p>
 <hr />
 <h2 id="7-configuration-dsl-yaml">7. Configuration DSL (YAML)<a class="headerlink" href="#7-configuration-dsl-yaml" title="Permanent link">&para;</a></h2>
 <p>YAML replaces TOML. The full schema is published as JSON Schema and validated on load.</p>
@@ -4877,14 +4852,12 @@ merging resolves conflicts by <code>MAX(as_of_date)</code> and then <code>create
 </tr>
 </tbody>
 </table>
-<p>For each chunk, monthly materialization consumes the base daily aggregate state
-(never the raw rows), groups by <code>dim_tuple</code> without <code>Day</code>, sums counts, unions
-CPC sketches, and writes an immutable run/chunk partial:</p>
-<div class="highlight"><pre><span></span><code>aggregates/ih/engagement/monthly/period=2024-08/part-&lt;run&gt;.parquet
-</code></pre></div>
-<p>Cross-grain materialization is purely an aggregate-state operation — no raw
-data is involved. Query-time merging combines the latest successful partial per
-chunk; <code>valuestream vacuum</code> later removes superseded physical files.</p>
+<p>No monthly or summary copy is written. A monthly request scans the daily
+partial, groups by the requested dimensions plus <code>Month</code>, and merges each
+state with its registered merge rule. A summary request performs the same
+merge without a time bucket. Query-time merging combines the latest successful
+partial per chunk; <code>valuestream vacuum</code> later removes superseded physical
+files.</p>
 <hr />
 <h2 id="9-query-layer">9. Query Layer<a class="headerlink" href="#9-query-layer" title="Permanent link">&para;</a></h2>
 <h3 id="91-planner">9.1 Planner<a class="headerlink" href="#91-planner" title="Permanent link">&para;</a></h3>
@@ -4893,10 +4866,8 @@ chunk; <code>valuestream vacuum</code> later removes superseded physical files.<
 2. derive the requested logical grain from explicit criteria such as
    time_axis=Day/Month/Quarter/Year; default to summary when no time bucket is
    requested
-3. enumerate physical aggregates of the processor (grain × period scope)
-4. pick the smallest aggregate whose grain &gt;= requested logical grain, or a
-   finer aggregate that can be safely rolled up when the coarser aggregate is
-   not materialized,
+3. resolve the processor&#39;s single physical base aggregate and period scope
+4. verify the base grain is finer than or equal to the requested logical grain,
    AND whose group-by columns ⊇ requested group_by
    AND whose states cover the metric&#39;s needs
 5. emit a DuckDB query:
@@ -5293,8 +5264,8 @@ removes the checkpoint.</p>
 </tr>
 <tr>
 <td><code>boxplot</code></td>
-<td><code>x, y, color?</code></td>
-<td>from <code>numeric_distribution</code> quantile states</td>
+<td><code>x?, color?, facet_row?, facet_col?</code></td>
+<td>selected distribution metric owns the digest/property</td>
 </tr>
 <tr>
 <td><code>histogram</code></td>
@@ -5603,7 +5574,7 @@ and generated-code analysis remain later surfaces. See
 <ol>
 <li>Should <code>dashboards.yaml</code> support computed columns at the tile level, or should everything be a metric? Leaning <strong>metric</strong>, to keep aggregate routing predictable.</li>
 <li>Should <code>metrics.yaml</code> support metric inheritance (CTR variants)? Probably yes, with <code>extends:</code> keyword — defer to Phase 5.</li>
-<li>Distinct-count default: CPC with <code>lg_k=11</code>. HLL with <code>lg_k=12</code> remains supported for backward compatibility and explicit performance trade-offs.</li>
+<li>Distinct-count default: CPC with <code>lg_k=11</code>. HLL with <code>lg_k=12</code> is an explicit alternative for different performance trade-offs.</li>
 <li>Do we need a tdigest-of-tdigests for very deep hierarchies, or is one-pass merging enough? Benchmarks in Phase 2.</li>
 <li>Should the Builder UI persist YAML in git, or in DuckDB with import/export? Likely git (configs as code) but with a one-click export to share with non-developers.</li>
 </ol>

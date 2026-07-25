@@ -1198,34 +1198,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../operations/deployment/" class="md-nav__link">
         
   
@@ -2392,9 +2364,11 @@ under <code>meta/</code> remain available for audit.</p>
 <li>Use the compact toolbar for Presentation/Inspect mode, Advanced mode, and Filters.</li>
 <li>Choose a date preset and up to three primary business filters; open More filters for secondary controls.
    Relative presets such as Last 30 days and Year to date are anchored to the
-   latest available aggregate period when the workspace contains historical
-   data. Reports states when it has applied this clamp. Custom date ranges are
-   always used exactly as entered.</li>
+   latest common data coverage when the workspace contains historical data.
+   When a metric uses relative daily set windows, Reports uses its exact last
+   covered day rather than rounding a partial month to month-end. Reports
+   states when it has applied this clamp. Custom date ranges are always used
+   exactly as entered.</li>
 <li>Read the highlighted calendar chip for the active date preset and exact date
    range (for example, <code>Last 90 days · Apr 16–Jul 14, 2026</code>). Click it to reset
    the time range to all time across every report page. Other active chips show

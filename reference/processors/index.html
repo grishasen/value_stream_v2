@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -3495,7 +3467,7 @@
     <span class="n">kind</span><span class="p">:</span> <span class="nb">str</span>              <span class="c1"># one of binary_outcome | numeric_distribution | ...</span>
     <span class="n">source_id</span><span class="p">:</span> <span class="nb">str</span>
     <span class="n">group_by</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>    <span class="c1"># transformed source columns preserved for reporting</span>
-    <span class="n">time</span><span class="o">.</span><span class="n">grains</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="c1"># Day, Month, Summary, ...</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">grain</span><span class="p">:</span> <span class="nb">str</span>        <span class="c1"># one physical base grain</span>
     <span class="n">states</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">StateSpec</span><span class="p">]</span>
     <span class="n">config_hash</span><span class="p">:</span> <span class="nb">str</span>
 
@@ -3520,21 +3492,26 @@
 <span class="sd">        merge rule. Used by compaction and by the query layer to fold</span>
 <span class="sd">        multiple chunks&#39; partials into a single answer.&quot;&quot;&quot;</span>
 
-    <span class="c1"># 4. Cross-grain compaction</span>
+    <span class="c1"># 4. Base-grain projection/merge</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">compact</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">frame</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>             <span class="c1"># finer grain</span>
-        <span class="n">target_grain</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">frame</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>             <span class="c1"># chunk aggregate</span>
+        <span class="n">target_grain</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>               <span class="c1"># configured base grain</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Reduce a finer-grained aggregate to a coarser one</span>
-<span class="sd">        by dropping the fine time-grain column and re-merging.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Project or merge the chunk aggregate to the one stored base grain.&quot;&quot;&quot;</span>
 
     <span class="c1"># 5. Optional: derived helpers</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">derive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Some processors expose derived helpers (e.g. RFM segmentation);</span>
 <span class="sd">        most leave this to the metric DSL.&quot;&quot;&quot;</span>
 </code></pre></div>
-<p>The default <code>merge</code> and <code>compact</code> implementations are generic — they iterate over <code>self.states</code> and dispatch to the per-state-type merge rule. Subclasses override them only when the merge requires extra context (e.g. pooled variance needs the <code>_n_minus1_variance</code> and <code>_n_mean_diff_sq</code> temporaries documented in reference/algorithms.md §2.3).</p>
+<p>The default <code>merge</code> and <code>compact</code> implementations are generic — they iterate
+over <code>self.states</code> and dispatch to the per-state-type merge rule. Ingestion
+calls <code>compact</code> only for <code>time.grain</code>; query-time rollups reuse the same merge
+contract for coarser calendar grains. Subclasses override the merge only when
+it requires extra context (e.g. pooled variance needs the
+<code>_n_minus1_variance</code> and <code>_n_mean_diff_sq</code> temporaries documented in
+reference/algorithms.md §2.3).</p>
 <p>When the target uses the processor's finest physical level, <code>compact</code> first
 checks whether the prepared target keys are unique. Unique rows are projected
 directly instead of re-merging singleton sketches; duplicate keys and every
@@ -3585,14 +3562,14 @@ in the same way as a merged result.</p>
 </tr>
 <tr>
 <td><code>pooled_mean</code></td>
-<td><code>FLOAT64</code> (paired with <code>Count</code>)</td>
-<td><code>pl.mean(col)</code></td>
-<td><code>weighted_mean(value, count)</code></td>
+<td><code>FLOAT64</code> (explicit <code>source_column</code> or recipe plus <code>weight</code>)</td>
+<td><code>pl.mean(col)</code> or named recipe</td>
+<td><code>weighted_mean(value, weight)</code></td>
 <td>numeric_distribution, score_distribution</td>
 </tr>
 <tr>
 <td><code>pooled_variance</code></td>
-<td><code>FLOAT64</code> (paired with <code>Count, Mean</code>)</td>
+<td><code>FLOAT64</code> (explicit <code>source_column</code>, <code>mean</code>, and <code>weight</code>)</td>
 <td><code>pl.var(col)</code></td>
 <td>Welford-merge</td>
 <td>numeric_distribution</td>
@@ -3623,7 +3600,7 @@ in the same way as a merged result.</p>
 <td><code>BLOB</code></td>
 <td><code>datasketches.hll_sketch(lg_k=12, tgt_type=HLL_8)</code></td>
 <td>union</td>
-<td>backward-compatible / opt-in distinct counts</td>
+<td>explicitly selected distinct-count alternative</td>
 </tr>
 <tr>
 <td><code>theta</code></td>
@@ -3648,13 +3625,13 @@ mapping is preserved in <code>processors.yaml</code>; <code>type</code> and <cod
 dedicated fields. Empty mappings use the defaults shown above. The Builder
 accepts <code>lg_k</code> only for CPC/HLL/theta states, <code>k</code> only for t-digest/KLL states,
 and <code>lg_max_map_size</code> only for Top-K states.</p>
-<p>When Configuration Builder applies a processor, each unconditioned t-digest or
-KLL state receives a <code>tdigest_quantile</code> metric with no explicit <code>quantile</code> if
-no such distribution binding exists. The state remains the mergeable binary
-storage contract; the metric is the public query/report binding. Explicit
-percentile metrics can coexist with it. States marked <code>outcome: positive</code> or
-<code>outcome: negative</code> are excluded because they are paired implementation inputs
-for curve and calibration metrics.</p>
+<p>Whenever a structured authoring path writes a processor, each unconditioned
+t-digest or KLL state receives a persisted <code>distribution</code> metric if no
+distribution binding exists.
+The state remains the mergeable binary storage contract; the metric is the
+public query/report binding. Explicit <code>quantile</code> metrics can coexist with it.
+States marked <code>outcome: positive</code> or <code>outcome: negative</code> are excluded because
+they are paired implementation inputs for curve and calibration metrics.</p>
 <hr />
 <h2 id="3-binary_outcome-processor">3. binary_outcome processor<a class="headerlink" href="#3-binary_outcome-processor" title="Permanent link">&para;</a></h2>
 <h3 id="31-purpose">3.1 Purpose<a class="headerlink" href="#31-purpose" title="Permanent link">&para;</a></h3>
@@ -3664,10 +3641,10 @@ for curve and calibration metrics.</p>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">engagement</span><span class="w">                          </span><span class="c1"># snake_case</span>
 <span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">binary_outcome</span>
-<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">CustomerType</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Week</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">CustomerType</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
-<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">property</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
+<span class="w">      </span><span class="nt">grain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily</span>
 
 <span class="w">    </span><span class="nt">outcome</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Outcome</span>
@@ -3696,8 +3673,8 @@ for curve and calibration metrics.</p>
 
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">Count</span><span class="p">:</span><span class="w">               </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">Positives</span><span class="p">:</span><span class="w">           </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">Negatives</span><span class="p">:</span><span class="w">           </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">Positives</span><span class="p">:</span><span class="w">           </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> outcome</span><span class="p">:</span><span class="w"> </span><span class="nv">positive</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">Negatives</span><span class="p">:</span><span class="w">           </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> outcome</span><span class="p">:</span><span class="w"> </span><span class="nv">negative</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">Revenue</span><span class="p">:</span><span class="w">             </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">Revenue</span><span class="p p-Indicator">}</span><span class="w">     </span><span class="c1"># for conversion</span>
 <span class="w">      </span><span class="nt">Touchpoints</span><span class="p">:</span><span class="w">         </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span><span class="w">                                  </span><span class="c1"># for conversion</span>
 <span class="w">      </span><span class="nt">UniqueCustomers_cpc</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">cpc</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">CustomerID</span><span class="p p-Indicator">,</span><span class="nt"> lg_k</span><span class="p">:</span><span class="w"> </span><span class="nv">11</span><span class="p p-Indicator">}</span>
@@ -3906,37 +3883,24 @@ OUTPUT merge(F2)
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">descriptive</span>
 <span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">numeric_distribution</span>
-<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">CustomerType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Week</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">CustomerType</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
-<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">properties</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Outcome</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Propensity</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">FinalPropensity</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Priority</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">]</span>
-<span class="w">    </span><span class="nt">quantile_engine</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tdigest</span><span class="w">                </span><span class="c1"># tdigest | kll | exact</span>
-<span class="w">    </span><span class="nt">sketch_build_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bulk</span><span class="w">                 </span><span class="c1"># bulk (default) | legacy; execution-only</span>
-<span class="w">    </span><span class="nt">states</span><span class="p">:</span><span class="w">                                  </span><span class="c1"># template, expanded per property</span>
-<span class="w">      </span><span class="s">&quot;{prop}_Count&quot;</span><span class="p p-Indicator">:</span><span class="w">    </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt">           per_property</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="s">&quot;{prop}_Sum&quot;</span><span class="p p-Indicator">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt">       per_property</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> numeric_only</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="s">&quot;{prop}_Mean&quot;</span><span class="p p-Indicator">:</span><span class="w">     </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">pooled_mean</span><span class="p p-Indicator">,</span><span class="nt">     per_property</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> numeric_only</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> weight</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{prop}_Count&quot;</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="s">&quot;{prop}_Var&quot;</span><span class="p p-Indicator">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">pooled_variance</span><span class="p p-Indicator">,</span><span class="nt"> per_property</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> numeric_only</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> count</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{prop}_Count&quot;</span><span class="p p-Indicator">,</span><span class="nt"> mean</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{prop}_Mean&quot;</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="s">&quot;{prop}_Min&quot;</span><span class="p p-Indicator">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">min</span><span class="p p-Indicator">,</span><span class="nt">             per_property</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> numeric_only</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="s">&quot;{prop}_Max&quot;</span><span class="p p-Indicator">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">max</span><span class="p p-Indicator">,</span><span class="nt">             per_property</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> numeric_only</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="s">&quot;{prop}_tdigest&quot;</span><span class="p p-Indicator">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">tdigest</span><span class="p p-Indicator">,</span><span class="nt">         per_property</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> numeric_only</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> k</span><span class="p">:</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">property</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
+<span class="w">      </span><span class="nt">grain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily</span>
+<span class="w">    </span><span class="nt">properties</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ResponseTime</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">quantile_engine</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tdigest</span>
+<span class="w">    </span><span class="nt">states</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">ResponseTime_Count</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">ResponseTime_Sum</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">ResponseTime_Mean</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">pooled_mean</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">,</span><span class="nt"> weight</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime_Count</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">ResponseTime_Var</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">pooled_variance</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">,</span><span class="nt"> mean</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime_Mean</span><span class="p p-Indicator">,</span><span class="nt"> weight</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime_Count</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">ResponseTime_Min</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">min</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">ResponseTime_Max</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">max</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">ResponseTime_tdigest</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">tdigest</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">,</span><span class="nt"> k</span><span class="p">:</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">}</span>
 </code></pre></div>
-<p>The engine expands <code>{prop}</code> for each template entry in <code>properties</code>. A state
-whose name/metadata does not contain <code>{prop}</code> is an ordinary explicit state and
-is built once. This lets recipes add, for example, <code>ResponseTime_kll</code> alongside
-the default <code>ResponseTime_tdigest</code>, or a CPC/HLL/Theta/Top-K sketch over another
-configured source field. For non-numeric properties (e.g. <code>Outcome</code> is a
-string), only <code>Count</code> is generated unless an explicit compatible sketch state
-is configured.</p>
-<p><code>sketch_build_mode</code> controls only how t-digest/KLL states cross the Python
-callback boundary. <code>bulk</code> is the default: it combines the processor's
-quantile-sketch construction for each group and reduces repeated Python
-callbacks while retaining the same state and merge contracts. <code>legacy</code> keeps
-the per-field callback plan as an explicit comparison and rollback escape
-hatch. The mode does not change state definitions, merge semantics, or
-source/processor computation hashes; the catalog hash still records the
-authored runtime choice.</p>
+<p><code>properties</code> identifies the approved numeric inputs and <code>states</code> is the exact
+persisted output contract. The engine does not generate, merge, or rename
+states implicitly. Sketch construction always uses the bulk implementation.</p>
 <h3 id="43-source-schema-requirements">4.3 Source schema requirements<a class="headerlink" href="#43-source-schema-requirements" title="Permanent link">&para;</a></h3>
 <p>Each property in <code>properties</code> must exist in the Source's row schema. Numeric properties produce numeric states; string/categorical properties produce only <code>Count</code>. Group-by and time-grain columns must exist.</p>
 <h3 id="44-output-schema-daily-grain-abbreviated">4.4 Output schema (daily grain, abbreviated)<a class="headerlink" href="#44-output-schema-daily-grain-abbreviated" title="Permanent link">&para;</a></h3>
@@ -4023,15 +3987,15 @@ global_var  = (ssw + ssb) / (global_n - 1)     # pooled variance
 <td>scalar</td>
 </tr>
 <tr>
-<td><code>Median(p)</code></td>
-<td><code>tdigest_quantile</code></td>
-<td><code>&lt;p&gt;_tdigest</code></td>
-<td>scalar</td>
+<td><code>Distribution(p)</code></td>
+<td><code>distribution</code></td>
+<td><code>&lt;p&gt;_tdigest</code> or <code>&lt;p&gt;_kll</code></td>
+<td>quantile suite</td>
 </tr>
 <tr>
-<td><code>p25(p)</code>, <code>p75(p)</code>, <code>p90(p)</code>, <code>p95(p)</code>, <code>p99(p)</code></td>
-<td><code>tdigest_quantile</code></td>
-<td><code>&lt;p&gt;_tdigest</code></td>
+<td><code>Median(p)</code>, <code>p25(p)</code>, <code>p75(p)</code>, <code>p90(p)</code>, <code>p95(p)</code>, <code>p99(p)</code></td>
+<td><code>quantile</code></td>
+<td>digest state plus required <code>quantile</code></td>
 <td>scalar</td>
 </tr>
 <tr>
@@ -4042,10 +4006,8 @@ global_var  = (ssw + ssb) / (global_n - 1)     # pooled variance
 </tr>
 </tbody>
 </table>
-<p>The Builder-authored distribution form of <code>tdigest_quantile</code> omits
-<code>quantile</code>. It returns the median as the primary scalar and makes the complete
-quantile suite available to boxplots and other distribution charts. Named
-percentile rows in the table above are optional additional metrics.</p>
+<p><code>distribution</code> exposes the complete quantile suite to boxplots and related
+charts. <code>quantile</code> always requires an explicit value between 0 and 1.</p>
 <h3 id="49-edge-cases">4.9 Edge cases<a class="headerlink" href="#49-edge-cases" title="Permanent link">&para;</a></h3>
 <ul>
 <li>A property may exist in some chunks and not in others. The engine fills missing property states with sentinel values (<code>Count=0</code>, sketches empty) and never errors on a missing property.</li>
@@ -4064,13 +4026,14 @@ and CPC/HLL/Theta/Top-K states over configured source fields, and computes
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">model_ml_scores</span>
 <span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">score_distribution</span>
-<span class="w">    </span><span class="nt">sketch_build_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bulk</span><span class="w">                 </span><span class="c1"># bulk (default) | legacy; execution-only</span>
-<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">CustomerType</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Week</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">CustomerType</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
-<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">property</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
+<span class="w">      </span><span class="nt">grain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily</span>
 
-<span class="w">    </span><span class="nt">score_properties</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Propensity</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">FinalPropensity</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">score_properties</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="nv">Propensity</span><span class="p p-Indicator">,</span><span class="nt"> role</span><span class="p">:</span><span class="w"> </span><span class="nv">primary</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="nv">FinalPropensity</span><span class="p p-Indicator">,</span><span class="nt"> role</span><span class="p">:</span><span class="w"> </span><span class="nv">calibrated</span><span class="p p-Indicator">}</span>
 
 <span class="w">    </span><span class="nt">outcome</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Outcome</span>
@@ -4081,8 +4044,8 @@ and CPC/HLL/Theta/Top-K states over configured source fields, and computes
 
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">Count</span><span class="p">:</span><span class="w">                         </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">personalization</span><span class="p">:</span><span class="w">               </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">pooled_mean</span><span class="p p-Indicator">,</span><span class="nt"> weight</span><span class="p">:</span><span class="w"> </span><span class="nv">Count</span><span class="p p-Indicator">,</span><span class="nt"> source_metric</span><span class="p">:</span><span class="w"> </span><span class="nv">personalization</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">novelty</span><span class="p">:</span><span class="w">                       </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">pooled_mean</span><span class="p p-Indicator">,</span><span class="nt"> weight</span><span class="p">:</span><span class="w"> </span><span class="nv">Count</span><span class="p p-Indicator">,</span><span class="nt"> source_metric</span><span class="p">:</span><span class="w"> </span><span class="nv">novelty</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">personalization</span><span class="p">:</span><span class="w">               </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">pooled_mean</span><span class="p p-Indicator">,</span><span class="nt"> weight</span><span class="p">:</span><span class="w"> </span><span class="nv">Count</span><span class="p p-Indicator">,</span><span class="nt"> recipe</span><span class="p">:</span><span class="w"> </span><span class="nv">personalization</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">novelty</span><span class="p">:</span><span class="w">                       </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">pooled_mean</span><span class="p p-Indicator">,</span><span class="nt"> weight</span><span class="p">:</span><span class="w"> </span><span class="nv">Count</span><span class="p p-Indicator">,</span><span class="nt"> recipe</span><span class="p">:</span><span class="w"> </span><span class="nv">novelty</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">Propensity_tdigest_positives</span><span class="p">:</span><span class="w">       </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">tdigest</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">Propensity</span><span class="p p-Indicator">,</span><span class="nt">      score_property</span><span class="p">:</span><span class="w"> </span><span class="nv">Propensity</span><span class="p p-Indicator">,</span><span class="nt">      outcome</span><span class="p">:</span><span class="w"> </span><span class="nv">positive</span><span class="p p-Indicator">,</span><span class="nt"> k</span><span class="p">:</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">Propensity_tdigest_negatives</span><span class="p">:</span><span class="w">       </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">tdigest</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">Propensity</span><span class="p p-Indicator">,</span><span class="nt">      score_property</span><span class="p">:</span><span class="w"> </span><span class="nv">Propensity</span><span class="p p-Indicator">,</span><span class="nt">      outcome</span><span class="p">:</span><span class="w"> </span><span class="nv">negative</span><span class="p p-Indicator">,</span><span class="nt"> k</span><span class="p">:</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">FinalPropensity_tdigest_positives</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">tdigest</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">FinalPropensity</span><span class="p p-Indicator">,</span><span class="nt"> score_property</span><span class="p">:</span><span class="w"> </span><span class="nv">FinalPropensity</span><span class="p p-Indicator">,</span><span class="nt"> outcome</span><span class="p">:</span><span class="w"> </span><span class="nv">positive</span><span class="p p-Indicator">,</span><span class="nt"> k</span><span class="p">:</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">}</span>
@@ -4091,11 +4054,6 @@ and CPC/HLL/Theta/Top-K states over configured source fields, and computes
 <span class="w">      </span><span class="nt">Priority_kll</span><span class="p">:</span><span class="w">                  </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">kll</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">Priority</span><span class="p p-Indicator">,</span><span class="nt"> k</span><span class="p">:</span><span class="w"> </span><span class="nv">200</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">Category_topk</span><span class="p">:</span><span class="w">                 </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">topk</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">Category</span><span class="p p-Indicator">,</span><span class="nt"> lg_max_map_size</span><span class="p">:</span><span class="w"> </span><span class="nv">10</span><span class="p p-Indicator">}</span>
 </code></pre></div>
-<p><code>sketch_build_mode</code> has the same execution-only semantics and computation-hash
-exclusion as for <code>numeric_distribution</code>. <code>bulk</code> is the default for new and
-omitted configurations; set <code>legacy</code> explicitly to compare the former
-per-field callback plan or roll back the optimization without changing the
-logical aggregate contract.</p>
 <p>The ingestion runner assigns a hidden source-order index before transforms when
 <code>personalization</code> or <code>novelty</code> is present. Their bounded samples are restored to
 that source order inside the group callback, so Polars streaming scheduling and
@@ -4125,19 +4083,12 @@ G = F.group_by(group_keys).agg(
 )
 </code></pre></div>
 <p><code>personalization</code> and <code>novelty</code> formulas live in reference/algorithms.md §5; their inputs are <code>(CustomerID, ActionName)</code> and <code>(CustomerID, InteractionID, ActionName)</code> respectively.</p>
-<p>Each t-digest state selects its transformed input with <code>source_column</code>. For
-implicit score states, <code>score_properties</code> generates
-<code>&lt;ScoreProperty&gt;_tdigest_positives</code> and <code>&lt;ScoreProperty&gt;_tdigest_negatives</code>
-for every selected score property. Older <code>score: primary</code> and
-<code>score: calibrated</code> forms remain supported for existing catalogs and resolve
-through legacy <code>score_columns</code> when present.
-An explicit generic state named <code>&lt;ScoreProperty&gt;_tdigest</code> with no
-<code>source_column</code> infers <code>&lt;ScoreProperty&gt;</code> from the state name and includes all
-configured positive and negative outcome rows. Only states with
+<p>Each t-digest or KLL state selects its transformed input with the required
+<code>source_column</code>. <code>score_properties</code> declares each score column and its role;
+it does not generate states. Only states with
 <code>outcome: positive</code> or <code>outcome: negative</code> apply an outcome-side filter.
-<code>&lt;ScoreProperty&gt;_kll</code> follows the same unconditioned rule. Explicit
-CPC/HLL/Theta/Top-K states use <code>source_column</code> and are built over all retained
-outcome rows.
+Unconditioned states include all retained outcome rows. Explicit
+CPC/HLL/Theta/Top-K states also require <code>source_column</code>.
 Curve metrics then select stored positive and negative t-digest states with
 <code>positive_state</code> and <code>negative_state</code> in <code>metrics.yaml</code>.</p>
 <h3 id="54-merge-algorithm">5.4 merge algorithm<a class="headerlink" href="#54-merge-algorithm" title="Permanent link">&para;</a></h3>
@@ -4211,8 +4162,12 @@ Curve metrics then select stored positive and negative t-digest states with
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">entity_lifecycle</span>
 <span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ControlGroup</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PurchasedDateTime</span>
-<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">property</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PurchasedDateTime</span>
+<span class="w">      </span><span class="nt">grain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">summary</span>
+<span class="w">      </span><span class="nt">calendar</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">timezone</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">UTC</span>
+<span class="w">        </span><span class="nt">week_start</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">monday</span>
+<span class="w">        </span><span class="nt">fiscal_year_start_month</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
 
 <span class="w">    </span><span class="nt">keys</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">customer_id</span><span class="p">:</span><span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">CustomerID</span>
@@ -4220,17 +4175,10 @@ Curve metrics then select stored positive and negative t-digest states with
 <span class="w">      </span><span class="nt">monetary</span><span class="p">:</span><span class="w">       </span><span class="l l-Scalar l-Scalar-Plain">OneTimeCost</span>
 <span class="w">      </span><span class="nt">purchase_date</span><span class="p">:</span><span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">PurchasedDateTime</span>
 
-<span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">non_contractual</span><span class="w">          </span><span class="c1"># non_contractual | contractual</span>
-
-<span class="w">    </span><span class="c1"># only for model=contractual</span>
-<span class="w">    </span><span class="nt">recurring_period_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RecurringPeriod</span>
-<span class="w">    </span><span class="nt">recurring_cost_column</span><span class="p">:</span><span class="w">   </span><span class="l l-Scalar l-Scalar-Plain">RecurringCost</span>
-
 <span class="w">    </span><span class="nt">lifespan_years</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">9</span>
-<span class="w">    </span><span class="nt">rfm_segments</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">retail_banking</span><span class="w">    </span><span class="c1"># named preset; or inline dict</span>
 
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">unique_holdings</span><span class="p">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt">     source_aggregation</span><span class="p">:</span><span class="w"> </span><span class="nv">n_unique_order</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">unique_holdings</span><span class="p">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">HoldingID</span><span class="p p-Indicator">,</span><span class="nt"> distinct</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">lifetime_value</span><span class="p">:</span><span class="w">       </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">OneTimeCost</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">MinPurchasedDate</span><span class="p">:</span><span class="w">     </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">min</span><span class="p p-Indicator">,</span><span class="nt">       source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">PurchasedDateTime</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">MaxPurchasedDate</span><span class="p">:</span><span class="w">     </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">max</span><span class="p p-Indicator">,</span><span class="nt">       source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">PurchasedDateTime</span><span class="p p-Indicator">}</span>
@@ -4252,20 +4200,11 @@ F = F.with_columns(
 group_keys = group_by + [customer_id_col, &quot;Year&quot;, &quot;Quarter&quot;]   # entity-level keys
 
 agg = [
-    pl.col(order_id_col).n_unique().alias(&quot;unique_holdings&quot;),
-    pl.sum(monetary_col).alias(&quot;lifetime_value&quot;),
-    pl.min(purchase_date_col).alias(&quot;MinPurchasedDate&quot;),
-    pl.max(purchase_date_col).alias(&quot;MaxPurchasedDate&quot;),
-    build_cpc(pl.col(customer_id_col)).alias(&quot;UniquePurchasers_cpc&quot;),
+    build_state(state_id, typed_state_spec)
+    for state_id, typed_state_spec in processor.states
 ]
 
-if model == &quot;contractual&quot;:
-    agg += [(pl.col(recurring_cost_col) * pl.col(recurring_period_column)).sum().alias(&quot;recurring_costs&quot;)]
-
 G = F.group_by(group_keys).agg(agg)
-
-if model == &quot;contractual&quot;:
-    G = G.with_columns(lifetime_value = G.lifetime_value + G.recurring_costs).drop(&quot;recurring_costs&quot;)
 
 OUTPUT G
 </code></pre></div>
@@ -4278,6 +4217,17 @@ OUTPUT G
 <li>Compaction to summary drops <code>Year, Quarter</code> and re-merges.</li>
 </ul>
 <h3 id="65-derived-metric-lifecycle_summary-rfm">6.5 Derived metric — <code>lifecycle_summary</code> (RFM)<a class="headerlink" href="#65-derived-metric-lifecycle_summary-rfm" title="Permanent link">&para;</a></h3>
+<p>The metric explicitly binds the four required state roles; the names below are
+examples, not reserved identifiers:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">CLV_Summary</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">processor</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">clv</span>
+<span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lifecycle_summary</span>
+<span class="w">  </span><span class="nt">entity_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CustomerID</span>
+<span class="w">  </span><span class="nt">holdings_state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unique_holdings</span>
+<span class="w">  </span><span class="nt">monetary_state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lifetime_value</span>
+<span class="w">  </span><span class="nt">first_purchase_state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MinPurchasedDate</span>
+<span class="w">  </span><span class="nt">last_purchase_state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MaxPurchasedDate</span>
+</code></pre></div>
 <div class="highlight"><pre><span></span><code>INPUT compacted lifecycle frame F
 
 observation_end = max(F.MaxPurchasedDate)
@@ -4336,10 +4286,10 @@ OUTPUT S
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unique_users</span>
 <span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">entity_set</span>
-<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Week</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
-<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">property</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
+<span class="w">      </span><span class="nt">grain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily</span>
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">ActiveUsers_cpc</span><span class="p">:</span><span class="w">    </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">cpc</span><span class="p p-Indicator">,</span><span class="nt">   source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">CustomerID</span><span class="p p-Indicator">,</span><span class="nt"> lg_k</span><span class="p">:</span><span class="w"> </span><span class="nv">11</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">ActiveUsers_theta</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">theta</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">CustomerID</span><span class="p p-Indicator">,</span><span class="nt"> lg_k</span><span class="p">:</span><span class="w"> </span><span class="nv">12</span><span class="p p-Indicator">}</span>
@@ -4392,6 +4342,10 @@ the latest available <code>Day</code>. <code>last: Nd</code> is inclusive of the
 [offset_a, offset_b]</code> applies inclusive day/week offsets such as <code>[-30d,
 -1d]</code>. Windowed set queries require a configured daily grain so retention is
 computed from persisted sketches rather than raw events.</p>
+<p>Reports therefore read exact daily freshness for windowed set metrics and
+anchor relative presets to the latest common covered day across the page. A
+partial month ending on September 18 remains anchored to September 18; its
+monthly period label must not advance the window anchor to September 30.</p>
 <p>The planner is responsible for finding the right <code>period</code> partitions and for assembling theta operands.</p>
 <hr />
 <h2 id="8-funnel-processor">8. funnel processor<a class="headerlink" href="#8-funnel-processor" title="Permanent link">&para;</a></h2>
@@ -4402,10 +4356,10 @@ computed from persisted sketches rather than raw events.</p>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">action_funnel</span>
 <span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">funnel</span>
-<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Week</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">PlacementType</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
-<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">property</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
+<span class="w">      </span><span class="nt">grain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily</span>
 <span class="w">    </span><span class="nt">stages</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">Impression</span><span class="p p-Indicator">,</span><span class="nt"> when</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">eq</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">Impression</span><span class="p p-Indicator">}}</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">Clicked</span><span class="p p-Indicator">,</span><span class="nt">    when</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">eq</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">Clicked</span><span class="p p-Indicator">}}</span>
@@ -4471,10 +4425,10 @@ funnel has no <code>entity</code> default.</p>
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">snapshot</span>
 <span class="w">    </span><span class="nt">snapshot_kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">periodic</span>
 <span class="w">    </span><span class="nt">cadence</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily</span>
-<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Plan</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Region</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Week</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Plan</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Region</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">as_of_date</span>
-<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">property</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">as_of_date</span>
+<span class="w">      </span><span class="nt">grain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">daily</span>
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">ActiveSubs</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">MRR</span><span class="p">:</span><span class="w">         </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">monthly_recurring</span><span class="p p-Indicator">}</span>
@@ -4489,11 +4443,12 @@ funnel has no <code>entity</code> default.</p>
 <span class="w">    </span><span class="nt">entity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ticket_id</span>
 <span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Team</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Severity</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">time</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">grains</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Summary</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="nt">property</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">created_at</span>
+<span class="w">      </span><span class="nt">grain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">summary</span>
 <span class="w">    </span><span class="nt">milestones</span><span class="p">:</span>
-<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">created_at</span><span class="p p-Indicator">,</span><span class="nt">        column</span><span class="p">:</span><span class="w"> </span><span class="nv">created_at</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">first_response_at</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">first_response_at</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">resolved_at</span><span class="p p-Indicator">,</span><span class="nt">       column</span><span class="p">:</span><span class="w"> </span><span class="nv">resolved_at</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">created_at</span><span class="p p-Indicator">,</span><span class="nt">        property</span><span class="p">:</span><span class="w"> </span><span class="nv">created_at</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">first_response_at</span><span class="p p-Indicator">,</span><span class="nt"> property</span><span class="p">:</span><span class="w"> </span><span class="nv">first_response_at</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">resolved_at</span><span class="p p-Indicator">,</span><span class="nt">       property</span><span class="p">:</span><span class="w"> </span><span class="nv">resolved_at</span><span class="p p-Indicator">}</span>
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">OpenTickets</span><span class="p">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> where</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">is_null</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">resolved_at</span><span class="p p-Indicator">}}</span>
 <span class="w">      </span><span class="nt">MeanResolveHours</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">pooled_mean</span><span class="p p-Indicator">,</span><span class="nt"> source_metric</span><span class="p">:</span><span class="w"> </span><span class="nv">resolve_hours</span><span class="p p-Indicator">,</span><span class="nt"> weight</span><span class="p">:</span><span class="w"> </span><span class="nv">ResolvedTickets</span><span class="p p-Indicator">}</span>
@@ -4549,9 +4504,8 @@ preserves atomic publication and history; vacuum removes superseded files.</p>
 <li><code>test_pooled_variance_correctness</code> — pooled var matches a brute-force computation on the un-grouped data, within <code>1e-9</code>.</li>
 <li><code>test_tdigest_curve_correctness</code> — ROC AUC reconstructed from digests is within <code>1e-2</code> of <code>sklearn.metrics.roc_auc_score</code> on the raw scores.</li>
 <li><code>test_cpc_distinct_correctness</code> — CPC distinct-count estimates and bounds cover deterministic fixtures for <code>n ∈ {1e2, 1e4, 1e6}</code>.</li>
-<li><code>test_hll_backward_compatibility</code> — explicitly configured HLL states still build, merge, and query correctly.</li>
+<li><code>test_hll_state_contract</code> — an explicitly configured HLL state builds, merges, and queries correctly.</li>
 <li>A markdown reference page in <code>docs/processors/&lt;id&gt;.md</code> describing the canonical YAML, expected Source schema, and example output.</li>
-<li>(Optional) A migration mapping in <code>migration.py</code> if a legacy family corresponds to this processor.</li>
 </ol>
 
 

@@ -1078,34 +1078,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/operations/migration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Migration & backfill
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../guides/operations/deployment/" class="md-nav__link">
         
   
@@ -3539,7 +3511,7 @@
                                 ▼
                             Metric ── Processor (FK)
                                   \── kind ∈ { formula, approx_distinct_count,
-                                              tdigest_quantile, variant_compare,
+                                              distribution, quantile, variant_compare,
                                               proportion_test, contingency_test,
                                               curve_from_digests,
                                               calibration_from_digests,
@@ -3573,7 +3545,17 @@
 <h3 id="catalog">Catalog<a class="headerlink" href="#catalog" title="Permanent link">&para;</a></h3>
 <p>The set of YAML files in <code>&lt;workspace&gt;/catalog/</code> that define everything declarative about the workspace: <code>pipelines.yaml</code>, <code>processors.yaml</code>, <code>metrics.yaml</code>, and <code>dashboards.yaml</code>. Loaded once at startup, validated, and hashed into a single <code>config_hash</code>.</p>
 <h3 id="chart">Chart<a class="headerlink" href="#chart" title="Permanent link">&para;</a></h3>
-<p>A presentation-layer artifact bound to a Tile. Each chart has a <code>kind</code> (<code>line, stacked_area, bar, kpi_card, waterfall, pareto, treemap, heatmap, scatter, combo, interval, donut, geo_map, table, bar_polar, sankey, gauge, funnel, boxplot, histogram, calibration_curve, roc_curve, precision_recall_curve, gain_curve, lift_curve, rfm_density, exposure, corr, model</code>) and required Tile fields (<code>x, y, color, facets, …</code>). <code>heatmap</code> is an adaptive family whose intensity comes from the selected metric; <code>calendar_heatmap</code>, <code>cohort_heatmap</code>, and <code>descriptive_heatmap</code> are compatibility aliases, not separate authoring choices. Funnel likewise accepts configured Funnel-processor stages or numeric-distribution count rows through one chart kind. Combo, Pareto, and Waterfall Y, Polar bar Radius, Treemap Color, Donut Values, and Sankey link Value are metric-owned, while Combo <code>y2</code> identifies a compatible same-kind scalar metric backed by the same processor. Waterfall is a single trace: its colors are semantic (increase, decrease, or total), and it does not accept color grouping or facets. See reference/chart-catalog.md.</p>
+<p>A presentation-layer artifact bound to a Tile. Tiles are a strict
+chart-discriminated union: each chart admits only its own dimension and style
+roles. Every Metric publishes a read-only output contract. A metric-owned
+chart role persists one member of that contract in <code>metric_output</code>, including
+the single output of a scalar metric. Heatmap uses <code>x</code> and optional
+<code>y</code>; Sankey and Treemap use ordered <code>path</code>; Donut uses <code>names</code>; Combo uses
+<code>secondary_metric</code>. Pareto and Waterfall Y, Polar radius, Treemap color,
+Donut values, and Sankey link values are metric-owned. Waterfall accepts only
+<code>x</code> plus common presentation settings; its colors are semantic increase,
+decrease, and total. Retired chart aliases and source/target shorthand are
+rejected. See reference/chart-catalog.md.</p>
 <h3 id="chunk">Chunk<a class="headerlink" href="#chunk" title="Permanent link">&para;</a></h3>
 <p>The unit of idempotent work in the ingestion engine. A chunk consists of:
 - a <code>chunk_id</code> (typically derived from a filename pattern, e.g. <code>2024-08-21</code>),
@@ -3590,7 +3572,11 @@ chunk commit marker.</p>
 Only an <code>ok</code> row whose parent run is <code>ok</code> or <code>partial</code> is query-visible and
 eligible for idempotent reuse.</p>
 <h3 id="compaction">Compaction<a class="headerlink" href="#compaction" title="Permanent link">&para;</a></h3>
-<p>The process of reducing finer-grained aggregates into coarser-grained aggregates by <code>groupby + state-merge</code>. Compaction is a pure file operation and never touches raw data. Standard chain: <code>Day → Month → Summary</code>, stored internally as <code>daily → monthly → summary</code>.</p>
+<p>The process of reducing aggregate states with <code>groupby + state-merge</code>.
+Ingestion uses it once to produce the processor's configured base-grain
+partial. Coarser <code>Week</code>, <code>Month</code>, <code>Quarter</code>, <code>Year</code>, and <code>Summary</code> answers are
+merged from that base aggregate at query time; duplicate coarser physical
+materializations are not written. Compaction never touches raw data.</p>
 <h3 id="config-hash">Config hash<a class="headerlink" href="#config-hash" title="Permanent link">&para;</a></h3>
 <p>The sha256 of the canonicalized YAML for a Processor (or for the whole catalog, depending on context). Recorded on every aggregate row and returned by query surfaces where available. Used to:
 - detect when an aggregate was produced under a different config,
@@ -3605,17 +3591,20 @@ eligible for idempotent reuse.</p>
 <h3 id="expression">Expression<a class="headerlink" href="#expression" title="Permanent link">&para;</a></h3>
 <p>A node in the AST that evaluates to a column or a scalar at query time. Used in: <code>transforms[*].filter</code>, <code>transforms[*].derive_column</code>, <code>processors.&lt;id&gt;.filter</code>, and <code>metrics.&lt;id&gt;.expression</code> (when <code>kind: formula</code>).</p>
 <h3 id="freshness">Freshness<a class="headerlink" href="#freshness" title="Permanent link">&para;</a></h3>
-<p>The minimum gap between "the latest available chunk from upstream" and "the latest aggregate row served by the query layer," for a given <code>(source, processor, grain)</code>. Surfaced on every dashboard tile and in the <code>/api/v1/workspace</code> response.</p>
+<p>The minimum gap between "the latest available chunk from upstream" and "the latest aggregate row served by the query layer," for a given <code>(source, processor, grain)</code>. Freshness retains both the authored aggregate-period label and, when the stored grain provides one, the exact latest covered date. Report presets use the latest common exact coverage needed by their metrics so partial periods do not create empty relative windows. Freshness is surfaced on every dashboard tile and in the <code>/api/v1/workspace</code> response.</p>
 <h3 id="grain">Grain<a class="headerlink" href="#grain" title="Permanent link">&para;</a></h3>
-<p>A time resolution at which a Processor materializes aggregates. User-facing configs use calendar names such as <code>Day</code>, <code>Month</code>, <code>Quarter</code>, <code>Year</code>, and <code>Summary</code>; the storage layer normalizes currently implemented grains to <code>daily</code>, <code>monthly</code>, and <code>summary</code>.</p>
+<p>The time resolution of a Processor. <code>time.grain</code> is the one physical base
+grain stored by ingestion. Calendar columns at that grain and above remain
+valid <code>group_by</code> dimensions, so queries can request <code>Day</code>, <code>Week</code>, <code>Month</code>,
+<code>Quarter</code>, <code>Year</code>, or <code>Summary</code> without storing a copy for each resolution.</p>
 <h3 id="cpc-state">CPC state<a class="headerlink" href="#cpc-state" title="Permanent link">&para;</a></h3>
 <p>A binary state (Apache DataSketches CPC sketch) used by default to estimate
 distinct counts. Generated states use <code>lg_k=11</code>; merge rule: union. CPC exposes
 estimate bounds but does not support intersection or difference. See
 reference/algorithms.md.</p>
 <h3 id="hll-state">HLL state<a class="headerlink" href="#hll-state" title="Permanent link">&para;</a></h3>
-<p>A binary state (Apache DataSketches HLL_4 or HLL_8 sketch) retained for
-backward compatibility and opt-in distinct counts. Merge rule: union. See
+<p>A binary state (Apache DataSketches HLL_4 or HLL_8 sketch) available as an
+explicit distinct-count alternative. Merge rule: union. See
 reference/algorithms.md.</p>
 <h3 id="ingestion-engine">Ingestion engine<a class="headerlink" href="#ingestion-engine" title="Permanent link">&para;</a></h3>
 <p>The component that turns files into aggregates. Implemented as a sequence of phases: discovery → reader → transforms → processor fan-out → partial write → compaction → ledger update.</p>
@@ -3626,15 +3615,26 @@ reference/algorithms.md.</p>
 <h3 id="mergeable-state">Mergeable state<a class="headerlink" href="#mergeable-state" title="Permanent link">&para;</a></h3>
 <p>A state column whose values can be combined under a deterministic, associative-commutative rule across rows. The state catalog defines:
 - <code>count</code> → SUM
+  - row count when no selector is set
+  - non-null or distinct count when <code>source_column</code> is set
+  - outcome/stage counts only when the corresponding typed selector is set
 - <code>value_sum</code> → SUM
 - <code>min</code>, <code>max</code> → MIN/MAX
-- <code>pooled_mean</code> → SUM-of-(value*count) / SUM-of-count
-- <code>pooled_variance</code> → Welford-merge
+- <code>pooled_mean</code> → SUM-of-(value*weight) / SUM-of-weight, with explicit
+  <code>source_column</code> or computation <code>recipe</code> and <code>weight</code> state
+- <code>pooled_variance</code> → Welford-merge using explicit <code>mean</code> and <code>weight</code>
+  companion states
 - <code>tdigest</code>, <code>kll</code> → sketch merge
 - <code>cpc</code>, <code>hll</code>, <code>theta</code> → sketch union (intersect/diff for theta only)
 - <code>topk</code> → frequent-items merge</p>
 <h3 id="metric">Metric<a class="headerlink" href="#metric" title="Permanent link">&para;</a></h3>
-<p>A <em>derived</em> business measurement bound to a Processor. A metric has a <code>kind</code> and inputs from the Processor's state. Examples: <code>CTR (formula)</code>, <code>ROC_AUC (curve_from_digests)</code>, <code>Lift (variant_compare)</code>, <code>Median_ResponseTime (tdigest_quantile)</code>, <code>UniqueCustomers (approx_distinct_count)</code>, <code>Experiment_Significance (contingency_test)</code>, <code>CLV_Summary (lifecycle_summary)</code>.</p>
+<p>A <em>derived</em> business measurement bound to a Processor. A metric has a <code>kind</code>
+and inputs from the Processor's explicit state contract. Examples:
+<code>CTR (formula)</code>, <code>ROC_AUC (curve_from_digests)</code>, <code>Lift (variant_compare)</code>,
+<code>ResponseTime_Distribution (distribution)</code>, <code>Median_ResponseTime (quantile)</code>,
+<code>UniqueCustomers (approx_distinct_count)</code>, and a lifecycle summary whose four
+input states are explicitly bound. State identifiers never imply metric
+semantics.</p>
 <p>Every metric may also carry <code>display</code> metadata: a friendly <code>label</code>, <code>unit</code>,
 default <code>value_format</code>, and <code>direction</code> (<code>higher_is_better</code>,
 <code>lower_is_better</code>, or <code>neutral</code>). Display metadata never changes the formula,
@@ -3645,7 +3645,9 @@ future recipe edits automatically.</p>
 <h3 id="partial">Partial<a class="headerlink" href="#partial" title="Permanent link">&para;</a></h3>
 <p>A Parquet file produced by one Processor processing one chunk. Lives at <code>aggregates/&lt;src&gt;/&lt;proc&gt;/daily/period=YYYY-MM/part-&lt;pipeline_run_id&gt;.parquet</code>. A "partial" is conceptually the smallest unit of write; compaction merges multiple partials into one.</p>
 <h3 id="period">Period<a class="headerlink" href="#period" title="Permanent link">&para;</a></h3>
-<p>The hive partition key used inside an aggregate directory. For <code>daily</code>, <code>monthly</code>, and the default <code>summary</code> materialization, <code>period = YYYY-MM</code>. <code>time.aggregation_levels</code> can coarsen summary storage to quarter or year. For optional grains the convention is the smallest "obviously coarser" string (<code>weekly_iso → YYYY-MM-Www</code>, <code>hourly → YYYY-MM-DD</code>).</p>
+<p>The hive partition key used inside the processor's base-grain aggregate
+directory. Daily and monthly bases use <code>period = YYYY-MM</code>; finer or coarser
+bases use the smallest useful partition label for their configured resolution.</p>
 <h3 id="pipeline-run">Pipeline run<a class="headerlink" href="#pipeline-run" title="Permanent link">&para;</a></h3>
 <p>One end-to-end execution of an ingestion against a Source. Has an id (UUID), a config hash, a status (<code>running | ok | failed | partial</code>), counts of total / ok / failed chunks, and start/end timestamps. Recorded in <code>meta/pipeline_runs.duckdb</code>.
 The row is inserted as <code>running</code> after discovery and before the first chunk.
@@ -3715,9 +3717,13 @@ processor <code>group_by</code> column still requires raw replay.</p>
 <h3 id="time-filter">Time filter<a class="headerlink" href="#time-filter" title="Permanent link">&para;</a></h3>
 <p>A page-level list of supported date presets plus one default preset. Time
 selection becomes query-layer <code>start</code>/<code>end</code> bounds and never bypasses aggregate
-routing. <code>all_time</code> is the backward-compatible default.</p>
+routing. <code>all_time</code> is the canonical default.</p>
 <h3 id="time-grain">Time grain<a class="headerlink" href="#time-grain" title="Permanent link">&para;</a></h3>
-<p>The Processor-level storage contract declared under <code>time.grains</code>. Calendar columns like <code>Day</code>, <code>Month</code>, <code>Quarter</code>, and <code>Year</code> are generated by transforms and can be used in reports, but they are not ordinary business group-by columns.</p>
+<p>The Processor-level storage contract declared by <code>time.property</code> and
+<code>time.grain</code>. Calendar columns at or above that base grain are persisted as
+ordinary <code>group_by</code> dimensions when selected. For example, a daily processor
+may expose <code>Day</code>, <code>Week</code>, <code>Month</code>, <code>Quarter</code>, and <code>Year</code> to report roles without
+adding a separate time-role system.</p>
 <h3 id="transform">Transform<a class="headerlink" href="#transform" title="Permanent link">&para;</a></h3>
 <p>A typed step in the Source's <code>transforms</code> list. Each transform takes a Polars LazyFrame and returns a LazyFrame. Built-in transforms: <code>rename_capitalize, parse_datetime, derive_calendar, derive_action_id, filter, dedup, defaults, derive_column, cast, drop_columns</code>. Transforms operate <strong>before</strong> processors fan out, so they affect every Processor bound to the Source.</p>
 <h3 id="variant">Variant<a class="headerlink" href="#variant" title="Permanent link">&para;</a></h3>
@@ -3765,7 +3771,7 @@ routing. <code>all_time</code> is the backward-compatible default.</p>
 <tr>
 <td><code>processor.id</code></td>
 <td><code>processors.yaml</code></td>
-<td>snake_case; recommended same as legacy family for migration</td>
+<td>snake_case</td>
 <td><code>engagement</code>, <code>model_ml_scores</code></td>
 </tr>
 <tr>
@@ -3839,11 +3845,10 @@ settings, and filters over existing aggregate dimensions are compatible changes
 and do not require reprocessing.</p>
 <p>Adding a State to an existing Processor changes its computation hash. Queries
 under the updated Catalog read only aggregate partials carrying that new hash;
-older files remain available for the older Catalog version but are never mixed
-with the new schema. Until ingestion publishes the new contract, report tiles
-show that a first run or backfill is required. Optional backfill for a widening
-therefore refers to historical coverage, not permission to derive a missing
-state from old aggregate files.</p>
+older files remain available for the older configuration hash but are never
+mixed with the new schema. Until ingestion publishes the new contract, report
+tiles show that a source replay is required. Historical replay is never
+permission to derive a missing state from old aggregate files.</p>
 <h3 id="authoring-revision-ui-local">Authoring revision (UI-local)<a class="headerlink" href="#authoring-revision-ui-local" title="Permanent link">&para;</a></h3>
 <p>An authoring revision is a UI lifecycle object, not another catalog entity and
 not a durable raw-data store. It consists of a canonical proposed catalog
@@ -3901,7 +3906,6 @@ the final recoverable draft removes the checkpoint.</p>
 <p>Uploaded Studio samples and their derived preview frames remain session-local
 inputs to authoring. They do not become production source files or persisted
 aggregates merely because a draft references their schema.</p>
-<p>The migration tool (<code>valuestream migrate</code>) classifies each change automatically and reports the action required.</p>
 <h2 id="6-examples">6. Examples<a class="headerlink" href="#6-examples" title="Permanent link">&para;</a></h2>
 <h3 id="61-source-chunk-aggregate">6.1 Source → Chunk → Aggregate<a class="headerlink" href="#61-source-chunk-aggregate" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>Files in folder:
@@ -3955,10 +3959,10 @@ Return: rows + plan + freshness + config_hash
 <h3 id="64-group-by-and-time-binding">6.4 Group-by and Time Binding<a class="headerlink" href="#64-group-by-and-time-binding" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>processors.yaml:
   engagement:
-    group_by: [Channel, PlacementType, ...]
+    group_by: [Day, Week, Month, Quarter, Year, Channel, PlacementType, ...]
     time:
-      column: OutcomeTime
-      grains: [Day, Month, Summary]
+      property: OutcomeTime
+      grain: daily
 
 dashboards.yaml:
   daily_ctr:
@@ -4077,9 +4081,9 @@ dashboards.yaml:
 </tr>
 <tr>
 <td>Processor</td>
-<td>Grain</td>
+<td>Base grain</td>
 <td>materializes at</td>
-<td>1 : N</td>
+<td>1 : 1</td>
 </tr>
 <tr>
 <td>Processor</td>
