@@ -45,7 +45,7 @@ plugins:
         PHASE2_WALKTHROUGH.md: tutorials/distribution-analytics.md
         PHASE3_WALKTHROUGH.md: tutorials/lifecycle-and-funnel-analytics.md
         PHASE4_WALKTHROUGH.md: tutorials/ui-tour.md
-        PHASE6_RUNBOOK.md: guides/operations/migration.md
+        PHASE6_RUNBOOK.md: guides/operations/runbook.md
         PEGA_EXPORT_TUTORIAL.md: tutorials/pega-export.md
         BUILDER_TUTORIAL.md: tutorials/builder.md
         ARCHITECTURE.md: concepts/architecture.md
@@ -86,7 +86,6 @@ nav:
       - Operations:
           - Runbook: guides/operations/runbook.md
           - Performance benchmarking: guides/operations/performance-benchmarking.md
-          - Migration & backfill: guides/operations/migration.md
           - Deployment: guides/operations/deployment.md
           - Configuration authoring rollout: guides/operations/authoring-rollout.md
           - Security: guides/operations/security.md
