@@ -5050,7 +5050,8 @@ is not weakened to an existence-only check.</p>
 <li>commit those receipts as lineage for every written path, without reopening
    the new Parquet files, after a file-exists and size stat check;</li>
 <li>insert the chunk's <code>status='ok'</code> row as the chunk commit marker;</li>
-<li>transition the existing run from <code>running</code> to <code>ok</code>, <code>partial</code>, or <code>failed</code>.</li>
+<li>transition a normally completed run from <code>running</code> to <code>ok</code> or <code>failed</code>;
+   recovery may use <code>partial</code> for an interrupted run with verified chunks.</li>
 </ol>
 <p>Terminal run <code>rows_in</code> and <code>rows_kept</code> totals sum only chunks whose durable
 status is <code>ok</code>; failed, recovery-rejected, and skipped chunks contribute zero
@@ -5100,9 +5101,15 @@ batched collect fails, the chunk runner retries the processors sequentially;
 failure of that fallback fails the whole chunk.</p>
 <h3 id="105-failure-semantics">10.5 Failure semantics<a class="headerlink" href="#105-failure-semantics" title="Permanent link">&para;</a></h3>
 <ul>
-<li>A processor failure fails the whole chunk. None of that chunk's new files are published; other chunks continue. The run is <code>partial</code> when another chunk commits successfully and <code>failed</code> otherwise.</li>
+<li>A processor failure fails the whole chunk. None of that chunk's new files are
+  published; other chunks continue. Any failed chunk makes the normally
+  completed run <code>failed</code>, even when other chunks commit successfully.</li>
 <li>Source-level failures (e.g. unreadable file) abort the chunk, not the run; subsequent chunks are processed.</li>
-<li>Re-running the source picks up only failed/missing chunks unless <code>--force</code> is set.</li>
+<li>Successful chunk commit markers remain query-visible and reusable after the
+  failed run reaches its terminal state. Re-running the source therefore picks
+  up only failed/missing chunks unless <code>--force</code> is set.</li>
+<li>Data Load renders a failed result as an error and groups identical chunk
+  messages by source, showing the affected count and a bounded chunk-id sample.</li>
 <li>A hard process termination leaves the run <code>running</code> and therefore invisible. The next invocation under the source lock verifies committed chunks, finalizes the stale run, refreshes views, and reuses only verified chunks.</li>
 </ul>
 <hr />

@@ -2457,12 +2457,17 @@ guided order, or <strong>Jump to step</strong> when you already know where to wo
 <li>Review the aggregate context available to Chat With Data in <strong>Chat Review</strong>.</li>
 <li>Update shared defaults and report appearance in <strong>Settings</strong>.</li>
 <li>Finish in <strong>Export current workspace</strong>, choose the next useful outcome, and
-   download catalog files when needed.</li>
+   download catalog files when needed. The terminal header shows
+   <strong>Workspace current</strong> as a completion status, not as a disabled action.</li>
 </ol>
-<p>Workspace Health is read-only, so its primary action is <strong>Continue</strong>. On an
-editable step, the top-right action becomes <strong>Apply to workspace</strong> only when
-the current draft is valid and differs from the persisted catalog. There is
-exactly one active Apply action for the object being edited.</p>
+<p>Workspace Health does not edit YAML, so its primary action is <strong>Continue</strong>.
+The <strong>Validation Sample</strong> panel is available beside Catalog Health in both
+Workspace Health and Export whenever sources exist. Load or reload a bounded
+source sample there to validate transforms against observed physical fields;
+those field names remain active while you move between Builder steps. On an
+editable step, the top-right action becomes <strong>Apply to workspace</strong> only when the
+current draft is valid and differs from the persisted catalog. There is exactly
+one active Apply action for the object being edited.</p>
 <p>Builder mirrors the current step to the URL as a stable <code>builder_step</code> value.
 Reloading a clean session therefore returns to the same step even when there is
 no draft checkpoint. Unknown or obsolete values fall back to <strong>Workspace
@@ -2480,7 +2485,8 @@ source data and never materializes aggregates.</p>
 <p>Create drafts use the same recovery contract as maintenance drafts. For
 example, a recovered <strong>Create Metric</strong> draft is offered before the source and
 metric-kind selectors can replace its identity. When Apply is unavailable, the
-editor states the exact missing or invalid input beside the disabled action.</p>
+editor states the exact missing or invalid input while <strong>Continue</strong> remains
+available; the draft stays preserved until it is fixed, applied, or discarded.</p>
 <p>After a successful Apply, the Builder recommends one explicit next action:</p>
 <ul>
 <li><strong>Run data</strong> for source, processor, dimension, workspace-setting, or recipe
@@ -2528,7 +2534,19 @@ workspace, reader definition, and discovered file identity remain unchanged.
 If inspection fails, the inline message names the source and path pattern.
 Correct the reader, path, or permissions issue, then choose <strong>Retry source
 inspection</strong> to invalidate only that source inspection. In create mode, choose
-<strong>Load sample</strong> again after replacing or changing the matching sample files.</p>
+<strong>Load sample</strong> again after replacing or changing the matching sample files.
+The same observed physical fields feed Workspace Health validation. Returning
+to Workspace Health shows <strong>Reload sample</strong>, so schema-aware validation can be
+refreshed without reopening or recreating the source.</p>
+<p>Catalog-only validation remains conservative because YAML does not enumerate
+every raw column. Data Load therefore keeps the <strong>Validation Sample</strong> panel
+available even when Catalog Health is blocked. Loading a matching sample
+revalidates the catalog against its observed fields and unlocks the data-run
+controls when the transforms are valid; genuinely missing fields and
+transform-order mistakes remain blocking authoring errors. When ingestion
+starts, structural catalog validation still runs, while physical source
+expressions are evaluated by the reader and transform executor against the
+actual chunks instead of the incomplete catalog-inferred schema.</p>
 <h3 id="adding-a-source">Adding a source<a class="headerlink" href="#adding-a-source" title="Permanent link">&para;</a></h3>
 <p>Choose <strong>Create New Source</strong> on <strong>Sources</strong>. In an empty workspace, the source
 creator opens automatically. The initial template uses the Parquet reader,
@@ -2641,14 +2659,22 @@ and <strong>Source Column</strong> remain separate fields and cannot be redefine
 After a state is added, the popover clears before the next state is authored.
 Sketch-size keys are checked against the selected type so, for example,
 <code>lg_max_map_size</code> cannot leak from a Top-K state into a CPC or theta state.</p>
-<p>Applying or updating a processor automatically adds one distribution metric for every
-unconditioned t-digest or KLL state that does not already have one. The metric
-omits <code>quantile</code>, so it reads the median as its primary value and exposes the
-full quantile suite to distribution charts. Existing distribution metrics are
-reused, explicit percentile metrics remain separate, and outcome-specific
-positive/negative digests are left as internal inputs to curve and calibration
-metrics. The processor and any automatic metrics are written in the same
-validated transaction; the separate data run materializes the new state.</p>
+<p>For <code>numeric_distribution</code>, selecting a <strong>Numeric Property</strong> immediately adds
+its count, pooled mean, pooled variance, minimum, maximum, and selected
+t-digest/KLL rows to <strong>Processor Sketches</strong>. The operation is additive and
+idempotent: existing and manually edited rows are not replaced. Count and mean
+are included because pooled variance needs both merge dependencies.</p>
+<p>Applying or updating a processor automatically adds one distribution metric for
+every unconditioned t-digest or KLL state that does not already have one. The
+metric omits <code>quantile</code>, so it reads the median as its primary value and exposes
+the full quantile suite to distribution charts. A numeric pooled-variance state
+also creates a standard-deviation formula metric using <code>sqrt(variance)</code>;
+standard deviation is derived rather than persisted because variance is the
+mergeable aggregate. Existing generated metrics are reused, explicit percentile
+metrics remain separate, and outcome-specific positive/negative digests are
+left as internal inputs to curve and calibration metrics. The processor and any
+automatic metrics are written in the same validated transaction; the separate
+data run materializes the new state.</p>
 <p>Kind-specific settings cover every engine-read property: <code>entity_set</code> exposes
 the sketched <strong>Entity Column</strong>, and <code>entity_lifecycle</code> exposes its customer,
 order, monetary, and purchase-date key columns.</p>
@@ -2677,6 +2703,10 @@ ID. This is the human-readable <code>display.label</code> used by report axes an
 selectors; leave it blank to fall back to a label derived from the Metric ID.
 Unit, number format, and favorable direction remain under <strong>Report
 presentation</strong>.</p>
+<p>Generated Metric IDs are always ASCII-safe, including when the display name
+contains accents or other Unicode characters. If a manually entered ID is
+invalid, the draft remains available for correction but does not prevent
+continuing to Reports.</p>
 <p>A digest state is the mergeable binary accumulator persisted by a processor;
 it is not itself a public query result. Its automatically authored distribution
 metric is the stable catalog name that tells the query layer to decode that

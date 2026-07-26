@@ -3900,7 +3900,13 @@ OUTPUT merge(F2)
 </code></pre></div>
 <p><code>properties</code> identifies the approved numeric inputs and <code>states</code> is the exact
 persisted output contract. The engine does not generate, merge, or rename
-states implicitly. Sketch construction always uses the bulk implementation.</p>
+states implicitly. In Configuration Builder, selecting a numeric property is
+an authoring shortcut that appends the merge-safe <code>&lt;property&gt;_Count</code>,
+<code>&lt;property&gt;_Mean</code>, <code>&lt;property&gt;_Var</code>, <code>&lt;property&gt;_Min</code>, <code>&lt;property&gt;_Max</code>, and
+<code>&lt;property&gt;_&lt;quantile_engine&gt;</code> definitions to the editable state grid. Existing
+or manually edited rows are preserved. Standard deviation is not persisted as
+a separate state: applying the processor creates a formula metric that evaluates
+<code>sqrt(&lt;property&gt;_Var)</code>. Sketch construction always uses the bulk implementation.</p>
 <h3 id="43-source-schema-requirements">4.3 Source schema requirements<a class="headerlink" href="#43-source-schema-requirements" title="Permanent link">&para;</a></h3>
 <p>Each property in <code>properties</code> must exist in the Source's row schema. Numeric properties produce numeric states; string/categorical properties produce only <code>Count</code>. Group-by and time-grain columns must exist.</p>
 <h3 id="44-output-schema-daily-grain-abbreviated">4.4 Output schema (daily grain, abbreviated)<a class="headerlink" href="#44-output-schema-daily-grain-abbreviated" title="Permanent link">&para;</a></h3>
@@ -4007,7 +4013,9 @@ global_var  = (ssw + ssb) / (global_n - 1)     # pooled variance
 </tbody>
 </table>
 <p><code>distribution</code> exposes the complete quantile suite to boxplots and related
-charts. <code>quantile</code> always requires an explicit value between 0 and 1.</p>
+charts. <code>quantile</code> always requires an explicit value between 0 and 1.
+Configuration Builder automatically creates <code>StdDev(p)</code> as a formula metric
+when it applies a numeric processor with a pooled-variance state.</p>
 <h3 id="49-edge-cases">4.9 Edge cases<a class="headerlink" href="#49-edge-cases" title="Permanent link">&para;</a></h3>
 <ul>
 <li>A property may exist in some chunks and not in others. The engine fills missing property states with sentinel values (<code>Count=0</code>, sketches empty) and never errors on a missing property.</li>

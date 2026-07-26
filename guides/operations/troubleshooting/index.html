@@ -2254,6 +2254,11 @@ capture when escalating.</p>
 <td>Re-run with <code>--force</code> if rebuild is intended</td>
 </tr>
 <tr>
+<td>Run finishes with some rows kept but status <code>failed</code></td>
+<td>One or more chunks failed; successful chunks were retained</td>
+<td>Expand <strong>Failed chunk details</strong>, fix the grouped error, then run normally to process only failed/missing chunks</td>
+</tr>
+<tr>
 <td>Previous run remains <code>running</code> after a crash</td>
 <td>The process ended before the terminal run update</td>
 <td>Start the same source normally. Under the source lock the engine verifies committed chunks, marks the stale run <code>partial</code>/<code>failed</code>, and reprocesses only unverified chunks; do not use <code>--force</code></td>

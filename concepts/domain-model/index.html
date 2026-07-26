@@ -3569,8 +3569,9 @@ chunk, complete lineage commits before <code>status=ok</code>, making that row t
 chunk commit marker.</p>
 <h3 id="chunk-ledger">Chunk ledger<a class="headerlink" href="#chunk-ledger" title="Permanent link">&para;</a></h3>
 <p>The DuckDB table at <code>meta/chunks.duckdb</code> recording every chunk processed by every run.
-Only an <code>ok</code> row whose parent run is <code>ok</code> or <code>partial</code> is query-visible and
-eligible for idempotent reuse.</p>
+Only an <code>ok</code> row whose parent run has reached a terminal state is query-visible
+and eligible for idempotent reuse. This includes successful chunks retained
+inside an otherwise failed run.</p>
 <h3 id="compaction">Compaction<a class="headerlink" href="#compaction" title="Permanent link">&para;</a></h3>
 <p>The process of reducing aggregate states with <code>groupby + state-merge</code>.
 Ingestion uses it once to produce the processor's configured base-grain
@@ -3652,10 +3653,12 @@ bases use the smallest useful partition label for their configured resolution.</
 <p>One end-to-end execution of an ingestion against a Source. Has an id (UUID), a config hash, a status (<code>running | ok | failed | partial</code>), counts of total / ok / failed chunks, and start/end timestamps. Recorded in <code>meta/pipeline_runs.duckdb</code>.
 The row is inserted as <code>running</code> after discovery and before the first chunk.
 While it is running, <code>finished_at</code> is null and none of that run's new chunks are
-visible. Normal completion transitions the same row to <code>ok</code>, <code>partial</code>, or
-<code>failed</code>. If the process dies first, the next caller holding the source lock
-verifies committed chunks and performs the terminal transition; it never
-creates a second row for the interrupted run.
+visible. Normal completion transitions the same row to <code>ok</code> or <code>failed</code>; any
+failed chunk makes the run <code>failed</code>, even when other chunks committed
+successfully. <code>partial</code> is reserved for an interrupted run whose committed
+chunks were later verified during recovery. If the process dies first, the
+next caller holding the source lock verifies committed chunks and performs the
+terminal transition; it never creates a second row for the interrupted run.
 Run-level <code>rows_in</code> and <code>rows_kept</code> totals include only chunks whose durable
 marker finishes as <code>ok</code>; failed, recovery-rejected, and skipped chunks do not
 inflate the published-row totals shown by operational surfaces.</p>
