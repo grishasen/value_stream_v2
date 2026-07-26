@@ -37,7 +37,7 @@ def probe_source(
     """Discover source chunks and sample the first transformed chunk."""
     workspace = Path(workspace_path)
     catalog = load(workspace)
-    validation = validate_catalog(catalog)
+    validation = validate_catalog(catalog, defer_unobserved_source_expressions=True)
     if not validation.ok:
         messages = "; ".join(f"{i.location}: {i.message}" for i in validation.issues)
         raise ValueError(f"catalog does not validate: {messages}")

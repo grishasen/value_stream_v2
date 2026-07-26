@@ -23,12 +23,17 @@ guided order, or **Jump to step** when you already know where to work.
 5. Review the aggregate context available to Chat With Data in **Chat Review**.
 6. Update shared defaults and report appearance in **Settings**.
 7. Finish in **Export current workspace**, choose the next useful outcome, and
-   download catalog files when needed.
+   download catalog files when needed. The terminal header shows
+   **Workspace current** as a completion status, not as a disabled action.
 
-Workspace Health is read-only, so its primary action is **Continue**. On an
-editable step, the top-right action becomes **Apply to workspace** only when
-the current draft is valid and differs from the persisted catalog. There is
-exactly one active Apply action for the object being edited.
+Workspace Health does not edit YAML, so its primary action is **Continue**.
+The **Validation Sample** panel is available beside Catalog Health in both
+Workspace Health and Export whenever sources exist. Load or reload a bounded
+source sample there to validate transforms against observed physical fields;
+those field names remain active while you move between Builder steps. On an
+editable step, the top-right action becomes **Apply to workspace** only when the
+current draft is valid and differs from the persisted catalog. There is exactly
+one active Apply action for the object being edited.
 
 Builder mirrors the current step to the URL as a stable `builder_step` value.
 Reloading a clean session therefore returns to the same step even when there is
@@ -51,7 +56,8 @@ source data and never materializes aggregates.
 Create drafts use the same recovery contract as maintenance drafts. For
 example, a recovered **Create Metric** draft is offered before the source and
 metric-kind selectors can replace its identity. When Apply is unavailable, the
-editor states the exact missing or invalid input beside the disabled action.
+editor states the exact missing or invalid input while **Continue** remains
+available; the draft stays preserved until it is fixed, applied, or discarded.
 
 After a successful Apply, the Builder recommends one explicit next action:
 
@@ -108,6 +114,19 @@ If inspection fails, the inline message names the source and path pattern.
 Correct the reader, path, or permissions issue, then choose **Retry source
 inspection** to invalidate only that source inspection. In create mode, choose
 **Load sample** again after replacing or changing the matching sample files.
+The same observed physical fields feed Workspace Health validation. Returning
+to Workspace Health shows **Reload sample**, so schema-aware validation can be
+refreshed without reopening or recreating the source.
+
+Catalog-only validation remains conservative because YAML does not enumerate
+every raw column. Data Load therefore keeps the **Validation Sample** panel
+available even when Catalog Health is blocked. Loading a matching sample
+revalidates the catalog against its observed fields and unlocks the data-run
+controls when the transforms are valid; genuinely missing fields and
+transform-order mistakes remain blocking authoring errors. When ingestion
+starts, structural catalog validation still runs, while physical source
+expressions are evaluated by the reader and transform executor against the
+actual chunks instead of the incomplete catalog-inferred schema.
 
 ### Adding a source
 
@@ -241,14 +260,23 @@ After a state is added, the popover clears before the next state is authored.
 Sketch-size keys are checked against the selected type so, for example,
 `lg_max_map_size` cannot leak from a Top-K state into a CPC or theta state.
 
-Applying or updating a processor automatically adds one distribution metric for every
-unconditioned t-digest or KLL state that does not already have one. The metric
-omits `quantile`, so it reads the median as its primary value and exposes the
-full quantile suite to distribution charts. Existing distribution metrics are
-reused, explicit percentile metrics remain separate, and outcome-specific
-positive/negative digests are left as internal inputs to curve and calibration
-metrics. The processor and any automatic metrics are written in the same
-validated transaction; the separate data run materializes the new state.
+For `numeric_distribution`, selecting a **Numeric Property** immediately adds
+its count, pooled mean, pooled variance, minimum, maximum, and selected
+t-digest/KLL rows to **Processor Sketches**. The operation is additive and
+idempotent: existing and manually edited rows are not replaced. Count and mean
+are included because pooled variance needs both merge dependencies.
+
+Applying or updating a processor automatically adds one distribution metric for
+every unconditioned t-digest or KLL state that does not already have one. The
+metric omits `quantile`, so it reads the median as its primary value and exposes
+the full quantile suite to distribution charts. A numeric pooled-variance state
+also creates a standard-deviation formula metric using `sqrt(variance)`;
+standard deviation is derived rather than persisted because variance is the
+mergeable aggregate. Existing generated metrics are reused, explicit percentile
+metrics remain separate, and outcome-specific positive/negative digests are
+left as internal inputs to curve and calibration metrics. The processor and any
+automatic metrics are written in the same validated transaction; the separate
+data run materializes the new state.
 
 Kind-specific settings cover every engine-read property: `entity_set` exposes
 the sketched **Entity Column**, and `entity_lifecycle` exposes its customer,
@@ -284,6 +312,11 @@ ID. This is the human-readable `display.label` used by report axes and
 selectors; leave it blank to fall back to a label derived from the Metric ID.
 Unit, number format, and favorable direction remain under **Report
 presentation**.
+
+Generated Metric IDs are always ASCII-safe, including when the display name
+contains accents or other Unicode characters. If a manually entered ID is
+invalid, the draft remains available for correction but does not prevent
+continuing to Reports.
 
 A digest state is the mergeable binary accumulator persisted by a processor;
 it is not itself a public query result. Its automatically authored distribution

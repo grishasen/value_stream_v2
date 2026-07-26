@@ -103,7 +103,7 @@ def chunk_done(
     files: list[Path] | tuple[Path, ...],
     config_hash: str,
 ) -> bool:
-    """Return true if this source/chunk/config has a successful prior run."""
+    """Return true for a matching successful chunk in a terminal prior run."""
     _ensure_ledger_read_dbs(workspace_path)
     chunks_db = meta_dir(workspace_path) / "chunks.duckdb"
     runs_db = meta_dir(workspace_path) / "pipeline_runs.duckdb"
@@ -120,7 +120,7 @@ def chunk_done(
               AND c.status = 'ok'
               AND c.file_hash = ?
               AND r.config_hash = ?
-              AND r.status IN ('ok', 'partial')
+              AND r.status IN ('ok', 'partial', 'failed')
             """,
             (source_id, chunk_id, fingerprint, config_hash),
         ).fetchone()
@@ -134,7 +134,7 @@ def done_chunk_ids(
     config_hash: str,
     file_hashes: Mapping[str, str] | None = None,
 ) -> set[str]:
-    """Return chunk ids with a successful prior run under ``config_hash``.
+    """Return committed chunk ids from terminal runs under ``config_hash``.
 
     One query replaces a per-chunk :func:`chunk_done` loop when planning a
     source run.
@@ -152,7 +152,7 @@ def done_chunk_ids(
             WHERE c.source_id = ?
               AND c.status = 'ok'
               AND r.config_hash = ?
-              AND r.status IN ('ok', 'partial')
+              AND r.status IN ('ok', 'partial', 'failed')
             """,
             (source_id, config_hash),
         ).fetchall()
@@ -193,7 +193,7 @@ def successful_chunk_keys(
     *,
     source_id: str,
 ) -> set[tuple[str, str]]:
-    """Return ``(pipeline_run_id, chunk_id)`` pairs that are safe to query."""
+    """Return terminal-run ``(pipeline_run_id, chunk_id)`` pairs safe to query."""
     _ensure_ledger_read_dbs(workspace_path)
     chunks_db = meta_dir(workspace_path) / "chunks.duckdb"
     runs_db = meta_dir(workspace_path) / "pipeline_runs.duckdb"
@@ -206,7 +206,7 @@ def successful_chunk_keys(
             JOIN runs_db.pipeline_runs r ON c.pipeline_run_id = r.id
             WHERE c.source_id = ?
               AND c.status = 'ok'
-              AND r.status IN ('ok', 'partial')
+              AND r.status IN ('ok', 'partial', 'failed')
             """,
             (source_id,),
         ).fetchall()

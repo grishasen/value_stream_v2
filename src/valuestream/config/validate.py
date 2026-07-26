@@ -93,13 +93,16 @@ def validate_catalog(  # noqa: PLR0915
     catalog: model.Catalog,
     *,
     source_columns_by_id: Mapping[str, Iterable[str]] | None = None,
+    defer_unobserved_source_expressions: bool = False,
 ) -> CatalogValidationResult:
     """Run all cross-reference and per-expression checks on ``catalog``.
 
     ``source_columns_by_id`` supplies optional physical, pre-transform columns when a
     caller has inspected the active source. Catalog-only validation remains conservative;
     sample-backed authoring can additionally evolve the observed schema through the
-    configured transform order, including ``rename_capitalize``.
+    configured transform order, including ``rename_capitalize``. Runtime ingestion may
+    set ``defer_unobserved_source_expressions`` because the reader and transform executor
+    validate those physical references against each real chunk.
     """
     issues: list[CatalogIssue] = []
 
@@ -127,9 +130,11 @@ def validate_catalog(  # noqa: PLR0915
         seed_columns_by_source.setdefault(processor.source, set()).update(
             _processor_source_columns(processor)
         )
+    observed_source_ids: set[str] = set()
     for source_id, columns in (source_columns_by_id or {}).items():
         if source_id not in source_ids:
             continue
+        observed_source_ids.add(source_id)
         seed_columns_by_source.setdefault(source_id, set()).update(
             str(column) for column in columns if str(column).strip()
         )
@@ -141,6 +146,9 @@ def validate_catalog(  # noqa: PLR0915
             source,
             issues,
             seed_columns=seed_columns_by_source.get(source.id, set()),
+            validate_physical_expressions=(
+                not defer_unobserved_source_expressions or source.id in observed_source_ids
+            ),
         )
 
     # 1. processor.source must resolve to a Source.
@@ -224,6 +232,11 @@ def validate_catalog(  # noqa: PLR0915
             continue
         bound_source = source_by_id.get(processor.source)
         if bound_source is None:
+            continue
+        if (
+            defer_unobserved_source_expressions
+            and bound_source.id not in observed_source_ids
+        ):
             continue
         schema = dict(source_schemas.get(bound_source.id, {}))
         for column in processor.group_by:
@@ -845,14 +858,15 @@ def _validate_source_expressions(
     issues: list[CatalogIssue],
     *,
     seed_columns: set[str],
+    validate_physical_expressions: bool,
 ) -> dict[str, expr_ast.Dtype]:
     """Validate transform expressions while evolving a best-effort row schema.
 
-    Phase 0 has no physical file reader yet, so the source schema is inferred
-    from catalog declarations rather than observed data. That is intentionally
-    conservative: natural keys, timestamp fields, defaults, and direct transform
-    column references seed the schema; expression transforms are then checked in
-    order and may add derived columns.
+    Catalog-only authoring and CLI validation infer a conservative source schema
+    from declarations. Runtime ingestion can defer expression checks when no
+    physical schema was observed because the transform executor evaluates them
+    against each real chunk. Derived outputs remain in the evolving schema for
+    downstream processor validation.
     """
     schema = _initial_source_schema(source)
     for column in seed_columns:
@@ -875,15 +889,18 @@ def _validate_source_expressions(
                 schema.setdefault(part, "String")
             schema.setdefault("ActionID", "String")
         elif isinstance(transform, model.DeriveColumn):
-            dtype = _validate_expr_collect(
-                transform.expression,
-                schema,
-                issues,
-                prefix=f"{prefix}.expression",
-            )
-            if dtype is not None:
-                schema[transform.output] = dtype
-        elif isinstance(transform, model.FilterTransform):
+            if validate_physical_expressions:
+                dtype = _validate_expr_collect(
+                    transform.expression,
+                    schema,
+                    issues,
+                    prefix=f"{prefix}.expression",
+                )
+                if dtype is not None:
+                    schema[transform.output] = dtype
+            else:
+                schema.setdefault(transform.output, "String")
+        elif isinstance(transform, model.FilterTransform) and validate_physical_expressions:
             _validate_expr_collect(
                 transform.expression,
                 schema,

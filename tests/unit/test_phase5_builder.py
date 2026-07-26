@@ -680,6 +680,8 @@ def test_builder_navigation_supports_jump_back_and_continue(tmp_path: Path) -> N
         "Download metrics.yaml",
         "Download dashboards.yaml",
     }
+    assert not any(button.label == "Workspace current" for button in rendered.button)
+    assert any("Workspace current" in str(item.value) for item in rendered.success)
 
 
 @pytest.mark.unit
@@ -915,6 +917,75 @@ def test_create_source_load_sample_populates_schema_controls(tmp_path: Path) -> 
     natural_key = next(item for item in rendered.multiselect if item.label == "Natural Key")
     assert natural_key.options == []
     assert rendered.session_state[config_builder.VS_SOURCE_SAMPLE_SCHEMAS_KEY] == {}
+
+
+@pytest.mark.unit
+def test_workspace_health_can_load_sample_for_schema_aware_validation(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+    source = load(tmp_path).pipelines.sources[0]
+    source_def = builder.source_to_dict(source)
+    source_def["transforms"] = [
+        {
+            "kind": "filter",
+            "expression": {
+                "op": "eq",
+                "column": "ActionContext",
+                "value": "Web",
+            },
+        }
+    ]
+    builder.write_source_definition(tmp_path, source_def)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    pl.DataFrame(
+        {
+            "InteractionID": ["interaction-1"],
+            "OutcomeTime": ["2026-07-24T00:00:00Z"],
+            "Outcome": ["Clicked"],
+            "Channel": ["Web"],
+            "ActionContext": ["Web"],
+        }
+    ).write_parquet(data_dir / "sample.parquet")
+
+    def app(workspace: str) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        st.session_state.setdefault("builder_step", "Workspace Health")
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+
+    assert not rendered.exception
+    assert any("ActionContext" in str(item.value) for item in rendered.error)
+    assert any(button.label == "Load sample" for button in rendered.button)
+
+    rendered = (
+        next(button for button in rendered.button if button.label == "Load sample")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert rendered.session_state[config_builder.VS_OBSERVED_SOURCE_COLUMNS_KEY]["ih"] == [
+        "InteractionID",
+        "OutcomeTime",
+        "Outcome",
+        "Channel",
+        "ActionContext",
+    ]
+    assert any("Using 5 observed fields" in str(item.value) for item in rendered.success)
+    assert any("No validation issues found." in str(item.value) for item in rendered.success)
+    assert any(button.label == "Reload sample" for button in rendered.button)
+
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Export current workspace").run()
+
+    assert not rendered.exception
+    assert any(button.label == "Reload sample" for button in rendered.button)
+    assert any("No validation issues found." in str(item.value) for item in rendered.success)
 
 
 @pytest.mark.unit
@@ -1185,6 +1256,49 @@ def test_metric_from_scratch_template_and_post_apply_editor_are_clean(tmp_path: 
     assert len(metrics) == 2
     assert "engagement_metric_qa_rate" in metrics
     assert metrics["engagement_metric_qa_rate"].display.label == "QA rate"
+
+
+@pytest.mark.unit
+def test_invalid_metric_draft_does_not_block_continue(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    def app(workspace: str) -> None:
+        from valuestream.ui.context import load_context  # noqa: PLC0415
+        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+
+        _builder_steps(load_context(workspace))
+
+    rendered = AppTest.from_function(app, kwargs={"workspace": str(tmp_path)}).run()
+    jump = next(item for item in rendered.selectbox if item.label == "Jump to step")
+    rendered = jump.set_value("Metrics").run()
+    create_from = next(item for item in rendered.segmented_control if item.label == "Create from")
+    rendered = create_from.set_value("From Scratch").run()
+    processor = next(item for item in rendered.selectbox if item.label == "Processor")
+    rendered = processor.set_value("engagement").run()
+    metric_kind = next(item for item in rendered.selectbox if item.label == "Metric Kind")
+    rendered = metric_kind.set_value("formula").run()
+    display_name = next(
+        item for item in rendered.text_input if item.label == "Metric Display Name"
+    )
+    rendered = display_name.set_value("QA rate").run()
+    metric_id = next(item for item in rendered.text_input if item.label == "Metric ID")
+    rendered = metric_id.set_value("QA rate!").run()
+
+    assert not rendered.exception
+    assert any("Metric ID must start" in str(item.value) for item in rendered.error)
+    assert any(button.label == "Continue" for button in rendered.button)
+    assert not any(button.label == "Apply to workspace" for button in rendered.button)
+
+    rendered = (
+        next(button for button in rendered.button if button.label == "Continue")
+        .click()
+        .run(timeout=15)
+    )
+
+    assert not rendered.exception
+    assert rendered.session_state["builder_step"] == "Reports / Tiles"
+    drafts = rendered.session_state[builder.BUILDER_DRAFTS_KEY]
+    assert any(str(key).startswith("metric:new:") for key in drafts)
 
 
 @pytest.mark.unit
@@ -2837,6 +2951,99 @@ def test_build_state_defs_uses_direct_editor_rows() -> None:
             "type": "value_sum",
             "source_column": "NetRevenue",
         }
+    }
+
+
+@pytest.mark.unit
+def test_numeric_properties_append_mergeable_summary_and_digest_states() -> None:
+    existing = [
+        {
+            "State": "Custom_counter",
+            "Type": "count",
+            "Source Column": "",
+            "Parameters": "",
+            "Derived From": "custom state",
+            "Enabled": True,
+        },
+        {
+            "State": "Priority_tdigest",
+            "Type": "tdigest",
+            "Source Column": "Priority",
+            "Parameters": "",
+            "Derived From": "custom digest",
+            "Enabled": True,
+        },
+    ]
+
+    rows = config_builder._with_numeric_property_state_rows(
+        existing,
+        ["FinalPropensity", "Priority", "FinalPropensity"],
+        "tdigest",
+    )
+
+    assert rows[:2] == existing
+    names = [row["State"] for row in rows]
+    assert names.count("Priority_tdigest") == 1
+    assert names[2:] == [
+        "FinalPropensity_Count",
+        "FinalPropensity_Mean",
+        "FinalPropensity_Var",
+        "FinalPropensity_Min",
+        "FinalPropensity_Max",
+        "FinalPropensity_tdigest",
+        "Priority_Count",
+        "Priority_Mean",
+        "Priority_Var",
+        "Priority_Min",
+        "Priority_Max",
+    ]
+    by_name = {row["State"]: row for row in rows}
+    assert by_name["FinalPropensity_Mean"]["Parameters"] == (
+        "{weight: FinalPropensity_Count}"
+    )
+    assert by_name["FinalPropensity_Var"]["Parameters"] == (
+        "{mean: FinalPropensity_Mean, weight: FinalPropensity_Count}"
+    )
+    assert by_name["FinalPropensity_Min"]["Type"] == "min"
+    assert by_name["FinalPropensity_Max"]["Type"] == "max"
+    assert by_name["FinalPropensity_tdigest"]["Type"] == "tdigest"
+
+
+@pytest.mark.unit
+def test_numeric_property_state_definitions_follow_selected_quantile_engine() -> None:
+    definitions = config_builder._numeric_property_state_definitions(
+        ["Revenue"],
+        "kll",
+    )
+
+    assert definitions == {
+        "Revenue_Count": {
+            "type": "count",
+            "source_column": "Revenue",
+        },
+        "Revenue_Mean": {
+            "type": "pooled_mean",
+            "source_column": "Revenue",
+            "weight": "Revenue_Count",
+        },
+        "Revenue_Var": {
+            "type": "pooled_variance",
+            "source_column": "Revenue",
+            "mean": "Revenue_Mean",
+            "weight": "Revenue_Count",
+        },
+        "Revenue_Min": {
+            "type": "min",
+            "source_column": "Revenue",
+        },
+        "Revenue_Max": {
+            "type": "max",
+            "source_column": "Revenue",
+        },
+        "Revenue_kll": {
+            "type": "kll",
+            "source_column": "Revenue",
+        },
     }
 
 
@@ -4795,6 +5002,18 @@ def test_stable_catalog_id_is_readable_deterministic_and_collision_safe() -> Non
 
 
 @pytest.mark.unit
+def test_stable_catalog_id_transliterates_unicode_to_ascii() -> None:
+    generated = builder.stable_catalog_id(
+        "Métrique – Käufer σ",  # noqa: RUF001 - exercises non-ASCII normalization
+        fallback="metric",
+        parent_id="engagement",
+    )
+
+    assert generated == "engagement_metric_metrique_kaufer"
+    assert builder.catalog_id_is_safe(generated)
+
+
+@pytest.mark.unit
 def test_stable_catalog_id_preserves_valid_preferred_id_when_title_changes() -> None:
     assert (
         builder.stable_catalog_id(
@@ -5180,6 +5399,35 @@ def test_kind_switch_reseeds_description_and_kind_specific_controls(tmp_path: Pa
 
 
 @pytest.mark.unit
+def test_numeric_property_selection_populates_processor_state_grid(tmp_path: Path) -> None:
+    _write_builder_catalog(tmp_path)
+
+    rendered = AppTest.from_function(
+        _render_processors_create_step, kwargs={"workspace": str(tmp_path)}
+    ).run()
+    kind = next(item for item in rendered.selectbox if item.label == "Kind")
+    rendered = kind.set_value("numeric_distribution").run()
+    properties = next(
+        item for item in rendered.multiselect if item.label == "Numeric Properties"
+    )
+    rendered = properties.set_value(["Outcome"]).run()
+
+    assert not rendered.exception
+    rows = rendered.session_state["builder_proc_states_ih_processor"]
+    assert [row["State"] for row in rows] == [
+        "Outcome_Count",
+        "Outcome_Mean",
+        "Outcome_Var",
+        "Outcome_Min",
+        "Outcome_Max",
+        "Outcome_tdigest",
+    ]
+    by_name = {row["State"]: row for row in rows}
+    assert by_name["Outcome_Var"]["Type"] == "pooled_variance"
+    assert by_name["Outcome_tdigest"]["Type"] == "tdigest"
+
+
+@pytest.mark.unit
 def test_kind_switch_preserves_user_description_and_shows_lifecycle_keys(
     tmp_path: Path,
 ) -> None:
@@ -5414,6 +5662,70 @@ def test_automatic_distribution_metrics_cover_only_public_digest_states() -> Non
 
 
 @pytest.mark.unit
+def test_automatic_standard_deviation_metric_uses_pooled_variance_state() -> None:
+    processor = model.NumericDistributionProcessor.model_validate(
+        {
+            "id": "descriptive",
+            "source": "ih",
+            "kind": "numeric_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "properties": ["Value"],
+            "states": {
+                "Value_Count": {
+                    "type": "count",
+                    "source_column": "Value",
+                },
+                "Value_Mean": {
+                    "type": "pooled_mean",
+                    "source_column": "Value",
+                    "weight": "Value_Count",
+                },
+                "Value_Var": {
+                    "type": "pooled_variance",
+                    "source_column": "Value",
+                    "mean": "Value_Mean",
+                    "weight": "Value_Count",
+                },
+            },
+        }
+    )
+
+    definitions = builder.automatic_standard_deviation_metric_definitions(
+        processor,
+        {},
+    )
+
+    assert definitions == {
+        "descriptive_metric_value_stddev": {
+            "processor": "descriptive",
+            "kind": "formula",
+            "expression": {
+                "op": "sqrt",
+                "arg": {"col": "Value_Var"},
+            },
+            "description": (
+                "Standard deviation automatically derived from the Value_Var "
+                "pooled variance state."
+            ),
+            "display": {"label": "Value standard deviation"},
+        }
+    }
+    existing = model.Metrics.model_validate(
+        {
+            "catalog_version": 2,
+            "metrics": definitions,
+        }
+    ).metrics
+    assert (
+        builder.automatic_standard_deviation_metric_definitions(
+            processor,
+            existing,
+        )
+        == {}
+    )
+
+
+@pytest.mark.unit
 def test_ensure_digest_distribution_metrics_writes_idempotent_metric(
     tmp_path: Path,
 ) -> None:
@@ -5453,6 +5765,53 @@ def test_ensure_digest_distribution_metrics_writes_idempotent_metric(
     metric = load(tmp_path).metrics.metrics[created[0]]
     assert metric.kind == "distribution"
     assert builder.ensure_digest_distribution_metrics(tmp_path, "descriptive") == []
+
+
+@pytest.mark.unit
+def test_ensure_processor_generated_metrics_writes_distribution_and_stddev(
+    tmp_path: Path,
+) -> None:
+    _write_builder_catalog(tmp_path)
+    processor_def = {
+        "id": "descriptive",
+        "source": "ih",
+        "kind": "numeric_distribution",
+        "properties": ["Value"],
+        "group_by": ["Channel"],
+        "time": {"property": "OutcomeTime", "grain": "daily"},
+        "states": config_builder._numeric_property_state_definitions(
+            ["Value"],
+            "tdigest",
+        ),
+    }
+    processors_path = tmp_path / "catalog" / "processors.yaml"
+    processors_yaml = yaml.safe_load(processors_path.read_text(encoding="utf-8"))
+    processors_yaml["processors"].append(processor_def)
+    processors_path.write_text(
+        yaml.safe_dump(processors_yaml, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with builder.validated_catalog_transaction(tmp_path):
+        created = builder.ensure_processor_generated_metrics(
+            tmp_path,
+            "descriptive",
+        )
+
+    assert created == [
+        "descriptive_metric_value_distribution",
+        "descriptive_metric_value_stddev",
+    ]
+    catalog = load(tmp_path)
+    distribution = catalog.metrics.metrics[created[0]]
+    stddev = catalog.metrics.metrics[created[1]]
+    assert distribution.kind == "distribution"
+    assert stddev.kind == "formula"
+    assert stddev.expression.model_dump(mode="json") == {
+        "op": "sqrt",
+        "arg": {"col": "Value_Var"},
+    }
+    assert builder.ensure_processor_generated_metrics(tmp_path, "descriptive") == []
 
 
 @pytest.mark.unit
@@ -5915,6 +6274,13 @@ def test_validate_workspace_accepts_observed_data_only_columns(tmp_path: Path) -
     )
 
     ok, issues = builder.validate_workspace(workspace)
+    assert not ok
+    assert any("'ActionContext' not found in schema" in issue for issue in issues)
+
+    ok, issues = builder.validate_workspace(
+        workspace,
+        source_columns_by_id={"ih": ["CustomerID", "OutcomeTime"]},
+    )
     assert not ok
     assert any("'ActionContext' not found in schema" in issue for issue in issues)
 

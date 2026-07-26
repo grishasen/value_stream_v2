@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import tempfile
+import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1562,6 +1563,75 @@ def automatic_distribution_metric_definitions(
     return definitions
 
 
+def automatic_standard_deviation_metric_definitions(
+    processor: model.Processor,
+    metrics: Mapping[str, model.Metric],
+    *,
+    reserved_ids: Iterable[str] = (),
+) -> dict[str, dict[str, Any]]:
+    """Return missing standard-deviation metrics for numeric variance states."""
+
+    if not isinstance(processor, model.NumericDistributionProcessor):
+        return {}
+    existing_variance_states: set[str] = set()
+    for metric in metrics.values():
+        if not isinstance(metric, model.FormulaMetric) or metric.processor != processor.id:
+            continue
+        expression = metric.expression.model_dump(mode="json", exclude_none=True)
+        if (
+            expression.get("op") == "sqrt"
+            and isinstance(expression.get("arg"), dict)
+            and expression["arg"].get("col")
+        ):
+            existing_variance_states.add(str(expression["arg"]["col"]))
+
+    used_ids = {*metrics, *reserved_ids}
+    definitions: dict[str, dict[str, Any]] = {}
+    for state_name, state in model.effective_processor_states(processor).items():
+        if not isinstance(state, model.PooledVarianceState):
+            continue
+        if state_name in existing_variance_states:
+            continue
+        property_name = state.source_column
+        metric_id = stable_catalog_id(
+            f"{property_name}_stddev",
+            fallback="metric",
+            parent_id=processor.id,
+            existing_ids=[*used_ids, *definitions],
+        )
+        definitions[metric_id] = {
+            "processor": processor.id,
+            "kind": "formula",
+            "expression": {
+                "op": "sqrt",
+                "arg": {"col": state_name},
+            },
+            "description": (
+                f"Standard deviation automatically derived from the {state_name} "
+                "pooled variance state."
+            ),
+            "display": {"label": f"{property_name} standard deviation"},
+        }
+    return definitions
+
+
+def automatic_processor_metric_definitions(
+    processor: model.Processor,
+    metrics: Mapping[str, model.Metric],
+) -> dict[str, dict[str, Any]]:
+    """Return every metric generated automatically for one processor."""
+
+    definitions = automatic_distribution_metric_definitions(processor, metrics)
+    definitions.update(
+        automatic_standard_deviation_metric_definitions(
+            processor,
+            metrics,
+            reserved_ids=definitions,
+        )
+    )
+    return definitions
+
+
 def ensure_digest_distribution_metrics(
     workspace: str | Path,
     processor_id: str,
@@ -1581,6 +1651,38 @@ def ensure_digest_distribution_metrics(
     metrics_data = _read_yaml(metrics_path)
     metrics = model.Metrics.model_validate(metrics_data)
     definitions = automatic_distribution_metric_definitions(
+        processor,
+        metrics.metrics,
+    )
+    if definitions:
+        metric_definitions = metrics_data.setdefault("metrics", {})
+        if not isinstance(metric_definitions, dict):
+            raise ValueError("metrics.yaml must contain a mapping at `metrics`")
+        metric_definitions.update(definitions)
+        model.Metrics.model_validate(metrics_data)
+        _write_yaml(metrics_path, metrics_data)
+    return list(definitions)
+
+
+def ensure_processor_generated_metrics(
+    workspace: str | Path,
+    processor_id: str,
+) -> list[str]:
+    """Write missing distribution and standard-deviation metrics."""
+
+    processors = model.Processors.model_validate(
+        _read_yaml(_catalog_file(workspace, "processors.yaml"))
+    )
+    processor = next(
+        (candidate for candidate in processors.processors if candidate.id == processor_id),
+        None,
+    )
+    if processor is None:
+        raise ValueError(f"processor {processor_id!r} was not found")
+    metrics_path = _catalog_file(workspace, "metrics.yaml")
+    metrics_data = _read_yaml(metrics_path)
+    metrics = model.Metrics.model_validate(metrics_data)
+    definitions = automatic_processor_metric_definitions(
         processor,
         metrics.metrics,
     )
@@ -2611,9 +2713,14 @@ def _catalog_id_stem(name: str, *, fallback: str) -> str:
 
 
 def _catalog_id_slug(value: str) -> str:
-    text = str(value).strip().lower()
+    text = (
+        unicodedata.normalize("NFKD", str(value).strip())
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .lower()
+    )
     chars = [char if char.isalnum() else "_" for char in text]
-    return "_".join("".join(chars).split("_")).strip("_")
+    return "_".join(part for part in "".join(chars).split("_") if part)
 
 
 def catalog_id_is_safe(value: str) -> bool:
@@ -3322,7 +3429,7 @@ def write_processor_definition(
     workspace: str | Path,
     processor_def: dict[str, Any],
 ) -> list[str]:
-    """Add or replace a processor and expose its public digest metrics."""
+    """Add or replace a processor and expose its generated metrics."""
     if not processor_def.get("id"):
         raise ValueError("processor definition must include `id`")
     path = _catalog_file(workspace, "processors.yaml")
@@ -3333,7 +3440,7 @@ def write_processor_definition(
     _replace_or_append(processors, processor_def)
     model.Processors.model_validate(data)
     _write_yaml(path, data)
-    return ensure_digest_distribution_metrics(workspace, str(processor_def["id"]))
+    return ensure_processor_generated_metrics(workspace, str(processor_def["id"]))
 
 
 def rename_processor_definition(
@@ -3391,7 +3498,7 @@ def rename_processor_definition(
         _write_yaml(processors_path, processors)
         _write_yaml(metrics_path, metrics)
         _rename_processor_chat_description(workspace, old_id=old_id, new_id=new_id)
-        created_metrics = ensure_digest_distribution_metrics(workspace, new_id)
+        created_metrics = ensure_processor_generated_metrics(workspace, new_id)
         require_valid_workspace(workspace, source_columns_by_id=source_columns_by_id)
     return created_metrics
 
@@ -4201,6 +4308,8 @@ __all__ = [
     "BuilderDraftStatus",
     "CalculatedExpressionValidation",
     "automatic_distribution_metric_definitions",
+    "automatic_processor_metric_definitions",
+    "automatic_standard_deviation_metric_definitions",
     "blank_calculated_row",
     "blank_default_row",
     "blank_filter_row",
@@ -4270,6 +4379,7 @@ __all__ = [
     "editor_row_enabled",
     "ensure_digest_distribution_metrics",
     "ensure_minimum_workspace",
+    "ensure_processor_generated_metrics",
     "expression_yaml",
     "filter_rows_from_expression",
     "first_filter_expression",

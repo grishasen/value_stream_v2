@@ -366,7 +366,13 @@ processors:
 
 `properties` identifies the approved numeric inputs and `states` is the exact
 persisted output contract. The engine does not generate, merge, or rename
-states implicitly. Sketch construction always uses the bulk implementation.
+states implicitly. In Configuration Builder, selecting a numeric property is
+an authoring shortcut that appends the merge-safe `<property>_Count`,
+`<property>_Mean`, `<property>_Var`, `<property>_Min`, `<property>_Max`, and
+`<property>_<quantile_engine>` definitions to the editable state grid. Existing
+or manually edited rows are preserved. Standard deviation is not persisted as
+a separate state: applying the processor creates a formula metric that evaluates
+`sqrt(<property>_Var)`. Sketch construction always uses the bulk implementation.
 
 ### 4.3 Source schema requirements
 
@@ -464,6 +470,8 @@ Same shape as binary_outcome's: drop the appropriate calendar columns, then `mer
 
 `distribution` exposes the complete quantile suite to boxplots and related
 charts. `quantile` always requires an explicit value between 0 and 1.
+Configuration Builder automatically creates `StdDev(p)` as a formula metric
+when it applies a numeric processor with a pooled-variance state.
 
 ### 4.9 Edge cases
 

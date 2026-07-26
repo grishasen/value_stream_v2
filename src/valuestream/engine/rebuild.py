@@ -182,7 +182,7 @@ def _select_source_ids(
 
 
 def _require_valid_catalog(catalog: model.Catalog) -> None:
-    validation = validate_catalog(catalog)
+    validation = validate_catalog(catalog, defer_unobserved_source_expressions=True)
     if validation.ok:
         return
     messages = "; ".join(f"{issue.location}: {issue.message}" for issue in validation.issues)

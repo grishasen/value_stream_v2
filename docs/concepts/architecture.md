@@ -285,7 +285,7 @@ persisting the index.
 [Chunk ledger row status=ok] -- last durable chunk commit marker
       |
       v
-[Pipeline run finalized] -- ok / partial / failed; committed chunks become visible
+[Pipeline run finalized] -- ok / failed; recovered interruptions may be partial
       |
       v
 === ingestion done ===
@@ -378,6 +378,12 @@ by resolved workspace and run scope supplies poll-friendly progress across
 browser reloads and websocket reconnects. It is not a durable job queue:
 restarting the server ends those threads, after which the normal ingestion
 ledger recovery verifies and adopts completed chunk work.
+
+Run preflight still validates structural catalog invariants and aggregate
+contracts. It does not reject an expression merely because its physical source
+field was absent from the catalog-inferred schema: the reader and transform
+executor validate those references against each real input chunk. Sample-backed
+authoring remains the earlier, friendlier place to catch missing physical fields.
 
 ### Configuration authoring surfaces
 
@@ -483,7 +489,7 @@ Optional/future:
 - A **clean rebuild** acquires all selected source locks in deterministic order and holds them through forced ingestion, coverage validation, scoped cleanup, and aggregate-view refresh. This prevents a concurrent run from publishing files that cleanup could mistake for superseded output.
 - Inside a run, **chunks are processed sequentially by default** (predictable memory profile, simpler error semantics). The `--parallel <N>` flag runs chunks in a process pool of N workers: partial parquet part files are per-chunk so worker writes never collide, and all ledger writes stay in the parent process (the DuckDB metadata files are single-writer). Worker processes sidestep the GIL held by Python sketch building, so the initial load scales with cores.
 - Inside a chunk, **processors fan out through one batched `pl.collect_all`**: every processor's `chunk_aggregate` plan collects in a single pass (sharing the scan via common-subplan elimination), with a logged sequential fallback if the batch fails.
-- The **query layer is read-only**, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. The run's durable `running` row is the outer publication barrier. Within it, atomic Parquet writes and complete lineage commit before the chunk's `ok` row, which is the chunk commit marker. A partial becomes visible only after that chunk row and a final `ok`/`partial` run row exist; until then readers retain the previous successful version.
+- The **query layer is read-only**, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. The run's durable `running` row is the outer publication barrier. Within it, atomic Parquet writes and complete lineage commit before the chunk's `ok` row, which is the chunk commit marker. A committed chunk becomes visible only after its parent run reaches any terminal state; until then readers retain the previous successful version.
 
 ## 13. Caching strategy
 
@@ -508,11 +514,14 @@ There is **no cache below the storage layer** (no in-memory copy of the aggregat
 
 A `chunk` is the unit of recovery; a `run` is the unit of reporting and the
 outer publication barrier. Successful chunks within a partially-failed run are
-kept, marked, and re-used on the next run. After acquiring the source lock, a
-new caller treats every older `running` row for that source as interrupted: an
-`ok` chunk is retained only when its current input fingerprint, file lineage,
-physical provenance, and processor computation hashes all verify. The stale run
-becomes `partial` when at least one chunk verifies and `failed` otherwise.
+kept, marked, and re-used on the next run, but the completed run itself is
+`failed` whenever any chunk fails. Data Load presents repeated chunk errors as
+one grouped failure with the affected chunk count and identifiers. After
+acquiring the source lock, a new caller treats every older `running` row for
+that source as interrupted: an `ok` chunk is retained only when its current
+input fingerprint, file lineage, physical provenance, and processor computation
+hashes all verify. The stale run becomes `partial` when at least one chunk
+verifies and `failed` otherwise.
 Files without a committed chunk marker remain invisible and are eligible for a
 later vacuum.
 Recovery fetches lineage once per stale run, indexes that run's physical paths

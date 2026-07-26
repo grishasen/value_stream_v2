@@ -134,7 +134,7 @@ def run_workspace(
         f"Starting workspace run: workspace={workspace}, force={force}, parallel={parallel}"
     )
     catalog = load(workspace)
-    validation = validate_catalog(catalog)
+    validation = validate_catalog(catalog, defer_unobserved_source_expressions=True)
     if not validation.ok:
         messages = "; ".join(f"{i.location}: {i.message}" for i in validation.issues)
         raise ValueError(f"catalog does not validate: {messages}")
@@ -152,13 +152,7 @@ def run_workspace(
     sources_failed = sum(1 for result in results if result.status == "failed")
     sources_partial = sum(1 for result in results if result.status == "partial")
     sources_ok = sum(1 for result in results if result.status == "ok")
-    status = (
-        "failed"
-        if sources_failed and not sources_ok and not sources_partial
-        else "partial"
-        if sources_failed or sources_partial
-        else "ok"
-    )
+    status = "failed" if sources_failed else "partial" if sources_partial else "ok"
     elapsed_ms = _elapsed_ms(started)
     logger.info(
         f"Workspace run finished: workspace={workspace}, status={status}, "
@@ -216,7 +210,7 @@ def _run_source_locked(  # noqa: PLR0915
     started = time.perf_counter()
     workspace = Path(workspace_path)
     catalog = load(workspace)
-    validation = validate_catalog(catalog)
+    validation = validate_catalog(catalog, defer_unobserved_source_expressions=True)
     if not validation.ok:
         messages = "; ".join(f"{i.location}: {i.message}" for i in validation.issues)
         raise ValueError(f"catalog does not validate: {messages}")
@@ -342,9 +336,7 @@ def _run_source_locked(  # noqa: PLR0915
         chunks_skipped = sum(1 for chunk in chunk_results if chunk.status == "skipped")
         rows_in = sum(chunk.rows_in for chunk in chunk_results if chunk.status == "ok")
         rows_kept = sum(chunk.rows_kept for chunk in chunk_results if chunk.status == "ok")
-        status = (
-            "failed" if chunks_failed and not chunks_ok else "partial" if chunks_failed else "ok"
-        )
+        status = "failed" if chunks_failed else "ok"
 
         ledger.finalize_run(
             workspace,

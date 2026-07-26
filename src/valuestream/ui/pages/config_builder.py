@@ -26,6 +26,7 @@ from valuestream.ai.settings import (
 from valuestream.charts import render_chart
 from valuestream.config import canonical as config_canonical
 from valuestream.config import model
+from valuestream.config.validate import CatalogValidationResult, validate_catalog
 from valuestream.readers.discovery import discover
 from valuestream.readers.io import cleanup_temporaries, read
 from valuestream.transforms import apply_transforms
@@ -339,11 +340,12 @@ REPORT_LIBRARY_CHART_LABELS = builder.CHART_DISPLAY_LABELS
 def render(ctx: ValueStreamContext) -> None:
     """Render validation-first YAML catalog builders."""
     start_journey(st.session_state, workflow=AuthoringWorkflow.BUILDER)
+    validation = _builder_catalog_validation(ctx)
     components.render_page_header(
         "Configuration Builder",
         "Make one reviewable workspace change at a time, apply it safely, then open a report or refresh data.",
-        status="ok" if ctx.validation.ok else "warning",
-        status_label="Catalog OK" if ctx.validation.ok else "Needs review",
+        status="ok" if validation.ok else "warning",
+        status_label="Catalog OK" if validation.ok else "Needs review",
     )
     with st.sidebar:
         if st.button("Reload catalog", icon=":material/refresh:"):
@@ -775,6 +777,7 @@ def _render_editor_primary_action(
     help_text: str,
     preserve_widget_keys: tuple[str, ...] = (),
     invalid_reason: str | None = None,
+    allow_continue_when_invalid: bool = False,
 ) -> bool:
     """Render one canonical draft status and the single active apply action."""
     registered = builder.registered_builder_draft(st.session_state, status.key)
@@ -821,6 +824,10 @@ def _render_editor_primary_action(
             on_click=_discard_registered_builder_draft,
             args=(status.key, widget_prefixes, preserve_widget_keys),
         )
+
+    if not valid and allow_continue_when_invalid:
+        _render_continue_primary(save_slot)
+        return False
 
     apply_requested = save_slot.button(
         "Apply to workspace",
@@ -1262,10 +1269,13 @@ def _funnel_stage_warnings(catalog: model.Catalog) -> list[str]:
 
 def _health(ctx: ValueStreamContext, save_slot: Any) -> None:
     _render_continue_primary(save_slot)
+    _begin_source_inspection_scope()
+    _render_validation_sample_panel(ctx)
+    validation = _builder_catalog_validation(ctx)
     components.key_value_strip(
         [{"label": key, "value": value} for key, value in catalog_counts(ctx).items()],
     )
-    components.render_validation_summary(ctx.validation.issues, ok=ctx.validation.ok)
+    components.render_validation_summary(validation.issues, ok=validation.ok)
 
     with components.bordered_panel(
         "Review Progress", "Configuration areas to check before export."
@@ -1280,6 +1290,81 @@ def _health(ctx: ValueStreamContext, save_slot: Any) -> None:
         for col, (label, status) in zip(cols, areas, strict=True):
             with col:
                 components.status_badge(label, status)
+
+
+def _builder_catalog_validation(ctx: ValueStreamContext) -> CatalogValidationResult:
+    """Validate against physical columns observed from samples in this session."""
+
+    observed = _observed_source_columns()
+    if not observed:
+        return ctx.validation
+    return validate_catalog(ctx.catalog, source_columns_by_id=observed)
+
+
+def catalog_validation_with_observed_sources(
+    ctx: ValueStreamContext,
+) -> CatalogValidationResult:
+    """Return catalog validation enriched by source schemas observed this session."""
+
+    return _builder_catalog_validation(ctx)
+
+
+def _render_validation_sample_panel(ctx: ValueStreamContext) -> None:
+    """Keep bounded sample loading available beside catalog validation."""
+
+    sources = list(ctx.catalog.pipelines.sources)
+    if not sources:
+        return
+    with components.bordered_panel(
+        "Validation Sample",
+        "Load or reload a bounded source sample before reviewing Catalog Health.",
+    ):
+        st.caption(
+            "Sample-backed validation checks transforms against observed physical fields. "
+            "It does not ingest data; observed field names remain available while you move "
+            "between Builder steps."
+        )
+        source = st.selectbox(
+            "Validation Source",
+            sources,
+            format_func=_source_choice_label_edit,
+            key="builder_validation_sample_source",
+        )
+        observed = _observed_source_columns()
+        columns = observed.get(source.id, [])
+        if st.button(
+            "Reload sample" if columns else "Load sample",
+            icon=":material/database_search:",
+            key=f"builder_validation_load_sample_{source.id}",
+        ):
+            result = _source_inspection(ctx, source)
+            columns = (
+                [name for name, _dtype in result.raw_schema]
+                if not result.error_kind
+                else []
+            )
+            if columns:
+                st.rerun()
+
+        if not columns:
+            st.caption(
+                f"No sample-backed fields are active for `{source.id}`. "
+                "Catalog-only validation remains conservative."
+            )
+            return
+        preview = ", ".join(f"`{field}`" for field in columns[:8])
+        if len(columns) > 8:
+            preview = f"{preview}, +{len(columns) - 8} more"
+        st.success(f"Using {len(columns)} observed fields from `{source.id}` for validation.")
+        st.caption(f"Observed fields: {preview}")
+
+
+def render_validation_sample_panel(ctx: ValueStreamContext) -> CatalogValidationResult:
+    """Render sample controls and return validation with any observed schemas."""
+
+    _begin_source_inspection_scope()
+    _render_validation_sample_panel(ctx)
+    return catalog_validation_with_observed_sources(ctx)
 
 
 def _render_default_values_editor(
@@ -3986,12 +4071,23 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             )
 
     state_key = f"builder_proc_states_{processor.id}"
+    state_editor_key = f"builder_proc_state_editor_{processor.id}"
     states_baseline: model.Processor = processor
     if creating:
         states_baseline = _kind_candidate_processor(processor, kind, kind_settings)
         _reseed_state_rows_for_kind(states_baseline, state_key, processor.id, field_mapping)
     if state_key not in st.session_state:
         st.session_state[state_key] = _state_rows(states_baseline, field_mapping)
+    if kind == "numeric_distribution":
+        current_rows = builder.normalize_editor_rows(st.session_state[state_key])
+        synced_rows = _with_numeric_property_state_rows(
+            current_rows,
+            builder.string_list(kind_settings.get("properties")),
+            str(kind_settings.get("quantile_engine") or "tdigest"),
+        )
+        if synced_rows != current_rows:
+            st.session_state[state_key] = synced_rows
+            components.clear_pinned_editor(state_editor_key)
     state_frame = builder.editor_frame(
         st.session_state[state_key],
         ["State", "Type", "Source Column", "Parameters", "Derived From", "Enabled"],
@@ -4004,7 +4100,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     ):
         _render_state_rows_editor(
             state_key,
-            f"builder_proc_state_editor_{processor.id}",
+            state_editor_key,
             state_frame,
         )
         st.caption(
@@ -4017,8 +4113,9 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         )
         st.caption(
             "Applying a public t-digest or KLL state also creates its distribution "
-            "metric automatically. Positive/negative outcome digests remain inputs "
-            "for curve and calibration metrics."
+            "metric automatically. Numeric variance states also create a standard "
+            "deviation metric as sqrt(variance). Positive/negative outcome digests "
+            "remain inputs for curve and calibration metrics."
         )
 
     filter_expression = builder.first_filter_expression(processor)
@@ -4179,7 +4276,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
                 message = "Processor written."
             if created_metric_ids:
                 metric_list = ", ".join(f"`{metric_id}`" for metric_id in created_metric_ids)
-                message += f" Added distribution metrics automatically: {metric_list}."
+                message += f" Added generated metrics automatically: {metric_list}."
             _complete_builder_apply(
                 status=draft_status,
                 scope="processor",
@@ -4255,9 +4352,17 @@ def _kind_candidate_processor(
     candidate_def = builder.processor_to_dict(processor)
     for managed_key in forms.PROCESSOR_KIND_MANAGED_FIELDS:
         candidate_def.pop(managed_key, None)
+    if not builder.processor_supports_dedup(kind):
+        candidate_def.pop("dedup_keys", None)
     candidate_def.update(kind_settings)
     candidate_def["kind"] = kind
-    candidate_def.pop("states", None)
+    if kind == "numeric_distribution":
+        candidate_def["states"] = _numeric_property_state_definitions(
+            builder.string_list(kind_settings.get("properties")),
+            str(kind_settings.get("quantile_engine") or "tdigest"),
+        )
+    else:
+        candidate_def.pop("states", None)
     try:
         return model.Processors.model_validate(
             {"catalog_version": 2, "processors": [candidate_def]}
@@ -4804,6 +4909,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 "states can be used without running data."
             ),
             invalid_reason=metric_invalid_reason,
+            allow_continue_when_invalid=True,
         ):
             try:
                 if not editing and metric_name.strip() in catalog.metrics.metrics:
@@ -7592,17 +7698,17 @@ def _settings_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any) 
 @st.fragment()
 def _export_current_workspace(ctx: ValueStreamContext, save_slot: Any) -> None:
     save_slot.empty()
-    save_slot.button(
+    save_slot.success(
         "Workspace current",
         icon=":material/check_circle:",
-        disabled=True,
-        width="stretch",
-        key="builder_export_current",
     )
     st.write("### What happens next")
     _render_outcome_handoff()
     st.write("### Current workspace validation")
-    components.render_validation_summary(ctx.validation.issues, ok=ctx.validation.ok)
+    _begin_source_inspection_scope()
+    _render_validation_sample_panel(ctx)
+    validation = _builder_catalog_validation(ctx)
+    components.render_validation_summary(validation.issues, ok=validation.ok)
     filenames = [
         "pipelines.yaml",
         "processors.yaml",
@@ -8915,6 +9021,134 @@ def _processor_editor_projection(processor: model.Processor) -> dict[str, Any]:
     """Return the exact strict catalog-v2 processor contract."""
 
     return builder.processor_to_dict(processor)
+
+
+def _with_numeric_property_state_rows(
+    rows: list[dict[str, Any]],
+    properties: list[str],
+    quantile_engine: str,
+) -> list[dict[str, Any]]:
+    """Append the mergeable numeric state suite missing from editor rows."""
+
+    normalized = builder.normalize_editor_rows(rows)
+    existing_names = {
+        str(row.get("State", "")).strip()
+        for row in normalized
+        if str(row.get("State", "")).strip()
+    }
+    additions = [
+        row
+        for row in _numeric_property_state_rows(properties, quantile_engine)
+        if row["State"] not in existing_names
+    ]
+    return [*normalized, *additions]
+
+
+def _numeric_property_state_rows(
+    properties: list[str],
+    quantile_engine: str,
+) -> list[dict[str, Any]]:
+    """Return required mergeable states for selected numeric properties.
+
+    Standard deviation is intentionally not persisted: it is generated as a
+    formula metric over the pooled variance state when the processor is
+    applied.
+    """
+
+    engine = quantile_engine if quantile_engine in {"tdigest", "kll"} else "tdigest"
+    rows: list[dict[str, Any]] = []
+    for property_name in builder.dedupe(
+        [str(value).strip() for value in properties if str(value).strip()]
+    ):
+        count = f"{property_name}_Count"
+        mean = f"{property_name}_Mean"
+        variance = f"{property_name}_Var"
+        rows.extend(
+            [
+                {
+                    "State": count,
+                    "Type": "count",
+                    "Source Column": property_name,
+                    "Parameters": "",
+                    "Derived From": f"non-null {property_name}",
+                    "Enabled": True,
+                },
+                {
+                    "State": mean,
+                    "Type": "pooled_mean",
+                    "Source Column": property_name,
+                    "Parameters": yaml.safe_dump(
+                        {"weight": count},
+                        sort_keys=True,
+                        default_flow_style=True,
+                    ).strip(),
+                    "Derived From": f"weighted mean of {property_name}",
+                    "Enabled": True,
+                },
+                {
+                    "State": variance,
+                    "Type": "pooled_variance",
+                    "Source Column": property_name,
+                    "Parameters": yaml.safe_dump(
+                        {"mean": mean, "weight": count},
+                        sort_keys=True,
+                        default_flow_style=True,
+                    ).strip(),
+                    "Derived From": f"pooled variance of {property_name}",
+                    "Enabled": True,
+                },
+                {
+                    "State": f"{property_name}_Min",
+                    "Type": "min",
+                    "Source Column": property_name,
+                    "Parameters": "",
+                    "Derived From": f"minimum of {property_name}",
+                    "Enabled": True,
+                },
+                {
+                    "State": f"{property_name}_Max",
+                    "Type": "max",
+                    "Source Column": property_name,
+                    "Parameters": "",
+                    "Derived From": f"maximum of {property_name}",
+                    "Enabled": True,
+                },
+                {
+                    "State": f"{property_name}_{engine}",
+                    "Type": engine,
+                    "Source Column": property_name,
+                    "Parameters": "",
+                    "Derived From": f"distribution of {property_name}",
+                    "Enabled": True,
+                },
+            ]
+        )
+    return rows
+
+
+def _numeric_property_state_definitions(
+    properties: list[str],
+    quantile_engine: str,
+) -> dict[str, dict[str, Any]]:
+    """Return strict catalog definitions for automatic numeric state rows."""
+
+    definitions: dict[str, dict[str, Any]] = {}
+    for row in _numeric_property_state_rows(properties, quantile_engine):
+        state_name = str(row["State"])
+        state_type = str(row["Type"])
+        definition: dict[str, Any] = {
+            "type": state_type,
+            "source_column": str(row["Source Column"]),
+        }
+        definition.update(
+            _parse_state_parameters(
+                row.get("Parameters"),
+                state_name=state_name,
+                state_type=state_type,
+            )
+        )
+        definitions[state_name] = definition
+    return definitions
 
 
 def _state_rows(

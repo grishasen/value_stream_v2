@@ -84,6 +84,12 @@ Data Load resumes progress polling. An application-server restart does stop
 those process-local background threads. In that case, invoke the same normal
 run again and rely on the interrupted-run verification described above.
 
+When any chunk fails, the source run is marked **failed** even if other chunks
+completed. Data Load shows the failed summary and groups identical chunk errors
+with their affected chunk count and identifiers. Successfully committed chunks
+remain queryable and are reused by the next normal run, so fix the reported
+cause and run again without **Force rebuild**.
+
 Files created by older releases that have chunk/lineage metadata but no
 `pipeline_runs` row cannot be adopted automatically because their source
 computation hash was never persisted. Let the replacement run finish, inspect

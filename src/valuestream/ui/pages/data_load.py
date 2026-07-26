@@ -28,6 +28,7 @@ from valuestream.ui.instrumentation import (
     record_event,
     workflow_from_handoff,
 )
+from valuestream.ui.pages import config_builder
 from valuestream.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +44,15 @@ class _BackgroundRun:
     progress: dict[str, Any] = field(default_factory=dict)
     result: Any = None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class _RunFailureGroup:
+    """Identical chunk failures grouped for concise post-run reporting."""
+
+    source_id: str
+    error: str
+    chunk_ids: tuple[str, ...]
 
 
 # Runs execute on daemon threads keyed by workspace+scope so a browser reload
@@ -124,6 +134,80 @@ def _run_summary(result: Any) -> str:
     return str(result)
 
 
+def _result_failed(result: Any) -> bool:
+    """Return whether a completed result must be presented as a failed load."""
+
+    status = str(getattr(result, "status", "")).lower()
+    return (
+        status in {"failed", "partial"}
+        or int(getattr(result, "chunks_failed", 0) or 0) > 0
+        or int(getattr(result, "sources_failed", 0) or 0) > 0
+        or int(getattr(result, "sources_partial", 0) or 0) > 0
+    )
+
+
+def _run_failure_groups(result: Any) -> tuple[_RunFailureGroup, ...]:
+    """Group repeated per-chunk errors across source and workspace results."""
+
+    source_results = getattr(result, "results", None)
+    if source_results is None:
+        source_results = (result,) if hasattr(result, "chunks") else ()
+
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for source_result in source_results:
+        source_id = str(getattr(source_result, "source_id", "unknown source"))
+        for chunk in getattr(source_result, "chunks", ()):
+            if str(getattr(chunk, "status", "")).lower() != "failed":
+                continue
+            error = str(getattr(chunk, "error", None) or "No chunk error was recorded.")
+            grouped.setdefault((source_id, error), []).append(
+                str(getattr(chunk, "chunk_id", "unknown chunk"))
+            )
+
+    return tuple(
+        _RunFailureGroup(source_id=source_id, error=error, chunk_ids=tuple(chunk_ids))
+        for (source_id, error), chunk_ids in grouped.items()
+    )
+
+
+def _render_run_failure_details(result: Any) -> None:
+    groups = _run_failure_groups(result)
+    if not groups:
+        st.caption("No per-chunk error details were recorded. Review the server log for this run.")
+        return
+
+    with st.expander("Failed chunk details", expanded=True, icon=":material/error:"):
+        for group in groups:
+            st.write(
+                f"**{group.source_id} · {len(group.chunk_ids)} chunk(s) failed with this error**"
+            )
+            st.error(group.error)
+            visible = ", ".join(group.chunk_ids[:8])
+            remaining = len(group.chunk_ids) - 8
+            suffix = f" · +{remaining} more" if remaining > 0 else ""
+            st.caption(f"Affected chunks: {visible}{suffix}")
+        st.info(
+            "Successful chunks were kept and will be reused. Correct the error, then run the "
+            "source again to process only failed or missing chunks."
+        )
+
+
+def _render_completed_run(run: _BackgroundRun) -> None:
+    if run.error is not None:
+        st.toast("Data load failed.", icon=":material/error:")
+        st.error(f"{run.label} failed: {run.error}")
+        return
+    if run.result is None:
+        return
+    if _result_failed(run.result):
+        st.toast("Data load failed.", icon=":material/error:")
+        st.error(f"{run.label} — {_run_summary(run.result)}")
+        _render_run_failure_details(run.result)
+        return
+    st.toast("Data load finished.", icon=":material/database_upload:")
+    st.success(f"{run.label} — {_run_summary(run.result)}")
+
+
 def _render_background_runs(workspace: Path) -> bool:
     """Show every active or just-finished run for this workspace.
 
@@ -165,26 +249,23 @@ def _render_background_runs(workspace: Path) -> bool:
         else:
             with _BACKGROUND_RUNS_LOCK:
                 _BACKGROUND_RUNS.pop(key, None)
-            if run.error is not None:
-                st.toast("Data load failed.", icon=":material/error:")
-                st.error(f"{run.label} failed: {run.error}")
-            elif run.result is not None:
-                st.toast("Data load finished.", icon=":material/database_upload:")
-                st.success(f"{run.label} — {_run_summary(run.result)}")
+            _render_completed_run(run)
     return any_alive
 
 
 def render(ctx: ValueStreamContext) -> None:
     """Render guided data loading controls."""
+    validation = config_builder.catalog_validation_with_observed_sources(ctx)
     components.render_page_header(
         "Data Load",
         "Load, refresh, and validate source data before opening reports.",
-        status="ok" if ctx.validation.ok else "blocked",
-        status_label="Catalog OK" if ctx.validation.ok else "Catalog blocked",
+        status="ok" if validation.ok else "blocked",
+        status_label="Catalog OK" if validation.ok else "Catalog blocked",
     )
 
-    if not ctx.validation.ok:
-        components.render_validation_summary(ctx.validation.issues, ok=False)
+    validation = config_builder.render_validation_sample_panel(ctx)
+    if not validation.ok:
+        components.render_validation_summary(validation.issues, ok=False)
         st.stop()
 
     sources = _ordered_sources(ctx.catalog.pipelines.sources)

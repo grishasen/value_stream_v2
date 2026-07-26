@@ -150,8 +150,9 @@ chunk commit marker.
 
 ### Chunk ledger
 The DuckDB table at `meta/chunks.duckdb` recording every chunk processed by every run.
-Only an `ok` row whose parent run is `ok` or `partial` is query-visible and
-eligible for idempotent reuse.
+Only an `ok` row whose parent run has reached a terminal state is query-visible
+and eligible for idempotent reuse. This includes successful chunks retained
+inside an otherwise failed run.
 
 ### Compaction
 The process of reducing aggregate states with `groupby + state-merge`.
@@ -253,10 +254,12 @@ bases use the smallest useful partition label for their configured resolution.
 One end-to-end execution of an ingestion against a Source. Has an id (UUID), a config hash, a status (`running | ok | failed | partial`), counts of total / ok / failed chunks, and start/end timestamps. Recorded in `meta/pipeline_runs.duckdb`.
 The row is inserted as `running` after discovery and before the first chunk.
 While it is running, `finished_at` is null and none of that run's new chunks are
-visible. Normal completion transitions the same row to `ok`, `partial`, or
-`failed`. If the process dies first, the next caller holding the source lock
-verifies committed chunks and performs the terminal transition; it never
-creates a second row for the interrupted run.
+visible. Normal completion transitions the same row to `ok` or `failed`; any
+failed chunk makes the run `failed`, even when other chunks committed
+successfully. `partial` is reserved for an interrupted run whose committed
+chunks were later verified during recovery. If the process dies first, the
+next caller holding the source lock verifies committed chunks and performs the
+terminal transition; it never creates a second row for the interrupted run.
 Run-level `rows_in` and `rows_kept` totals include only chunks whose durable
 marker finishes as `ok`; failed, recovery-rejected, and skipped chunks do not
 inflate the published-row totals shown by operational surfaces.

@@ -11,6 +11,7 @@ from pathlib import Path
 import duckdb
 import polars as pl
 import pytest
+import yaml
 from click.testing import CliRunner
 
 import valuestream.engine.runner as runner_module
@@ -216,6 +217,57 @@ def test_run_source_writes_provenance_and_queryable_ctr(tmp_path: Path) -> None:
         include_state_columns=True,
     )
     assert {"Count", "Positives", "Negatives", "UniqueCustomers_hll"} <= set(raw_ctr.columns)
+
+
+@pytest.mark.integration
+def test_workspace_run_defers_unobserved_source_expressions_to_real_chunks(
+    tmp_path: Path,
+) -> None:
+    _seed_workspace(tmp_path)
+    pipelines_path = tmp_path / "catalog" / "pipelines.yaml"
+    pipelines = yaml.safe_load(pipelines_path.read_text(encoding="utf-8"))
+    pipelines["sources"][0]["transforms"].extend(
+        [
+            {
+                "kind": "filter",
+                "expression": {"op": "not_null", "column": "SubjectID"},
+            },
+            {
+                "kind": "derive_column",
+                "output": "Placement",
+                "expression": {
+                    "op": "case",
+                    "when": [
+                        {
+                            "cond": {
+                                "op": "ne",
+                                "column": "PlacementType",
+                                "value": "",
+                            },
+                            "then": {"col": "PlacementType"},
+                        }
+                    ],
+                    "else": {"lit": "Unknown"},
+                },
+            },
+        ]
+    )
+    pipelines_path.write_text(
+        yaml.safe_dump(pipelines, sort_keys=False),
+        encoding="utf-8",
+    )
+    for source_file in sorted((tmp_path / "data").glob("*.parquet")):
+        frame = pl.read_parquet(source_file).with_columns(
+            pl.col("CustomerID").alias("SubjectID"),
+            pl.col("Channel").alias("PlacementType"),
+        )
+        frame.write_parquet(source_file)
+
+    result = run_workspace(tmp_path)
+
+    assert result.status == "ok"
+    assert result.sources_ok == 1
+    assert result.results[0].chunks_ok == 2
 
 
 @pytest.mark.integration
@@ -675,8 +727,7 @@ def test_presentation_only_changes_do_not_reprocess_source(tmp_path: Path) -> No
     )
     dashboards = tmp_path / "catalog" / "dashboards.yaml"
     dashboards.write_text(
-        "catalog_version: 2\ndashboards:\n"
-        "  - id: overview\n    title: New title\n    pages: []\n",
+        "catalog_version: 2\ndashboards:\n  - id: overview\n    title: New title\n    pages: []\n",
         encoding="utf-8",
     )
 
@@ -769,11 +820,11 @@ def test_run_row_totals_only_count_successfully_published_chunks(
             raise RuntimeError("simulated aggregate write failure")
         return original_write(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(runner_module, "write_aggregate_with_receipts", fail_first_chunk)
+    with monkeypatch.context() as failure:
+        failure.setattr(runner_module, "write_aggregate_with_receipts", fail_first_chunk)
+        result = run_source(tmp_path, "ih")
 
-    result = run_source(tmp_path, "ih")
-
-    assert result.status == "partial"
+    assert result.status == "failed"
     assert result.chunks_ok == 1
     assert result.chunks_failed == 1
     assert next(chunk for chunk in result.chunks if chunk.status == "failed").rows_in == 3
@@ -785,6 +836,14 @@ def test_run_row_totals_only_count_successfully_published_chunks(
             (result.run_id,),
         ).fetchone()
     assert totals == (3, 3)
+    partial_ctr = query_metric(tmp_path, "CTR", grain="summary")
+    assert partial_ctr["CTR"].to_list() == [pytest.approx(2 / 3)]
+
+    resumed = run_source(tmp_path, "ih")
+
+    assert resumed.status == "ok"
+    assert resumed.chunks_ok == 1
+    assert resumed.chunks_skipped == 1
 
 
 @pytest.mark.integration

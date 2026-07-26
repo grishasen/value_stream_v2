@@ -1100,7 +1100,8 @@ The durable commit order is:
 2. commit those receipts as lineage for every written path, without reopening
    the new Parquet files, after a file-exists and size stat check;
 3. insert the chunk's `status='ok'` row as the chunk commit marker;
-4. transition the existing run from `running` to `ok`, `partial`, or `failed`.
+4. transition a normally completed run from `running` to `ok` or `failed`;
+   recovery may use `partial` for an interrupted run with verified chunks.
 
 Terminal run `rows_in` and `rows_kept` totals sum only chunks whose durable
 status is `ok`; failed, recovery-rejected, and skipped chunks contribute zero
@@ -1159,9 +1160,15 @@ failure of that fallback fails the whole chunk.
 
 ### 10.5 Failure semantics
 
-- A processor failure fails the whole chunk. None of that chunk's new files are published; other chunks continue. The run is `partial` when another chunk commits successfully and `failed` otherwise.
+- A processor failure fails the whole chunk. None of that chunk's new files are
+  published; other chunks continue. Any failed chunk makes the normally
+  completed run `failed`, even when other chunks commit successfully.
 - Source-level failures (e.g. unreadable file) abort the chunk, not the run; subsequent chunks are processed.
-- Re-running the source picks up only failed/missing chunks unless `--force` is set.
+- Successful chunk commit markers remain query-visible and reusable after the
+  failed run reaches its terminal state. Re-running the source therefore picks
+  up only failed/missing chunks unless `--force` is set.
+- Data Load renders a failed result as an error and groups identical chunk
+  messages by source, showing the affected count and a bounded chunk-id sample.
 - A hard process termination leaves the run `running` and therefore invisible. The next invocation under the source lock verifies committed chunks, finalizes the stale run, refreshes views, and reuses only verified chunks.
 
 ---
