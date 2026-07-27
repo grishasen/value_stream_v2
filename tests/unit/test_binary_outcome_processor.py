@@ -9,7 +9,7 @@ import pytest
 
 from valuestream.config import model
 from valuestream.processors.binary_outcome import BinaryOutcomeProcessor, ChunkContext
-from valuestream.states import hll, topk
+from valuestream.states import cpc, hll, topk
 
 
 def _ctx() -> ChunkContext:
@@ -282,3 +282,52 @@ def test_daily_compaction_fast_path_restamps_provenance() -> None:
     assert compacted["chunk_id"].to_list() == ["new-chunk"]
     assert compacted["created_at"].to_list() == [ctx.created_at]
     assert compacted["config_hash"].to_list() == [processor.config_hash]
+
+
+@pytest.mark.unit
+def test_state_where_filters_counts_sums_and_sketches_after_dedup() -> None:
+    processor = _processor(
+        {
+            "group_by": ["Channel"],
+            "dedup_keys": ["InteractionID"],
+            "states": {
+                "Count": {"type": "count"},
+                "Positives": {"type": "count", "outcome": "positive"},
+                "ClickedRows": {
+                    "type": "count",
+                    "where": {"op": "eq", "column": "Outcome", "value": "Clicked"},
+                },
+                "ClickedRevenue": {
+                    "type": "value_sum",
+                    "source_column": "Revenue",
+                    "where": {"op": "eq", "column": "Outcome", "value": "Clicked"},
+                },
+                "ClickedActions_cpc": {
+                    "type": "cpc",
+                    "source_column": "ActionID",
+                    "where": {"op": "eq", "column": "Outcome", "value": "Clicked"},
+                },
+                "AllActions_cpc": {"type": "cpc", "source_column": "ActionID"},
+            },
+        }
+    )
+    # i1 appears twice: the deduplicator keeps the Clicked row over the
+    # Impression row, so the filtered states must see exactly one click for it.
+    frame = pl.LazyFrame(
+        {
+            "InteractionID": ["i1", "i1", "i2", "i3"],
+            "ActionID": ["a1", "a1", "a2", "a3"],
+            "Outcome": ["Impression", "Clicked", "Clicked", "Impression"],
+            "Revenue": [0.0, 5.0, 7.0, 0.0],
+            "Channel": ["Web", "Web", "Web", "Web"],
+        }
+    )
+
+    out = processor.chunk_aggregate(frame, _ctx()).row(0, named=True)
+
+    assert out["Count"] == 3
+    assert out["Positives"] == 2
+    assert out["ClickedRows"] == 2
+    assert out["ClickedRevenue"] == pytest.approx(12.0)
+    assert cpc.estimate(out["ClickedActions_cpc"]) == pytest.approx(2.0, rel=1e-3)
+    assert cpc.estimate(out["AllActions_cpc"]) == pytest.approx(3.0, rel=1e-3)

@@ -338,3 +338,18 @@ def test_set_op_operands_apply_relative_time_windows(tmp_path: Path) -> None:
     assert retained.filter(pl.col("Channel") == "Mobile")["RetainedFromPriorDay"][
         0
     ] == pytest.approx(0.0)
+
+    # The operand lookback resolves against the anchor, so restricting the query
+    # to the anchor day alone must not shorten it into a same-day intersection.
+    anchor_only = query_metric(
+        tmp_path,
+        "RetainedFromPriorDay",
+        group_by=["Channel"],
+        grain="summary",
+        start=dt.date(2024, 1, 2),
+        end=dt.date(2024, 1, 2),
+    )
+
+    assert anchor_only.filter(pl.col("Channel") == "Web")["RetainedFromPriorDay"][
+        0
+    ] == pytest.approx(1.0)

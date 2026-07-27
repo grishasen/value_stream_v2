@@ -75,15 +75,14 @@ class NumericDistributionProcessor:
         distribution_sketches: list[p3.DistributionSketchSpec] = []
         remaining_sketches: list[tuple[pl.Expr, tuple[str, str, int]]] = []
         for name, spec in self.state_specs.items():
+            raw_extra = p3.spec_extra(spec)
             if spec.type == "count":
                 if spec.source_column:
                     _require_source_column(self.id, name, spec.source_column, existing)
-                    agg_exprs.append(pl.col(spec.source_column).count().alias(name))
-                else:
-                    agg_exprs.append(pl.len().alias(name))
+                agg_exprs.append(p3.count_expr(raw_extra, alias=name))
             elif spec.type == "value_sum":
                 _require_source_column(self.id, name, spec.source_column, existing)
-                agg_exprs.append(pl.col(spec.source_column).sum().cast(pl.Float64).alias(name))
+                agg_exprs.append(p3.value_sum_expr(spec.source_column, raw_extra, alias=name))
             elif spec.type == "pooled_mean":
                 if spec.source_column is None:
                     raise ValueError(

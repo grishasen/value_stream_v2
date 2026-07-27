@@ -222,12 +222,16 @@ def query_metric(
     if windowed_set_op and grain != "summary":
         raise ValueError("time-window set_op metrics currently require grain='summary'")
     storage_grain = "daily" if windowed_set_op else grain
+    load_start = start
+    if windowed_set_op and start is not None:
+        assert isinstance(metric, model.SetOpMetric)
+        load_start = _date_bound(start) - dt.timedelta(days=_set_op_lookback_days(metric))
     frame, stored_grain = _load_current_aggregate(
         workspace_path,
         processor,
         storage_grain,
         metric_name=metric_name,
-        start=start,
+        start=load_start,
         end=end,
     )
     frame = _with_calendar_columns(
@@ -236,7 +240,7 @@ def query_metric(
         processor.config.aggregation_level_for(stored_grain),
     )
     frame = _apply_filters(frame, filters or {})
-    frame = _apply_time_range(frame, stored_grain, start=start, end=end)
+    frame = _apply_time_range(frame, stored_grain, start=load_start, end=end)
     if _provenance_sink is not None:
         _provenance_sink.append(
             _query_provenance(
@@ -1320,6 +1324,28 @@ def _topk_dtype() -> pl.DataType:
 
 def _set_op_states(metric: model.SetOpMetric) -> list[str]:
     return [operand.state for operand in metric.operands]
+
+
+def _set_op_lookback_days(metric: model.SetOpMetric) -> int:
+    """Return how many days before the query start a set_op operand still needs.
+
+    Operand windows resolve against the anchor (the query ``end``), so the rows
+    they select can predate the requested ``start``. Loading only the requested
+    range would silently shorten the lookback, turning a 30-day retention metric
+    into whatever the report's time filter happened to select.
+    """
+
+    lookback = 0
+    for operand in metric.operands:
+        window = operand.time_window
+        if window is None:
+            continue
+        if window.last is not None:
+            lookback = max(lookback, _duration_days(window.last, allow_negative=False) - 1)
+        elif window.between is not None:
+            offsets = [_duration_days(bound, allow_negative=True) for bound in window.between]
+            lookback = max(lookback, -min(offsets))
+    return max(lookback, 0)
 
 
 def _derive_windowed_set_op(

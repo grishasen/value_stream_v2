@@ -209,3 +209,45 @@ def test_explicit_recipe_sketches_build_alongside_distribution_states() -> None:
     assert cpc.estimate(out["Channel_cpc"][0]) == pytest.approx(1, rel=0.02)
     assert kll.quantile(out["ResponseTime_kll"][0], 0.5) == pytest.approx(2.0)
     assert "ResponseTime_tdigest" in out.columns
+
+
+@pytest.mark.unit
+def test_state_where_filters_counts_and_sums() -> None:
+    processor = NumericDistributionProcessor(
+        model.NumericDistributionProcessor.model_validate(
+            {
+                "id": "descriptive",
+                "source": "ih",
+                "kind": "numeric_distribution",
+                "group_by": ["Channel"],
+                "time": {"property": "day", "grain": "summary"},
+                "properties": ["ResponseTime"],
+                "states": {
+                    "ResponseTime_Count": {"type": "count", "source_column": "ResponseTime"},
+                    "ConversionResponseTime_Count": {
+                        "type": "count",
+                        "source_column": "ResponseTime",
+                        "where": {"op": "eq", "column": "Outcome", "value": "Conversion"},
+                    },
+                    "ConversionResponseTime_Sum": {
+                        "type": "value_sum",
+                        "source_column": "ResponseTime",
+                        "where": {"op": "eq", "column": "Outcome", "value": "Conversion"},
+                    },
+                },
+            }
+        )
+    )
+    frame = pl.LazyFrame(
+        {
+            "Outcome": ["Conversion", "Impression", "Conversion", "NoConversion"],
+            "ResponseTime": [10.0, 1.0, 30.0, 2.0],
+            "Channel": ["Web", "Web", "Web", "Web"],
+        }
+    )
+
+    out = processor.chunk_aggregate(frame, _ctx()).row(0, named=True)
+
+    assert out["ResponseTime_Count"] == 4
+    assert out["ConversionResponseTime_Count"] == 2
+    assert out["ConversionResponseTime_Sum"] == pytest.approx(40.0)

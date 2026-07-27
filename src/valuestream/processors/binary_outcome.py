@@ -147,42 +147,45 @@ class BinaryOutcomeProcessor:
         exprs: list[pl.Expr] = []
         sketch_helpers: list[pl.Expr] = []
         for name, spec in self.state_specs.items():
+            raw_extra = p3.spec_extra(spec)
+            condition = p3.where_expr(raw_extra)
             if spec.type == "count":
                 if spec.outcome == "positive":
-                    exprs.append(pl.col("__valuestream_positive").sum().alias(name))
+                    positive = pl.col("__valuestream_positive")
+                    if condition is not None:
+                        positive = pl.when(condition).then(positive).otherwise(0)
+                    exprs.append(positive.sum().alias(name))
                 elif spec.outcome == "negative":
-                    exprs.append((1 - pl.col("__valuestream_positive")).sum().alias(name))
+                    negative = 1 - pl.col("__valuestream_positive")
+                    if condition is not None:
+                        negative = pl.when(condition).then(negative).otherwise(0)
+                    exprs.append(negative.sum().alias(name))
                 elif spec.source_column:
                     if spec.source_column not in existing:
                         raise ValueError(
                             f"binary_outcome processor {self.id!r} state {name!r} "
                             f"requires missing source column {spec.source_column!r}"
                         )
-                    count = (
-                        pl.col(spec.source_column).n_unique()
-                        if spec.distinct
-                        else pl.col(spec.source_column).count()
-                    )
-                    exprs.append(count.alias(name))
+                    exprs.append(p3.count_expr(raw_extra, alias=name))
                 elif spec.stage:
                     raise ValueError(
                         f"binary_outcome processor {self.id!r} state {name!r} "
                         "cannot use a funnel stage selector"
                     )
                 else:
-                    exprs.append(pl.len().alias(name))
+                    exprs.append(p3.count_expr(raw_extra, alias=name))
             elif spec.type == "value_sum":
                 source_column = spec.source_column
                 if source_column in existing:
-                    exprs.append(pl.col(source_column).sum().cast(pl.Float64).alias(name))
+                    exprs.append(p3.value_sum_expr(source_column, raw_extra, alias=name))
             elif spec.type == "min":
                 source_column = spec.source_column
                 if source_column in existing:
-                    exprs.append(pl.col(source_column).min().alias(name))
+                    exprs.append(p3.filtered_column(source_column, raw_extra).min().alias(name))
             elif spec.type == "max":
                 source_column = spec.source_column
                 if source_column in existing:
-                    exprs.append(pl.col(source_column).max().alias(name))
+                    exprs.append(p3.filtered_column(source_column, raw_extra).max().alias(name))
             elif spec.type in {"cpc", "hll", "theta", "topk"}:
                 sketch_expr, _ = p3.sketch_build_expr(
                     name,

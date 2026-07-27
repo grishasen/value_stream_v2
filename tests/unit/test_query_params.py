@@ -206,3 +206,27 @@ def test_variant_compare_keeps_undefined_outputs_numeric() -> None:
 
     assert out["AbsoluteRateDifference"].dtype == pl.Float64
     assert out["AbsoluteRateDifference"][0] is None
+
+
+@pytest.mark.unit
+def test_set_op_lookback_days_covers_every_operand_window() -> None:
+    def metric(*windows: dict[str, object] | None) -> model.SetOpMetric:
+        return model.SetOpMetric.model_validate(
+            {
+                "processor": "audience",
+                "kind": "set_op",
+                "operation": "intersection",
+                "operands": [
+                    {"state": "Customers_theta", **({"time_window": window} if window else {})}
+                    for window in windows
+                ],
+            }
+        )
+
+    # 'last' windows reach back one day less than their duration: 1d is the
+    # anchor day itself, so it needs no extra history.
+    assert executor._set_op_lookback_days(metric({"last": "1d"}, {"last": "7d"})) == 6
+    assert executor._set_op_lookback_days(metric({"last": "1d"}, {"between": ["-30d", "-1d"]})) == 30
+    assert executor._set_op_lookback_days(metric({"last": "1d"}, {"between": ["-2w", "-1d"]})) == 14
+    assert executor._set_op_lookback_days(metric(None, None)) == 0
+    assert executor._set_op_lookback_days(metric({"last": "1d"}, None)) == 0

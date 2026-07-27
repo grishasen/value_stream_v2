@@ -13,6 +13,7 @@ import yaml
 
 from valuestream.config import model
 from valuestream.config.canonical import (
+    _processor_computation_fields,
     canonicalize,
     catalog_config_hash,
     config_hash,
@@ -164,6 +165,47 @@ class TestCatalogHash:
             "native_ml_reduction": 1,
         }
         assert "__valuestream_algorithm_revision" not in numeric_payload
+
+    def test_filtered_scalar_state_revision_invalidates_only_affected_processors(self) -> None:
+        """A ``where`` on count/value_sum used to be ignored, so its rows are stale.
+
+        The config that produced those rows is unchanged, so only an explicit
+        revision marker can invalidate them — and it must not invalidate the
+        sketch states, which always honored ``where``.
+        """
+
+        def binary(states: dict[str, dict[str, object]]) -> model.Processor:
+            return model.BinaryOutcomeProcessor.model_validate(
+                {
+                    "id": "p",
+                    "source": "ih",
+                    "kind": "binary_outcome",
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "states": {"Count": {"type": "count"}, **states},
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked"],
+                        "negative_values": ["Impression"],
+                    },
+                }
+            )
+
+        where = {"op": "eq", "column": "Outcome", "value": "Clicked"}
+        unfiltered = _processor_computation_fields(binary({}))
+        filtered_count = _processor_computation_fields(
+            binary({"Clicks": {"type": "count", "where": where}})
+        )
+        filtered_sum = _processor_computation_fields(
+            binary({"Rev": {"type": "value_sum", "source_column": "Revenue", "where": where}})
+        )
+        filtered_sketch = _processor_computation_fields(
+            binary({"Act": {"type": "cpc", "source_column": "ActionID", "where": where}})
+        )
+
+        assert filtered_count["__valuestream_algorithm_revision"] == {"filtered_scalar_states": 1}
+        assert filtered_sum["__valuestream_algorithm_revision"] == {"filtered_scalar_states": 1}
+        assert "__valuestream_algorithm_revision" not in unfiltered
+        assert "__valuestream_algorithm_revision" not in filtered_sketch
 
     def test_two_yamls_same_meaning_same_hash(self, tmp_path: Path) -> None:
         """A YAML file rewritten with reordered keys hashes identically."""

@@ -33,6 +33,12 @@ from valuestream.utils.hashing import sha256_hex
 COMPUTATION_SCHEMA_VERSION = 2
 _SCORE_BOUNDED_SAMPLE_ORDER_REVISION = 1
 _SCORE_NATIVE_ML_REDUCTION_REVISION = 1
+# ``where`` on count/value_sum states was silently ignored by the
+# binary_outcome and numeric_distribution processors, which returned unfiltered
+# totals. The config that produced those rows is unchanged, so only an explicit
+# revision marker can invalidate them.
+_FILTERED_SCALAR_STATE_REVISION = 1
+_FILTERED_SCALAR_STATE_TYPES = frozenset({"count", "value_sum"})
 
 
 def canonicalize(value: Any) -> Any:
@@ -201,7 +207,29 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
             "bounded_ml_source_order": _SCORE_BOUNDED_SAMPLE_ORDER_REVISION,
             "native_ml_reduction": _SCORE_NATIVE_ML_REDUCTION_REVISION,
         }
+    if _has_filtered_scalar_state(processor):
+        revision = dict(payload.get("__valuestream_algorithm_revision") or {})
+        revision["filtered_scalar_states"] = _FILTERED_SCALAR_STATE_REVISION
+        payload["__valuestream_algorithm_revision"] = revision
     return payload
+
+
+def _has_filtered_scalar_state(processor: model.Processor) -> bool:
+    """Report whether this processor computes a ``where``-filtered scalar state.
+
+    Only ``binary_outcome`` and ``numeric_distribution`` ever ignored ``where``
+    on count/value_sum states, so restricting the marker to them keeps every
+    other workspace's aggregates valid.
+    """
+
+    if not isinstance(
+        processor, model.BinaryOutcomeProcessor | model.NumericDistributionProcessor
+    ):
+        return False
+    return any(
+        state.type in _FILTERED_SCALAR_STATE_TYPES and getattr(state, "where", None) is not None
+        for state in model.effective_processor_states(processor).values()
+    )
 
 
 def catalog_config_hash(catalog: model.Catalog) -> str:
