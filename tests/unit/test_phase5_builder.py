@@ -9105,80 +9105,133 @@ def test_report_library_labels_disambiguate_duplicate_pages() -> None:
     assert labels["model_quality/distributions/response_histogram"] == "Histogram · Distributions"
 
 
+class _AlertSlot:
+    """Minimal stand-in for the st.empty() slot reserved at the top of the page."""
+
+    def __init__(self, *, writable: bool = True) -> None:
+        self.writable = writable
+        self.claims = 0
+        self.renders: list[list[str]] = []
+        self._current: list[str] | None = None
+
+    def empty(self) -> None:
+        self.claims += 1
+
+    def container(self) -> _AlertSlot:
+        if not self.writable:
+            raise RuntimeError(
+                "A fragment tried to write to a container created outside the fragment"
+            )
+        self._current = []
+        self.renders.append(self._current)
+        return self
+
+    def __enter__(self) -> _AlertSlot:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._current = None
+
+    def record(self, text: str) -> None:
+        if self._current is not None:
+            self._current.append(text)
+
+    @property
+    def last(self) -> list[str]:
+        return self.renders[-1] if self.renders else []
+
+
+def _install_alert_slot(monkeypatch: pytest.MonkeyPatch, slot: _AlertSlot) -> list[str]:
+    """Route st.error/st.button into the slot when open, else record inline."""
+
+    inline: list[str] = []
+
+    def _error(message: object, **_: object) -> None:
+        if slot._current is not None:
+            slot.record(str(message))
+        else:
+            inline.append(str(message))
+
+    def _button(label: object = "", **kwargs: object) -> None:
+        text = str(kwargs.get("label", label))
+        if slot._current is not None:
+            slot.record(text)
+        else:
+            inline.append(text)
+
+    monkeypatch.setattr(config_builder.st, "error", _error)
+    monkeypatch.setattr(config_builder.st, "button", _button)
+    config_builder._begin_source_inspection_scope()
+    config_builder._source_inspection_scope()["alert_slot"] = slot
+    return inline
+
+
 @pytest.mark.unit
-def test_source_inspection_failure_renders_in_the_page_alert_region(
+def test_page_alert_region_is_claimed_with_empty_not_container(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Inspection runs deep in the step body; its error must surface at the top."""
+    """Streamlit rejects fragment writes to a container never written to itself."""
 
-    class _Region:
-        def __init__(self) -> None:
-            self.errors: list[str] = []
-            self.buttons: list[str] = []
-
-        def error(self, message: str, **_: object) -> None:
-            self.errors.append(message)
-
-        def button(self, label: str, **_: object) -> None:
-            self.buttons.append(label)
-
-    region = _Region()
-    config_builder._begin_source_inspection_scope()
-    scope = config_builder._source_inspection_scope()
-    scope["alert_region"] = region
-
-    source = model.Source.model_validate(
-        {"id": "ih", "reader": {"kind": "parquet", "file_pattern": "*.parquet", "root": "/tmp/x"}}
+    created: list[str] = []
+    monkeypatch.setattr(
+        config_builder.st, "empty", lambda: created.append("empty") or _AlertSlot()
     )
-    key = config_builder.SourceInspectionKey("ws", "0123456789abcdef" * 4, (), 5)
-    result = config_builder.SourceInspectionResult(key, (), None, "read")
+    monkeypatch.setattr(
+        config_builder.st,
+        "container",
+        lambda *a, **k: pytest.fail("the alert region must be reserved with st.empty()"),
+    )
 
-    inline: list[str] = []
-    monkeypatch.setattr(config_builder.st, "error", lambda msg, **_: inline.append(str(msg)))
-    monkeypatch.setattr(config_builder.st, "button", lambda label, **_: inline.append(str(label)))
+    config_builder._open_page_alert_region()
 
-    config_builder._render_source_inspection_failure_once(source, result, scope)
-
-    assert len(region.errors) == 1
-    assert "Could not inspect source" in region.errors[0]
-    assert region.buttons == ["Retry source inspection"]
-    assert inline == []
-
-    # The failure is rendered once per scope, not once per fragment that asks.
-    config_builder._render_source_inspection_failure_once(source, result, scope)
-    assert len(region.errors) == 1
+    assert created == ["empty"]
 
 
 @pytest.mark.unit
-def test_apply_failure_renders_in_the_page_alert_region(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A rolled-back apply must not report the reason below the fold."""
+def test_page_alerts_accumulate_so_an_apply_error_keeps_the_inspection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Filling the slot replaces it, so every alert this run must be redrawn."""
 
-    captured: list[str] = []
+    slot = _AlertSlot()
+    inline = _install_alert_slot(monkeypatch, slot)
 
-    class _Region:
-        def error(self, message: str, **_: object) -> None:
-            captured.append(message)
+    config_builder._emit_page_alert("inspection failed", retry={"label": "Retry"})
+    config_builder._emit_page_alert("apply rolled back")
 
-    config_builder._begin_source_inspection_scope()
-    config_builder._source_inspection_scope()["alert_region"] = _Region()
-
-    inline: list[str] = []
-    monkeypatch.setattr(config_builder.st, "error", lambda msg, **_: inline.append(str(msg)))
-
-    config_builder._render_apply_failure(ValueError("validation failed; changes were rolled back"))
-
-    assert captured == ["validation failed; changes were rolled back"]
+    assert slot.last == ["inspection failed", "Retry", "apply rolled back"]
     assert inline == []
 
 
 @pytest.mark.unit
-def test_page_alert_region_survives_fragment_scope_resets() -> None:
-    """Fragments reset inspection memoization; that must not detach the region."""
+def test_page_alert_falls_back_inline_when_the_slot_rejects_the_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure must never be swallowed because the reserved slot is unusable."""
 
-    sentinel = object()
+    slot = _AlertSlot(writable=False)
+    inline = _install_alert_slot(monkeypatch, slot)
+
+    config_builder._render_apply_failure(ValueError("changes were rolled back"))
+
+    assert inline == ["changes were rolled back"]
+
+
+@pytest.mark.unit
+def test_fragments_reclaim_the_alert_slot_and_reset_pending_alerts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each fragment run re-reserves the slot and redraws from a clean list."""
+
+    slot = _AlertSlot()
+    _install_alert_slot(monkeypatch, slot)
+    config_builder._emit_page_alert("first run")
+
+    # A fragment entering resets memoization but must keep the slot attached.
     config_builder._begin_source_inspection_scope()
-    config_builder._source_inspection_scope()["alert_region"] = sentinel
+    config_builder._claim_page_alert_region()
+    config_builder._emit_page_alert("second run")
 
-    config_builder._begin_source_inspection_scope()
-
-    assert config_builder._page_alert_region() is sentinel
+    assert slot.claims == 1
+    assert config_builder._source_inspection_scope()["alert_slot"] is slot
+    assert slot.last == ["second run"]

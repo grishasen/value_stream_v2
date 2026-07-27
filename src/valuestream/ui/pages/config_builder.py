@@ -766,6 +766,7 @@ def _claim_fragment_action_slots(save_slot: Any, draft_slot: Any) -> None:
     _consume_builder_post_apply_cleanup()
     save_slot.empty()
     draft_slot.empty()
+    _claim_page_alert_region()
 
 
 def _render_editor_primary_action(
@@ -1110,7 +1111,7 @@ def _render_apply_failure(exc: Exception) -> None:
     modal covers this region.
     """
 
-    _page_alert_region().error(str(exc))
+    _emit_page_alert(str(exc))
 
 
 def _record_builder_applied(outcome: builder.BuilderApplyOutcome) -> None:
@@ -8213,35 +8214,72 @@ def _begin_source_inspection_scope() -> None:
     """Reset per-fragment memoization while retaining bounded cache entries."""
 
     previous = st.session_state.get(BUILDER_SOURCE_INSPECTION_SCOPE_KEY)
-    # The alert region is created once per page render and reused by every
+    # The alert slot is reserved once per page render and reused by every
     # fragment, so resetting a fragment's memoization must not detach it.
-    region = previous.get("alert_region") if isinstance(previous, dict) else None
+    # Pending alerts reset with the scope: a fragment redraws the slot from
+    # scratch, so carrying them over would duplicate messages already shown.
+    slot = previous.get("alert_slot") if isinstance(previous, dict) else None
     st.session_state[BUILDER_SOURCE_INSPECTION_SCOPE_KEY] = {
         "keys": {},
         "rendered_failures": set(),
-        "alert_region": region,
+        "alert_slot": slot,
+        "alerts": [],
     }
 
 
 def _open_page_alert_region() -> None:
     """Reserve a slot at the top of the page for failures raised further down.
 
-    Source inspection happens deep inside the step body, so its errors used to
-    render below the controls that caused them — often past the fold. Reserving
-    the slot up front lets those messages appear first while the code that
-    detects them stays where it is.
+    Source inspection and apply both happen deep inside the step body, so their
+    errors used to render below the controls that caused them — often past the
+    fold. Reserving the slot up front lets those messages appear first while the
+    code that detects them stays where it is.
+
+    It must be ``st.empty()`` rather than ``st.container()``: the writers run
+    inside fragments, and Streamlit only accepts a fragment write to an outside
+    container when that container was itself written to during the full run.
     """
 
     scope = _source_inspection_scope()
-    scope["alert_region"] = st.container()
+    scope["alert_slot"] = st.empty()
+    scope["alerts"] = []
     scope["rendered_failures"] = set()
 
 
-def _page_alert_region() -> Any:
-    """Return the top-of-page alert slot, or Streamlit itself when unavailable."""
+def _claim_page_alert_region() -> None:
+    """Re-reserve the alert slot at the start of a fragment run."""
 
-    region = _source_inspection_scope().get("alert_region")
-    return region if region is not None else st
+    slot = _source_inspection_scope().get("alert_slot")
+    if slot is not None:
+        slot.empty()
+
+
+def _emit_page_alert(message: str, *, retry: Mapping[str, Any] | None = None) -> None:
+    """Render one failure in the top-of-page region, keeping earlier ones visible.
+
+    Filling the slot replaces everything in it, so every alert raised during
+    this run is redrawn each time rather than only the newest.
+    """
+
+    scope = _source_inspection_scope()
+    alerts = list(scope.get("alerts") or [])
+    alerts.append({"message": message, "retry": dict(retry) if retry else None})
+    scope["alerts"] = alerts
+    slot = scope.get("alert_slot")
+    if slot is not None:
+        try:
+            with slot.container():
+                for alert in alerts:
+                    st.error(alert["message"])
+                    if alert["retry"]:
+                        st.button(**alert["retry"])
+            return
+        except Exception:  # pragma: no cover - Streamlit display path
+            logger.exception("Failed to render a page alert in the reserved region")
+    # Never swallow a failure: fall back to rendering it where it was raised.
+    st.error(message)
+    if retry:
+        st.button(**retry)
 
 
 def _source_inspection_scope() -> dict[str, Any]:
@@ -8560,16 +8598,15 @@ def _render_source_inspection_failure_once(
         guidance = "Add a matching file or update Root / File Pattern, then retry."
     else:
         guidance = "Check reader settings, transforms, and file permissions, then retry."
-    region = _page_alert_region()
-    region.error(
-        f"Could not inspect source `{source.id}` with path pattern `{pattern}`. {guidance}"
-    )
-    region.button(
-        "Retry source inspection",
-        icon=":material/refresh:",
-        key=f"builder_source_inspection_retry_{result.key.source_hash[:16]}",
-        on_click=_invalidate_source_inspection_cache_entry,
-        args=(result.key,),
+    _emit_page_alert(
+        f"Could not inspect source `{source.id}` with path pattern `{pattern}`. {guidance}",
+        retry={
+            "label": "Retry source inspection",
+            "icon": ":material/refresh:",
+            "key": f"builder_source_inspection_retry_{result.key.source_hash[:16]}",
+            "on_click": _invalidate_source_inspection_cache_entry,
+            "args": (result.key,),
+        },
     )
 
 
