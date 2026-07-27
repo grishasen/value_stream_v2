@@ -8219,11 +8219,18 @@ def _begin_source_inspection_scope() -> None:
     # Pending alerts reset with the scope: a fragment redraws the slot from
     # scratch, so carrying them over would duplicate messages already shown.
     slot = previous.get("alert_slot") if isinstance(previous, dict) else None
+    region = previous.get("alert_region") if isinstance(previous, dict) else None
+    keys = previous.get("alert_widget_keys") if isinstance(previous, dict) else None
     st.session_state[BUILDER_SOURCE_INSPECTION_SCOPE_KEY] = {
         "keys": {},
         "rendered_failures": set(),
         "alert_slot": slot,
-        "alerts": [],
+        # The open region and the widget keys already drawn into it belong to
+        # the current render pass, not to a fragment's memoization, so both
+        # survive a scope reset. Dropping them would reopen the region and
+        # erase alerts this pass already showed.
+        "alert_region": region,
+        "alert_widget_keys": keys if isinstance(keys, set) else set(),
     }
 
 
@@ -8242,44 +8249,69 @@ def _open_page_alert_region() -> None:
 
     scope = _source_inspection_scope()
     scope["alert_slot"] = st.empty()
-    scope["alerts"] = []
+    scope["alert_region"] = None
+    scope["alert_widget_keys"] = set()
     scope["rendered_failures"] = set()
 
 
 def _claim_page_alert_region() -> None:
     """Re-reserve the alert slot at the start of a fragment run."""
 
-    slot = _source_inspection_scope().get("alert_slot")
+    scope = _source_inspection_scope()
+    slot = scope.get("alert_slot")
     if slot is not None:
         slot.empty()
+    # Filling the slot again would replace whatever this run already drew, so
+    # the container is rebuilt lazily on the next alert instead.
+    scope["alert_region"] = None
+    scope["alert_widget_keys"] = set()
 
 
-def _emit_page_alert(message: str, *, retry: Mapping[str, Any] | None = None) -> None:
-    """Render one failure in the top-of-page region, keeping earlier ones visible.
+def _page_alert_region() -> Any:
+    """Return the region alerts append into, or Streamlit itself as a fallback.
 
-    Filling the slot replaces everything in it, so every alert raised during
-    this run is redrawn each time rather than only the newest.
+    The region is a container opened inside the reserved slot on first use and
+    reused afterwards. Re-opening it per alert would replace the slot's whole
+    contents, and re-drawing an already-registered widget key is a duplicate
+    element error — so alerts append to one container instead.
     """
 
     scope = _source_inspection_scope()
-    alerts = list(scope.get("alerts") or [])
-    alerts.append({"message": message, "retry": dict(retry) if retry else None})
-    scope["alerts"] = alerts
+    region = scope.get("alert_region")
+    if region is not None:
+        return region
     slot = scope.get("alert_slot")
-    if slot is not None:
-        try:
-            with slot.container():
-                for alert in alerts:
-                    st.error(alert["message"])
-                    if alert["retry"]:
-                        st.button(**alert["retry"])
-            return
-        except Exception:  # pragma: no cover - Streamlit display path
-            logger.exception("Failed to render a page alert in the reserved region")
-    # Never swallow a failure: fall back to rendering it where it was raised.
-    st.error(message)
-    if retry:
-        st.button(**retry)
+    if slot is None:
+        return st
+    try:
+        region = slot.container()
+    except Exception:  # pragma: no cover - Streamlit display path
+        logger.exception("Failed to open the reserved page alert region")
+        return st
+    scope["alert_region"] = region
+    return region
+
+
+def _emit_page_alert(message: str, *, retry: Mapping[str, Any] | None = None) -> None:
+    """Append one failure to the top-of-page region, keeping earlier ones visible."""
+
+    region = _page_alert_region()
+    try:
+        region.error(message)
+        if retry:
+            key = str(retry.get("key") or "")
+            used = _source_inspection_scope().setdefault("alert_widget_keys", set())
+            # A retry control is a widget: drawing the same key twice in one run
+            # raises, and the already-visible button still works.
+            if key and key not in used:
+                used.add(key)
+                region.button(**retry)
+        return
+    except Exception:  # pragma: no cover - Streamlit display path
+        logger.exception("Failed to render a page alert in the reserved region")
+    if region is not st:
+        # Never swallow a failure: fall back to rendering it where it was raised.
+        st.error(message)
 
 
 def _source_inspection_scope() -> dict[str, Any]:
