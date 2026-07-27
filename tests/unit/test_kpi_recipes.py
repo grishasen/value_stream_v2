@@ -35,7 +35,7 @@ def test_builtin_recipe_library_is_versioned_and_unique() -> None:
     Draft202012Validator(generate_schema()).validate(payload)
 
     assert library.schema_version == 1
-    assert len(library.recipes) == 12
+    assert len(library.recipes) == 16
     assert len({recipe.id for recipe in library.recipes}) == len(library.recipes)
     assert {recipe.domain for recipe in library.recipes} >= {
         "Audience",

@@ -169,6 +169,7 @@ class TestFatWorkspace:
                 "model_quality",
                 "model_comparison",
                 "recommendation_quality",
+                "exploration_and_evidence",
                 "distributions",
             ],
             "fat_experiments": [
