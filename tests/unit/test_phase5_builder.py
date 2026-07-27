@@ -9103,3 +9103,82 @@ def test_report_library_labels_disambiguate_duplicate_pages() -> None:
     )
     # Unique labels stay short.
     assert labels["model_quality/distributions/response_histogram"] == "Histogram · Distributions"
+
+
+@pytest.mark.unit
+def test_source_inspection_failure_renders_in_the_page_alert_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Inspection runs deep in the step body; its error must surface at the top."""
+
+    class _Region:
+        def __init__(self) -> None:
+            self.errors: list[str] = []
+            self.buttons: list[str] = []
+
+        def error(self, message: str, **_: object) -> None:
+            self.errors.append(message)
+
+        def button(self, label: str, **_: object) -> None:
+            self.buttons.append(label)
+
+    region = _Region()
+    config_builder._begin_source_inspection_scope()
+    scope = config_builder._source_inspection_scope()
+    scope["alert_region"] = region
+
+    source = model.Source.model_validate(
+        {"id": "ih", "reader": {"kind": "parquet", "file_pattern": "*.parquet", "root": "/tmp/x"}}
+    )
+    key = config_builder.SourceInspectionKey("ws", "0123456789abcdef" * 4, (), 5)
+    result = config_builder.SourceInspectionResult(key, (), None, "read")
+
+    inline: list[str] = []
+    monkeypatch.setattr(config_builder.st, "error", lambda msg, **_: inline.append(str(msg)))
+    monkeypatch.setattr(config_builder.st, "button", lambda label, **_: inline.append(str(label)))
+
+    config_builder._render_source_inspection_failure_once(source, result, scope)
+
+    assert len(region.errors) == 1
+    assert "Could not inspect source" in region.errors[0]
+    assert region.buttons == ["Retry source inspection"]
+    assert inline == []
+
+    # The failure is rendered once per scope, not once per fragment that asks.
+    config_builder._render_source_inspection_failure_once(source, result, scope)
+    assert len(region.errors) == 1
+
+
+@pytest.mark.unit
+def test_apply_failure_renders_in_the_page_alert_region(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rolled-back apply must not report the reason below the fold."""
+
+    captured: list[str] = []
+
+    class _Region:
+        def error(self, message: str, **_: object) -> None:
+            captured.append(message)
+
+    config_builder._begin_source_inspection_scope()
+    config_builder._source_inspection_scope()["alert_region"] = _Region()
+
+    inline: list[str] = []
+    monkeypatch.setattr(config_builder.st, "error", lambda msg, **_: inline.append(str(msg)))
+
+    config_builder._render_apply_failure(ValueError("validation failed; changes were rolled back"))
+
+    assert captured == ["validation failed; changes were rolled back"]
+    assert inline == []
+
+
+@pytest.mark.unit
+def test_page_alert_region_survives_fragment_scope_resets() -> None:
+    """Fragments reset inspection memoization; that must not detach the region."""
+
+    sentinel = object()
+    config_builder._begin_source_inspection_scope()
+    config_builder._source_inspection_scope()["alert_region"] = sentinel
+
+    config_builder._begin_source_inspection_scope()
+
+    assert config_builder._page_alert_region() is sentinel

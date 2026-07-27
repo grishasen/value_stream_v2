@@ -347,6 +347,7 @@ def render(ctx: ValueStreamContext) -> None:
         status="ok" if validation.ok else "warning",
         status_label="Catalog OK" if validation.ok else "Needs review",
     )
+    _open_page_alert_region()
     with st.sidebar:
         if st.button("Reload catalog", icon=":material/refresh:"):
             st.rerun()
@@ -1098,6 +1099,18 @@ def _record_builder_apply_failed(exc: Exception) -> None:
         stage=AuthoringStage.APPLY,
         outcome=outcome,
     )
+
+
+def _render_apply_failure(exc: Exception) -> None:
+    """Surface a rolled-back apply at the top of the page.
+
+    Apply buttons sit at the bottom of a long step body, so rendering the
+    failure in place puts the reason for the rollback below the fold while the
+    page scrolls back to the top. Dialogs keep their own inline errors — the
+    modal covers this region.
+    """
+
+    _page_alert_region().error(str(exc))
 
 
 def _record_builder_applied(outcome: builder.BuilderApplyOutcome) -> None:
@@ -3041,7 +3054,7 @@ def _source_builder(  # noqa: PLR0912, PLR0915
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
             logger.exception("Failed to write source definition: source=%s", proposed_source_id)
-            st.error(str(exc))
+            _render_apply_failure(exc)
 
 
 WORKSPACE_DIMENSIONS_KEY = "builder_dimension_common"
@@ -3166,7 +3179,7 @@ def _dimensions_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
             logger.exception("Failed to write workspace dimensions")
-            st.error(str(exc))
+            _render_apply_failure(exc)
 
 
 def _dimension_identity_key(value: str) -> str:
@@ -3804,7 +3817,7 @@ def _exploration_lifecycle_controls(ctx: ValueStreamContext, source_id: str) -> 
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
             logger.exception("Failed to promote exploration: processor=%s", selected.id)
-            st.error(str(exc))
+            _render_apply_failure(exc)
         else:
             st.session_state["builder_apply_notice"] = (
                 f"Exploration `{selected.id}` promoted to a permanent processor."
@@ -4292,7 +4305,7 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
             logger.exception(
                 "Failed to write processor definition: processor=%s", processor_id.strip()
             )
-            st.error(str(exc))
+            _render_apply_failure(exc)
 
 
 def _processor_kind_settings(
@@ -4602,7 +4615,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
             logger.exception("Failed to add KPI recipe to the catalog")
-            st.error(str(exc))
+            _render_apply_failure(exc)
             return
 
     left, right = st.columns([1.05, 1.2], gap="small")
@@ -4955,7 +4968,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 logger.exception(
                     "Failed to write metric definition: metric=%s", metric_name.strip()
                 )
-                st.error(str(exc))
+                _render_apply_failure(exc)
 
     with right, st.container(border=True):
         st.write("### Review")
@@ -7574,7 +7587,7 @@ def _chat_settings_editor(
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
             logger.exception("Failed to write Chat With Data guidance")
-            st.error(str(exc))
+            _render_apply_failure(exc)
 
 
 @st.fragment()
@@ -7692,7 +7705,7 @@ def _settings_builder(ctx: ValueStreamContext, save_slot: Any, draft_slot: Any) 
         except Exception as exc:  # pragma: no cover - Streamlit display path
             _record_builder_apply_failed(exc)
             logger.exception("Failed to write workspace settings")
-            st.error(str(exc))
+            _render_apply_failure(exc)
 
 
 @st.fragment()
@@ -8199,10 +8212,36 @@ def _source_profile_sample(
 def _begin_source_inspection_scope() -> None:
     """Reset per-fragment memoization while retaining bounded cache entries."""
 
+    previous = st.session_state.get(BUILDER_SOURCE_INSPECTION_SCOPE_KEY)
+    # The alert region is created once per page render and reused by every
+    # fragment, so resetting a fragment's memoization must not detach it.
+    region = previous.get("alert_region") if isinstance(previous, dict) else None
     st.session_state[BUILDER_SOURCE_INSPECTION_SCOPE_KEY] = {
         "keys": {},
         "rendered_failures": set(),
+        "alert_region": region,
     }
+
+
+def _open_page_alert_region() -> None:
+    """Reserve a slot at the top of the page for failures raised further down.
+
+    Source inspection happens deep inside the step body, so its errors used to
+    render below the controls that caused them — often past the fold. Reserving
+    the slot up front lets those messages appear first while the code that
+    detects them stays where it is.
+    """
+
+    scope = _source_inspection_scope()
+    scope["alert_region"] = st.container()
+    scope["rendered_failures"] = set()
+
+
+def _page_alert_region() -> Any:
+    """Return the top-of-page alert slot, or Streamlit itself when unavailable."""
+
+    region = _source_inspection_scope().get("alert_region")
+    return region if region is not None else st
 
 
 def _source_inspection_scope() -> dict[str, Any]:
@@ -8521,8 +8560,11 @@ def _render_source_inspection_failure_once(
         guidance = "Add a matching file or update Root / File Pattern, then retry."
     else:
         guidance = "Check reader settings, transforms, and file permissions, then retry."
-    st.error(f"Could not inspect source `{source.id}` with path pattern `{pattern}`. {guidance}")
-    st.button(
+    region = _page_alert_region()
+    region.error(
+        f"Could not inspect source `{source.id}` with path pattern `{pattern}`. {guidance}"
+    )
+    region.button(
         "Retry source inspection",
         icon=":material/refresh:",
         key=f"builder_source_inspection_retry_{result.key.source_hash[:16]}",
