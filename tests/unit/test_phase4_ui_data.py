@@ -1518,6 +1518,46 @@ def test_kpi_bundle_uses_complete_latest_period_and_equal_previous_period(
 
 
 @pytest.mark.unit
+def test_kpi_bundle_honors_selected_metric_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    catalog = _catalog(["ModelControlGroup"])
+    metrics = catalog.metrics.model_dump(mode="python", by_alias=True, exclude_none=True)
+    metrics["metrics"]["ModelControlLift"] = {
+        "processor": "engagement",
+        "kind": "variant_compare",
+        "variant_column": "ModelControlGroup",
+        "test_role": "Test",
+        "control_role": "Control",
+        "outputs": ["TestCTR", "ControlCTR", "Lift"],
+    }
+    catalog = catalog.model_copy(update={"metrics": model.Metrics.model_validate(metrics)})
+    tile = model.validate_tile(
+        {
+            "id": "lift_kpi",
+            "title": "Model-control lift",
+            "metric": "ModelControlLift",
+            "chart": "kpi_card",
+            "placement": "kpi_strip",
+            "metric_output": "Lift",
+        }
+    )
+
+    def fake_query_metric(*_: object, **__: object) -> pl.DataFrame:
+        return pl.DataFrame({"TestCTR": [0.5], "ControlCTR": [0.25], "Lift": [1.0]})
+
+    monkeypatch.setattr("valuestream.ui.pages.reports.query_metric_cached", fake_query_metric)
+
+    bundle = _kpi_bundle(
+        SimpleNamespace(workspace=Path("."), catalog=catalog),
+        tile,
+        filters={},
+        start=None,
+        end=None,
+    )
+
+    assert bundle.value == pytest.approx(1.0)
+
+
+@pytest.mark.unit
 def test_advanced_tile_from_fields_keeps_metric_locked_and_rebuilds_chart_fields() -> None:
     base_tile = {
         "id": "daily_ctr",

@@ -238,6 +238,48 @@ recipes:
       caveat: Approximation error depends on sketch configuration and the observed distribution.
     report: { chart: boxplot, placement: content }
 
+  - id: service.response_time_p95
+    version: 1
+    title: Response time (P95)
+    domain: Service health
+    summary: High-tail seconds between decision and recorded outcome, exceeded by five percent of interactions.
+    business_questions:
+      - How quickly do customers act on delivered decisions?
+      - Are slow response tails improving after channel or arbitration changes?
+    tags: [ service, latency, response-time, p95, tail, tdigest, kll ]
+    maturity: reviewed
+    processor_kinds: [ numeric_distribution, score_distribution ]
+    inputs:
+      - role: digest_state
+        label: Response-time field
+        description: Persisted distribution sketch over a duration column such as decision-to-outcome seconds.
+        source: state
+        state_types: [ tdigest, kll ]
+        absent_state_attributes: [ outcome ]
+        preferred_names: [ ResponseTime_tdigest, ResponseTime_kll, Latency_tdigest, Duration_tdigest ]
+        selection: field_algorithm
+    default_metric_id: VS_Response_Time_P95
+    metric:
+      processor: ${processor_id}
+      kind: quantile
+      description: 95th-percentile response time reconstructed from a persisted mergeable distribution sketch.
+      display:
+        label: P95 response time
+        unit: seconds
+        value_format: number
+        direction: lower_is_better
+      state: ${digest_state}
+      quantile: 0.95
+    method:
+      calculation: q(0.95) of the persisted response-time distribution
+      accuracy: approximate
+      algorithm: Quantile query over a t-digest or KLL state.
+      caveat: Measures the latency recorded in the source column (for example decision-to-outcome), not system serving latency; approximation error depends on sketch configuration.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+      kpi: { comparison: previous_period, comparison_period: month, sparkline_grain: daily, sparkline_points: 30 }
+
   - id: model_quality.roc_auc
     version: 1
     title: ROC AUC

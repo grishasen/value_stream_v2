@@ -966,7 +966,11 @@ def _kpi_bundle(
 ) -> KpiBundle:
     tile_dict = tile_to_dict(tile)
     metric = ctx.catalog.metrics.metrics[tile.metric]
-    value_column = builder.metric_output_columns(tile.metric, metric)[0]
+    output_columns = builder.metric_output_columns(tile.metric, metric)
+    selected_output = str(tile_dict.get("metric_output") or "")
+    value_column = (
+        selected_output if selected_output in output_columns else output_columns[0]
+    )
     applied, _ = partition_filters_for_tile(ctx.catalog, tile, filters)
     query_filters = {**dict(tile_dict.get("filters") or {}), **applied}
     kpi = tile.kpi or model.KpiSpec()
