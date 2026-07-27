@@ -125,6 +125,29 @@ class TestFatWorkspace:
             "funnel_dropoff",
         }
 
+    def test_filtered_state_kpis_are_wired_to_their_backing_states(self) -> None:
+        catalog = load(FAT_WS)
+        processors = {processor.id: processor for processor in catalog.processors.processors}
+        metrics = catalog.metrics.metrics
+
+        # Coverage and repeat-clicker KPIs are only meaningful if their states
+        # actually carry the outcome filter that narrows them.
+        clicked_actions = processors["engagement"].states["ClickedActions_cpc"]
+        clicked_customers = processors["audience"].states["ClickedCustomers_theta"]
+        assert clicked_actions.where is not None
+        assert clicked_customers.where is not None
+        assert metrics["ActionsClicked"].state == "ClickedActions_cpc"
+        assert metrics["ActionsDelivered"].state == "DeliveredActions_cpc"
+        assert {operand.state for operand in metrics["RepeatClickers30d"].operands} == {
+            "ClickedCustomers_theta"
+        }
+
+        # Conversion latency is correct without a tile filter only because the
+        # processor itself is restricted to converted decisions.
+        latency = processors["conversion_latency"]
+        assert latency.filter is not None
+        assert metrics["ConversionLatencyMedian"].processor == "conversion_latency"
+
     def test_business_report_pages_are_present(self) -> None:
         catalog = load(FAT_WS)
 
@@ -134,21 +157,30 @@ class TestFatWorkspace:
         }
 
         assert pages_by_dashboard == {
-            "fat_business_value": [
-                "executive_overview",
-                "engagement",
-                "conversion_and_revenue",
-                "efficiency_and_unit_economics",
-                "outcome_funnel",
+            "fat_engagement": [
+                "engagement_overview",
+                "engagement_breakdowns",
+                "engagement_lift",
+                "engagement_actions",
                 "reach_and_frequency",
-            ],
-            "fat_model_quality": [
-                "model_quality",
-                "model_comparison",
-                "distributions",
                 "response_time_health",
             ],
-            "fat_experiments": ["experiments"],
+            "fat_machine_learning": [
+                "model_quality",
+                "model_comparison",
+                "recommendation_quality",
+                "distributions",
+            ],
+            "fat_experiments": [
+                "experiment_readout",
+                "experiment_significance",
+            ],
+            "fat_conversions": [
+                "conversion_overview",
+                "products_and_revenue_mix",
+                "unit_economics",
+                "outcome_funnel",
+            ],
         }
 
 
