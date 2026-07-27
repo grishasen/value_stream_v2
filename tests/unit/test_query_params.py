@@ -228,5 +228,5 @@ def test_set_op_lookback_days_covers_every_operand_window() -> None:
     assert executor._set_op_lookback_days(metric({"last": "1d"}, {"last": "7d"})) == 6
     assert executor._set_op_lookback_days(metric({"last": "1d"}, {"between": ["-30d", "-1d"]})) == 30
     assert executor._set_op_lookback_days(metric({"last": "1d"}, {"between": ["-2w", "-1d"]})) == 14
-    assert executor._set_op_lookback_days(metric(None, None)) == 0
-    assert executor._set_op_lookback_days(metric({"last": "1d"}, None)) == 0
+    assert executor._set_op_lookback_days(metric(None, None)) is None
+    assert executor._set_op_lookback_days(metric({"last": "1d"}, None)) is None

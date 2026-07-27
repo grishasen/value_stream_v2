@@ -107,6 +107,12 @@ The 5 provenance columns are added by the engine wrapper, not by the processor i
 
 reference/algorithms.md gives the full algorithmic detail.
 
+`count` and `value_sum` states may carry a `where` expression on processors
+that accept those states. The predicate is applied to that state only, after
+the processor-wide filter and any processor deduplication. For a distinct
+count, excluded rows are removed before distinctness is evaluated; they do not
+create a synthetic null member.
+
 Configuration Builder exposes these kind-specific state settings through a
 `Parameters YAML` mapping beside the state name, type, and source column. The
 mapping is preserved in `processors.yaml`; `type` and `source_column` remain
@@ -792,6 +798,11 @@ the latest available `Day`. `last: Nd` is inclusive of the anchor; `between:
 [offset_a, offset_b]` applies inclusive day/week offsets such as `[-30d,
 -1d]`. Windowed set queries require a configured daily grain so retention is
 computed from persisted sketches rather than raw events.
+
+An operand without `time_window` means all aggregate history through the
+anchor. When it is combined with a windowed operand, the planner removes the
+query's lower scan bound so the all-time operand is not shortened by a report
+date preset.
 
 Reports therefore read exact daily freshness for windowed set metrics and
 anchor relative presets to the latest common covered day across the page. A

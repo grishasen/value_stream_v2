@@ -297,6 +297,12 @@ def test_state_where_filters_counts_sums_and_sketches_after_dedup() -> None:
                     "type": "count",
                     "where": {"op": "eq", "column": "Outcome", "value": "Clicked"},
                 },
+                "DistinctClickedActions": {
+                    "type": "count",
+                    "source_column": "ActionID",
+                    "distinct": True,
+                    "where": {"op": "eq", "column": "Outcome", "value": "Clicked"},
+                },
                 "ClickedRevenue": {
                     "type": "value_sum",
                     "source_column": "Revenue",
@@ -328,6 +334,7 @@ def test_state_where_filters_counts_sums_and_sketches_after_dedup() -> None:
     assert out["Count"] == 3
     assert out["Positives"] == 2
     assert out["ClickedRows"] == 2
+    assert out["DistinctClickedActions"] == 2
     assert out["ClickedRevenue"] == pytest.approx(12.0)
     assert cpc.estimate(out["ClickedActions_cpc"]) == pytest.approx(2.0, rel=1e-3)
     assert cpc.estimate(out["AllActions_cpc"]) == pytest.approx(3.0, rel=1e-3)

@@ -57,9 +57,14 @@ def count_expr(raw_extra: dict[str, Any], *, alias: str) -> pl.Expr:
     condition = where_expr(raw_extra)
     source_column = str(raw_extra.get("source_column") or "")
     if source_column:
-        value = filtered_column(source_column, raw_extra)
         if raw_extra.get("distinct") is True:
+            value = pl.col(source_column)
+            if condition is not None:
+                # Filtering the values is not equivalent to replacing excluded
+                # rows with null: Polars counts null as one distinct value.
+                value = value.filter(condition)
             return value.n_unique().alias(alias)
+        value = filtered_column(source_column, raw_extra)
         return value.count().alias(alias)
     if condition is None:
         return pl.len().alias(alias)

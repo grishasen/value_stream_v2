@@ -39,6 +39,13 @@ _SCORE_NATIVE_ML_REDUCTION_REVISION = 1
 # revision marker can invalidate them.
 _FILTERED_SCALAR_STATE_REVISION = 1
 _FILTERED_SCALAR_STATE_TYPES = frozenset({"count", "value_sum"})
+# Filtered distinct counts previously replaced excluded rows with null before
+# ``n_unique``, which counted that null as an extra distinct member.
+_FILTERED_DISTINCT_COUNT_REVISION = 1
+# Binary/numeric value sums now cast each input to Float64 before summing
+# instead of summing in the source dtype and casting afterward. This avoids
+# integer/Float32 overflow but changes existing unfiltered state semantics.
+_FLOAT64_VALUE_SUM_REVISION = 1
 
 
 def canonicalize(value: Any) -> Any:
@@ -199,17 +206,24 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
     payload = processor.model_dump(by_alias=True, exclude_none=True)
     for field in ("description",):
         payload.pop(field, None)
+    revision: dict[str, int] = {}
     if isinstance(processor, model.ScoreDistributionProcessor) and {
         "personalization",
         "novelty",
     }.intersection(model.effective_processor_states(processor)):
-        payload["__valuestream_algorithm_revision"] = {
-            "bounded_ml_source_order": _SCORE_BOUNDED_SAMPLE_ORDER_REVISION,
-            "native_ml_reduction": _SCORE_NATIVE_ML_REDUCTION_REVISION,
-        }
+        revision.update(
+            {
+                "bounded_ml_source_order": _SCORE_BOUNDED_SAMPLE_ORDER_REVISION,
+                "native_ml_reduction": _SCORE_NATIVE_ML_REDUCTION_REVISION,
+            }
+        )
     if _has_filtered_scalar_state(processor):
-        revision = dict(payload.get("__valuestream_algorithm_revision") or {})
         revision["filtered_scalar_states"] = _FILTERED_SCALAR_STATE_REVISION
+    if _has_filtered_distinct_count_state(processor):
+        revision["filtered_distinct_count"] = _FILTERED_DISTINCT_COUNT_REVISION
+    if _has_float64_value_sum_state(processor):
+        revision["float64_value_sum_inputs"] = _FLOAT64_VALUE_SUM_REVISION
+    if revision:
         payload["__valuestream_algorithm_revision"] = revision
     return payload
 
@@ -228,6 +242,41 @@ def _has_filtered_scalar_state(processor: model.Processor) -> bool:
         return False
     return any(
         state.type in _FILTERED_SCALAR_STATE_TYPES and getattr(state, "where", None) is not None
+        for state in model.effective_processor_states(processor).values()
+    )
+
+
+def _has_float64_value_sum_state(processor: model.Processor) -> bool:
+    """Report whether value sums use the revised pre-sum Float64 cast."""
+
+    if not isinstance(
+        processor, model.BinaryOutcomeProcessor | model.NumericDistributionProcessor
+    ):
+        return False
+    return any(
+        state.type == "value_sum"
+        for state in model.effective_processor_states(processor).values()
+    )
+
+
+def _has_filtered_distinct_count_state(processor: model.Processor) -> bool:
+    """Report whether the processor uses the corrected filtered-distinct path."""
+
+    if not isinstance(
+        processor,
+        (
+            model.BinaryOutcomeProcessor
+            | model.NumericDistributionProcessor
+            | model.EntityLifecycleProcessor
+            | model.EntitySetProcessor
+            | model.SnapshotProcessor
+        ),
+    ):
+        return False
+    return any(
+        state.type == "count"
+        and getattr(state, "distinct", False)
+        and getattr(state, "where", None) is not None
         for state in model.effective_processor_states(processor).values()
     )
 

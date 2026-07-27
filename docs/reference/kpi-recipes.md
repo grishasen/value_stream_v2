@@ -161,6 +161,7 @@ internal state-ID choice.
 | `audience.unique_entities` | Distinct audience/reach | CPC, HLL, or Theta state; CPC preferred | Approximate | KPI card |
 | `distribution.median` | Median numeric/score value | t-digest or KLL state | Approximate | KPI card |
 | `distribution.p95` | High-tail numeric/score value | t-digest or KLL state | Approximate | KPI card |
+| `service.response_time_p95` | Decision-to-outcome response time (P95) | Unconditioned response-time t-digest or KLL state | Approximate | KPI card with previous-period comparison |
 | `model_quality.roc_auc` | Ranking discrimination | Matched positive/negative t-digests | Approximate | KPI card |
 | `funnel.conversion_rate` | Funnel completion rate | Start/completion count states | Exact | KPI card |
 | `funnel.dropoff_rate` | Funnel stage loss | Ordered funnel stages | Exact | KPI card |

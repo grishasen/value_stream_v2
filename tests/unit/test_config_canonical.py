@@ -164,7 +164,12 @@ class TestCatalogHash:
             "bounded_ml_source_order": 1,
             "native_ml_reduction": 1,
         }
-        assert "__valuestream_algorithm_revision" not in numeric_payload
+        assert "bounded_ml_source_order" not in numeric_payload[
+            "__valuestream_algorithm_revision"
+        ]
+        assert "native_ml_reduction" not in numeric_payload[
+            "__valuestream_algorithm_revision"
+        ]
 
     def test_filtered_scalar_state_revision_invalidates_only_affected_processors(self) -> None:
         """A ``where`` on count/value_sum used to be ignored, so its rows are stale.
@@ -192,8 +197,23 @@ class TestCatalogHash:
 
         where = {"op": "eq", "column": "Outcome", "value": "Clicked"}
         unfiltered = _processor_computation_fields(binary({}))
+        unfiltered_sum = _processor_computation_fields(
+            binary({"Rev": {"type": "value_sum", "source_column": "Revenue"}})
+        )
         filtered_count = _processor_computation_fields(
             binary({"Clicks": {"type": "count", "where": where}})
+        )
+        filtered_distinct = _processor_computation_fields(
+            binary(
+                {
+                    "ClickedActions": {
+                        "type": "count",
+                        "source_column": "ActionID",
+                        "distinct": True,
+                        "where": where,
+                    }
+                }
+            )
         )
         filtered_sum = _processor_computation_fields(
             binary({"Rev": {"type": "value_sum", "source_column": "Revenue", "where": where}})
@@ -203,7 +223,17 @@ class TestCatalogHash:
         )
 
         assert filtered_count["__valuestream_algorithm_revision"] == {"filtered_scalar_states": 1}
-        assert filtered_sum["__valuestream_algorithm_revision"] == {"filtered_scalar_states": 1}
+        assert filtered_distinct["__valuestream_algorithm_revision"] == {
+            "filtered_distinct_count": 1,
+            "filtered_scalar_states": 1,
+        }
+        assert filtered_sum["__valuestream_algorithm_revision"] == {
+            "filtered_scalar_states": 1,
+            "float64_value_sum_inputs": 1,
+        }
+        assert unfiltered_sum["__valuestream_algorithm_revision"] == {
+            "float64_value_sum_inputs": 1
+        }
         assert "__valuestream_algorithm_revision" not in unfiltered
         assert "__valuestream_algorithm_revision" not in filtered_sketch
 

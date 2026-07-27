@@ -229,6 +229,12 @@ def test_state_where_filters_counts_and_sums() -> None:
                         "source_column": "ResponseTime",
                         "where": {"op": "eq", "column": "Outcome", "value": "Conversion"},
                     },
+                    "DistinctConversionResponseTimes": {
+                        "type": "count",
+                        "source_column": "ResponseTime",
+                        "distinct": True,
+                        "where": {"op": "eq", "column": "Outcome", "value": "Conversion"},
+                    },
                     "ConversionResponseTime_Sum": {
                         "type": "value_sum",
                         "source_column": "ResponseTime",
@@ -250,4 +256,5 @@ def test_state_where_filters_counts_and_sums() -> None:
 
     assert out["ResponseTime_Count"] == 4
     assert out["ConversionResponseTime_Count"] == 2
+    assert out["DistinctConversionResponseTimes"] == 2
     assert out["ConversionResponseTime_Sum"] == pytest.approx(40.0)

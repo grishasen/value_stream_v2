@@ -319,6 +319,14 @@ def test_set_op_operands_apply_relative_time_windows(tmp_path: Path) -> None:
         time_window: {last: 1d}
       - state: Visitors_theta
         time_window: {between: [-1d, -1d]}
+  VisitorsBeforeToday:
+    processor: unique_users
+    kind: set_op
+    operation: minus
+    operands:
+      - state: Visitors_theta
+      - state: Visitors_theta
+        time_window: {last: 1d}
 """,
         encoding="utf-8",
     )
@@ -351,5 +359,21 @@ def test_set_op_operands_apply_relative_time_windows(tmp_path: Path) -> None:
     )
 
     assert anchor_only.filter(pl.col("Channel") == "Web")["RetainedFromPriorDay"][
+        0
+    ] == pytest.approx(1.0)
+
+    # An operand without a window means all history up to the anchor. The
+    # planner must remove the lower query bound instead of truncating it to the
+    # selected report day.
+    prior_visitors = query_metric(
+        tmp_path,
+        "VisitorsBeforeToday",
+        group_by=["Channel"],
+        grain="summary",
+        start=dt.date(2024, 1, 2),
+        end=dt.date(2024, 1, 2),
+    )
+
+    assert prior_visitors.filter(pl.col("Channel") == "Web")["VisitorsBeforeToday"][
         0
     ] == pytest.approx(1.0)

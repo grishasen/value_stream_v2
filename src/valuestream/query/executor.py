@@ -225,7 +225,12 @@ def query_metric(
     load_start = start
     if windowed_set_op and start is not None:
         assert isinstance(metric, model.SetOpMetric)
-        load_start = _date_bound(start) - dt.timedelta(days=_set_op_lookback_days(metric))
+        lookback_days = _set_op_lookback_days(metric)
+        load_start = (
+            None
+            if lookback_days is None
+            else _date_bound(start) - dt.timedelta(days=lookback_days)
+        )
     frame, stored_grain = _load_current_aggregate(
         workspace_path,
         processor,
@@ -1326,20 +1331,22 @@ def _set_op_states(metric: model.SetOpMetric) -> list[str]:
     return [operand.state for operand in metric.operands]
 
 
-def _set_op_lookback_days(metric: model.SetOpMetric) -> int:
-    """Return how many days before the query start a set_op operand still needs.
+def _set_op_lookback_days(metric: model.SetOpMetric) -> int | None:
+    """Return required history before query start, or ``None`` for all time.
 
     Operand windows resolve against the anchor (the query ``end``), so the rows
     they select can predate the requested ``start``. Loading only the requested
     range would silently shorten the lookback, turning a 30-day retention metric
-    into whatever the report's time filter happened to select.
+    into whatever the report's time filter happened to select. An operand
+    without a window represents all history up to the anchor and therefore
+    requires an unbounded lower scan boundary.
     """
 
     lookback = 0
     for operand in metric.operands:
         window = operand.time_window
         if window is None:
-            continue
+            return None
         if window.last is not None:
             lookback = max(lookback, _duration_days(window.last, allow_negative=False) - 1)
         elif window.between is not None:
@@ -1375,11 +1382,15 @@ def _derive_windowed_set_op(
     for index, operand in enumerate(metric.operands):
         if operand.state not in frame.columns:
             raise ValueError(f"state {operand.state!r} not present for metric {metric_name!r}")
-        filtered = _apply_set_time_window(
-            frame,
-            date_column=date_column,
-            window=operand.time_window,
-            anchor=effective_anchor,
+        filtered = (
+            frame
+            if operand.time_window is None
+            else _apply_set_time_window(
+                frame,
+                date_column=date_column,
+                window=operand.time_window,
+                anchor=effective_anchor,
+            )
         )
         merged = processor.merge_for_query(filtered, group_columns)
         alias = f"__set_operand_{index}"
