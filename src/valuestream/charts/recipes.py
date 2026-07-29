@@ -98,7 +98,7 @@ CHART_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
 
 
 CHART_OPTIONAL_FIELDS: dict[str, tuple[str, ...]] = {
-    "line": ("color", "facet_row", "facet_col"),
+    "line": ("color", "line_dash", "symbol", "facet_row", "facet_col"),
     "stacked_area": ("facet_row", "facet_col"),
     "bar": ("color", "facet_row", "facet_col"),
     "waterfall": (),
@@ -181,6 +181,7 @@ _TILE_RUNTIME_FIELDS = {
     "conditional_formatting",
     "facet_col",
     "facet_row",
+    "filters",
     "goal_line",
     "group_by",
     "height",
@@ -188,6 +189,7 @@ _TILE_RUNTIME_FIELDS = {
     "horizon",
     "labels",
     "lat",
+    "line_dash",
     "locationmode",
     "locations",
     "log_x",
@@ -209,6 +211,7 @@ _TILE_RUNTIME_FIELDS = {
     "sort_by",
     "sort_direction",
     "stages",
+    "symbol",
     "theme",
     "theta",
     "top_n",

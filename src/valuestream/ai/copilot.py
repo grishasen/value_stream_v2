@@ -34,6 +34,7 @@ from valuestream.recipes import (
     load_builtin_kpi_recipes,
     processor_with_recipe_states,
     recipe_readiness,
+    resolve_recipe_parameters,
 )
 from valuestream.utils.logger import get_logger
 from valuestream.utils.names import capitalize_fields
@@ -968,7 +969,20 @@ def _apply_install_recipe(draft: dict[str, Any], op: dict[str, Any]) -> tuple[di
     processor = next((item for item in processors if item.id == processor_id), None)
     if processor is None:
         raise ValueError(f"Processor '{processor_id}' does not exist in the draft")
-    readiness = recipe_readiness(recipe, processor)
+    parameters_raw = op.get("parameters")
+    parameter_values = resolve_recipe_parameters(
+        recipe,
+        (
+            {str(key): float(value) for key, value in parameters_raw.items()}
+            if isinstance(parameters_raw, dict)
+            else None
+        ),
+    )
+    readiness = recipe_readiness(
+        recipe,
+        processor,
+        parameter_values=parameter_values,
+    )
     bindings_raw = op.get("bindings")
     bindings = (
         {str(key): str(value) for key, value in bindings_raw.items()}
@@ -985,7 +999,13 @@ def _apply_install_recipe(draft: dict[str, Any], op: dict[str, Any]) -> tuple[di
     metrics = draft.get("metrics", {}).get("metrics", {})
     if isinstance(metrics, dict) and metric_id in metrics:
         raise ValueError(f"Metric '{metric_id}' already exists in the draft")
-    metric = instantiate_metric(recipe, processor, metric_id, bindings)
+    metric = instantiate_metric(
+        recipe,
+        processor,
+        metric_id,
+        bindings,
+        parameter_values=parameter_values,
+    )
     updated = update_metric_definition(draft, metric_id, metric_id, metric)
     dashboard_id = str(op.get("dashboard") or "").strip()
     page_id = str(op.get("page") or "").strip()

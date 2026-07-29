@@ -13,6 +13,7 @@ from valuestream.config._schema_gen import generate_all
 from valuestream.config.loader import CatalogLoadError, load
 from valuestream.config.validate import validate_catalog
 from valuestream.expr import ast as expr_ast
+from valuestream.recipes import load_builtin_kpi_recipes, recipe_readiness
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEMO_WS = REPO_ROOT / "examples" / "demo"
@@ -148,6 +149,29 @@ class TestFatWorkspace:
         assert latency.filter is not None
         assert metrics["ConversionLatencyMedian"].processor == "conversion_latency"
 
+    def test_upward_exploration_recipe_targets_the_dedicated_processor(self) -> None:
+        catalog = load(FAT_WS)
+        processors = {processor.id: processor for processor in catalog.processors.processors}
+        recipe = next(
+            recipe
+            for recipe in load_builtin_kpi_recipes().recipes
+            if recipe.id == "decisioning.material_upward_exploration_rate"
+        )
+
+        assert recipe_readiness(recipe, processors["engagement"]).status == "incompatible"
+
+        readiness = recipe_readiness(recipe, processors["exploration"])
+        assert readiness.status == "ready"
+        assert readiness.resolved_inputs == {
+            "explored": "MaterialExploredUp_Count",
+            "observations": "Explore_Count",
+        }
+        material = processors["exploration"].states["MaterialExploredUp_Count"]
+        assert material.where is not None
+        assert material.where.model_dump(mode="json", by_alias=True)["args"][1]["args"][1][
+            "args"
+        ][1] == {"lit": 0.1}
+
     def test_business_report_pages_are_present(self) -> None:
         catalog = load(FAT_WS)
 
@@ -183,6 +207,112 @@ class TestFatWorkspace:
                 "outcome_funnel",
             ],
         }
+
+    def test_adaptive_diagnostics_are_fixed_to_valid_populations(self) -> None:
+        catalog = load(FAT_WS)
+        pages = {
+            page.id: page
+            for dashboard in catalog.dashboards.dashboards
+            for page in dashboard.pages
+        }
+        adaptive = pages["exploration_and_evidence"]
+        tiles = {tile.id: tile for tile in adaptive.tiles}
+
+        test_tiles = {
+            "exploration_rate_kpi",
+            "model_maturity_kpi",
+            "exploration_delta_median_kpi",
+            "exploration_delta_p95_kpi",
+            "exploration_samples_kpi",
+            "band_calibration_final",
+            "remaining_uncertainty_kpi",
+            "convergence_curve_uncertainty",
+            "convergence_curve_maturity",
+            "convergence_curve_exploration_rate",
+            "convergence_curve_volume",
+            "exploration_rate_trend",
+            "model_maturity_trend",
+        }
+        assert all(
+            tiles[tile_id].filters == {"ModelControlGroup": ["Test"]}
+            for tile_id in test_tiles
+        )
+        assert tiles["band_calibration_model"].filters == {
+            "ModelControlGroup": ["Control"]
+        }
+        assert {filter_.field for filter_ in adaptive.filters} == {
+            "Channel",
+            "Issue",
+            "Treatment",
+            "CustomerType",
+        }
+
+    def test_exploration_uses_treatment_level_grain_and_age(self) -> None:
+        catalog = load(FAT_WS)
+        source = catalog.pipelines.sources[0]
+        processors = {processor.id: processor for processor in catalog.processors.processors}
+
+        treatment_age = next(
+            transform
+            for transform in source.transforms
+            if isinstance(transform, model.DeriveColumn)
+            and transform.output == "TreatmentAgeDays"
+        )
+        assert isinstance(treatment_age.expression, expr_ast.OpCast)
+        assert not any(
+            isinstance(transform, model.DeriveColumn)
+            and transform.output == "ActionAgeDays"
+            for transform in source.transforms
+        )
+
+        treatment_hierarchy = {"Issue", "Group", "Name", "Treatment"}
+        assert treatment_hierarchy <= set(processors["exploration"].group_by)
+        assert treatment_hierarchy | {"TreatmentAgeDays"} <= set(
+            processors["exploration_by_treatment_age"].group_by
+        )
+
+        treatment_age_metrics = {
+            "RelativeExplorationVarianceByTreatmentAge",
+            "ImpliedEvidenceIndexByTreatmentAge",
+            "MaterialUpwardExplorationRateByTreatmentAge",
+            "ExplorationSamplesByTreatmentAge",
+        }
+        assert all(
+            catalog.metrics.metrics[name].processor == "exploration_by_treatment_age"
+            for name in treatment_age_metrics
+        )
+        adaptive = next(
+            page
+            for dashboard in catalog.dashboards.dashboards
+            for page in dashboard.pages
+            if page.id == "exploration_and_evidence"
+        )
+        convergence_tiles = [
+            tile for tile in adaptive.tiles if tile.id.startswith("convergence_curve_")
+        ]
+        assert {tile.x for tile in convergence_tiles} == {"TreatmentAgeDays"}
+
+    def test_corrected_business_names_and_action_metric_are_used(self) -> None:
+        catalog = load(FAT_WS)
+        pages = {
+            page.id: page
+            for dashboard in catalog.dashboards.dashboards
+            for page in dashboard.pages
+        }
+
+        actions = pages["engagement_actions"]
+        action_tiles = {tile.id: tile for tile in actions.tiles}
+        assert action_tiles["actions_delivered"].metric == "ActionsDelivered"
+        assert "engaged_action_coverage" not in action_tiles
+        assert action_tiles["action_coverage_ratio"].title == "Clicked-action coverage"
+
+        assert pages["response_time_health"].title == "Decision-to-outcome latency"
+        adaptive_metrics = {tile.metric for tile in pages["exploration_and_evidence"].tiles}
+        assert {
+            "MaterialUpwardExplorationRate",
+            "ImpliedEvidenceIndex",
+            "RelativeExplorationVariance",
+        } <= adaptive_metrics
 
 
 # ---------------------------------------------------------------------------

@@ -636,6 +636,7 @@ class MetricDisplaySpec(_StrictModel):
 class MetricRecipeSpec(_StrictModel):
     id: str
     version: int = Field(ge=1)
+    parameters: dict[str, float] = Field(default_factory=dict)
 
 
 class _MetricBase(_StrictModel):
@@ -876,6 +877,7 @@ class _TileBase(_StrictModel):
     title: str
     metric: str
     description: str = ""
+    filters: dict[str, Any] | None = None
     placement: Literal["content", "kpi_strip"] = "content"
     kpi: KpiSpec | None = None
     scale_mode: Literal["absolute", "index_100", "percent_change"] = "absolute"
@@ -908,8 +910,15 @@ class _FacetedTile(_TileBase):
     facet_col: str | None = None
 
 
+class LineTile(_FacetedTile):
+    chart: Literal["line"]
+    x: str
+    line_dash: str | None = None
+    symbol: str | None = None
+
+
 class MetricAxisTile(_FacetedTile):
-    chart: Literal["line", "bar", "pareto"]
+    chart: Literal["bar", "pareto"]
     x: str
 
 
@@ -1078,7 +1087,8 @@ class ExperimentTile(_FacetedTile):
 
 
 Tile = Annotated[
-    MetricAxisTile
+    LineTile
+    | MetricAxisTile
     | StackedAreaTile
     | WaterfallTile
     | ScalarTile

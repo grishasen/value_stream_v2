@@ -78,6 +78,19 @@
           "default": null,
           "title": "Facet Row"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -439,6 +452,19 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -820,6 +846,19 @@
           "default": null,
           "title": "Facet Row"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -1182,7 +1221,7 @@
                 "interval": "#/$defs/IntervalTile",
                 "kpi_card": "#/$defs/ScalarTile",
                 "lift_curve": "#/$defs/CurveTile",
-                "line": "#/$defs/MetricAxisTile",
+                "line": "#/$defs/LineTile",
                 "model": "#/$defs/ModelTile",
                 "pareto": "#/$defs/MetricAxisTile",
                 "precision_recall_curve": "#/$defs/CurveTile",
@@ -1198,6 +1237,9 @@
               "propertyName": "chart"
             },
             "oneOf": [
+              {
+                "$ref": "#/$defs/LineTile"
+              },
               {
                 "$ref": "#/$defs/MetricAxisTile"
               },
@@ -1371,6 +1413,19 @@
           ],
           "default": null,
           "title": "Facet Row"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -1751,6 +1806,19 @@
           "default": null,
           "title": "Facet Row"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -2102,6 +2170,19 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -2475,6 +2556,19 @@
           "default": null,
           "title": "Facet Row"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -2824,6 +2918,19 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -3188,6 +3295,19 @@
           ],
           "default": null,
           "title": "Facet Row"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -3574,6 +3694,19 @@
           "default": null,
           "title": "Facet Row"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -3943,6 +4076,19 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -4332,6 +4478,19 @@
           "title": "Description",
           "type": "string"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -4713,6 +4872,19 @@
           "default": null,
           "title": "Facet Row"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -5081,6 +5253,19 @@
           ],
           "default": null,
           "title": "Facet Row"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -5455,6 +5640,412 @@
       "title": "KpiSpec",
       "type": "object"
     },
+    "LineTile": {
+      "additionalProperties": false,
+      "properties": {
+        "bins": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bins"
+        },
+        "chart": {
+          "const": "line",
+          "title": "Chart",
+          "type": "string"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "conditional_formatting": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conditional Formatting"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "facet_col": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Facet Col"
+        },
+        "facet_row": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Facet Row"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
+        "goal_line": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Goal Line"
+        },
+        "group_by": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group By"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "hole": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hole"
+        },
+        "horizon": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Horizon"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kpi": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KpiSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "labels": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Labels"
+        },
+        "line_dash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Dash"
+        },
+        "log_x": {
+          "default": false,
+          "title": "Log X",
+          "type": "boolean"
+        },
+        "log_y": {
+          "default": false,
+          "title": "Log Y",
+          "type": "boolean"
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "metric_output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric Output"
+        },
+        "placement": {
+          "default": "content",
+          "enum": [
+            "content",
+            "kpi_strip"
+          ],
+          "title": "Placement",
+          "type": "string"
+        },
+        "scale_mode": {
+          "default": "absolute",
+          "enum": [
+            "absolute",
+            "index_100",
+            "percent_change"
+          ],
+          "title": "Scale Mode",
+          "type": "string"
+        },
+        "show_trend_delta": {
+          "default": false,
+          "title": "Show Trend Delta",
+          "type": "boolean"
+        },
+        "showlegend": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Showlegend"
+        },
+        "sort_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sort By"
+        },
+        "sort_direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "ascending",
+                "descending"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sort Direction"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Symbol"
+        },
+        "theme": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Theme"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "top_n": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top N"
+        },
+        "value_format": {
+          "anyOf": [
+            {
+              "enum": [
+                "percent",
+                "integer",
+                "number",
+                "currency"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Format"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        },
+        "x": {
+          "title": "X",
+          "type": "string"
+        },
+        "x_axis_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "X Axis Title"
+        },
+        "y_axis_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Y Axis Title"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "metric",
+        "chart",
+        "x"
+      ],
+      "title": "LineTile",
+      "type": "object"
+    },
     "MetricAxisTile": {
       "additionalProperties": false,
       "properties": {
@@ -5473,7 +6064,6 @@
         },
         "chart": {
           "enum": [
-            "line",
             "bar",
             "pareto"
           ],
@@ -5536,6 +6126,19 @@
           ],
           "default": null,
           "title": "Facet Row"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -5881,6 +6484,19 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -6270,6 +6886,19 @@
           "title": "Description",
           "type": "string"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -6614,6 +7243,19 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -6967,6 +7609,19 @@
           "title": "Description",
           "type": "string"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -7303,6 +7958,19 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -7692,6 +8360,19 @@
           "default": null,
           "title": "Facet Row"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -8070,6 +8751,19 @@
           "default": null,
           "title": "Facet Row"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -8418,6 +9112,19 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [
@@ -8786,6 +9493,19 @@
           "title": "Description",
           "type": "string"
         },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
+        },
         "goal_line": {
           "anyOf": [
             {
@@ -9122,6 +9842,19 @@
           "default": "",
           "title": "Description",
           "type": "string"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filters"
         },
         "goal_line": {
           "anyOf": [

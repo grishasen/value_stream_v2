@@ -247,6 +247,12 @@ Defaults run after the reader, before transforms (or as the first transform — 
 
 Type promotion: if the default value parses as a float, it becomes Float64; otherwise it stays a string.
 
+When `rename_capitalize` is enabled, Configuration Builder emits edited
+defaults immediately after that rename and before fixed transforms. This order
+is required when a default seeds a sometimes-missing date field for a following
+`parse_datetime`; placing the default after parsing would restore the field as a
+string and make downstream `date_diff` expressions invalid.
+
 ```yaml
 sources:
   - id: ih

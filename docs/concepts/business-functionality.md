@@ -25,6 +25,7 @@ capabilities without reading processor code.
 | Engagement | How many interactions occurred, how many were positive, and what was the engagement rate? |
 | Conversion and revenue | Which channels, offers, or groups convert, and how much value do they generate? |
 | Model quality | How are propensity, priority, rank, ROC AUC, average precision, and calibration behaving? |
+| Adaptive decisioning | How often does the decisioning policy revise model scores for exploration, and is exploration narrowing as evidence accumulates? |
 | Response time and numeric distributions | What are medians, percentiles, and distribution shapes for numeric fields? |
 | Experiment monitoring | Are test and control groups materially different? |
 | Funnels | Where do users or outcomes drop between configured stages? |

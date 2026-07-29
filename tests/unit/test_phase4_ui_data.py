@@ -95,10 +95,17 @@ def test_tile_grain_inference() -> None:
 @pytest.mark.unit
 def test_tile_group_by_inference_uses_column_names() -> None:
     result = group_by_for_tile(
-        {"x": "Day", "color": "Channel", "facet_row": "Placement"},
+        {
+            "chart": "line",
+            "x": "Day",
+            "color": "Channel",
+            "line_dash": "CustomerType",
+            "symbol": "CustomerType",
+            "facet_row": "Placement",
+        },
     )
 
-    assert result == ["Channel", "Placement"]
+    assert result == ["Placement", "Channel", "CustomerType"]
 
 
 @pytest.mark.unit
@@ -497,6 +504,39 @@ def test_query_tile_applies_only_supported_page_filters(monkeypatch: pytest.Monk
     )
 
     assert captured["filters"] == {"Channel": ["Web"]}
+
+
+@pytest.mark.unit
+def test_query_tile_fixed_filters_override_page_population(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = _catalog(["ModelControlGroup"])
+    tile = model.validate_tile(
+        {
+            "id": "test_ctr",
+            "title": "Test CTR",
+            "metric": "CTR",
+            "chart": "line",
+            "x": "Day",
+            "filters": {"ModelControlGroup": ["Test"]},
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_query_metric(*args: object, **kwargs: object) -> pl.DataFrame:
+        captured["filters"] = kwargs["filters"]
+        return pl.DataFrame({"Day": ["2024-01-01"], "CTR": [0.2]})
+
+    monkeypatch.setattr(ui_data, "query_metric", fake_query_metric)
+
+    query_tile(
+        "workspace",
+        catalog,
+        tile,
+        filters={"ModelControlGroup": ["Control"]},
+    )
+
+    assert captured["filters"] == {"ModelControlGroup": ["Test"]}
 
 
 @pytest.mark.unit
@@ -1296,9 +1336,20 @@ def test_report_grid_promotes_faceted_tiles_to_full_width() -> None:
             "color": "Channel",
         }
     )
+    style_series = model.validate_tile(
+        {
+            "id": "daily_ctr_by_customer_type",
+            "title": "Daily CTR by customer type",
+            "metric": "CTR",
+            "chart": "line",
+            "x": "Day",
+            "line_dash": "CustomerType",
+        }
+    )
 
     assert _is_full_width_tile(faceted)
     assert _is_full_width_tile(color_series)
+    assert _is_full_width_tile(style_series)
     assert not _is_full_width_tile(simple)
 
 
@@ -1518,6 +1569,39 @@ def test_kpi_bundle_uses_complete_latest_period_and_equal_previous_period(
 
 
 @pytest.mark.unit
+def test_kpi_bundle_fixed_filters_override_page_population(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = _catalog(["ModelControlGroup"])
+    tile = model.validate_tile(
+        {
+            "id": "test_ctr_kpi",
+            "title": "Test CTR",
+            "metric": "CTR",
+            "chart": "kpi_card",
+            "filters": {"ModelControlGroup": ["Test"]},
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_query_metric(*_: object, **kwargs: object) -> pl.DataFrame:
+        captured["filters"] = kwargs["filters"]
+        return pl.DataFrame({"CTR": [0.2]})
+
+    monkeypatch.setattr("valuestream.ui.pages.reports.query_metric_cached", fake_query_metric)
+
+    _kpi_bundle(
+        SimpleNamespace(workspace=Path("."), catalog=catalog),
+        tile,
+        filters={"ModelControlGroup": ["Control"]},
+        start=None,
+        end=None,
+    )
+
+    assert captured["filters"] == {"ModelControlGroup": ["Test"]}
+
+
+@pytest.mark.unit
 def test_kpi_bundle_honors_selected_metric_output(monkeypatch: pytest.MonkeyPatch) -> None:
     catalog = _catalog(["ModelControlGroup"])
     metrics = catalog.metrics.model_dump(mode="python", by_alias=True, exclude_none=True)
@@ -1678,6 +1762,8 @@ def test_reports_advanced_editor_derives_polar_radius_from_metric() -> None:
     assert seed["theta"] == "Channel"
     assert seed["color"] == "Placement"
     assert "size" not in ADVANCED_FIELD_CONTROLS["line"]
+    assert "line_dash" in ADVANCED_FIELD_CONTROLS["line"]
+    assert "symbol" in ADVANCED_FIELD_CONTROLS["line"]
     assert "animation_frame" in ADVANCED_FIELD_CONTROLS["scatter"]
     assert "animation_group" in ADVANCED_FIELD_CONTROLS["scatter"]
     assert "size" in ADVANCED_FIELD_CONTROLS["scatter"]

@@ -24,6 +24,7 @@ from valuestream.recipes import (
     recipe_binding_attribute,
     recipe_binding_options,
     recipe_readiness,
+    resolve_recipe_parameters,
     unique_artifact_id,
 )
 from valuestream.ui import components, config_help
@@ -44,6 +45,7 @@ class RecipeInstallRequest:
     recipe_version: int
     metric_id: str
     metric_def: dict[str, Any]
+    parameter_values: dict[str, float] | None = None
     processor_id: str = ""
     state_additions: dict[str, dict[str, Any]] | None = None
     processor_def: dict[str, Any] | None = None
@@ -137,6 +139,10 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
             help=config_help.field_help("recipe.selector"),
         )
         _render_recipe_description(recipe)
+        parameter_values = _render_recipe_parameters(
+            recipe,
+            key_prefix=f"{key_prefix}_{_key_fragment(recipe.id)}",
+        )
 
         compatible = [
             processor for processor in processors if processor.kind in recipe.processor_kinds
@@ -152,7 +158,12 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
         compatible = sorted(compatible, key=lambda item: _text_sort_key(item.id))
 
         readiness_by_id = {
-            processor.id: recipe_readiness(recipe, processor) for processor in compatible
+            processor.id: recipe_readiness(
+                recipe,
+                processor,
+                parameter_values=parameter_values,
+            )
+            for processor in compatible
         }
         processors_by_id = {processor.id: processor for processor in compatible}
         processor_id = st.selectbox(
@@ -177,6 +188,7 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
             processor,
             readiness,
             key_prefix=mapping_key,
+            parameter_values=parameter_values,
         )
         bindings_complete = len(selection.bindings) == len(recipe.inputs)
         _render_readiness(
@@ -251,6 +263,7 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
                 metric_id=metric_id,
                 bindings=selection.bindings,
                 state_additions=selection.state_additions,
+                parameter_values=parameter_values,
                 report_target=report_target,
                 tile_id=tile_id,
             )
@@ -287,13 +300,21 @@ def build_recipe_install_request(
     metric_id: str,
     bindings: dict[str, str],
     state_additions: dict[str, dict[str, Any]],
+    parameter_values: dict[str, float] | None = None,
     report_target: ReportPageTarget | None = None,
     tile_id: str = "",
 ) -> RecipeInstallRequest:
     """Build the exact, validated catalog patch shown by both Studio surfaces."""
 
+    resolved_parameters = resolve_recipe_parameters(recipe, parameter_values)
     configured_processor = processor_with_recipe_states(processor, state_additions)
-    metric_def = instantiate_metric(recipe, configured_processor, metric_id, bindings)
+    metric_def = instantiate_metric(
+        recipe,
+        configured_processor,
+        metric_id,
+        bindings,
+        parameter_values=resolved_parameters,
+    )
     processor_def = _processor_yaml_definition(configured_processor) if state_additions else None
     tile_def = (
         instantiate_tile(recipe, configured_processor, metric_id, tile_id, bindings)
@@ -311,6 +332,7 @@ def build_recipe_install_request(
         recipe_version=recipe.version,
         metric_id=metric_id,
         metric_def=metric_def,
+        parameter_values=resolved_parameters or None,
         processor_id=processor.id,
         state_additions=state_additions or None,
         processor_def=processor_def,
@@ -348,9 +370,9 @@ def _materialization_plan(
     proposed_catalog = catalog.model_copy(update={"processors": proposed_processors})
     source_fields = tuple(
         dict.fromkeys(
-            str(definition.get("source_column") or "")
+            field
             for definition in state_additions.values()
-            if definition.get("source_column")
+            for field in _state_definition_source_fields(definition)
         )
     )
     return RecipeMaterializationPlan(
@@ -363,6 +385,28 @@ def _materialization_plan(
             proposed_catalog, configured_processor
         ),
     )
+
+
+def _state_definition_source_fields(definition: dict[str, Any]) -> list[str]:
+    fields: list[str] = []
+    source_column = str(definition.get("source_column") or "")
+    if source_column:
+        fields.append(source_column)
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            if column := value.get("col"):
+                fields.append(str(column))
+            if column := value.get("column"):
+                fields.append(str(column))
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(definition.get("where"))
+    return _dedupe(fields)
 
 
 def recipe_install_preview_files(request: RecipeInstallRequest) -> dict[str, str]:
@@ -408,6 +452,7 @@ def recipe_install_fingerprint(request: RecipeInstallRequest) -> str:
             "recipe_version": request.recipe_version,
             "metric_id": request.metric_id,
             "metric_def": request.metric_def,
+            "parameter_values": request.parameter_values,
             "processor_id": request.processor_id,
             "state_additions": request.state_additions,
             "processor_def": request.processor_def,
@@ -502,12 +547,44 @@ def _render_recipe_description(recipe: KpiRecipe) -> None:
         )
 
 
+def _render_recipe_parameters(
+    recipe: KpiRecipe,
+    *,
+    key_prefix: str,
+) -> dict[str, float]:
+    if not recipe.parameters:
+        return {}
+    values: dict[str, float] = {}
+    with st.container(border=True):
+        st.write("**Recipe parameters**")
+        for parameter in recipe.parameters:
+            scale = 100.0 if parameter.unit == "percent" else 1.0
+            label = (
+                f"{parameter.label} (%)"
+                if parameter.unit == "percent"
+                else parameter.label
+            )
+            selected = st.number_input(
+                label,
+                min_value=float(parameter.minimum * scale),
+                max_value=float(parameter.maximum * scale),
+                value=float(parameter.default * scale),
+                step=float(parameter.step * scale),
+                format="%.1f",
+                key=f"{key_prefix}_parameter_{parameter.name}",
+                help=parameter.description,
+            )
+            values[parameter.name] = float(selected) / scale
+    return resolve_recipe_parameters(recipe, values)
+
+
 def _render_recipe_bindings(  # noqa: PLR0912
     recipe: KpiRecipe,
     processor: model.Processor,
     readiness: RecipeReadiness,
     *,
     key_prefix: str,
+    parameter_values: dict[str, float] | None = None,
 ) -> RecipeBindingSelection:
     bindings: dict[str, str] = {}
     state_additions: dict[str, dict[str, Any]] = {}
@@ -527,6 +604,7 @@ def _render_recipe_bindings(  # noqa: PLR0912
             working_processor,
             readiness.input_options.get(item.role, ()),
             proposal_fields=proposal_fields,
+            parameter_values=parameter_values,
         )
         if item.different_from and item.different_from in bindings:
             options = [

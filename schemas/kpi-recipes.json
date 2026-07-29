@@ -1183,6 +1183,14 @@
           ],
           "title": "Metric"
         },
+        "parameters": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RecipeParameter"
+          },
+          "title": "Parameters",
+          "type": "array"
+        },
         "processor_kinds": {
           "items": {
             "enum": [
@@ -1615,6 +1623,13 @@
         "id": {
           "title": "Id",
           "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Parameters",
+          "type": "object"
         },
         "version": {
           "minimum": 1,
@@ -4187,9 +4202,20 @@
           "title": "Preferred State Types",
           "type": "array"
         },
+        "proposed_name": {
+          "default": "",
+          "pattern": "^$|^[A-Za-z][A-Za-z0-9_]*$",
+          "title": "Proposed Name",
+          "type": "string"
+        },
         "require_preferred": {
           "default": false,
           "title": "Require Preferred",
+          "type": "boolean"
+        },
+        "requires_where": {
+          "default": false,
+          "title": "Requires Where",
           "type": "boolean"
         },
         "role": {
@@ -4233,6 +4259,11 @@
             "type": "string"
           },
           "title": "State Attributes",
+          "type": "object"
+        },
+        "state_template": {
+          "additionalProperties": true,
+          "title": "State Template",
           "type": "object"
         },
         "state_types": {
@@ -4297,6 +4328,62 @@
         "algorithm"
       ],
       "title": "RecipeMethod",
+      "type": "object"
+    },
+    "RecipeParameter": {
+      "additionalProperties": false,
+      "description": "One bounded value selected while a recipe is installed.",
+      "properties": {
+        "default": {
+          "title": "Default",
+          "type": "number"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "maximum": {
+          "title": "Maximum",
+          "type": "number"
+        },
+        "minimum": {
+          "title": "Minimum",
+          "type": "number"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "step": {
+          "exclusiveMinimum": 0.0,
+          "title": "Step",
+          "type": "number"
+        },
+        "unit": {
+          "default": "number",
+          "enum": [
+            "number",
+            "percent"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "default",
+        "minimum",
+        "maximum",
+        "step"
+      ],
+      "title": "RecipeParameter",
       "type": "object"
     },
     "RecipeReport": {

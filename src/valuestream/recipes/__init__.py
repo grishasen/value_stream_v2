@@ -5,6 +5,7 @@ from valuestream.recipes.kpi import (
     KpiRecipeLibrary,
     RecipeBindingOption,
     RecipeInput,
+    RecipeParameter,
     RecipeReadiness,
     instantiate_metric,
     instantiate_tile,
@@ -15,6 +16,7 @@ from valuestream.recipes.kpi import (
     recipe_binding_attribute,
     recipe_binding_options,
     recipe_readiness,
+    resolve_recipe_parameters,
     unique_artifact_id,
 )
 
@@ -23,6 +25,7 @@ __all__ = [
     "KpiRecipeLibrary",
     "RecipeBindingOption",
     "RecipeInput",
+    "RecipeParameter",
     "RecipeReadiness",
     "instantiate_metric",
     "instantiate_tile",
@@ -33,5 +36,6 @@ __all__ = [
     "recipe_binding_attribute",
     "recipe_binding_options",
     "recipe_readiness",
+    "resolve_recipe_parameters",
     "unique_artifact_id",
 ]

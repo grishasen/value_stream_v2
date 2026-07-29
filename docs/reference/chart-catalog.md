@@ -79,9 +79,12 @@ The chart factory receives `(rows: pl.DataFrame, tile: dict, plan: PlanInfo)` an
 | `x_axis_title` / `y_axis_title` | str | cartesian charts | explicit primary-axis labels |
 | `y2_axis_title` | str | combo | explicit secondary-axis label; otherwise the secondary metric label is used |
 | `color` | str | most | column name to map to color; treemap color comes from `metric` |
+| `line_dash` | str | line | column name mapped independently to solid/dashed/dotted line styles |
+| `symbol` | str | line | optional column name mapped to marker shapes; markers are enabled when configured |
 | `size` | str | scatter | column name for marker size |
 | `path` | list[str] | treemap | hierarchy of group-by columns |
 | `description` | str | any | plain-language context; falls back to metric description |
+| `filters` | dict | any | fixed aggregate-backed population filters; they override an interactive page filter on the same field |
 | `placement` | str | kpi_card | `content` or explicit `kpi_strip` placement |
 | `kpi` | dict | kpi_card | comparison period, target, sparkline grain/points |
 | `scale_mode` | str | line, stacked_area | `absolute`, `index_100`, or `percent_change` |
@@ -128,11 +131,10 @@ For each chart: required Tile fields, expected metric output shape, and an outli
 
 ### 3.0 `kpi_card`
 
-Required chart fields: none. The displayed value is always derived from the
-selected metric's primary output; `value` and `y` are not configurable card
-roles. Existing overrides are ignored at runtime and removed when a card is
-saved through the visual or advanced editor. Converting a KPI card to another
-chart also removes KPI-only `placement` and `kpi` settings. An ungrouped card
+Required chart fields: none. The displayed value is derived from `metric_output`
+when it names one of the selected metric's outputs, otherwise from that metric's
+primary output; `value` and `y` are not configurable card roles. Converting a
+KPI card to another chart removes KPI-only `placement` and `kpi` settings. An ungrouped card
 becomes part of the responsive KPI strip only when `placement: kpi_strip` is
 explicit. The `kpi` mapping supports:
 
@@ -150,13 +152,26 @@ rows or a non-numeric value displays `n/a`; report code never invents a reducer.
 
 ### 3.1 `line`
 
-Required: `x`. Optional: `color, facet_row, facet_col, log_x, log_y`.
+Required: `x`. Optional: `color, line_dash, symbol, facet_row, facet_col,
+log_x, log_y`.
 The Y value is always the selected metric's primary output; neither `y` nor
 `value` is a configurable role. Existing overrides are ignored and removed on
 save.
 
 Metric shape: a Polars frame with `x`, the metric output, and the group-by
-columns referenced by `color/facets`.
+columns referenced by `color`, `line_dash`, `symbol`, or facets. Plotly creates
+one trace per unique combination. Use `color` for the primary business
+dimension and `line_dash` for a second dimension when every value of the first
+dimension must keep one stable color. Adding `symbol` repeats the second
+encoding with marker shape for accessibility and monochrome export.
+
+```yaml
+chart: line
+x: Day
+color: Channel
+line_dash: CustomerType
+symbol: CustomerType
+```
 
 Construction:
 
@@ -165,6 +180,9 @@ fig = px.line(
     df.to_pandas(),
     x=tile["x"], y=tile["metric"],
     color=tile.get("color"),
+    line_dash=tile.get("line_dash"),
+    symbol=tile.get("symbol"),
+    markers=bool(tile.get("symbol")),
     facet_row=tile.get("facet_row"),
     facet_col=tile.get("facet_col"),
     log_x=tile.get("log_x", False),
@@ -175,7 +193,9 @@ fig.update_layout(showlegend=tile.get("showlegend", True))
 return fig
 ```
 
-If `x` is categorical (a non-temporal string column) the factory falls back to `px.bar` with `barmode="group"`.
+If `x` is categorical (a non-temporal string column) the factory falls back to
+`px.bar` with `barmode="group"` unless `line_dash` or `symbol` is configured;
+explicit line styling keeps the line rendering.
 
 `stacked_area` uses the same metric-owned Y contract and requires `x` plus
 `color`; the selected metric supplies the stacked values.
@@ -542,7 +562,7 @@ The Builder UI uses the following metadata table to filter chart kinds by the me
 
 | Chart kind | Allowed processor kinds | Default x | Default y |
 |---|---|---|---|
-| `line` | binary_outcome, score_distribution, conversion, snapshot | first time-grain dim | selected metric's primary output |
+| `line` | binary_outcome, score_distribution, conversion, snapshot | first time-grain dim; optional color/style/symbol dimensions | selected metric's primary output |
 | `stacked_area` | binary_outcome, score_distribution, snapshot | first time-grain dim | selected metric's primary output |
 | `bar` | binary_outcome, snapshot | first non-time dim | selected metric's primary output |
 | `kpi_card` | aggregate metrics | — | selected metric's primary output |
@@ -677,8 +697,9 @@ Supported values:
   not already use a `color` dimension.
 - `scale_mode`: `index_100` divides each series by its first non-zero value and
   multiplies by 100; `percent_change` subtracts one after the same partitioned
-  normalization. Partitions are defined by color and facet dimensions. A zero
-  or empty baseline yields null display values rather than infinity.
+  normalization. Partitions are defined by color, line-style, marker-symbol,
+  and facet dimensions. A zero or empty baseline yields null display values
+  rather than infinity.
 - `labels`, metric `display.label`, and metric `display.unit` resolve axis,
   legend, hover, KPI, and table labels centrally. Tile overrides win.
 - Report table tiles render with native `st.dataframe`, use the available tile

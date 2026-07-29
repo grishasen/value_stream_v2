@@ -1124,7 +1124,7 @@ def test_metric_delete_dialog_requires_explicit_tile_choice_and_cancel_is_read_o
 
     assert not rendered.exception
     warnings = [str(item.value) for item in rendered.warning]
-    assert any("CTR · Formula / state passthrough · Engagement" in value for value in warnings), (
+    assert any("Engagement · CTR · Formula / state passthrough" in value for value in warnings), (
         warnings
     )
     assert any("overview/portfolio/ctr" in str(item.value) for item in rendered.code)
@@ -1277,9 +1277,7 @@ def test_invalid_metric_draft_does_not_block_continue(tmp_path: Path) -> None:
     rendered = processor.set_value("engagement").run()
     metric_kind = next(item for item in rendered.selectbox if item.label == "Metric Kind")
     rendered = metric_kind.set_value("formula").run()
-    display_name = next(
-        item for item in rendered.text_input if item.label == "Metric Display Name"
-    )
+    display_name = next(item for item in rendered.text_input if item.label == "Metric Display Name")
     rendered = display_name.set_value("QA rate").run()
     metric_id = next(item for item in rendered.text_input if item.label == "Metric ID")
     rendered = metric_id.set_value("QA rate!").run()
@@ -1944,9 +1942,7 @@ def test_marketing_chart_defaults_cover_supported_plotly_shapes(tmp_path: Path) 
     _write_builder_catalog(tmp_path)
     catalog = load(tmp_path)
 
-    assert builder.default_tile_fields(catalog, "CTR", "kpi_card") == {
-        "metric_output": "CTR"
-    }
+    assert builder.default_tile_fields(catalog, "CTR", "kpi_card") == {"metric_output": "CTR"}
     assert builder.default_tile_fields(catalog, "CTR", "gauge") == {
         "facet_row": "Channel",
         "metric_output": "CTR",
@@ -2204,7 +2200,15 @@ def test_tile_field_controls_show_gauge_facet_selectors(
             "line",
             {"x": "Day", "metric_output": "CTR", "color": "Channel"},
             {"x": "Day", "metric_output": "CTR", "color": "Channel"},
-            ["Y (Metric Output)", "X", "Color", "Facet_Row", "Facet_Col"],
+            [
+                "Y (Metric Output)",
+                "X",
+                "Color",
+                "Line style",
+                "Marker shape",
+                "Facet_Row",
+                "Facet_Col",
+            ],
         ),
         (
             "bar",
@@ -2326,6 +2330,15 @@ def test_chart_field_controls_start_with_required_metadata() -> None:
     assert builder.chart_field_controls("donut") == ("metric_output", "names", "color")
     assert builder.chart_field_controls("sankey") == ("metric_output", "path")
     assert builder.chart_field_controls("waterfall") == ("metric_output", "x")
+    assert builder.chart_field_controls("line") == (
+        "metric_output",
+        "x",
+        "color",
+        "line_dash",
+        "symbol",
+        "facet_row",
+        "facet_col",
+    )
 
 
 def _combo_catalog() -> model.Catalog:
@@ -2374,7 +2387,7 @@ def _combo_catalog() -> model.Catalog:
                             "negative_values": ["Impression"],
                         },
                     },
-                ]
+                ],
             },
             "metrics": {
                 "catalog_version": 2,
@@ -2399,7 +2412,7 @@ def _combo_catalog() -> model.Catalog:
                         "kind": "formula",
                         "expression": {"col": "Clicked_Count"},
                     },
-                }
+                },
             },
             "dashboards": {"catalog_version": 2, "dashboards": []},
         }
@@ -2534,7 +2547,7 @@ def test_combo_validation_rejects_wrong_kind_or_processor_for_secondary_metric()
                                     }
                                 ],
                             }
-                        ]
+                        ],
                     }
                 )
             }
@@ -2563,7 +2576,7 @@ def test_combo_validation_rejects_wrong_kind_or_processor_for_secondary_metric()
                                     }
                                 ],
                             }
-                        ]
+                        ],
                     }
                 )
             }
@@ -2656,8 +2669,15 @@ def test_tile_field_controls_show_size_only_for_supported_charts(
 
     line_fields = config_builder._tile_field_controls(
         "line",
-        {"x": "Month", "metric_output": "CTR", "color": "Group", "size": "Count"},
-        ["", "Month", "Group", "CTR", "Count"],
+        {
+            "x": "Month",
+            "metric_output": "CTR",
+            "color": "Group",
+            "line_dash": "CustomerType",
+            "symbol": "CustomerType",
+            "size": "Count",
+        },
+        ["", "Month", "Group", "CustomerType", "CTR", "Count"],
         key_suffix="line",
         catalog=catalog,
         metric_name="CTR",
@@ -2672,8 +2692,12 @@ def test_tile_field_controls_show_size_only_for_supported_charts(
     )
 
     assert "size" not in line_fields
+    assert line_fields["line_dash"] == "CustomerType"
+    assert line_fields["symbol"] == "CustomerType"
     assert geo_fields["size"] == "Count"
     assert "builder_tile_size_line" not in [call["key"] for call in calls]
+    assert "builder_tile_line_dash_line" in [call["key"] for call in calls]
+    assert "builder_tile_symbol_line" in [call["key"] for call in calls]
     assert "builder_tile_size_geo" in [call["key"] for call in calls]
 
 
@@ -2751,7 +2775,7 @@ def test_default_tile_fields_leave_calibration_axes_empty() -> None:
                             "negative_values": ["Impression"],
                         },
                     }
-                ]
+                ],
             },
             "metrics": {
                 "catalog_version": 2,
@@ -2762,7 +2786,7 @@ def test_default_tile_fields_leave_calibration_axes_empty() -> None:
                         "positive_state": "final_propensity_tdigest_positives",
                         "negative_state": "final_propensity_tdigest_negatives",
                     }
-                }
+                },
             },
             "dashboards": {"catalog_version": 2, "dashboards": []},
         }
@@ -2817,7 +2841,7 @@ def test_curve_metric_chart_choices_include_model_curves() -> None:
                             "negative_values": ["Impression"],
                         },
                     }
-                ]
+                ],
             },
             "metrics": {
                 "catalog_version": 2,
@@ -2829,7 +2853,7 @@ def test_curve_metric_chart_choices_include_model_curves() -> None:
                         "negative_state": "propensity_tdigest_negatives",
                         "output": "roc_auc",
                     }
-                }
+                },
             },
             "dashboards": {"catalog_version": 2, "dashboards": []},
         }
@@ -2998,9 +3022,7 @@ def test_numeric_properties_append_mergeable_summary_and_digest_states() -> None
         "Priority_Max",
     ]
     by_name = {row["State"]: row for row in rows}
-    assert by_name["FinalPropensity_Mean"]["Parameters"] == (
-        "{weight: FinalPropensity_Count}"
-    )
+    assert by_name["FinalPropensity_Mean"]["Parameters"] == ("{weight: FinalPropensity_Count}")
     assert by_name["FinalPropensity_Var"]["Parameters"] == (
         "{mean: FinalPropensity_Mean, weight: FinalPropensity_Count}"
     )
@@ -3191,7 +3213,7 @@ def test_default_rows_with_fields_appends_selected_fields_without_duplicates() -
 
 
 @pytest.mark.unit
-def test_build_source_definition_can_add_rename_capitalize_defaults_transform() -> None:
+def test_build_source_definition_places_date_default_before_datetime_parse() -> None:
     source = model.Source.model_validate(
         {
             "id": "ih",
@@ -3204,9 +3226,13 @@ def test_build_source_definition_can_add_rename_capitalize_defaults_transform() 
                 "natural_key": ["InteractionID"],
                 "drop_columns": [],
             },
-            "defaults": {"Revenue": 0.0},
+            "defaults": {"StartDate": ""},
             "transforms": [
-                {"kind": "parse_datetime", "columns": ["OutcomeTime"], "format": "%Y-%m-%d"}
+                {
+                    "kind": "parse_datetime",
+                    "columns": ["OutcomeTime", "StartDate"],
+                    "format": "%Y-%m-%d",
+                }
             ],
         }
     )
@@ -3225,18 +3251,22 @@ def test_build_source_definition_can_add_rename_capitalize_defaults_transform() 
         timestamp_column="OutcomeTime",
         natural_key=["InteractionID"],
         drop_columns=[],
-        default_rows=[{"Field": "Revenue", "Default Value": "0.0", "Enabled": True}],
+        default_rows=[{"Field": "StartDate", "Default Value": "", "Enabled": True}],
         use_rename_capitalize=True,
         filter_expression=None,
         calculated_rows=[],
     )
 
     assert source_def["defaults"] == {}
-    assert source_def["transforms"][:2] == [
+    assert source_def["transforms"] == [
         {"kind": "rename_capitalize"},
-        {"kind": "parse_datetime", "columns": ["OutcomeTime"], "format": "%Y-%m-%d"},
+        {"kind": "defaults", "values": {"StartDate": ""}},
+        {
+            "kind": "parse_datetime",
+            "columns": ["OutcomeTime", "StartDate"],
+            "format": "%Y-%m-%d",
+        },
     ]
-    assert source_def["transforms"][2] == {"kind": "defaults", "values": {"Revenue": 0.0}}
 
 
 @pytest.mark.unit
@@ -3517,7 +3547,7 @@ def test_preserve_untouched_processor_definition_keeps_real_edits() -> None:
                         "negative_values": ["Impression"],
                     },
                 }
-            ]
+            ],
         }
     ).processors[0]
     proposed = builder.processor_to_dict(processor)
@@ -4956,7 +4986,7 @@ def test_large_report_type_group_uses_compact_selector() -> None:
                 "metrics": {"catalog_version": 2, "metrics": {}},
                 "dashboards": {
                     "catalog_version": 2,
-                    "dashboards": [{"id": "overview", "title": "Overview", "pages": []}]
+                    "dashboards": [{"id": "overview", "title": "Overview", "pages": []}],
                 },
             }
         )
@@ -5081,7 +5111,7 @@ def test_metric_edit_controls_sync_metric_and_filters_bidirectionally() -> None:
 
     options = config_builder._sync_metric_edit_controls(state, metric_defs, processor_ids)
 
-    assert options == ["CTR", "Reach", "Revenue"]
+    assert options == ["Revenue", "CTR", "Reach"]
     assert state["builder_metric_processor_edit"] == "conversion"
     assert state["builder_metric_kind_edit"] == "formula"
     assert state["builder_metric_selected_id"] == "Revenue"
@@ -5133,7 +5163,7 @@ def test_metric_filter_helpers_scope_metrics_by_processor_and_kind(tmp_path: Pat
 
 
 @pytest.mark.unit
-def test_metric_choice_label_leads_with_human_name_then_kind_and_source(tmp_path: Path) -> None:
+def test_metric_choice_label_leads_with_source_then_name_and_type(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
     builder.write_metric_definition(
         tmp_path,
@@ -5144,8 +5174,163 @@ def test_metric_choice_label_leads_with_human_name_then_kind_and_source(tmp_path
 
     assert (
         config_builder._metric_choice_label(catalog, "Dropoff")
-        == "Dropoff · Formula / state passthrough · Engagement"
+        == "Engagement · Dropoff · Formula / state passthrough"
     )
+
+
+@pytest.mark.unit
+def test_metric_review_summary_explains_formula_and_inputs() -> None:
+    summary = config_builder._metric_review_summary(
+        "CTR",
+        {
+            "processor": "engagement",
+            "kind": "formula",
+            "description": "Share of positive outcomes among observed decisions.",
+            "display": {
+                "label": "Click rate",
+                "unit": "percent",
+                "value_format": "percent",
+                "direction": "higher_is_better",
+            },
+            "expression": {
+                "op": "safe_div",
+                "num": {"col": "Positives"},
+                "den": {
+                    "op": "add",
+                    "args": [{"col": "Positives"}, {"col": "Negatives"}],
+                },
+            },
+        },
+    )
+
+    assert summary.processor == "Engagement"
+    assert summary.kind == "Formula / state passthrough"
+    assert summary.label == "Click rate"
+    assert summary.formula == "Positives / (Positives + Negatives)"
+    assert summary.formula_latex == (
+        r"\frac{\text{Positives}}{\text{Positives} + \text{Negatives}}"
+    )
+    assert summary.inputs == ("Positives", "Negatives")
+    assert summary.aggregate_basis == (
+        "Scalar aggregate states support derived formula metrics such as rates and means."
+    )
+    assert summary.presentation == "Percent · Higher is better"
+    assert "returns 0" in summary.formula_note
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("definition", "formula_token"),
+    [
+        (
+            {
+                "kind": "formula",
+                "expression": {"col": "Positives"},
+            },
+            "Positives",
+        ),
+        (
+            {
+                "kind": "approx_distinct_count",
+                "state": "UniqueCustomers_cpc",
+            },
+            "ApproxDistinct",
+        ),
+        (
+            {
+                "kind": "quantile",
+                "state": "ResponseTime_tdigest",
+                "quantile": 0.95,
+            },
+            "0.95",
+        ),
+        (
+            {
+                "kind": "variant_compare",
+                "test_role": "Test",
+                "control_role": "Control",
+            },
+            "Rate(Test) - Rate(Control)",
+        ),
+        (
+            {
+                "kind": "set_op",
+                "operation": "union",
+                "operands": [{"state": "AudienceA"}, {"state": "AudienceB"}],
+            },
+            "UNION",
+        ),
+        (
+            {
+                "kind": "funnel_dropoff",
+                "from_state": "Clicked_Count",
+                "to_state": "Conversion_Count",
+                "output": "rate",
+            },
+            "(Clicked Count - Conversion Count) / Clicked Count",
+        ),
+    ],
+)
+def test_metric_review_calculation_covers_metric_families(
+    definition: dict[str, object],
+    formula_token: str,
+) -> None:
+    formula, note = config_builder._metric_review_calculation(definition)
+
+    assert formula_token in formula
+    assert note
+
+
+@pytest.mark.unit
+def test_metric_review_markdown_combines_explanation_and_latex() -> None:
+    summary = config_builder._metric_review_summary(
+        "CTR",
+        {
+            "processor": "engagement",
+            "kind": "formula",
+            "description": "Click-through rate.",
+            "display": {"unit": "percent"},
+            "expression": {
+                "op": "safe_div",
+                "num": {"col": "Positives"},
+                "den": {"col": "Count"},
+            },
+        },
+    )
+
+    rendered = config_builder._metric_review_markdown(summary)
+
+    assert r"- **Calculation**: $\frac{\text{Positives}}{\text{Count}}$." in rendered
+    assert "- **Inputs**: `Positives`, `Count`." in rendered
+    assert (
+        "- **Aggregate basis**: Scalar aggregate states support derived formula metrics "
+        "such as rates and means." in rendered
+    )
+    assert "- **Presentation**: Percent." in rendered
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [
+        ("distribution", "full-distribution and percentile metrics"),
+        ("curve_from_digests", "ROC AUC, average-precision, and calibration metrics"),
+        ("approx_distinct_count", "approximate-distinct metrics"),
+        ("topk_items", "frequent-item ranking metrics"),
+        ("set_op", "union, intersection, difference"),
+        ("variant_compare", "rate, uplift, and significance metrics"),
+        ("lifecycle_summary", "RFM, lifetime-value"),
+        ("funnel_dropoff", "conversion and drop-off"),
+    ],
+)
+def test_metric_review_aggregate_basis_names_derived_metric_families(
+    kind: str,
+    expected: str,
+) -> None:
+    note = config_builder._metric_review_aggregate_basis({"kind": kind})
+
+    assert expected in note
+    assert note.endswith(".")
 
 
 @pytest.mark.unit
@@ -5407,9 +5592,7 @@ def test_numeric_property_selection_populates_processor_state_grid(tmp_path: Pat
     ).run()
     kind = next(item for item in rendered.selectbox if item.label == "Kind")
     rendered = kind.set_value("numeric_distribution").run()
-    properties = next(
-        item for item in rendered.multiselect if item.label == "Numeric Properties"
-    )
+    properties = next(item for item in rendered.multiselect if item.label == "Numeric Properties")
     rendered = properties.set_value(["Outcome"]).run()
 
     assert not rendered.exception
@@ -5609,7 +5792,7 @@ def test_automatic_distribution_metrics_cover_only_public_digest_states() -> Non
                         },
                     },
                 }
-            ]
+            ],
         }
     ).processors[0]
     metrics = model.Metrics.model_validate(
@@ -5622,7 +5805,7 @@ def test_automatic_distribution_metrics_cover_only_public_digest_states() -> Non
                     "state": "Score_tdigest",
                     "quantile": 0.9,
                 }
-            }
+            },
         }
     ).metrics
 
@@ -5649,7 +5832,7 @@ def test_automatic_distribution_metrics_cover_only_public_digest_states() -> Non
                     "state": "Score_tdigest",
                     "quantile": 0.9,
                 },
-            }
+            },
         }
     ).metrics
     assert (
@@ -5704,8 +5887,7 @@ def test_automatic_standard_deviation_metric_uses_pooled_variance_state() -> Non
                 "arg": {"col": "Value_Var"},
             },
             "description": (
-                "Standard deviation automatically derived from the Value_Var "
-                "pooled variance state."
+                "Standard deviation automatically derived from the Value_Var pooled variance state."
             ),
             "display": {"label": "Value standard deviation"},
         }
@@ -7505,17 +7687,17 @@ def test_delete_processor_without_dependencies_is_valid(tmp_path: Path) -> None:
         {
             "id": "unused_processor",
             "source": "ih",
-                "kind": "binary_outcome",
-                "group_by": ["Channel"],
-                "time": {"property": "OutcomeTime", "grain": "daily"},
-                "states": {"Count": {"type": "count"}},
-                "outcome": {
-                    "column": "Outcome",
-                    "positive_values": ["Clicked"],
-                    "negative_values": ["Impression"],
-                },
+            "kind": "binary_outcome",
+            "group_by": ["Channel"],
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "states": {"Count": {"type": "count"}},
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
             },
-        )
+        },
+    )
     builder.require_valid_workspace(tmp_path)
 
     plan = builder.delete_processor_cascade(tmp_path, "unused_processor")
@@ -7848,7 +8030,7 @@ def _numeric_distribution_catalog() -> model.Catalog:
                             }
                         },
                     }
-                ]
+                ],
             },
             "metrics": {
                 "catalog_version": 2,
@@ -7859,7 +8041,7 @@ def _numeric_distribution_catalog() -> model.Catalog:
                         "state": "ResponseTime_tdigest",
                         "quantile": 0.5,
                     }
-                }
+                },
             },
             "dashboards": {"catalog_version": 2, "dashboards": []},
         }
@@ -8741,9 +8923,7 @@ processors:
 """,
         encoding="utf-8",
     )
-    (catalog / "metrics.yaml").write_text(
-        "catalog_version: 2\nmetrics: {}\n", encoding="utf-8"
-    )
+    (catalog / "metrics.yaml").write_text("catalog_version: 2\nmetrics: {}\n", encoding="utf-8")
     (catalog / "dashboards.yaml").write_text(
         "catalog_version: 2\ndashboards: []\n", encoding="utf-8"
     )
@@ -8971,7 +9151,7 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
                             },
                         },
                     }
-                ]
+                ],
             },
             "metrics": {
                 "catalog_version": 2,
@@ -9002,7 +9182,7 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
                         "kind": "formula",
                         "expression": {"col": "Propensity_Count"},
                     },
-                }
+                },
             },
             "dashboards": {"catalog_version": 2, "dashboards": []},
         }
@@ -9052,6 +9232,7 @@ def test_boxplot_chart_offered_only_for_distribution_metrics() -> None:
         "Remove `y`; use `x`, `color`, or facets only to group the distribution."
     ]
 
+
 @pytest.mark.unit
 def test_descriptive_boxplot_is_retired_from_chart_offering() -> None:
     assert "descriptive_boxplot" not in RECIPES
@@ -9068,22 +9249,22 @@ def _tile_option(dashboard_id: str, page_id: str, tile_id: str, title: str):
 @pytest.mark.unit
 def test_report_library_labels_disambiguate_duplicate_pages() -> None:
     catalog = model.Catalog.model_validate(
-            {
-                "pipelines": {
-                    "catalog_version": 2,
-                    "workspace": "labels",
+        {
+            "pipelines": {
+                "catalog_version": 2,
+                "workspace": "labels",
                 "sources": [
                     {"id": "ih", "reader": {"kind": "parquet", "file_pattern": "*.parquet"}}
                 ],
             },
-                "processors": {"catalog_version": 2, "processors": []},
-                "metrics": {"catalog_version": 2, "metrics": {}},
-                "dashboards": {
-                    "catalog_version": 2,
-                    "dashboards": [
+            "processors": {"catalog_version": 2, "processors": []},
+            "metrics": {"catalog_version": 2, "metrics": {}},
+            "dashboards": {
+                "catalog_version": 2,
+                "dashboards": [
                     {"id": "model_quality", "title": "Model quality", "pages": []},
                     {"id": "experiments", "title": "Experiments", "pages": []},
-                ]
+                ],
             },
         }
     )
@@ -9150,7 +9331,9 @@ def _install_alert_slot(monkeypatch: pytest.MonkeyPatch, slot: _AlertSlot) -> li
         config_builder.st, "error", lambda message, **_: inline.append(str(message))
     )
     monkeypatch.setattr(
-        config_builder.st, "button", lambda label="", **kw: inline.append(str(kw.get("label", label)))
+        config_builder.st,
+        "button",
+        lambda label="", **kw: inline.append(str(kw.get("label", label))),
     )
     config_builder._begin_source_inspection_scope()
     scope = config_builder._source_inspection_scope()
@@ -9169,9 +9352,7 @@ def test_page_alert_region_is_reserved_with_empty_not_container(
     """Streamlit rejects fragment writes to a container never written to itself."""
 
     created: list[str] = []
-    monkeypatch.setattr(
-        config_builder.st, "empty", lambda: created.append("empty") or _AlertSlot()
-    )
+    monkeypatch.setattr(config_builder.st, "empty", lambda: created.append("empty") or _AlertSlot())
     monkeypatch.setattr(
         config_builder.st,
         "container",

@@ -258,6 +258,8 @@ def _apply_scale_mode(rows: pl.DataFrame, tile: Mapping[str, Any]) -> pl.DataFra
         str(value)
         for value in (
             tile.get("color"),
+            tile.get("line_dash"),
+            tile.get("symbol"),
             _facet_row(tile),
             _facet_col(tile),
         )
@@ -280,16 +282,26 @@ def _line(rows: pl.DataFrame, tile: Mapping[str, Any], *, max_points: int) -> go
     y = _field(tile, "y")
     plotted = rows.sort(x) if x in rows.columns else rows
     if isinstance(y, str) and rows.height > max_points:
-        plotted = _downsample_by_color(
-            plotted, x=x, y=y, color=tile.get("color"), max_points=max_points
+        plotted = _downsample_by_groups(
+            plotted,
+            x=x,
+            y=y,
+            groups=_line_trace_groups(plotted, tile),
+            max_points=max_points,
         )
-    if _should_render_line_as_grouped_bar(rows, x):
+    if _should_render_line_as_grouped_bar(rows, x) and not (
+        tile.get("line_dash") or tile.get("symbol")
+    ):
         return _bar(plotted, {**tile, "barmode": tile.get("barmode", "group")})
+    symbol = tile.get("symbol")
     fig = px.line(
         plotted,
         x=x,
         y=y,
         color=tile.get("color"),
+        line_dash=tile.get("line_dash"),
+        symbol=symbol,
+        markers=bool(symbol),
         facet_row=_facet_row(tile),
         facet_col=_facet_col(tile),
         log_x=bool(tile.get("log_x", False)),
@@ -311,8 +323,12 @@ def _stacked_area(rows: pl.DataFrame, tile: Mapping[str, Any], *, max_points: in
     y = _field(tile, "y")
     plotted = rows.sort(x) if x in rows.columns else rows
     if isinstance(tile.get("color"), str) and rows.height > max_points:
-        plotted = _downsample_by_color(
-            plotted, x=x, y=y, color=tile.get("color"), max_points=max_points
+        plotted = _downsample_by_groups(
+            plotted,
+            x=x,
+            y=y,
+            groups=_line_trace_groups(plotted, tile),
+            max_points=max_points,
         )
     groupnorm = str(tile.get("groupnorm", "")).casefold()
     if groupnorm in {"percent", "fraction"}:
@@ -1789,20 +1805,41 @@ def _clv_treemap(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
     )
 
 
-def _downsample_by_color(
+def _line_trace_groups(
+    rows: pl.DataFrame,
+    tile: Mapping[str, Any],
+) -> list[str]:
+    """Return every field that separates one rendered line from another."""
+
+    return list(
+        dict.fromkeys(
+            str(value)
+            for value in (
+                tile.get("color"),
+                tile.get("line_dash"),
+                tile.get("symbol"),
+                _facet_row(tile),
+                _facet_col(tile),
+            )
+            if isinstance(value, str) and value in rows.columns
+        )
+    )
+
+
+def _downsample_by_groups(
     rows: pl.DataFrame,
     *,
     x: str,
     y: str,
-    color: Any,
+    groups: list[str],
     max_points: int,
 ) -> pl.DataFrame:
-    if not isinstance(color, str) or color not in rows.columns:
+    if not groups:
         return lttb.downsample(rows, x=x, y=y, threshold=max_points)
-    groups = rows.partition_by(color, as_dict=True)
-    budget = max(3, max_points // max(len(groups), 1))
+    partitions = rows.partition_by(groups, as_dict=True)
+    budget = max(3, max_points // max(len(partitions), 1))
     return pl.concat(
-        [lttb.downsample(group, x=x, y=y, threshold=budget) for group in groups.values()]
+        [lttb.downsample(group, x=x, y=y, threshold=budget) for group in partitions.values()]
     )
 
 
@@ -2534,7 +2571,7 @@ def _apply_semantic_category_colors(
                 trace.update(marker={"colors": colors})
             continue
         name = str(getattr(trace, "name", "") or "")
-        color = category_map.get(name)
+        color = _trace_category_color(name, category_map)
         if color is None:
             continue
         update: dict[str, Any] = {}
@@ -2544,6 +2581,19 @@ def _apply_semantic_category_colors(
             update["line_color"] = color
         if update:
             trace.update(**update)
+
+
+def _trace_category_color(name: str, category_map: Mapping[str, str]) -> str | None:
+    """Resolve the leading Plotly Express color category from a combined trace name."""
+
+    if direct := category_map.get(name):
+        return direct
+    matches = [
+        (category, color)
+        for category, color in category_map.items()
+        if name.startswith(f"{category}, ")
+    ]
+    return max(matches, key=lambda item: len(item[0]))[1] if matches else None
 
 
 def _label_key(value: str) -> str:

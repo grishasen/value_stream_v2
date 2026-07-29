@@ -238,43 +238,43 @@ recipes:
       caveat: Approximation error depends on sketch configuration and the observed distribution.
     report: { chart: boxplot, placement: content }
 
-  - id: service.response_time_p95
+  - id: engagement.decision_to_outcome_latency_p95
     version: 1
-    title: Response time (P95)
-    domain: Service health
-    summary: High-tail seconds between decision and recorded outcome, exceeded by five percent of interactions.
+    title: Decision-to-outcome latency (P95)
+    domain: Engagement
+    summary: High-tail duration between a decision and its recorded outcome, exceeded by five percent of interactions.
     business_questions:
       - How quickly do customers act on delivered decisions?
       - Are slow response tails improving after channel or arbitration changes?
-    tags: [ service, latency, response-time, p95, tail, tdigest, kll ]
+    tags: [ engagement, latency, decision, outcome, p95, tail, tdigest, kll ]
     maturity: reviewed
     processor_kinds: [ numeric_distribution, score_distribution ]
     inputs:
       - role: digest_state
-        label: Response-time field
-        description: Persisted distribution sketch over a duration column such as decision-to-outcome seconds.
+        label: Decision-to-outcome duration field
+        description: Persisted distribution sketch over a duration column. The recipe preserves the source field's unit.
         source: state
         state_types: [ tdigest, kll ]
         absent_state_attributes: [ outcome ]
         preferred_names: [ ResponseTime_tdigest, ResponseTime_kll, Latency_tdigest, Duration_tdigest ]
         selection: field_algorithm
-    default_metric_id: VS_Response_Time_P95
+    default_metric_id: VS_Decision_To_Outcome_Latency_P95
     metric:
       processor: ${processor_id}
       kind: quantile
-      description: 95th-percentile response time reconstructed from a persisted mergeable distribution sketch.
+      description: 95th-percentile decision-to-outcome duration reconstructed from a persisted mergeable distribution sketch.
       display:
-        label: P95 response time
-        unit: seconds
+        label: P95 decision-to-outcome latency
+        unit: value
         value_format: number
         direction: lower_is_better
       state: ${digest_state}
       quantile: 0.95
     method:
-      calculation: q(0.95) of the persisted response-time distribution
+      calculation: q(0.95) of the persisted decision-to-outcome duration distribution
       accuracy: approximate
       algorithm: Quantile query over a t-digest or KLL state.
-      caveat: Measures the latency recorded in the source column (for example decision-to-outcome), not system serving latency; approximation error depends on sketch configuration.
+      caveat: Inherits the source field's unit and measures recorded decision-to-outcome duration, not system serving latency. Confirm the unit before adding a unit-specific label; approximation error depends on sketch configuration.
     report:
       chart: kpi_card
       placement: kpi_strip
@@ -390,39 +390,64 @@ recipes:
       placement: kpi_strip
       kpi: { comparison: previous_period, comparison_period: month }
 
-  - id: model_quality.exploration_rate
+  - id: decisioning.material_upward_exploration_rate
     version: 1
-    title: Exploration rate
-    domain: Model quality
-    summary: Share of decisions where the arbitrated score was revised away from the raw model score.
+    title: Material upward exploration rate
+    domain: Adaptive decisioning
+    summary: Share of decisions where the arbitrated score exceeds the raw model score by a configurable relative threshold.
     business_questions:
-      - How much traffic is being spent on learning rather than on the best-known action?
+      - How much traffic receives a materially higher score for learning rather than an immaterial numerical adjustment?
       - Is exploration winding down as the models accumulate evidence?
-    tags: [ model, exploration, bandit, thompson, learning ]
+    tags: [ decisioning, policy, exploration, materiality, bandit, thompson, learning ]
     maturity: draft
-    processor_kinds: [ binary_outcome, numeric_distribution, score_distribution ]
+    processor_kinds: [ numeric_distribution ]
+    parameters:
+      - name: minimum_relative_increase
+        label: Minimum increase over raw score
+        description: Count an upward revision only when it exceeds this percentage of the positive raw model score.
+        unit: percent
+        default: 0.10
+        minimum: 0.0
+        maximum: 1.0
+        step: 0.01
     inputs:
       - role: explored
-        label: Explored decision count
-        description: A count state carrying a where filter that selects the decisions whose score was revised.
+        label: Materially upward-explored decision count
+        description: The purpose-built count using the selected minimum relative increase.
         source: state
         state_types: [ count ]
-        preferred_names: [ ExploredUp_Count, Explored_Count ]
-        selection: choice
+        requires_where: true
+        proposed_name: MaterialExploredUp_Count
+        state_template:
+          type: count
+          source_column: ExplorationDelta
+          where:
+            op: and
+            args:
+              - { op: gt, column: Propensity, value: 0.0 }
+              - op: gt
+                args:
+                  - { col: ExplorationDelta }
+                  - op: mul
+                    args:
+                      - { col: Propensity }
+                      - { lit: "${minimum_relative_increase}" }
+        selection: automatic
       - role: observations
         label: Total decision count
         source: state
         state_types: [ count ]
-        preferred_names: [ Explore_Count, Count ]
-        selection: choice
+        preferred_names: [ Explore_Count ]
+        selection: automatic
+        require_preferred: true
         different_from: explored
-    default_metric_id: VS_Exploration_Rate
+    default_metric_id: VS_Material_Upward_Exploration_Rate
     metric:
       processor: ${processor_id}
       kind: formula
-      description: Explored decisions divided by all scored decisions.
+      description: Decisions whose arbitrated score materially exceeds the positive raw model score, divided by all scored decisions.
       display:
-        label: Exploration rate
+        label: Material upward exploration rate
         unit: percent
         value_format: percent
         direction: neutral
@@ -431,20 +456,20 @@ recipes:
         num: { col: "${explored}" }
         den: { col: "${observations}" }
     method:
-      calculation: explored / observations
+      calculation: materially-upward-explored / observations
       accuracy: exact
-      algorithm: Ratio of two mergeable counts, one of them where-filtered.
-      caveat: Exploration is not free and not waste — it is the price of learning. A control or holdout arm whose score is randomised rather than explored will read 100% and should be excluded.
+      algorithm: Ratio of two mergeable counts; the numerator applies a configurable relative-increase predicate before aggregation.
+      caveat: The default threshold is 10% of the positive raw score and can be changed during installation. Zero or negative raw scores are excluded from the numerator. This counts material upward revisions only, not all score changes. Randomised control or holdout arms must be excluded.
     report:
       chart: kpi_card
       placement: kpi_strip
       kpi: { comparison: previous_period, comparison_period: month }
 
-  - id: model_quality.model_maturity
+  - id: model_quality.implied_evidence_index
     version: 1
-    title: Model maturity (implied evidence)
+    title: Implied evidence index
     domain: Model quality
-    summary: How many responses the adaptive models have implicitly accumulated, recovered from the width of Thompson-sampled exploration.
+    summary: Heuristic evidence index inferred from the relative width of sampled exploration.
     business_questions:
       - Which actions are still in cold start, and which have enough evidence to trust?
       - How long does a new action take to converge?
@@ -467,14 +492,14 @@ recipes:
         preferred_names: [ ExplorationSq_Mean ]
         selection: field_algorithm
         different_from: variance_mean
-    default_metric_id: VS_Model_Maturity
+    default_metric_id: VS_Implied_Evidence_Index
     metric:
       processor: ${processor_id}
       kind: formula
-      description: Implied evidence count behind the adaptive model's score.
+      description: Heuristic evidence index inferred from exploration width.
       display:
-        label: Model maturity (implied responses)
-        unit: responses
+        label: Implied evidence index
+        unit: index
         value_format: number
         direction: higher_is_better
       expression:
@@ -487,18 +512,18 @@ recipes:
     method:
       calculation: mean(p*(1-p)) / mean((sampled - p)^2) - 1
       accuracy: statistical
-      algorithm: Method-of-moments inversion of a Beta(1 + p*E, 1 + (1-p)*E) posterior, whose variance is approximately p(1-p)/(E+1).
-      caveat: An order-of-magnitude pseudo-count, not a posterior count. It assumes the arbitrated score is a Beta draw centred on the model score, so it is meaningless wherever the score is randomised (it correctly collapses to -1 there) or overwritten by other adjustments. Pooled across actions it is dominated by the least mature ones, which makes it a good cold-start alarm but a poor average.
+      algorithm: Heuristic moment-ratio inversion comparing mean Bernoulli score variance with mean squared exploration delta.
+      caveat: An order-of-magnitude index, not a response count or fitted posterior parameter. The common Beta(1+p*E, 1+(1-p)*E) parameterisation is not centred exactly on p, and other score adjustments also enter the observed delta. The index can be negative and is meaningless wherever the score is randomised. Read it only within a consistently explored population and compare trends rather than treating the value as a literal count.
     report:
       chart: kpi_card
       placement: kpi_strip
       kpi: { comparison: previous_period, comparison_period: month }
 
-  - id: model_quality.remaining_uncertainty
+  - id: model_quality.relative_exploration_variance
     version: 1
-    title: Remaining uncertainty
+    title: Relative exploration variance
     domain: Model quality
-    summary: Share of a score's own variance still being added as exploration noise, on a 0-1 scale.
+    summary: Exploration-delta variance relative to the raw score's Bernoulli variance.
     business_questions:
       - How far from converged are the adaptive models?
       - How quickly does a newly launched action stop being explored?
@@ -521,13 +546,13 @@ recipes:
         preferred_names: [ PropensityVar_Mean, ScoreVar_Mean ]
         selection: field_algorithm
         different_from: exploration_sq_mean
-    default_metric_id: VS_Remaining_Uncertainty
+    default_metric_id: VS_Relative_Exploration_Variance
     metric:
       processor: ${processor_id}
       kind: formula
       description: Exploration variance as a share of the score's own Bernoulli variance.
       display:
-        label: Remaining uncertainty
+        label: Relative exploration variance
         unit: ratio
         value_format: percent
         direction: lower_is_better
@@ -536,10 +561,10 @@ recipes:
         num: { col: "${exploration_sq_mean}" }
         den: { col: "${variance_mean}" }
     method:
-      calculation: mean((sampled - p)^2) / mean(p*(1-p)), the reciprocal of (implied evidence + 1)
+      calculation: mean((sampled - p)^2) / mean(p*(1-p))
       accuracy: statistical
-      algorithm: Method-of-moments inversion of a Beta(1 + p*E, 1 + (1-p)*E) posterior, expressed as a bounded 0-1 ratio rather than a count.
-      caveat: 1.0 means the score is pure exploration and carries no accumulated evidence; values near 0 mean the model has converged. It is the reciprocal of the maturity index plus one, so it is the friendlier axis for a convergence chart. Meaningless wherever the score is randomised rather than explored, where it reads 1.0 or above.
+      algorithm: Ratio of two pooled means comparing observed squared score revisions with the raw score's Bernoulli-variance scale.
+      caveat: This ratio is not bounded to 0-1 and is not a posterior uncertainty probability. Values above 1 mean observed score revisions are wider than the Bernoulli-variance reference. It is meaningless wherever the score is randomised rather than explored; read it only within a consistently explored population and use it as a relative convergence signal.
     report:
       chart: kpi_card
       placement: kpi_strip

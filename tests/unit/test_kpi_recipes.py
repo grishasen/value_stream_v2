@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -43,6 +44,152 @@ def test_builtin_recipe_library_is_versioned_and_unique() -> None:
         "Engagement",
         "Funnel",
     }
+    documented = (repo_root / "docs" / "reference" / "kpi-recipes.md").read_text()
+    for recipe in library.recipes:
+        assert f"`{recipe.id}`" in documented
+
+
+@pytest.mark.unit
+def test_new_diagnostic_recipes_state_their_population_and_interpretation_limits() -> None:
+    latency = _recipe("engagement.decision_to_outcome_latency_p95")
+    upward = _recipe("decisioning.material_upward_exploration_rate")
+    evidence = _recipe("model_quality.implied_evidence_index")
+    relative_variance = _recipe("model_quality.relative_exploration_variance")
+
+    assert latency.metric.display.unit == "value"
+    assert "source field's unit" in latency.method.caveat
+    assert "not system serving latency" in latency.method.caveat
+
+    assert upward.title == "Material upward exploration rate"
+    assert upward.domain == "Adaptive decisioning"
+    assert upward.processor_kinds == ("numeric_distribution",)
+    assert upward.parameters[0].name == "minimum_relative_increase"
+    assert upward.parameters[0].default == pytest.approx(0.10)
+    assert upward.parameters[0].unit == "percent"
+    assert upward.inputs[0].proposed_name == "MaterialExploredUp_Count"
+    assert upward.inputs[0].state_template
+    assert upward.inputs[0].requires_where
+    assert upward.inputs[1].preferred_names == ("Explore_Count",)
+    assert upward.inputs[1].require_preferred
+    assert "default threshold is 10%" in upward.method.caveat
+    assert "holdout" in upward.method.caveat.casefold()
+
+    assert evidence.maturity == "draft"
+    assert evidence.metric.display.unit == "index"
+    assert "not a response count" in evidence.method.caveat
+    assert "not centred exactly" in evidence.method.caveat
+
+    assert relative_variance.maturity == "draft"
+    assert "not bounded" in relative_variance.method.caveat
+    assert "not a posterior uncertainty probability" in relative_variance.method.caveat
+
+
+@pytest.mark.unit
+def test_material_upward_exploration_requires_dedicated_relative_numeric_states() -> None:
+    recipe = _recipe("decisioning.material_upward_exploration_rate")
+    states = {
+        "Explore_Count": {"type": "count", "source_column": "ExplorationSq"},
+        "MaterialExploredUp_Count": _material_upward_state(0.10),
+    }
+    binary = _binary_processor(states)
+    exploration = model.NumericDistributionProcessor.model_validate(
+        {
+            "id": "exploration",
+            "source": "events",
+            "kind": "numeric_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "properties": ["Propensity", "ExplorationSq", "ExplorationDelta"],
+            "states": states,
+        }
+    )
+
+    assert recipe_readiness(recipe, binary).status == "incompatible"
+
+    readiness = recipe_readiness(recipe, exploration)
+    assert readiness.status == "ready"
+    assert readiness.resolved_inputs == {
+        "explored": "MaterialExploredUp_Count",
+        "observations": "Explore_Count",
+    }
+
+
+@pytest.mark.unit
+def test_material_upward_exploration_proposes_state_for_custom_threshold() -> None:
+    recipe = _recipe("decisioning.material_upward_exploration_rate")
+    processor = model.NumericDistributionProcessor.model_validate(
+        {
+            "id": "exploration",
+            "source": "events",
+            "kind": "numeric_distribution",
+            "time": {"property": "OutcomeTime", "grain": "daily"},
+            "properties": ["Propensity", "ExplorationSq", "ExplorationDelta"],
+            "states": {
+                "Explore_Count": {"type": "count", "source_column": "ExplorationSq"},
+                "MaterialExploredUp_Count": _material_upward_state(0.10),
+            },
+        }
+    )
+
+    parameter_values = {"minimum_relative_increase": 0.20}
+    readiness = recipe_readiness(
+        recipe,
+        processor,
+        parameter_values=parameter_values,
+    )
+    options = recipe_binding_options(
+        recipe.inputs[0],
+        processor,
+        readiness.input_options["explored"],
+        parameter_values=parameter_values,
+    )
+
+    assert readiness.status == "backfill_required"
+    assert readiness.input_options["explored"] == ()
+    assert len(options) == 1
+    assert not options[0].configured
+    assert options[0].value == "MaterialExploredUp_Count_2"
+    assert options[0].state_definition == _material_upward_state(0.20)
+
+    configured = processor_with_recipe_states(
+        processor,
+        {options[0].value: options[0].state_definition},
+    )
+    metric = instantiate_metric(
+        recipe,
+        configured,
+        "Material_Upward_20pct",
+        {
+            "explored": options[0].value,
+            "observations": "Explore_Count",
+        },
+        parameter_values=parameter_values,
+    )
+
+    assert metric["recipe"]["parameters"] == parameter_values
+    assert metric["expression"]["num"]["col"] == "MaterialExploredUp_Count_2"
+
+
+@pytest.mark.unit
+def test_material_upward_threshold_is_editable_as_percent(monkeypatch: pytest.MonkeyPatch) -> None:
+    recipe = _recipe("decisioning.material_upward_exploration_rate")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(recipe_library.st, "container", lambda **_: nullcontext())
+    monkeypatch.setattr(recipe_library.st, "write", lambda *_args, **_kwargs: None)
+
+    def number_input(label: str, **kwargs: object) -> float:
+        captured["label"] = label
+        captured.update(kwargs)
+        return 25.0
+
+    monkeypatch.setattr(recipe_library.st, "number_input", number_input)
+
+    values = recipe_library._render_recipe_parameters(recipe, key_prefix="material")
+
+    assert captured["label"] == "Minimum increase over raw score (%)"
+    assert captured["value"] == pytest.approx(10.0)
+    assert captured["step"] == pytest.approx(1.0)
+    assert values == {"minimum_relative_increase": 0.25}
 
 
 @pytest.mark.unit
@@ -752,6 +899,32 @@ def test_recipe_json_schema_matches_checked_in_artifact() -> None:
 
 def _recipe(recipe_id: str):
     return next(recipe for recipe in load_builtin_kpi_recipes().recipes if recipe.id == recipe_id)
+
+
+def _material_upward_state(threshold: float) -> dict[str, object]:
+    return {
+        "type": "count",
+        "source_column": "ExplorationDelta",
+        "where": {
+            "op": "and",
+            "args": [
+                {"op": "gt", "column": "Propensity", "value": 0.0},
+                {
+                    "op": "gt",
+                    "args": [
+                        {"col": "ExplorationDelta"},
+                        {
+                            "op": "mul",
+                            "args": [
+                                {"col": "Propensity"},
+                                {"lit": threshold},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        },
+    }
 
 
 def _binary_processor(states: dict[str, dict[str, object]]) -> model.BinaryOutcomeProcessor:

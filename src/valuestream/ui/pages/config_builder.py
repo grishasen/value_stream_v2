@@ -1161,6 +1161,43 @@ def _technical_yaml(label: str, text: str) -> None:
         st.code(text or "{}", language="yaml")
 
 
+@dataclass(frozen=True)
+class MetricReviewSummary:
+    """Business-facing explanation of one metric draft."""
+
+    label: str
+    processor: str
+    kind: str
+    description: str
+    formula: str
+    formula_latex: str
+    formula_note: str
+    inputs: tuple[str, ...]
+    aggregate_basis: str
+    presentation: str
+
+
+def _render_metric_review(metric_name: str, metric_def: Mapping[str, Any]) -> None:
+    """Lead metric review with meaning and calculation; keep YAML secondary."""
+
+    summary = _metric_review_summary(metric_name or "metric_id", metric_def)
+    st.write("### Review")
+    st.caption(
+        "Review the business definition and calculation first. Exact generated YAML "
+        "remains available below."
+    )
+    with st.container(border=True):
+        st.caption(f"{summary.processor} · {summary.kind}")
+        st.write(f"#### {summary.label}")
+        st.write(summary.description)
+        st.divider()
+        st.markdown(_metric_review_markdown(summary))
+    _technical_yaml(
+        "Generated metric YAML",
+        builder.metric_yaml(metric_name or "metric_id", dict(metric_def)),
+    )
+
+
 def _render_outcome_handoff() -> None:
     """Render the next valuable action after the most recent apply."""
     raw = st.session_state.get(BUILDER_LAST_OUTCOME_KEY)
@@ -1352,11 +1389,7 @@ def _render_validation_sample_panel(ctx: ValueStreamContext) -> None:
             key=f"builder_validation_load_sample_{source.id}",
         ):
             result = _source_inspection(ctx, source)
-            columns = (
-                [name for name, _dtype in result.raw_schema]
-                if not result.error_kind
-                else []
-            )
+            columns = [name for name, _dtype in result.raw_schema] if not result.error_kind else []
             if columns:
                 st.rerun()
 
@@ -4464,9 +4497,7 @@ def _remap_processor_def_fields(
     if isinstance(score_properties, list):
         for item in score_properties:
             if isinstance(item, dict) and item.get("column"):
-                item["column"] = field_remap.remap_field_name(
-                    str(item["column"]), field_mapping
-                )
+                item["column"] = field_remap.remap_field_name(str(item["column"]), field_mapping)
     return out
 
 
@@ -4683,9 +4714,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
             processor_id = st.selectbox(
                 "Processor",
                 list(editable_processors_by_id),
-                format_func=lambda value: _processor_choice_label(
-                    value, editable_processors_by_id
-                ),
+                format_func=lambda value: _processor_choice_label(value, editable_processors_by_id),
                 key=METRIC_EDIT_PROCESSOR_KEY,
                 help=config_help.field_help("metric.processor"),
                 on_change=_mark_metric_edit_sync,
@@ -4972,15 +5001,7 @@ def _metric_builder(  # noqa: PLR0911, PLR0912, PLR0915
                 _render_apply_failure(exc)
 
     with right, st.container(border=True):
-        st.write("### Review")
-        st.caption(
-            "The draft revision above is compared with the applied metric. Exact YAML remains "
-            "available for expert review."
-        )
-        _technical_yaml(
-            "Generated metric YAML",
-            builder.metric_yaml(metric_name or "metric_id", metric_def),
-        )
+        _render_metric_review(metric_name or "metric_id", metric_def)
 
 
 def _metric_definition_form(
@@ -6763,12 +6784,21 @@ def _field_controls_for_keys(
                 options,
                 index=builder.option_index(options, _tile_field_default(defaults, key)),
                 key=f"builder_tile_{key}_{key_suffix}",
-                help=config_help.field_help("report.field"),
+                help=config_help.field_help(
+                    {
+                        "line_dash": "report.line_dash",
+                        "symbol": "report.symbol",
+                    }.get(key, "report.field")
+                ),
             )
     return fields
 
 
 def _field_label(key: str) -> str:
+    if key == "line_dash":
+        return "Line style"
+    if key == "symbol":
+        return "Marker shape"
     return key.upper() if len(key) == 1 else key.title()
 
 
@@ -7801,9 +7831,7 @@ def _consume_pending_metric_refresh(
     metric_def = metric_defs_by_name.get(metric_id)
     if metric_def is None:
         return feedback
-    source = str(
-        metric_def.get("processor", feedback.get("processor", "")) or ""
-    )
+    source = str(metric_def.get("processor", feedback.get("processor", "")) or "")
     kind = str(metric_def.get("kind", feedback.get("kind", "")) or "")
     session_state["builder_metric_mode"] = METRIC_ACTION_EDIT
     session_state["builder_metric_selected_id"] = metric_id
@@ -7937,8 +7965,7 @@ def _metric_processors_for_definitions(
     metric_defs_by_name: Mapping[str, Mapping[str, Any]],
 ) -> list[model.Processor]:
     metric_sources = {
-        str(metric_def.get("processor", "") or "")
-        for metric_def in metric_defs_by_name.values()
+        str(metric_def.get("processor", "") or "") for metric_def in metric_defs_by_name.values()
     }
     return [processor for processor in processors if processor.id in metric_sources]
 
@@ -7993,7 +8020,10 @@ def _sync_metric_edit_controls(
             if str(metric_def.get("processor", "") or "") in valid_processors
             and str(metric_def.get("kind", "") or "")
         ],
-        key=str.casefold,
+        key=lambda name: (
+            _metric_choice_label_from_definition(name, metric_defs_by_name[name]).casefold(),
+            name.casefold(),
+        ),
     )
     if not editable_metric_names:
         return []
@@ -8082,13 +8112,512 @@ def _metric_choice_label(catalog: model.Catalog, metric_name: str) -> str:
     metric = catalog.metrics.metrics.get(metric_name)
     if metric is None:
         return metric_name
-    metric_def = builder.metric_to_dict(metric)
+    return _metric_choice_label_from_definition(metric_name, builder.metric_to_dict(metric))
+
+
+def _metric_choice_label_from_definition(
+    metric_name: str,
+    metric_def: Mapping[str, Any],
+) -> str:
     source = str(metric_def.get("processor", "") or "unknown")
     kind = str(metric_def.get("kind", "") or "unknown")
     display = metric_def.get("display")
     display_label = str(display.get("label", "") or "") if isinstance(display, dict) else ""
     label = display_label or humanize_identifier(metric_name)
-    return f"{label} · {builder.metric_kind_label(kind)} · {humanize_identifier(source)}"
+    return f"{humanize_identifier(source)} · {label} · {builder.metric_kind_label(kind)}"
+
+
+def _metric_review_summary(
+    metric_name: str,
+    metric_def: Mapping[str, Any],
+) -> MetricReviewSummary:
+    """Build the plain-language review model used by the metric editor."""
+
+    processor_id = str(metric_def.get("processor", "") or "unknown")
+    kind = str(metric_def.get("kind", "") or "unknown")
+    display = metric_def.get("display")
+    display_def = display if isinstance(display, Mapping) else {}
+    label = str(display_def.get("label", "") or "") or humanize_identifier(metric_name)
+    description = str(metric_def.get("description", "") or "").strip()
+    if not description:
+        description = (
+            f"{label} is calculated from persisted aggregate inputs owned by the "
+            f"{humanize_identifier(processor_id)} processor."
+        )
+    formula, formula_note = _metric_review_calculation(metric_def)
+    formula_latex = _metric_review_latex(metric_def)
+    inputs = _metric_review_inputs(metric_def)
+    aggregate_basis = _metric_review_aggregate_basis(metric_def)
+    presentation_parts = list(
+        dict.fromkeys(
+            [
+                humanize_identifier(str(value))
+                for value in (
+                    display_def.get("unit"),
+                    display_def.get("value_format"),
+                    display_def.get("direction"),
+                )
+                if value and str(value) != "neutral"
+            ]
+        )
+    )
+    return MetricReviewSummary(
+        label=label,
+        processor=humanize_identifier(processor_id),
+        kind=builder.metric_kind_label(kind),
+        description=description,
+        formula=formula,
+        formula_latex=formula_latex,
+        formula_note=formula_note,
+        inputs=inputs,
+        aggregate_basis=aggregate_basis,
+        presentation=" · ".join(presentation_parts) or "Default numeric presentation",
+    )
+
+
+def _metric_review_calculation(  # noqa: PLR0911, PLR0912
+    metric_def: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Return a compact formula and a plain-language interpretation."""
+
+    kind = str(metric_def.get("kind", "") or "")
+    if kind == "formula":
+        expression = metric_def.get("expression")
+        formula = _metric_expression_formula(expression)
+        if isinstance(expression, Mapping) and set(expression) == {"col"}:
+            note = "Uses this persisted aggregate state directly."
+        elif isinstance(expression, Mapping) and expression.get("op") == "safe_div":
+            note = "Divides the numerator by the denominator; returns 0 when it is zero."
+        else:
+            note = "Evaluates this closed expression after its aggregate states are merged."
+        return formula, note
+    if kind == "approx_distinct_count":
+        state = _review_name(metric_def.get("state"))
+        return f"ApproxDistinct({state})", "Estimates unique values from one mergeable sketch."
+    if kind == "topk_items":
+        state = _review_name(metric_def.get("state"))
+        limit = int(metric_def.get("limit", 10) or 10)
+        return f"TopK({state}, {limit})", "Returns the most frequent items from the Top-K state."
+    if kind == "distribution":
+        state = _review_name(metric_def.get("state"))
+        return f"Distribution({state})", "Reconstructs a queryable distribution from its digest."
+    if kind == "quantile":
+        state = _review_name(metric_def.get("state"))
+        quantile = float(metric_def.get("quantile", 0.5) or 0.0)
+        return (
+            f"Quantile({state}, {quantile:g})",
+            "Reads the selected percentile from the persisted distribution digest.",
+        )
+    if kind == "variant_compare":
+        test = _review_name(metric_def.get("test_role"))
+        control = _review_name(metric_def.get("control_role"))
+        return (
+            f"Rate({test}) - Rate({control})",
+            "Compares test and control rates and derives lift, uncertainty, and significance.",
+        )
+    if kind == "curve_from_digests":
+        output = str(metric_def.get("output", "roc_auc") or "roc_auc")
+        positive = _review_name(metric_def.get("positive_state"))
+        negative = _review_name(metric_def.get("negative_state"))
+        return (
+            f"{humanize_identifier(output)}({positive}, {negative})",
+            "Compares positive and negative score distributions.",
+        )
+    if kind == "calibration_from_digests":
+        positive = _review_name(metric_def.get("positive_state"))
+        negative = _review_name(metric_def.get("negative_state"))
+        return (
+            f"Calibration({positive}, {negative})",
+            "Builds observed-versus-predicted calibration from outcome-conditioned digests.",
+        )
+    if kind == "contingency_test":
+        tests = ", ".join(map(str, metric_def.get("tests", []) or [])) or "configured tests"
+        variant = _review_name(metric_def.get("variant_column"))
+        return (
+            f"Contingency({variant}; {tests})",
+            "Tests whether outcome counts differ across the configured variants.",
+        )
+    if kind == "proportion_test":
+        test = _review_name(metric_def.get("test_role"))
+        control = _review_name(metric_def.get("control_role"))
+        return (
+            f"Rate({test}) - Rate({control})",
+            "Runs a two-proportion comparison over positive and negative outcome counts.",
+        )
+    if kind == "lifecycle_summary":
+        return (
+            "Lifecycle(customers, holdings, value, first purchase, last purchase)",
+            "Combines mergeable lifecycle states into customer and RFM outputs.",
+        )
+    if kind == "set_op":
+        symbols = {"union": " UNION ", "intersection": " INTERSECT ", "minus": " MINUS "}
+        operation = str(metric_def.get("operation", "union") or "union")
+        operands = [
+            _review_name(operand.get("state"))
+            for operand in metric_def.get("operands", []) or []
+            if isinstance(operand, Mapping)
+        ]
+        return (
+            symbols.get(operation, " UNION ").join(operands) or humanize_identifier(operation),
+            "Applies the configured set operation to mergeable Theta states.",
+        )
+    if kind == "funnel_dropoff":
+        start = _review_name(metric_def.get("from_state"))
+        end = _review_name(metric_def.get("to_state"))
+        if metric_def.get("output", "rate") == "count":
+            return f"{start} - {end}", "Returns the number lost between the two funnel stages."
+        return (
+            f"({start} - {end}) / {start}",
+            "Returns the share lost between the two funnel stages.",
+        )
+    return humanize_identifier(kind or "Configured calculation"), builder.metric_kind_help(kind)
+
+
+def _metric_expression_formula(  # noqa: PLR0911, PLR0912
+    value: Any,
+    *,
+    depth: int = 0,
+) -> str:
+    """Format the closed expression AST as compact business-readable notation."""
+
+    if depth > 12:
+        return "…"
+    if not isinstance(value, Mapping):
+        return _review_literal(value)
+    if "col" in value:
+        return _review_name(value.get("col"))
+    if "lit" in value:
+        return _review_literal(value.get("lit"))
+    if "param" in value:
+        return _review_name(value.get("param"))
+    if "polars" in value:
+        return "Advanced expression"
+
+    op = str(value.get("op", "") or "")
+    if op == "safe_div":
+        numerator = _metric_formula_operand(value.get("num"), depth=depth + 1)
+        denominator = _metric_formula_operand(value.get("den"), depth=depth + 1)
+        return f"{numerator} / {denominator}"
+    args = value.get("args")
+    if isinstance(args, list):
+        symbols = {
+            "add": " + ",
+            "sub": " - ",
+            "mul": " * ",
+            "div": " / ",
+            "and": " AND ",
+            "or": " OR ",
+            "eq": " = ",
+            "ne": " ≠ ",
+            "lt": " < ",
+            "le": " ≤ ",
+            "gt": " > ",
+            "ge": " ≥ ",
+        }
+        rendered = [_metric_expression_formula(arg, depth=depth + 1) for arg in args]
+        if op in symbols:
+            return symbols[op].join(rendered)
+        return f"{humanize_identifier(op)}({', '.join(rendered)})"
+    if "column" in value and "value" in value:
+        symbols = {"eq": "=", "ne": "≠", "lt": "<", "le": "≤", "gt": ">", "ge": "≥"}
+        return (
+            f"{_review_name(value.get('column'))} {symbols.get(op, op)} "
+            f"{_review_literal(value.get('value'))}"
+        )
+    if "arg" in value:
+        argument = _metric_expression_formula(value.get("arg"), depth=depth + 1)
+        if op == "neg":
+            return f"-{argument}"
+        if op == "not":
+            return f"NOT {argument}"
+        return f"{humanize_identifier(op)}({argument})"
+    return humanize_identifier(op or "Configured expression")
+
+
+def _metric_formula_operand(value: Any, *, depth: int) -> str:
+    rendered = _metric_expression_formula(value, depth=depth)
+    return f"({rendered})" if isinstance(value, Mapping) and "op" in value else rendered
+
+
+def _metric_review_inputs(metric_def: Mapping[str, Any]) -> tuple[str, ...]:
+    inputs: list[str] = []
+
+    def collect(value: Any, key: str = "") -> None:
+        if isinstance(value, Mapping):
+            for child_key, child in value.items():
+                if isinstance(child, str) and (
+                    child_key in {"col", "state"} or child_key.endswith("_state")
+                ):
+                    inputs.append(_review_name(child))
+                else:
+                    collect(child, child_key)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child, key)
+
+    collect(metric_def)
+    return tuple(dict.fromkeys(inputs))
+
+
+def _metric_review_markdown(summary: MetricReviewSummary) -> str:
+    """Compose one explanatory Markdown block with an inline LaTeX formula."""
+
+    lines = [
+        f"- **Calculation**: ${summary.formula_latex}$. {summary.formula_note}",
+    ]
+    if summary.inputs:
+        inputs = ", ".join(f"`{value}`" for value in summary.inputs)
+        lines.append(f"- **Inputs**: {inputs}.")
+    lines.append(f"- **Aggregate basis**: {summary.aggregate_basis}")
+    lines.append(f"- **Presentation**: {summary.presentation}.")
+    return "\n".join(lines)
+
+
+def _metric_review_aggregate_basis(metric_def: Mapping[str, Any]) -> str:
+    """Explain which metric families the underlying aggregate states support."""
+
+    kind = str(metric_def.get("kind", "") or "")
+    digest_distribution = (
+        "t-digest or KLL sketches support full-distribution and percentile metrics."
+    )
+    digest_outcomes = (
+        "Paired outcome-conditioned digest sketches support ROC AUC, average-precision, "
+        "and calibration metrics."
+    )
+    outcome_counts = (
+        "Positive and negative count states support rate, uplift, and significance "
+        "metrics across variants."
+    )
+    notes = {
+        "distribution": digest_distribution,
+        "quantile": digest_distribution,
+        "curve_from_digests": digest_outcomes,
+        "calibration_from_digests": digest_outcomes,
+        "approx_distinct_count": (
+            "CPC, HLL, or Theta sketches support approximate-distinct metrics; Theta sketches "
+            "also support set-operation metrics."
+        ),
+        "topk_items": "Top-K sketches support frequent-item ranking metrics.",
+        "set_op": (
+            "Theta sketches support approximate union, intersection, difference, and "
+            "distinct-count metrics."
+        ),
+        "variant_compare": outcome_counts,
+        "contingency_test": outcome_counts,
+        "proportion_test": outcome_counts,
+        "lifecycle_summary": (
+            "Lifecycle aggregate states support RFM, lifetime-value, and customer-lifecycle "
+            "metrics."
+        ),
+        "funnel_dropoff": (
+            "Funnel stage count states support conversion and drop-off count or rate metrics."
+        ),
+        "formula": (
+            "Scalar aggregate states support derived formula metrics such as rates and means."
+        ),
+    }
+    return notes.get(
+        kind,
+        "Persisted aggregate states support this derived metric without retaining raw rows.",
+    )
+
+
+def _metric_review_latex(metric_def: Mapping[str, Any]) -> str:  # noqa: PLR0911, PLR0912
+    """Return LaTeX notation suitable for Streamlit Markdown math rendering."""
+
+    kind = str(metric_def.get("kind", "") or "")
+    if kind == "formula":
+        return _metric_expression_latex(metric_def.get("expression"))
+    if kind == "approx_distinct_count":
+        return _latex_call("ApproxDistinct", metric_def.get("state"))
+    if kind == "topk_items":
+        return _latex_call("TopK", metric_def.get("state"), metric_def.get("limit", 10))
+    if kind == "distribution":
+        return _latex_call("Distribution", metric_def.get("state"))
+    if kind == "quantile":
+        return _latex_call(
+            "Quantile",
+            metric_def.get("state"),
+            metric_def.get("quantile", 0.5),
+        )
+    if kind in {"variant_compare", "proportion_test"}:
+        test = _latex_rate(metric_def.get("test_role"))
+        control = _latex_rate(metric_def.get("control_role"))
+        return f"{test} - {control}"
+    if kind == "curve_from_digests":
+        return _latex_call(
+            str(metric_def.get("output", "roc_auc") or "roc_auc"),
+            metric_def.get("positive_state"),
+            metric_def.get("negative_state"),
+        )
+    if kind == "calibration_from_digests":
+        return _latex_call(
+            "Calibration",
+            metric_def.get("positive_state"),
+            metric_def.get("negative_state"),
+        )
+    if kind == "contingency_test":
+        tests = ", ".join(map(str, metric_def.get("tests", []) or [])) or "configured tests"
+        return _latex_call("Contingency", metric_def.get("variant_column"), tests)
+    if kind == "lifecycle_summary":
+        return (
+            r"\operatorname{Lifecycle}\left("
+            r"\text{customers},\ \text{holdings},\ \text{value},\ "
+            r"\text{first purchase},\ \text{last purchase}"
+            r"\right)"
+        )
+    if kind == "set_op":
+        symbols = {
+            "union": r" \cup ",
+            "intersection": r" \cap ",
+            "minus": r" \setminus ",
+        }
+        operation = str(metric_def.get("operation", "union") or "union")
+        operands = [
+            _latex_text(operand.get("state"))
+            for operand in metric_def.get("operands", []) or []
+            if isinstance(operand, Mapping)
+        ]
+        return symbols.get(operation, r" \cup ").join(operands) or _latex_text(operation)
+    if kind == "funnel_dropoff":
+        start = _latex_text(metric_def.get("from_state"))
+        end = _latex_text(metric_def.get("to_state"))
+        difference = f"{start} - {end}"
+        if metric_def.get("output", "rate") == "count":
+            return difference
+        return rf"\frac{{{difference}}}{{{start}}}"
+    return _latex_text(kind or "Configured calculation")
+
+
+def _metric_expression_latex(  # noqa: PLR0911, PLR0912
+    value: Any,
+    *,
+    depth: int = 0,
+) -> str:
+    if depth > 12:
+        return r"\ldots"
+    if not isinstance(value, Mapping):
+        return _latex_literal(value)
+    if "col" in value:
+        return _latex_text(value.get("col"))
+    if "lit" in value:
+        return _latex_literal(value.get("lit"))
+    if "param" in value:
+        return _latex_text(value.get("param"))
+    if "polars" in value:
+        return _latex_text("Advanced expression")
+
+    op = str(value.get("op", "") or "")
+    if op == "safe_div":
+        numerator = _metric_expression_latex(value.get("num"), depth=depth + 1)
+        denominator = _metric_expression_latex(value.get("den"), depth=depth + 1)
+        return rf"\frac{{{numerator}}}{{{denominator}}}"
+    args = value.get("args")
+    if isinstance(args, list):
+        symbols = {
+            "add": " + ",
+            "sub": " - ",
+            "mul": r" \times ",
+            "div": r" \div ",
+            "and": r" \land ",
+            "or": r" \lor ",
+            "eq": " = ",
+            "ne": r" \ne ",
+            "lt": " < ",
+            "le": r" \le ",
+            "gt": " > ",
+            "ge": r" \ge ",
+        }
+        rendered = [_metric_expression_latex(arg, depth=depth + 1) for arg in args]
+        if op == "div" and len(rendered) == 2:
+            return rf"\frac{{{rendered[0]}}}{{{rendered[1]}}}"
+        if op in symbols:
+            return symbols[op].join(rendered)
+        return _latex_operator_call(op, rendered)
+    if "column" in value and "value" in value:
+        symbols = {
+            "eq": "=",
+            "ne": r"\ne",
+            "lt": "<",
+            "le": r"\le",
+            "gt": ">",
+            "ge": r"\ge",
+        }
+        return (
+            f"{_latex_text(value.get('column'))} {symbols.get(op, op)} "
+            f"{_latex_literal(value.get('value'))}"
+        )
+    if "arg" in value:
+        argument = _metric_expression_latex(value.get("arg"), depth=depth + 1)
+        if op == "neg":
+            return f"-{argument}"
+        if op == "not":
+            return rf"\neg {argument}"
+        return _latex_operator_call(op, [argument])
+    return _latex_text(op or "Configured expression")
+
+
+def _latex_call(name: str, *values: Any) -> str:
+    return _latex_operator_call(
+        name,
+        [
+            _latex_literal(value) if isinstance(value, int | float) else _latex_text(value)
+            for value in values
+        ],
+    )
+
+
+def _latex_rate(value: Any) -> str:
+    return rf"\operatorname{{Rate}}\left({_latex_text(value)}\right)"
+
+
+def _latex_operator_call(name: str, values: list[str]) -> str:
+    operator = _latex_escape(humanize_identifier(str(name or "calculation")))
+    return rf"\operatorname{{{operator}}}\left({', '.join(values)}\right)"
+
+
+def _latex_text(value: Any) -> str:
+    text = humanize_identifier(str(value or "Not configured"))
+    return rf"\text{{{_latex_escape(text)}}}"
+
+
+def _latex_literal(value: Any) -> str:
+    if isinstance(value, str):
+        return _latex_text(value)
+    if value is None:
+        return r"\mathrm{null}"
+    if isinstance(value, bool):
+        return rf"\mathrm{{{str(value).lower()}}}"
+    return f"{value:g}" if isinstance(value, float) else str(value)
+
+
+def _latex_escape(value: str) -> str:
+    escaped = value.replace("\\", r"\backslash ")
+    for source, replacement in (
+        ("{", r"\{"),
+        ("}", r"\}"),
+        ("_", r"\_"),
+        ("&", r"\&"),
+        ("%", r"\%"),
+        ("#", r"\#"),
+        ("$", r"\$"),
+    ):
+        escaped = escaped.replace(source, replacement)
+    return escaped
+
+
+def _review_name(value: Any) -> str:
+    return humanize_identifier(str(value or "Not configured"))
+
+
+def _review_literal(value: Any) -> str:
+    if isinstance(value, str):
+        return f"“{value}”"
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return str(value).lower()
+    return f"{value:g}" if isinstance(value, float) else str(value)
 
 
 def _digest_state_label(processor: model.Processor, state_name: str) -> str:
@@ -8786,11 +9315,7 @@ def _new_processor_template(
                     builder.workspace_dimension_defaults(ctx.catalog),
                     seed_fields,
                 ),
-                *(
-                    builder.calendar_dimensions_for_grain("daily")
-                    if time_column
-                    else []
-                ),
+                *(builder.calendar_dimensions_for_grain("daily") if time_column else []),
             ]
         ),
         "time": {
@@ -8999,7 +9524,11 @@ def _build_source_definition(
             if transform["kind"] not in existing_transform_kinds
         )
     if use_rename_capitalize and default_values:
-        transforms.append({"kind": "defaults", "values": default_values})
+        # Defaults must run immediately after rename/capitalization. A missing
+        # date field may be seeded here specifically so a following
+        # parse_datetime transform can establish its date-like type before
+        # downstream date_diff expressions are validated and executed.
+        transforms.insert(1, {"kind": "defaults", "values": default_values})
     if filter_expression:
         transforms.append({"kind": "filter", "expression": filter_expression})
     transforms.extend(builder.build_derive_column_transforms(calculated_rows))
@@ -9143,9 +9672,7 @@ def _with_numeric_property_state_rows(
 
     normalized = builder.normalize_editor_rows(rows)
     existing_names = {
-        str(row.get("State", "")).strip()
-        for row in normalized
-        if str(row.get("State", "")).strip()
+        str(row.get("State", "")).strip() for row in normalized if str(row.get("State", "")).strip()
     }
     additions = [
         row

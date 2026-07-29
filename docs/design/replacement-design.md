@@ -661,12 +661,14 @@ dashboards:
               sparkline_points: 30
 
           - id: daily_ctr
-            title: Daily CTR by group
+            title: Daily CTR by channel and customer type
             metric: CTR
             chart: line
             x: day
             y: CTR
-            color: group
+            color: channel
+            line_dash: customer_type
+            symbol: customer_type
             facets: {row: channel, col: placement}
             scale_mode: absolute
 
@@ -1215,10 +1217,10 @@ The figure factory registry is one Python module per chart type (mirrors the cur
 Replaces the current `report_builder/` and most manual `config_generator/` editing with a single validation-first Builder workspace:
 
 - **Health and review progress** — show source/processor/metric/report validation status before editing.
-- **Sources** — edit reader kind, file pattern, grouping regex, root, streaming/hive flags, schema timestamp/natural-key/drop columns, source defaults, dataset filters, and calculated fields. Defaults run before filters; filter rules compile to the closed expression AST; calculated fields become `derive_column` transforms. A destructive action beside the source selector previews and transactionally removes the selected source, its processors, transitive metric dependants, report tiles, now-unsupported page filters, and related Chat descriptions. Dashboard/page containers and aggregate/run-history artifacts remain.
+- **Sources** — edit reader kind, file pattern, grouping regex, root, streaming/hive flags, schema timestamp/natural-key/drop columns, source defaults, dataset filters, and calculated fields. With rename/capitalization enabled, defaults run immediately after the rename and before fixed parsing transforms, filters, and derived fields; this preserves the declared type of default-seeded datetime columns. Filter rules compile to the closed expression AST; calculated fields become `derive_column` transforms. A destructive action beside the source selector previews and transactionally removes the selected source, its processors, transitive metric dependants, report tiles, now-unsupported page filters, and related Chat descriptions. Dashboard/page containers and aggregate/run-history artifacts remain.
 - **Dimensions** — review and update processor group-by fields from the approved source field catalog.
 - **Processors** — edit source binding, kind, group-by, time grains, state columns, state source fields, and optional processor filters.
-- **Metrics** — browse the shared KPI recipe library by business question/domain, inspect method accuracy and readiness, select processor-owned business fields plus any recipe-compatible sketch algorithm (or funnel stages/populations), optionally place a recommended report tile, or build a metric directly with the visual/AST editors. Internal state IDs remain technical detail. Before apply, the shared flow shows the exact generated YAML patch and, for a missing field/algorithm state, the source, fields, states, and current/proposed processor computation hashes. Configuration Builder installs and post-validates that patch inside one rollback boundary, then links to Data Load when a source run is required; it never starts ingestion implicitly.
+- **Metrics** — browse the shared KPI recipe library by business question/domain, inspect method accuracy and readiness, edit bounded recipe parameters, select processor-owned business fields plus any recipe-compatible sketch algorithm (or funnel stages/populations), optionally place a recommended report tile, or build a metric directly with the visual/AST editors. Existing metrics are ordered and labelled `Processor · metric name · metric kind`. Their Review panel leads with a business description, explanatory Markdown with inline LaTeX formula or algorithm notation, aggregate inputs, one sentence naming the metric families those aggregate states support, and presentation semantics; exact YAML stays collapsed under technical details. Internal state IDs remain technical detail. Before apply, the shared flow shows the exact generated YAML patch and, for a missing capability or parameter-resolved filtered state, the source, fields, states, and current/proposed processor computation hashes. Configuration Builder installs and post-validates that patch inside one rollback boundary, then links to Data Load when a source run is required; it never starts ingestion implicitly.
 - **Reports / Tiles** — search/filter a report library, create/duplicate/delete tiles, use visual chart-field mapping or raw YAML fallback, inspect chart recipe metadata, preview against aggregates, and save into `dashboards.yaml`.
 - **Chat Review** — review the aggregate metrics, processors, and persisted group-by fields exposed to Chat With Data; confirm catalog validation and LLM settings readiness before relying on chat answers; edit chat-only `ai.yaml` guidance such as the generic agent prompt plus dataset/metric descriptions used by the LLM planner.
 - **Settings** — edit `pipelines.yaml` workspace defaults such as workspace name, time zone, calendar grains, and week start, plus `dashboards.yaml` theme settings.

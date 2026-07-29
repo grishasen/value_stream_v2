@@ -22,7 +22,7 @@ import yaml
 from valuestream.charts import prepare_table_data, render_chart, table_row_colors
 from valuestream.config import model
 from valuestream.query import AggregateNotReadyError
-from valuestream.ui import builder, components
+from valuestream.ui import builder, components, config_help
 from valuestream.ui.context import ValueStreamContext
 from valuestream.ui.data import (
     FilterCapability,
@@ -106,6 +106,7 @@ ADVANCED_FIELD_KEYS = {
     "locations",
     "lower_output",
     "lon",
+    "line_dash",
     "metric_output",
     "names",
     "path",
@@ -114,6 +115,7 @@ ADVANCED_FIELD_KEYS = {
     "secondary_metric",
     "size",
     "stages",
+    "symbol",
     "theta",
     "upper_output",
     "x",
@@ -972,7 +974,9 @@ def _kpi_bundle(
         selected_output if selected_output in output_columns else output_columns[0]
     )
     applied, _ = partition_filters_for_tile(ctx.catalog, tile, filters)
-    query_filters = {**dict(tile_dict.get("filters") or {}), **applied}
+    # Fixed tile filters define the KPI population; interactive page filters
+    # may narrow other fields but cannot replace that authored scope.
+    query_filters = {**applied, **dict(tile_dict.get("filters") or {})}
     kpi = tile.kpi or model.KpiSpec()
     series = pl.DataFrame()
     if kpi.sparkline_grain or kpi.comparison == "previous_period":
@@ -1321,7 +1325,9 @@ def _is_full_width_tile(tile: Any) -> bool:
         return True
     if _has_grouped_gauge_tile(tile):
         return True
-    if chart == "line" and tile_dict.get("color"):
+    if chart == "line" and any(
+        tile_dict.get(field) for field in ("color", "line_dash", "symbol")
+    ):
         return True
     return bool(tile_dict.get("facet_row") or tile_dict.get("facet_col"))
 
@@ -2190,6 +2196,10 @@ def _advanced_field_widget(
         label = "Metric"
     elif field_name == "property":
         label = "Property"
+    elif field_name == "line_dash":
+        label = "Line style"
+    elif field_name == "symbol":
+        label = "Marker shape"
     else:
         label = field_name.upper() if len(field_name) == 1 else field_name.replace("_", " ").title()
     key = f"{prefix}_{field_name}"
@@ -2201,6 +2211,13 @@ def _advanced_field_widget(
         index=index,
         format_func=lambda item: "None" if item == "" else item,
         key=key,
+        help=(
+            config_help.field_help("report.line_dash")
+            if field_name == "line_dash"
+            else config_help.field_help("report.symbol")
+            if field_name == "symbol"
+            else None
+        ),
     )
 
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import re
+from collections.abc import Mapping
 from functools import lru_cache
 from importlib import resources
 from typing import Any, Literal
@@ -53,6 +55,30 @@ class _RecipeModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class RecipeParameter(_RecipeModel):
+    """One bounded value selected while a recipe is installed."""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    label: str
+    description: str = ""
+    unit: Literal["number", "percent"] = "number"
+    default: float
+    minimum: float
+    maximum: float
+    step: float = Field(gt=0.0)
+
+    @model_validator(mode="after")
+    def _range_is_valid(self) -> RecipeParameter:
+        values = (self.minimum, self.default, self.maximum, self.step)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("recipe parameter bounds must be finite")
+        if self.minimum > self.maximum:
+            raise ValueError("recipe parameter minimum cannot exceed maximum")
+        if not self.minimum <= self.default <= self.maximum:
+            raise ValueError("recipe parameter default must be inside its bounds")
+        return self
+
+
 class RecipeInput(_RecipeModel):
     """One processor capability that must be bound before instantiation."""
 
@@ -63,6 +89,9 @@ class RecipeInput(_RecipeModel):
     state_types: tuple[RecipeStateType, ...] = ()
     state_attributes: dict[str, str] = Field(default_factory=dict)
     absent_state_attributes: tuple[str, ...] = ()
+    requires_where: bool = False
+    state_template: dict[str, Any] = Field(default_factory=dict)
+    proposed_name: str = Field(default="", pattern=r"^$|^[A-Za-z][A-Za-z0-9_]*$")
     preferred_names: tuple[str, ...] = ()
     preferred_state_types: tuple[RecipeStateType, ...] = ()
     selection: Literal["automatic", "choice", "field_algorithm"] = "choice"
@@ -77,6 +106,12 @@ class RecipeInput(_RecipeModel):
             raise ValueError("same_attribute_as and match_attribute must be configured together")
         if self.source == "stage" and self.selection == "field_algorithm":
             raise ValueError("stage inputs cannot use field_algorithm selection")
+        if self.source == "stage" and self.requires_where:
+            raise ValueError("stage inputs cannot require a where predicate")
+        if self.source == "stage" and self.state_template:
+            raise ValueError("stage inputs cannot define a state template")
+        if self.proposed_name and not self.state_template:
+            raise ValueError("proposed_name requires a state_template")
         if self.require_preferred and not self.preferred_names:
             raise ValueError("require_preferred needs at least one preferred name")
         if not set(self.preferred_state_types) <= set(self.state_types):
@@ -111,6 +146,7 @@ class KpiRecipe(_RecipeModel):
     tags: tuple[str, ...] = ()
     maturity: Literal["draft", "reviewed", "certified"] = "reviewed"
     processor_kinds: tuple[RecipeProcessorKind, ...]
+    parameters: tuple[RecipeParameter, ...] = ()
     inputs: tuple[RecipeInput, ...] = ()
     default_metric_id: str
     metric: model.Metric
@@ -122,6 +158,10 @@ class KpiRecipe(_RecipeModel):
         roles = [item.role for item in self.inputs]
         if len(roles) != len(set(roles)):
             raise ValueError("recipe input roles must be unique")
+        parameter_names = [item.name for item in self.parameters]
+        if len(parameter_names) != len(set(parameter_names)):
+            raise ValueError("recipe parameter names must be unique")
+        parameter_defaults = {item.name: item.default for item in self.parameters}
         role_set = set(roles)
         for item in self.inputs:
             if item.same_attribute_as and item.same_attribute_as not in role_set:
@@ -132,6 +172,24 @@ class KpiRecipe(_RecipeModel):
                 raise ValueError(
                     f"input {item.role!r} references unknown role {item.different_from!r}"
                 )
+            template_parameters = _placeholder_names(item.state_template)
+            if unknown := template_parameters - set(parameter_names):
+                raise ValueError(
+                    f"input {item.role!r} state template references unknown parameter(s): "
+                    f"{', '.join(sorted(unknown))}"
+                )
+            if item.state_template:
+                state = _STATE_ADAPTER.validate_python(
+                    _substitute(item.state_template, parameter_defaults)
+                )
+                if item.state_types and state.type not in item.state_types:
+                    raise ValueError(
+                        f"input {item.role!r} state template type {state.type!r} is not accepted"
+                    )
+                if item.requires_where and getattr(state, "where", None) is None:
+                    raise ValueError(
+                        f"input {item.role!r} state template requires a where predicate"
+                    )
         template = _metric_template(self)
         placeholders = _placeholder_names(template)
         allowed = {"processor_id", "metric_id", "entity_column", *role_set}
@@ -199,7 +257,35 @@ def load_builtin_kpi_recipes() -> KpiRecipeLibrary:
     return KpiRecipeLibrary.model_validate(payload)
 
 
-def recipe_readiness(recipe: KpiRecipe, processor: model.Processor) -> RecipeReadiness:
+def resolve_recipe_parameters(
+    recipe: KpiRecipe,
+    values: Mapping[str, float] | None = None,
+) -> dict[str, float]:
+    """Resolve defaults and validate one recipe's editable installation parameters."""
+
+    provided = dict(values or {})
+    known = {item.name for item in recipe.parameters}
+    if unknown := set(provided) - known:
+        raise ValueError(f"unknown recipe parameter(s): {', '.join(sorted(unknown))}")
+    resolved: dict[str, float] = {}
+    for item in recipe.parameters:
+        value = float(provided.get(item.name, item.default))
+        if not math.isfinite(value):
+            raise ValueError(f"{item.label} must be finite")
+        if not item.minimum <= value <= item.maximum:
+            raise ValueError(
+                f"{item.label} must be between {item.minimum:g} and {item.maximum:g}"
+            )
+        resolved[item.name] = value
+    return resolved
+
+
+def recipe_readiness(
+    recipe: KpiRecipe,
+    processor: model.Processor,
+    *,
+    parameter_values: Mapping[str, float] | None = None,
+) -> RecipeReadiness:
     """Resolve unambiguous inputs and describe remaining authoring work."""
 
     if processor.kind not in recipe.processor_kinds:
@@ -213,13 +299,14 @@ def recipe_readiness(recipe: KpiRecipe, processor: model.Processor) -> RecipeRea
             ),
         )
 
+    resolved_parameters = resolve_recipe_parameters(recipe, parameter_values)
     options: dict[str, tuple[str, ...]] = {}
     resolved: dict[str, str] = {}
     messages: list[str] = []
     missing = False
     ambiguous = False
     for item in recipe.inputs:
-        choices = tuple(_input_options(item, processor))
+        choices = tuple(_input_options(item, processor, resolved_parameters))
         preferred = _preferred_choice(item.preferred_names, choices)
         if item.require_preferred:
             choices = (preferred,) if preferred else ()
@@ -258,8 +345,9 @@ def recipe_readiness(recipe: KpiRecipe, processor: model.Processor) -> RecipeRea
 def _missing_input_message(item: RecipeInput) -> str:
     if item.require_preferred and item.preferred_names:
         names = " or ".join(repr(name) for name in item.preferred_names)
+        predicate = " with a where predicate" if item.requires_where else ""
         return (
-            f"{item.label} requires a processor state named {names}; add or "
+            f"{item.label} requires a processor state named {names}{predicate}; add or "
             "rename a matching state, then backfill aggregates."
         )
     return f"{item.label} is not available and requires aggregate backfill."
@@ -270,10 +358,17 @@ def instantiate_metric(
     processor: model.Processor,
     metric_id: str,
     bindings: dict[str, str],
+    *,
+    parameter_values: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Materialize and validate one ordinary ``metrics.yaml`` definition."""
 
-    readiness = recipe_readiness(recipe, processor)
+    resolved_parameters = resolve_recipe_parameters(recipe, parameter_values)
+    readiness = recipe_readiness(
+        recipe,
+        processor,
+        parameter_values=resolved_parameters,
+    )
     if readiness.status == "incompatible":
         raise ValueError(readiness.messages[0])
     expected_roles = {item.role for item in recipe.inputs}
@@ -303,7 +398,11 @@ def instantiate_metric(
     display = dict(metric_def.get("display") or {})
     display["label"] = _metric_label_from_id(metric_id)
     metric_def["display"] = display
-    metric_def["recipe"] = {"id": recipe.id, "version": recipe.version}
+    metric_def["recipe"] = {
+        "id": recipe.id,
+        "version": recipe.version,
+        **({"parameters": resolved_parameters} if resolved_parameters else {}),
+    }
     validated = _METRIC_ADAPTER.validate_python(metric_def)
     return validated.model_dump(
         mode="json",
@@ -369,10 +468,16 @@ def recipe_binding_options(
     values: tuple[str, ...] | list[str] | None = None,
     *,
     proposal_fields: tuple[str, ...] | list[str] = (),
+    parameter_values: Mapping[str, float] | None = None,
 ) -> list[RecipeBindingOption]:
     """Describe configured and safely configurable field/algorithm bindings."""
 
-    choices = list(values) if values is not None else _input_options(item, processor)
+    resolved_parameters = dict(parameter_values or {})
+    choices = (
+        list(values)
+        if values is not None
+        else _input_options(item, processor, resolved_parameters)
+    )
     if item.source == "stage":
         return [
             RecipeBindingOption(
@@ -411,7 +516,37 @@ def recipe_binding_options(
             )
         )
 
-    if item.source != "state" or not proposal_fields:
+    if item.state_template:
+        if out:
+            return out
+        state_definition = _state_template_definition(item, resolved_parameters)
+        spec = _STATE_ADAPTER.validate_python(state_definition)
+        existing = set(model.effective_processor_states(processor)) | set(processor.states)
+        state_name = unique_artifact_id(
+            item.proposed_name or f"{item.role}_{spec.type}",
+            existing,
+        )
+        field = _state_business_field(processor, state_name, spec)
+        parameters = _state_parameter_summary(spec)
+        technical = f"Proposed aggregate state: {state_name} · {spec.type}"
+        if parameters:
+            technical += f" · {parameters}"
+        return [
+            RecipeBindingOption(
+                value=state_name,
+                label=" · ".join(
+                    value for value in (field, recipe_algorithm_label(spec.type)) if value
+                ),
+                field=field,
+                algorithm=recipe_algorithm_label(spec.type),
+                state_type=spec.type,
+                technical_detail=technical,
+                configured=False,
+                state_definition=state_definition,
+            )
+        ]
+
+    if item.source != "state" or not proposal_fields or item.requires_where:
         return out
 
     fields = _dedupe_strings([*proposal_fields, *processor_recipe_fields(processor)])
@@ -557,7 +692,11 @@ def _proposed_state_name(
     return unique_artifact_id(base, existing)
 
 
-def _input_options(item: RecipeInput, processor: model.Processor) -> list[str]:
+def _input_options(
+    item: RecipeInput,
+    processor: model.Processor,
+    parameter_values: Mapping[str, float] | None = None,
+) -> list[str]:
     if item.source == "stage":
         if not isinstance(processor, model.FunnelProcessor):
             return []
@@ -572,10 +711,19 @@ def _input_options(item: RecipeInput, processor: model.Processor) -> list[str]:
             if stage.name in by_stage
         ]
 
+    target_definition = (
+        _state_template_definition(item, dict(parameter_values or {}))
+        if item.state_template
+        else None
+    )
     out: list[str] = []
     wanted_types = set(item.state_types)
     for name, spec in model.effective_processor_states(processor).items():
         if wanted_types and spec.type not in wanted_types:
+            continue
+        if target_definition is not None:
+            if _normalized_state_definition(spec) == target_definition:
+                out.append(name)
             continue
         if not _state_attributes_match(
             spec,
@@ -583,8 +731,28 @@ def _input_options(item: RecipeInput, processor: model.Processor) -> list[str]:
             item.absent_state_attributes,
         ):
             continue
+        if item.requires_where and getattr(spec, "where", None) is None:
+            continue
         out.append(name)
     return out
+
+
+def _state_template_definition(
+    item: RecipeInput,
+    parameter_values: Mapping[str, float],
+) -> dict[str, Any]:
+    definition = _substitute(item.state_template, dict(parameter_values))
+    spec = _STATE_ADAPTER.validate_python(definition)
+    return _normalized_state_definition(spec)
+
+
+def _normalized_state_definition(spec: model.StateSpec) -> dict[str, Any]:
+    return spec.model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_none=True,
+        exclude_defaults=True,
+    )
 
 
 def _state_attributes_match(
@@ -718,14 +886,24 @@ def _state_parameter_summary(spec: model.StateSpec) -> str:
         for key in ("lg_k", "k", "lg_max_map_size")
         if getattr(spec, key, None) is not None
     }
-    return " · ".join(
+    parts = [
         f"{key}={values[key]}"
         for key in ("lg_k", "k", "lg_max_map_size")
         if key in values
-    )
+    ]
+    where = getattr(spec, "where", None)
+    if where is not None:
+        rendered = yaml.safe_dump(
+            where.model_dump(mode="json", by_alias=True, exclude_none=True),
+            default_flow_style=True,
+            sort_keys=False,
+            width=1000,
+        ).strip()
+        parts.append(f"where={rendered}")
+    return " · ".join(parts)
 
 
-def _substitute(value: Any, bindings: dict[str, str]) -> Any:
+def _substitute(value: Any, bindings: Mapping[str, Any]) -> Any:
     if isinstance(value, dict):
         return {key: _substitute(item, bindings) for key, item in value.items()}
     if isinstance(value, list):
@@ -762,6 +940,7 @@ __all__ = [
     "KpiRecipeLibrary",
     "RecipeBindingOption",
     "RecipeInput",
+    "RecipeParameter",
     "RecipeReadiness",
     "instantiate_metric",
     "instantiate_tile",
@@ -772,5 +951,6 @@ __all__ = [
     "recipe_binding_attribute",
     "recipe_binding_options",
     "recipe_readiness",
+    "resolve_recipe_parameters",
     "unique_artifact_id",
 ]

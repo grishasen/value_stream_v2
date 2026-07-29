@@ -238,9 +238,10 @@ default `value_format`, and `direction` (`higher_is_better`,
 `lower_is_better`, or `neutral`). Display metadata never changes the formula,
 processor computation hash, or stored aggregate state.
 
-A metric installed from a KPI Recipe may carry `recipe: {id, version}`
-provenance. The installed metric remains authoritative and does not track
-future recipe edits automatically.
+A metric installed from a KPI Recipe may carry
+`recipe: {id, version, parameters?}` provenance. Resolved parameter values are
+recorded when the recipe exposes them. The installed metric remains
+authoritative and does not track future recipe edits automatically.
 
 ### Partial
 A Parquet file produced by one Processor processing one chunk. Lives at `aggregates/<src>/<proc>/daily/period=YYYY-MM/part-<pipeline_run_id>.parquet`. A "partial" is conceptually the smallest unit of write; compaction merges multiple partials into one.
@@ -291,10 +292,11 @@ See reference/readers-and-formats.md.
 ### KPI Recipe
 A versioned, inert authoring artifact that connects a business question to
 required Processor capabilities, a metric template, calculation/method
-guidance, and recommended report presentation. It is not part of a workspace
-Catalog and cannot execute. An explicit install maps its roles to persisted
-aggregate states/stages and materializes ordinary Metric and optional Tile
-YAML. See reference/kpi-recipes.md.
+guidance, optional bounded install parameters, closed state templates, and
+recommended report presentation. It is not part of a workspace Catalog and
+cannot execute. An explicit install maps its roles to persisted aggregate
+states/stages and materializes ordinary Processor state, Metric, and optional
+Tile YAML. See reference/kpi-recipes.md.
 
 ### Run
 Shorthand for a pipeline run.
@@ -324,7 +326,7 @@ A binary state holding a serialized `datasketches.tdigest_double` (compression `
 A binary state holding a Theta sketch from Apache DataSketches. Used when set algebra (intersection / difference) is required, e.g. cohort retention, audience overlap.
 
 ### Tile
-A single chart on a Dashboard page, bound to one metric and one chart kind. Required fields depend on the chart kind (e.g. `line` requires `x`; `treemap` requires `path` and derives Color from its metric). Typed common fields include `description`, `placement`, `kpi`, `scale_mode`, and `value_format`; chart-specific extras remain permissive. `placement: kpi_strip` is valid only for an ungrouped `kpi_card`. A KPI query must resolve to one numeric scalar and can request a target, an equal-length previous period, and an aggregate time-series sparkline. `scale_mode` is presentation-only and supports `absolute`, `index_100`, and `percent_change` for line/stacked-area charts.
+A single chart on a Dashboard page, bound to one metric and one chart kind. Required fields depend on the chart kind (e.g. `line` requires `x`; `treemap` requires `path` and derives Color from its metric). Typed common fields include `description`, `placement`, `kpi`, `scale_mode`, and `value_format`; chart-specific fields are strict. A `line` tile may independently map `color`, `line_dash`, and optional marker `symbol` to aggregate dimensions, so one dimension retains stable colors while another is distinguished by line and marker style. `placement: kpi_strip` is valid only for an ungrouped `kpi_card`. A KPI query must resolve to one numeric scalar and can request a target, an equal-length previous period, and an aggregate time-series sparkline. `scale_mode` is presentation-only and supports `absolute`, `index_100`, and `percent_change` for line/stacked-area charts.
 
 ### Page filter
 An interactive Reports-page control authored under `page.filters`, with a safe
@@ -396,8 +398,9 @@ When the Catalog changes, the planner classifies the change against the existing
 | **Catalog removal** | Remove a Source from the Builder | The confirmed cascade removes its Processors, transitive dependent Metrics, bound Tiles, unsupported page filters, and related Chat descriptions from configuration. Persisted aggregates and run audit history remain untouched by the catalog edit. |
 
 Metric display metadata, dashboard/page/tile presentation, KPI comparison
-settings, and filters over existing aggregate dimensions are compatible changes
-and do not require reprocessing.
+settings—including line color, dash, and marker-symbol dimension mappings—and
+filters over existing aggregate dimensions are compatible changes and do not
+require reprocessing.
 
 Adding a State to an existing Processor changes its computation hash. Queries
 under the updated Catalog read only aggregate partials carrying that new hash;
@@ -530,7 +533,7 @@ Transforms define the user-facing schema. If a nicer business name is needed, cr
 | KPI recipe library | KPI Recipe | contains | 1 : N |
 | KPI Recipe | Metric | materializes on explicit install | 1 : 1 |
 | KPI Recipe | Tile | recommends on explicit install | 1 : 0..1 |
-| KPI Recipe | State | proposes when selected field/algorithm is not configured | 1 : 0..N |
+| KPI Recipe | State | proposes when a selected capability or parameter-resolved state template is not configured | 1 : 0..N |
 | Source | Reader | uses | 1 : 1 |
 | Source | Transform | applies | 1 : N (ordered) |
 | Source | Processor | feeds | 1 : N |

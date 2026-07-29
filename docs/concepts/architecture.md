@@ -153,9 +153,10 @@ Metric display metadata lives in `metrics.yaml`; page controls, KPI semantics,
 and tile presentation live in `dashboards.yaml`. Typed presentation properties
 cover labels, units, value formats, favorable direction, explicit KPI-strip
 placement, previous-period/target comparison, sparklines, absolute/index/change
-scales, semantic category colors, goal/reference lines, sorting, and conditional
-colors. These settings are consumed by the query/presentation boundary and do
-not alter persisted aggregate state or metric calculation semantics.
+scales, semantic category colors, independent line-dash and marker-symbol
+dimensions, goal/reference lines, sorting, and conditional colors. These
+settings are consumed by the query/presentation boundary and do not alter
+persisted aggregate state or metric calculation semantics.
 
 For external BI tools, `valuestream export-duckdb <workspace> --grain <grain>`
 creates a materialized DuckDB file with one table per metric at the selected
@@ -425,20 +426,31 @@ affected catalog files before control returns to the UI.
 
 Both metric steps also expose one shared, versioned KPI recipe library. The
 packaged recipe YAML is an inert authoring artifact: it describes business
-questions, aggregate capability requirements, metric templates, method
-accuracy, and report recommendations. A deterministic resolver reports
-`ready`, `mapping_required`, or `backfill_required`; only an explicit install
-materializes ordinary metric/tile YAML. AI Studio installs into its draft,
-while Configuration Builder installs into the active catalog. See the
+questions, aggregate capability requirements, bounded install parameters,
+closed processor-state/metric templates, method accuracy, and report
+recommendations. A deterministic resolver reports `ready`,
+`mapping_required`, or `backfill_required`; only an explicit install
+materializes ordinary processor/metric/tile YAML. AI Studio installs into its
+draft, while Configuration Builder installs into the active catalog. See the
 [KPI recipe reference](../reference/kpi-recipes.md).
 
 Recipe mapping is business-facing: sketch-backed metrics select a
 processor-owned field and any algorithm declared compatible by the recipe;
 paired digests select one score field, and funnels select stages/populations.
-State IDs and sketch parameters are technical detail. A missing
-field/algorithm state becomes a deterministic processor-state proposal. Before
-installation, both Studios show the exact generated YAML patch plus the named
-source, fields, states, and current/proposed processor computation hashes.
+Recipes may also expose bounded values such as a relative materiality
+threshold. State IDs and aggregate parameters remain technical detail. A
+missing field/algorithm state or a parameter-resolved, recipe-authored filtered
+state becomes a deterministic processor-state proposal. Before installation,
+both Studios show the exact generated YAML patch plus the named source, fields,
+states, and current/proposed processor computation hashes.
+
+The generic metric editor follows the same business-first rule. Metric choices
+are ordered and labelled as `Processor · metric name · metric kind`. Its Review
+panel leads with the metric description, a readable calculation, aggregate
+inputs, the metric families supported by those aggregate states, and
+presentation semantics. Calculations are rendered as explanatory Markdown with
+inline LaTeX notation; exact generated YAML remains available in collapsed
+technical details.
 Configuration Builder applies and post-validates the multi-file patch inside a
 rollback boundary. The changed processor requires the first ingestion run for
 a new workspace or replay/backfill for existing aggregates; recipe

@@ -57,7 +57,7 @@ _TIME_COLUMN_EQUIVALENTS = {
 _FACET_FIELDS = ("facet_col", "facet_row")
 _CURVE_CHARTS = {"roc_curve", "precision_recall_curve", "gain_curve", "lift_curve"}
 _CHART_DIMENSION_FIELDS = {
-    "line": ("x", *_FACET_FIELDS, "color"),
+    "line": ("x", *_FACET_FIELDS, "color", "line_dash", "symbol"),
     "stacked_area": ("x", *_FACET_FIELDS, "color"),
     "bar": ("x", *_FACET_FIELDS, "color"),
     "kpi_card": ("group_by",),
@@ -92,6 +92,8 @@ _DEFAULT_DIMENSION_FIELDS = (
     "path",
     "x",
     "color",
+    "line_dash",
+    "symbol",
     *_FACET_FIELDS,
     "animation_frame",
     "animation_group",
@@ -143,13 +145,16 @@ def query_tile(
         )
         query_metric_name = distribution_metric_name or query_metric_name
     canonical_tile = tile_dict
-    tile_filters = dict(tile_dict.get("filters") or {})
+    tile_filters: dict[str, Any] = {}
     filter_columns = available_filter_columns_for_tile(catalog, tile)
     if filters:
         for key, value in filters.items():
             column = _canonical_column(key, filter_columns)
             if value not in (None, "") and column is not None:
                 tile_filters[column] = value
+    # Authored tile filters define the metric's valid population and therefore
+    # take precedence over interactive page filters on the same field.
+    tile_filters.update(dict(tile_dict.get("filters") or {}))
     tile_filters = _canonicalize_filter_keys(tile_filters, filter_columns)
     grain = grain_for_tile(canonical_tile)
     group_by = _processor_group_columns(

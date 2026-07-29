@@ -661,6 +661,103 @@ def test_line_chart_keeps_line_trace_at_distinct_threshold() -> None:
 
 
 @pytest.mark.unit
+def test_line_chart_maps_color_and_style_to_independent_dimensions() -> None:
+    days = [dt.date(2024, 1, 1) + dt.timedelta(days=offset) for offset in range(30)]
+    frame = pl.DataFrame(
+        [
+            {
+                "Day": day,
+                "Channel": channel,
+                "CustomerType": customer_type,
+                "CTR": 0.01 * (index + 1),
+            }
+            for index, day in enumerate(days)
+            for channel in ("Web", "Mobile")
+            for customer_type in ("Known", "Anonymous")
+        ]
+    )
+
+    figure = render_chart(
+        frame,
+        {
+            "id": "line",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "chart": "line",
+            "title": "CTR by channel and customer type",
+            "x": "Day",
+            "color": "Channel",
+            "line_dash": "CustomerType",
+            "symbol": "CustomerType",
+        },
+        theme={
+            "category_colors": {
+                "Channel": {
+                    "Web": "#2563EB",
+                    "Mobile": "#14B8A6",
+                }
+            }
+        },
+    )
+
+    assert len(figure.data) == 4
+    web = [trace for trace in figure.data if "Web" in str(trace.name)]
+    mobile = [trace for trace in figure.data if "Mobile" in str(trace.name)]
+    known = [trace for trace in figure.data if "Known" in str(trace.name)]
+    anonymous = [trace for trace in figure.data if "Anonymous" in str(trace.name)]
+    assert {trace.line.color for trace in web} == {"#2563EB"}
+    assert {trace.line.color for trace in mobile} == {"#14B8A6"}
+    assert len({trace.line.dash for trace in known}) == 1
+    assert len({trace.line.dash for trace in anonymous}) == 1
+    assert {trace.line.dash for trace in known} != {trace.line.dash for trace in anonymous}
+    assert len({trace.marker.symbol for trace in known}) == 1
+    assert len({trace.marker.symbol for trace in anonymous}) == 1
+    assert {trace.marker.symbol for trace in known} != {
+        trace.marker.symbol for trace in anonymous
+    }
+    assert all("markers" in str(trace.mode) for trace in figure.data)
+
+
+@pytest.mark.unit
+def test_line_scale_mode_partitions_by_color_and_line_style() -> None:
+    frame = pl.DataFrame(
+        {
+            "Day": [
+                dt.date(2024, 1, 1),
+                dt.date(2024, 1, 2),
+                dt.date(2024, 1, 1),
+                dt.date(2024, 1, 2),
+            ],
+            "Channel": ["Web"] * 4,
+            "CustomerType": ["Known", "Known", "Anonymous", "Anonymous"],
+            "CTR": [0.1, 0.2, 0.4, 0.2],
+        }
+    )
+
+    figure = render_chart(
+        frame,
+        {
+            "id": "line",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "chart": "line",
+            "title": "Indexed CTR",
+            "x": "Day",
+            "color": "Channel",
+            "line_dash": "CustomerType",
+            "scale_mode": "index_100",
+        },
+    )
+
+    traces = {str(trace.name): list(trace.y) for trace in figure.data}
+    assert next(values for name, values in traces.items() if "Known" in name) == [100.0, 200.0]
+    assert next(values for name, values in traces.items() if "Anonymous" in name) == [
+        100.0,
+        50.0,
+    ]
+
+
+@pytest.mark.unit
 def test_bar_chart_sorts_and_limits_rows() -> None:
     frame = pl.DataFrame(
         {

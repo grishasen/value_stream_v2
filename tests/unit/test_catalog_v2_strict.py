@@ -97,6 +97,34 @@ def test_chart_contract_rejects_retired_aliases_and_metric_owned_y() -> None:
 
 
 @pytest.mark.unit
+def test_line_tile_accepts_dual_style_dimensions_only_for_lines() -> None:
+    base = {"id": "engagement", "title": "Engagement", "metric": "CTR"}
+
+    tile = model.validate_tile(
+        {
+            **base,
+            "chart": "line",
+            "x": "Day",
+            "color": "Channel",
+            "line_dash": "CustomerType",
+            "symbol": "CustomerType",
+        }
+    )
+
+    assert tile.line_dash == "CustomerType"
+    assert tile.symbol == "CustomerType"
+    with pytest.raises(ValidationError, match="line_dash"):
+        model.validate_tile(
+            {
+                **base,
+                "chart": "bar",
+                "x": "Channel",
+                "line_dash": "CustomerType",
+            }
+        )
+
+
+@pytest.mark.unit
 def test_boxplot_owns_its_distribution_through_the_selected_metric() -> None:
     base = {
         "id": "scores",

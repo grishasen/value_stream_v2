@@ -258,3 +258,60 @@ def test_state_where_filters_counts_and_sums() -> None:
     assert out["ConversionResponseTime_Count"] == 2
     assert out["DistinctConversionResponseTimes"] == 2
     assert out["ConversionResponseTime_Sum"] == pytest.approx(40.0)
+
+
+@pytest.mark.unit
+def test_material_upward_count_uses_relative_threshold() -> None:
+    processor = NumericDistributionProcessor(
+        model.NumericDistributionProcessor.model_validate(
+            {
+                "id": "exploration",
+                "source": "ih",
+                "kind": "numeric_distribution",
+                "group_by": ["Channel"],
+                "time": {"property": "day", "grain": "summary"},
+                "properties": ["ExplorationDelta"],
+                "states": {
+                    "Explore_Count": {
+                        "type": "count",
+                        "source_column": "ExplorationDelta",
+                    },
+                    "MaterialExploredUp_Count": {
+                        "type": "count",
+                        "source_column": "ExplorationDelta",
+                        "where": {
+                            "op": "and",
+                            "args": [
+                                {"op": "gt", "column": "Propensity", "value": 0.0},
+                                {
+                                    "op": "gt",
+                                    "args": [
+                                        {"col": "ExplorationDelta"},
+                                        {
+                                            "op": "mul",
+                                            "args": [
+                                                {"col": "Propensity"},
+                                                {"lit": 0.10},
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                },
+            }
+        )
+    )
+    frame = pl.LazyFrame(
+        {
+            "Channel": ["Web"] * 6,
+            "Propensity": [0.2, 0.2, 0.2, 0.0, -0.2, 0.5],
+            "ExplorationDelta": [0.019, 0.020, 0.021, 0.1, 0.5, 0.051],
+        }
+    )
+
+    out = processor.chunk_aggregate(frame, _ctx()).row(0, named=True)
+
+    assert out["Explore_Count"] == 6
+    assert out["MaterialExploredUp_Count"] == 2

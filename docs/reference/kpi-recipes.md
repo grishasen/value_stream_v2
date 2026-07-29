@@ -23,16 +23,19 @@ A recipe contains:
 | `business_questions`, `tags` | Search and interpretation aids |
 | `maturity` | `draft`, `reviewed`, or `certified` governance state |
 | `processor_kinds` | Processor families that may satisfy the recipe |
-| `inputs` | Required business roles, field/algorithm selection mode, accepted state types, metadata filters, pairing/exclusion rules, and preferences |
+| `parameters` | Optional bounded install-time numbers, including percentages displayed in business units |
+| `inputs` | Required business roles, field/algorithm selection mode, accepted state types, metadata and filtered-state requirements, recipe-authored state templates, pairing/exclusion rules, and preferences |
 | `default_metric_id` | Proposed ID; the installer adds a stable numeric suffix on collision |
 | `metric` | A normal metric definition with exact-value placeholders such as `${processor_id}` |
 | `method` | Calculation, accuracy class, algorithm, and caveat |
 | `report` | Recommended chart, placement, and optional KPI comparison defaults |
 
 Template substitution is deliberately closed: a placeholder must occupy the
-whole YAML scalar and must name a declared binding or built-in installer value.
-Recipes cannot inject Python, SQL, or expression strings. Formula recipes
-materialize the same closed expression AST used by hand-authored metrics.
+whole YAML scalar. Metric-template placeholders must name a declared binding
+or built-in installer value; state-template placeholders must name a declared,
+bounded recipe parameter. Recipes cannot inject Python, SQL, or expression
+strings. Formula recipes and recipe-authored filtered states materialize the
+same closed expression AST used by hand-authored catalog objects.
 
 ## Readiness
 
@@ -43,15 +46,16 @@ returns one of four states:
 |---|---|---|
 | `ready` | Every required state/stage maps unambiguously | Installer preselects all bindings |
 | `mapping_required` | Compatible candidates exist, but business intent is ambiguous | User chooses each unresolved input |
-| `backfill_required` | A required aggregate state or stage is absent from the current processor contract | Configurable sketch inputs can propose a processor state; non-configurable inputs remain blocked |
+| `backfill_required` | A required aggregate state or stage is absent from the current processor contract | Configurable sketch inputs and closed recipe-authored state templates can propose a processor state; other non-configurable inputs remain blocked |
 | `incompatible` | Processor kind cannot execute the recipe | Processor is excluded from the selector |
 
 Matching is deterministic. The resolver filters by source (`state` or
-`stage`), state type, required/absent state metadata, and strict semantic roles,
-then applies ordered name/algorithm preferences. A sole remaining candidate is
-safe to map automatically; multiple business fields, algorithms, stages, or
-populations require a user choice. Paired score digests require matching score
-metadata and funnel endpoints must be different.
+`stage`), state type, required/absent state metadata, required `where`
+predicates or the exact parameter-resolved state template, and strict semantic
+roles, then applies ordered name/algorithm preferences. A sole remaining
+candidate is safe to map automatically; multiple business fields, algorithms,
+stages, or populations require a user choice. Paired score digests require
+matching score metadata and funnel endpoints must be different.
 
 Readiness never examines raw event rows. It reads only processor configuration
 and its effective aggregate-state contract.
@@ -61,6 +65,9 @@ safe configuration choices. It lists every processor-owned candidate field —
 including every `group_by` field and configured identity/property field — and
 every algorithm declared compatible by the recipe. A field/algorithm pair
 that is not yet a processor state is shown as a proposal, not as unavailable.
+The browser never invents a business-specific `where` predicate. It may
+propose one only when the recipe contains the complete closed AST and every
+substituted value is a declared, bounded parameter.
 
 ## Install Workflow
 
@@ -68,17 +75,19 @@ Both authoring surfaces provide the same steps:
 
 1. Search by KPI, business question, tag, calculation, or domain.
 2. Read the business definition, accuracy class, algorithm, and caveat.
-3. Select a compatible Processor and review readiness.
-4. Select business fields and any recipe-compatible algorithm for sketch-backed
+3. Edit any bounded recipe parameters. Percentages are displayed as percentages
+   even though the generated catalog expression stores their decimal value.
+4. Select a compatible Processor and review readiness.
+5. Select business fields and any recipe-compatible algorithm for sketch-backed
    metrics, stages or populations for funnels, and any other ambiguous roles.
    Proposed states are identified as requiring a first run or backfill.
-5. Choose a unique metric ID.
-6. Optionally add the recommended tile to an existing dashboard page.
-7. Select **Review changes** and inspect the exact generated
+6. Choose a unique metric ID.
+7. Optionally add the recommended tile to an existing dashboard page.
+8. Select **Review changes** and inspect the exact generated
    `processors.yaml`, `metrics.yaml`, and `dashboards.yaml` patches.
-8. When a processor state is proposed, review the source, source fields,
+9. When a processor state is proposed, review the source, source fields,
    affected states, and current/proposed processor computation hashes.
-9. Apply explicitly. If materialization is required, follow the named source
+10. Apply explicitly. If materialization is required, follow the named source
    handoff to Data Load and start the run there.
 
 Configuration Builder writes any proposed processor state first, followed by
@@ -119,6 +128,10 @@ metrics:
       id: audience.unique_entities
       version: 1
 ```
+
+When a recipe has editable parameters, its installed metric also records the
+resolved values under `recipe.parameters`. This makes the chosen definition
+reviewable without making the packaged recipe part of runtime execution.
 
 If `Channel` and CPC were selected before that state existed, the same action
 also adds the ordinary processor configuration:
@@ -161,8 +174,13 @@ internal state-ID choice.
 | `audience.unique_entities` | Distinct audience/reach | CPC, HLL, or Theta state; CPC preferred | Approximate | KPI card |
 | `distribution.median` | Median numeric/score value | t-digest or KLL state | Approximate | KPI card |
 | `distribution.p95` | High-tail numeric/score value | t-digest or KLL state | Approximate | KPI card |
-| `service.response_time_p95` | Decision-to-outcome response time (P95) | Unconditioned response-time t-digest or KLL state | Approximate | KPI card with previous-period comparison |
+| `distribution.boxplot` | Distribution boxplot | t-digest or KLL state | Approximate | Boxplot |
+| `engagement.decision_to_outcome_latency_p95` | Decision-to-outcome latency (P95) | Unconditioned duration t-digest or KLL state | Approximate | KPI card with previous-period comparison |
 | `model_quality.roc_auc` | Ranking discrimination | Matched positive/negative t-digests | Approximate | KPI card |
+| `model_quality.score_calibration` | Observed-to-predicted score calibration | Positive count, score sum, and observation count | Exact | KPI card |
+| `decisioning.material_upward_exploration_rate` | Material upward score-revision rate | Purpose-built relatively filtered upward-revision and total counts on a numeric-distribution processor | Exact | KPI card |
+| `model_quality.implied_evidence_index` | Heuristic implied evidence index | Pooled score-variance and squared-delta means | Statistical | KPI card |
+| `model_quality.relative_exploration_variance` | Relative exploration variance | Pooled squared-delta and score-variance means | Statistical | KPI card |
 | `funnel.conversion_rate` | Funnel completion rate | Start/completion count states | Exact | KPI card |
 | `funnel.dropoff_rate` | Funnel stage loss | Ordered funnel stages | Exact | KPI card |
 | `lifecycle.summary` | Entity lifecycle measures | Entity lifecycle processor | Exact | Table |
@@ -172,6 +190,23 @@ The unique-entity recipe prefers CPC states created by current processor
 defaults while accepting HLL and Theta states. Theta is useful when the same
 persisted set also supports intersections or differences. The recipe does not
 convert or merge different sketch families together.
+
+The decision-to-outcome recipe is unit-neutral: it inherits the selected
+duration field's unit and must not be labelled as seconds unless the source
+contract establishes seconds. It measures the time until an outcome is
+recorded, not request-serving latency.
+
+The three exploration recipes are draft diagnostics. Upward exploration is an
+adaptive-decisioning policy KPI, not a predictive-model-quality metric. It uses
+a dedicated numeric-distribution processor so outcome filtering cannot change
+the population. **Material upward exploration rate** counts a decision only
+when the raw score is positive and
+`FinalPropensity - Propensity > Propensity × threshold`. The threshold defaults
+to 10% and is editable during installation; equality at the boundary and
+zero/negative raw scores are excluded. The implied evidence value is a
+heuristic index, not a response count or fitted posterior parameter. Relative
+exploration variance is an unbounded ratio, not an uncertainty probability.
+Randomised control arms must be excluded from all three.
 
 ## Versioning and Governance
 
@@ -194,6 +229,13 @@ deterministic state definition to `processors.yaml` (or the AI draft) and binds
 the metric to that state. Default parameters are CPC `lg_k=11`, HLL/Theta
 `lg_k=12`, t-digest `k=500`, KLL `k=200`, and Top-K
 `lg_max_map_size=10`; they remain inspectable in the technical binding.
+
+A parameter that changes aggregate-state semantics is part of that state
+definition. The resolver reuses a state only when its normalized definition,
+including the resolved predicate value, matches exactly. Choosing a different
+material-upward threshold therefore proposes a distinct filtered count state,
+changes the processor computation hash, and requires materialization rather
+than silently reinterpreting existing counts.
 
 This configuration is intentionally allowed before any data is loaded. The
 preview names the changed processor states, source fields, source, and the

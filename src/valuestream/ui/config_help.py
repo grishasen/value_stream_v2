@@ -518,6 +518,14 @@ FIELD_HELP: dict[str, str] = {
         "chart: kpi_card\nmetric: VS_Click_Through_Rate",
     ),
     "report.field": _tip("Metric result column assigned to this chart role.", "Month"),
+    "report.line_dash": _tip(
+        "Dimension represented by solid, dashed, dotted, or dash-dotted line styles.",
+        "CustomerType",
+    ),
+    "report.symbol": _tip(
+        "Optional dimension represented by marker shapes in addition to line style.",
+        "CustomerType",
+    ),
     "report.stages": _tip(
         "Comma-separated funnel stage columns rendered in business order.",
         "Impression,Clicked,Conversion",

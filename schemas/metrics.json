@@ -1388,6 +1388,13 @@
           "title": "Id",
           "type": "string"
         },
+        "parameters": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
         "version": {
           "minimum": 1,
           "title": "Version",
