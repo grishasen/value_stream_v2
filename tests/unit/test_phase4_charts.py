@@ -805,6 +805,52 @@ def test_bar_chart_supports_percent_stacking() -> None:
 
 
 @pytest.mark.unit
+def test_month_axis_uses_exact_periods_instead_of_thirty_day_date_ticks() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Month": [
+                    "2024-06",
+                    "2024-06",
+                    "2024-07",
+                    "2024-07",
+                    "2024-08",
+                    "2024-08",
+                    "2024-09",
+                    "2024-09",
+                ],
+                "Channel": ["Mobile", "Web"] * 4,
+                "Lift": [0.6, 1.15, 0.46, 0.57, 0.48, 0.89, 0.63, 0.89],
+            }
+        ),
+        {
+            "id": "monthly_lift",
+            "metric": "ModelControlLift",
+            "metric_output": "Lift",
+            "chart": "bar",
+            "title": "Monthly model-control lift",
+            "x": "Month",
+            "color": "Channel",
+            "value_format": "percent",
+        },
+    )
+
+    assert figure.layout.xaxis.type == "category"
+    assert list(figure.layout.xaxis.tickvals) == [
+        "2024-06",
+        "2024-07",
+        "2024-08",
+        "2024-09",
+    ]
+    assert list(figure.layout.xaxis.ticktext) == [
+        "June",
+        "July",
+        "August",
+        "September",
+    ]
+
+
+@pytest.mark.unit
 def test_scatter_ignores_invalid_marker_size_values() -> None:
     figure = render_chart(
         pl.DataFrame(

@@ -229,6 +229,7 @@ def render_chart(  # noqa: PLR0912, PLR0915
     _apply_label_overrides(fig, tile)
     _apply_goal_lines(fig, tile, base)
     _apply_value_format(fig, tile)
+    _apply_period_axis(fig, rows, tile)
     _strip_facet_annotation_prefixes(fig, tile, base)
     _apply_theme(fig, theme or {}, tile)
     _apply_display_labels(fig, tile)
@@ -2672,6 +2673,58 @@ def _apply_value_format(fig: go.Figure, tile: Mapping[str, Any]) -> None:
                 )
             else:
                 trace.update(hovertemplate=f"%{{x}}<br>%{{y:{value_format}}}<extra></extra>")
+
+
+def _apply_period_axis(
+    fig: go.Figure,
+    rows: pl.DataFrame,
+    tile: Mapping[str, Any],
+) -> None:
+    """Render authored month periods as exact categories, not 30-day date ticks."""
+
+    x = tile.get("x")
+    if not isinstance(x, str) or x not in {"Month", "month"} or x not in rows.columns:
+        return
+    ticks = _month_period_ticks(rows.get_column(x).drop_nulls().to_list())
+    if not ticks:
+        return
+    tickvals, ticktext = zip(*ticks, strict=True)
+    fig.update_xaxes(
+        type="category",
+        categoryorder="array",
+        categoryarray=list(tickvals),
+        tickmode="array",
+        tickvals=list(tickvals),
+        ticktext=list(ticktext),
+    )
+
+
+def _month_period_ticks(values: list[Any]) -> list[tuple[Any, str]]:
+    periods: dict[tuple[int, int], Any] = {}
+    for value in values:
+        parsed = _month_period(value)
+        if parsed is None:
+            return []
+        periods.setdefault(parsed, value)
+    if not periods:
+        return []
+    show_year = len({year for year, _ in periods}) > 1
+    return [
+        (
+            periods[(year, month)],
+            dt.date(year, month, 1).strftime("%B %Y" if show_year else "%B"),
+        )
+        for year, month in sorted(periods)
+    ]
+
+
+def _month_period(value: Any) -> tuple[int, int] | None:
+    if isinstance(value, dt.datetime | dt.date):
+        return value.year, value.month
+    matched = re.fullmatch(r"(\d{4})-(0[1-9]|1[0-2])(?:-\d{2})?", str(value))
+    if matched is None:
+        return None
+    return int(matched.group(1)), int(matched.group(2))
 
 
 def _apply_color_value_format(fig: go.Figure, value_format: str) -> None:

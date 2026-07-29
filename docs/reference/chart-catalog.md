@@ -67,6 +67,12 @@ validation.
 
 The chart factory receives `(rows: pl.DataFrame, tile: dict, plan: PlanInfo)` and returns a `plotly.graph_objects.Figure`.
 
+`Month` is a calendar-period dimension rather than a continuous elapsed-time
+value. Cartesian charts therefore render its actual `YYYY-MM` values as ordered
+categories labelled with full month names (and the year when the result spans
+multiple years). This prevents Plotly from replacing authored periods with
+synthetic 30-day ticks such as `Jul 31` or `Aug 30`.
+
 ---
 
 ## 2. Common Tile fields
