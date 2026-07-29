@@ -2526,7 +2526,11 @@ Use a <code>binary_outcome</code> processor with <code>variant_column</code> set
 <span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">contingency_test</span>
 <span class="w">    </span><span class="nt">tests</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">chi2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">g</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">z</span><span class="p p-Indicator">]</span>
 </code></pre></div>
-<p>A tile with <code>metric: Lift</code> gets <code>TestCTR, ControlCTR, Lift, Lift_Z_Score, Lift_P_Val, StdErr</code> per group. reference/algorithms.md §3 has the math.</p>
+<p>A tile with <code>metric: Lift</code> gets <code>TestCTR, ControlCTR</code>,
+<code>AbsoluteRateDifference</code> with its confidence bounds, relative <code>Lift</code> with
+<code>Lift_CI_Low</code> / <code>Lift_CI_High</code>, <code>Lift_Z_Score</code>, <code>Lift_P_Val</code>, and <code>StdErr</code> per
+group. An <code>interval</code> tile can plot <code>Lift</code> with those relative bounds.
+reference/algorithms.md §3 has the math.</p>
 <p><strong>D7. How do I do a multi-variant experiment?</strong>
 Use the <code>experiment</code> flavor of <code>binary_outcome</code>: include <code>ExperimentName</code> and <code>ExperimentGroup</code> in <code>group_by</code>, set <code>variant_column = ExperimentGroup</code>, and add a <code>filter</code> restricting to in-experiment rows. The <code>Experiment_Significance</code> metric runs chi-square, G-test, and z-test on the contingency.</p>
 <p><strong>D8. How do percentiles work for descriptive stats?</strong>

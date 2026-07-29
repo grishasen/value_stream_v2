@@ -3509,6 +3509,16 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <span class="w">  </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Clicks</span>
 <span class="w">  </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sankey</span>
 <span class="w">  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Channel</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">CustomerType</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Placement</span><span class="p p-Indicator">]</span>
+
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">relative_lift</span>
+<span class="w">  </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Relative lift with 95% confidence interval</span>
+<span class="w">  </span><span class="nt">metric</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ExperimentLift</span>
+<span class="w">  </span><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">interval</span>
+<span class="w">  </span><span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
+<span class="w">  </span><span class="nt">metric_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Lift</span>
+<span class="w">  </span><span class="nt">lower_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Lift_CI_Low</span>
+<span class="w">  </span><span class="nt">upper_output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Lift_CI_High</span>
+<span class="w">  </span><span class="nt">value_format</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">percent</span>
 </code></pre></div>
 <p>For Sankey, every adjacent pair in <code>path</code> becomes a link layer. Nodes are
 stage-scoped, so the same label may appear independently at different steps.

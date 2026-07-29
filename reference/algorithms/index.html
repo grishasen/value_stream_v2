@@ -3411,6 +3411,17 @@ scalar updates.</p>
 <div class="highlight"><pre><span></span><code>Lift = (TestCTR - ControlCTR) / ControlCTR
 </code></pre></div>
 <p>NaN/Inf-safe: replace <code>Inf</code> with <code>0.0</code>, NaN with <code>0.0</code> (no control = no lift to display).</p>
+<p><code>Lift_CI_Low</code> and <code>Lift_CI_High</code> are the configured-confidence-level Katz
+log interval for the relative risk, shifted down by one so the bounds use the
+same relative-lift scale:</p>
+<div class="highlight"><pre><span></span><code>RR = TestCTR / ControlCTR
+SE(log(RR)) = sqrt(1/TestPositives - 1/TestSampleSize
+                   + 1/ControlPositives - 1/ControlSampleSize)
+RR_CI = exp(log(RR) ± z * SE(log(RR)))
+Lift_CI = RR_CI - 1
+</code></pre></div>
+<p>When the relative-risk interval is undefined because an arm is empty or the
+control rate is zero, the bounds collapse to the display-safe <code>Lift</code> value.</p>
 <p>The same metric also returns <code>TestSampleSize</code>, <code>ControlSampleSize</code>, and the
 absolute rate effect:</p>
 <div class="highlight"><pre><span></span><code>AbsoluteRateDifference = TestCTR - ControlCTR
@@ -3423,9 +3434,10 @@ Newcombe-Wilson difference interval is:</p>
 <div class="highlight"><pre><span></span><code>AbsoluteRateDifference_CI_Low  = L_T - U_C
 AbsoluteRateDifference_CI_High = U_T - L_C
 </code></pre></div>
-<p>This interval uses only persisted <code>Positives</code> and <code>Negatives</code>; it never needs
-raw assignments. The implementation reports the historical <code>Lift</code>, z-score,
-p-value, <code>CTR</code>, and <code>StdErr</code> outputs unchanged for compatibility.</p>
+<p>Both intervals use only persisted <code>Positives</code> and <code>Negatives</code>; neither needs
+raw assignments. The implementation retains the absolute rate difference and
+its bounds alongside relative <code>Lift</code>, its bounds, z-score, p-value, <code>CTR</code>, and
+<code>StdErr</code>.</p>
 <h3 id="34-standard-error-of-a-proportion">3.4 Standard error of a proportion<a class="headerlink" href="#34-standard-error-of-a-proportion" title="Permanent link">&para;</a></h3>
 <p>For one variant with <code>n = Positives + Negatives</code>:
 <div class="highlight"><pre><span></span><code>StdErr = sqrt( CTR · (1 − CTR) / n )

@@ -2228,7 +2228,8 @@ and control variants can be compared statistically:</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>query<span class="w"> </span>examples/demo<span class="w"> </span>VS_ModelControl_Engagement_Compare<span class="w"> </span>--by<span class="w"> </span>Channel<span class="w"> </span>--grain<span class="w"> </span>Day
 uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>query<span class="w"> </span>examples/demo<span class="w"> </span>VS_ModelControl_Engagement_Z_Test<span class="w"> </span>--by<span class="w"> </span>Channel<span class="w"> </span>--grain<span class="w"> </span>Day
 </code></pre></div>
-<p><code>variant_compare</code> returns per-variant rates, lift, and standard error;
+<p><code>variant_compare</code> returns per-variant rates, relative lift with confidence
+bounds, the absolute rate difference with confidence bounds, and standard error;
 <code>contingency_test</code> returns the experiment p-value. The formulas are in
 <a href="../../reference/algorithms/">Algorithms</a>.</p>
 <h2 id="lifecycle-sets-and-snapshots">Lifecycle, Sets, and Snapshots<a class="headerlink" href="#lifecycle-sets-and-snapshots" title="Permanent link">&para;</a></h2>
