@@ -3466,6 +3466,11 @@ previous successful aggregate until the new run commits.</p>
 </tbody>
 </table>
 <p>Type promotion: if the default value parses as a float, it becomes Float64; otherwise it stays a string.</p>
+<p>When <code>rename_capitalize</code> is enabled, Configuration Builder emits edited
+defaults immediately after that rename and before fixed transforms. This order
+is required when a default seeds a sometimes-missing date field for a following
+<code>parse_datetime</code>; placing the default after parsing would restore the field as a
+string and make downstream <code>date_diff</code> expressions invalid.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">defaults</span><span class="p">:</span>

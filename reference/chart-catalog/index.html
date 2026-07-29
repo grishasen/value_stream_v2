@@ -2922,6 +2922,18 @@ validation.</p>
 <td>column name to map to color; treemap color comes from <code>metric</code></td>
 </tr>
 <tr>
+<td><code>line_dash</code></td>
+<td>str</td>
+<td>line</td>
+<td>column name mapped independently to solid/dashed/dotted line styles</td>
+</tr>
+<tr>
+<td><code>symbol</code></td>
+<td>str</td>
+<td>line</td>
+<td>optional column name mapped to marker shapes; markers are enabled when configured</td>
+</tr>
+<tr>
 <td><code>size</code></td>
 <td>str</td>
 <td>scatter</td>
@@ -2938,6 +2950,12 @@ validation.</p>
 <td>str</td>
 <td>any</td>
 <td>plain-language context; falls back to metric description</td>
+</tr>
+<tr>
+<td><code>filters</code></td>
+<td>dict</td>
+<td>any</td>
+<td>fixed aggregate-backed population filters; they override an interactive page filter on the same field</td>
 </tr>
 <tr>
 <td><code>placement</code></td>
@@ -3105,11 +3123,10 @@ metric; processor dimensions and time fields are excluded.</p>
 <h2 id="3-chart-catalog">3. Chart catalog<a class="headerlink" href="#3-chart-catalog" title="Permanent link">&para;</a></h2>
 <p>For each chart: required Tile fields, expected metric output shape, and an outline of the Plotly construction.</p>
 <h3 id="30-kpi_card">3.0 <code>kpi_card</code><a class="headerlink" href="#30-kpi_card" title="Permanent link">&para;</a></h3>
-<p>Required chart fields: none. The displayed value is always derived from the
-selected metric's primary output; <code>value</code> and <code>y</code> are not configurable card
-roles. Existing overrides are ignored at runtime and removed when a card is
-saved through the visual or advanced editor. Converting a KPI card to another
-chart also removes KPI-only <code>placement</code> and <code>kpi</code> settings. An ungrouped card
+<p>Required chart fields: none. The displayed value is derived from <code>metric_output</code>
+when it names one of the selected metric's outputs, otherwise from that metric's
+primary output; <code>value</code> and <code>y</code> are not configurable card roles. Converting a
+KPI card to another chart removes KPI-only <code>placement</code> and <code>kpi</code> settings. An ungrouped card
 becomes part of the responsive KPI strip only when <code>placement: kpi_strip</code> is
 explicit. The <code>kpi</code> mapping supports:</p>
 <ul>
@@ -3125,17 +3142,31 @@ latest available aggregate period anchors the current calendar period. The
 reference window has the same number of days. A card that returns zero/multiple
 rows or a non-numeric value displays <code>n/a</code>; report code never invents a reducer.</p>
 <h3 id="31-line">3.1 <code>line</code><a class="headerlink" href="#31-line" title="Permanent link">&para;</a></h3>
-<p>Required: <code>x</code>. Optional: <code>color, facet_row, facet_col, log_x, log_y</code>.
+<p>Required: <code>x</code>. Optional: <code>color, line_dash, symbol, facet_row, facet_col,
+log_x, log_y</code>.
 The Y value is always the selected metric's primary output; neither <code>y</code> nor
 <code>value</code> is a configurable role. Existing overrides are ignored and removed on
 save.</p>
 <p>Metric shape: a Polars frame with <code>x</code>, the metric output, and the group-by
-columns referenced by <code>color/facets</code>.</p>
+columns referenced by <code>color</code>, <code>line_dash</code>, <code>symbol</code>, or facets. Plotly creates
+one trace per unique combination. Use <code>color</code> for the primary business
+dimension and <code>line_dash</code> for a second dimension when every value of the first
+dimension must keep one stable color. Adding <code>symbol</code> repeats the second
+encoding with marker shape for accessibility and monochrome export.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">chart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">line</span>
+<span class="nt">x</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Day</span>
+<span class="nt">color</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
+<span class="nt">line_dash</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CustomerType</span>
+<span class="nt">symbol</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CustomerType</span>
+</code></pre></div>
 <p>Construction:</p>
 <div class="highlight"><pre><span></span><code><span class="n">fig</span> <span class="o">=</span> <span class="n">px</span><span class="o">.</span><span class="n">line</span><span class="p">(</span>
     <span class="n">df</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">(),</span>
     <span class="n">x</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">y</span><span class="o">=</span><span class="n">tile</span><span class="p">[</span><span class="s2">&quot;metric&quot;</span><span class="p">],</span>
     <span class="n">color</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;color&quot;</span><span class="p">),</span>
+    <span class="n">line_dash</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;line_dash&quot;</span><span class="p">),</span>
+    <span class="n">symbol</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;symbol&quot;</span><span class="p">),</span>
+    <span class="n">markers</span><span class="o">=</span><span class="nb">bool</span><span class="p">(</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;symbol&quot;</span><span class="p">)),</span>
     <span class="n">facet_row</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;facet_row&quot;</span><span class="p">),</span>
     <span class="n">facet_col</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;facet_col&quot;</span><span class="p">),</span>
     <span class="n">log_x</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;log_x&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
@@ -3145,7 +3176,9 @@ columns referenced by <code>color/facets</code>.</p>
 <span class="n">fig</span><span class="o">.</span><span class="n">update_layout</span><span class="p">(</span><span class="n">showlegend</span><span class="o">=</span><span class="n">tile</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;showlegend&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">))</span>
 <span class="k">return</span> <span class="n">fig</span>
 </code></pre></div>
-<p>If <code>x</code> is categorical (a non-temporal string column) the factory falls back to <code>px.bar</code> with <code>barmode="group"</code>.</p>
+<p>If <code>x</code> is categorical (a non-temporal string column) the factory falls back to
+<code>px.bar</code> with <code>barmode="group"</code> unless <code>line_dash</code> or <code>symbol</code> is configured;
+explicit line styling keeps the line rendering.</p>
 <p><code>stacked_area</code> uses the same metric-owned Y contract and requires <code>x</code> plus
 <code>color</code>; the selected metric supplies the stacked values.</p>
 <h3 id="32-bar">3.2 <code>bar</code><a class="headerlink" href="#32-bar" title="Permanent link">&para;</a></h3>
@@ -3497,7 +3530,7 @@ Builder writes the canonical <code>path</code> form.</p>
 <tr>
 <td><code>line</code></td>
 <td>binary_outcome, score_distribution, conversion, snapshot</td>
-<td>first time-grain dim</td>
+<td>first time-grain dim; optional color/style/symbol dimensions</td>
 <td>selected metric's primary output</td>
 </tr>
 <tr>
@@ -3769,8 +3802,9 @@ new chart kinds.</p>
   not already use a <code>color</code> dimension.</li>
 <li><code>scale_mode</code>: <code>index_100</code> divides each series by its first non-zero value and
   multiplies by 100; <code>percent_change</code> subtracts one after the same partitioned
-  normalization. Partitions are defined by color and facet dimensions. A zero
-  or empty baseline yields null display values rather than infinity.</li>
+  normalization. Partitions are defined by color, line-style, marker-symbol,
+  and facet dimensions. A zero or empty baseline yields null display values
+  rather than infinity.</li>
 <li><code>labels</code>, metric <code>display.label</code>, and metric <code>display.unit</code> resolve axis,
   legend, hover, KPI, and table labels centrally. Tile overrides win.</li>
 <li>Report table tiles render with native <code>st.dataframe</code>, use the available tile

@@ -2320,8 +2320,12 @@ Configuration Studio.</p>
 <td>Processor families that may satisfy the recipe</td>
 </tr>
 <tr>
+<td><code>parameters</code></td>
+<td>Optional bounded install-time numbers, including percentages displayed in business units</td>
+</tr>
+<tr>
 <td><code>inputs</code></td>
-<td>Required business roles, field/algorithm selection mode, accepted state types, metadata filters, pairing/exclusion rules, and preferences</td>
+<td>Required business roles, field/algorithm selection mode, accepted state types, metadata and filtered-state requirements, recipe-authored state templates, pairing/exclusion rules, and preferences</td>
 </tr>
 <tr>
 <td><code>default_metric_id</code></td>
@@ -2342,9 +2346,11 @@ Configuration Studio.</p>
 </tbody>
 </table>
 <p>Template substitution is deliberately closed: a placeholder must occupy the
-whole YAML scalar and must name a declared binding or built-in installer value.
-Recipes cannot inject Python, SQL, or expression strings. Formula recipes
-materialize the same closed expression AST used by hand-authored metrics.</p>
+whole YAML scalar. Metric-template placeholders must name a declared binding
+or built-in installer value; state-template placeholders must name a declared,
+bounded recipe parameter. Recipes cannot inject Python, SQL, or expression
+strings. Formula recipes and recipe-authored filtered states materialize the
+same closed expression AST used by hand-authored catalog objects.</p>
 <h2 id="readiness">Readiness<a class="headerlink" href="#readiness" title="Permanent link">&para;</a></h2>
 <p>The compatibility resolver evaluates a recipe against one Processor and
 returns one of four states:</p>
@@ -2370,7 +2376,7 @@ returns one of four states:</p>
 <tr>
 <td><code>backfill_required</code></td>
 <td>A required aggregate state or stage is absent from the current processor contract</td>
-<td>Configurable sketch inputs can propose a processor state; non-configurable inputs remain blocked</td>
+<td>Configurable sketch inputs and closed recipe-authored state templates can propose a processor state; other non-configurable inputs remain blocked</td>
 </tr>
 <tr>
 <td><code>incompatible</code></td>
@@ -2380,23 +2386,29 @@ returns one of four states:</p>
 </tbody>
 </table>
 <p>Matching is deterministic. The resolver filters by source (<code>state</code> or
-<code>stage</code>), state type, required/absent state metadata, and strict semantic roles,
-then applies ordered name/algorithm preferences. A sole remaining candidate is
-safe to map automatically; multiple business fields, algorithms, stages, or
-populations require a user choice. Paired score digests require matching score
-metadata and funnel endpoints must be different.</p>
+<code>stage</code>), state type, required/absent state metadata, required <code>where</code>
+predicates or the exact parameter-resolved state template, and strict semantic
+roles, then applies ordered name/algorithm preferences. A sole remaining
+candidate is safe to map automatically; multiple business fields, algorithms,
+stages, or populations require a user choice. Paired score digests require
+matching score metadata and funnel endpoints must be different.</p>
 <p>Readiness never examines raw event rows. It reads only processor configuration
 and its effective aggregate-state contract.</p>
 <p>For a <code>field_algorithm</code> input, the browser augments that static readiness with
 safe configuration choices. It lists every processor-owned candidate field —
 including every <code>group_by</code> field and configured identity/property field — and
 every algorithm declared compatible by the recipe. A field/algorithm pair
-that is not yet a processor state is shown as a proposal, not as unavailable.</p>
+that is not yet a processor state is shown as a proposal, not as unavailable.
+The browser never invents a business-specific <code>where</code> predicate. It may
+propose one only when the recipe contains the complete closed AST and every
+substituted value is a declared, bounded parameter.</p>
 <h2 id="install-workflow">Install Workflow<a class="headerlink" href="#install-workflow" title="Permanent link">&para;</a></h2>
 <p>Both authoring surfaces provide the same steps:</p>
 <ol>
 <li>Search by KPI, business question, tag, calculation, or domain.</li>
 <li>Read the business definition, accuracy class, algorithm, and caveat.</li>
+<li>Edit any bounded recipe parameters. Percentages are displayed as percentages
+   even though the generated catalog expression stores their decimal value.</li>
 <li>Select a compatible Processor and review readiness.</li>
 <li>Select business fields and any recipe-compatible algorithm for sketch-backed
    metrics, stages or populations for funnels, and any other ambiguous roles.
@@ -2443,6 +2455,9 @@ contract:</p>
 <span class="w">      </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">audience.unique_entities</span>
 <span class="w">      </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
 </code></pre></div>
+<p>When a recipe has editable parameters, its installed metric also records the
+resolved values under <code>recipe.parameters</code>. This makes the chosen definition
+reviewable without making the packaged recipe part of runtime execution.</p>
 <p>If <code>Channel</code> and CPC were selected before that state existed, the same action
 also adds the ordinary processor configuration:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">processors</span><span class="p">:</span>
@@ -2518,10 +2533,52 @@ internal state-ID choice.</p>
 <td>KPI card</td>
 </tr>
 <tr>
+<td><code>distribution.boxplot</code></td>
+<td>Distribution boxplot</td>
+<td>t-digest or KLL state</td>
+<td>Approximate</td>
+<td>Boxplot</td>
+</tr>
+<tr>
+<td><code>engagement.decision_to_outcome_latency_p95</code></td>
+<td>Decision-to-outcome latency (P95)</td>
+<td>Unconditioned duration t-digest or KLL state</td>
+<td>Approximate</td>
+<td>KPI card with previous-period comparison</td>
+</tr>
+<tr>
 <td><code>model_quality.roc_auc</code></td>
 <td>Ranking discrimination</td>
 <td>Matched positive/negative t-digests</td>
 <td>Approximate</td>
+<td>KPI card</td>
+</tr>
+<tr>
+<td><code>model_quality.score_calibration</code></td>
+<td>Observed-to-predicted score calibration</td>
+<td>Positive count, score sum, and observation count</td>
+<td>Exact</td>
+<td>KPI card</td>
+</tr>
+<tr>
+<td><code>decisioning.material_upward_exploration_rate</code></td>
+<td>Material upward score-revision rate</td>
+<td>Purpose-built relatively filtered upward-revision and total counts on a numeric-distribution processor</td>
+<td>Exact</td>
+<td>KPI card</td>
+</tr>
+<tr>
+<td><code>model_quality.implied_evidence_index</code></td>
+<td>Heuristic implied evidence index</td>
+<td>Pooled score-variance and squared-delta means</td>
+<td>Statistical</td>
+<td>KPI card</td>
+</tr>
+<tr>
+<td><code>model_quality.relative_exploration_variance</code></td>
+<td>Relative exploration variance</td>
+<td>Pooled squared-delta and score-variance means</td>
+<td>Statistical</td>
 <td>KPI card</td>
 </tr>
 <tr>
@@ -2558,6 +2615,21 @@ internal state-ID choice.</p>
 defaults while accepting HLL and Theta states. Theta is useful when the same
 persisted set also supports intersections or differences. The recipe does not
 convert or merge different sketch families together.</p>
+<p>The decision-to-outcome recipe is unit-neutral: it inherits the selected
+duration field's unit and must not be labelled as seconds unless the source
+contract establishes seconds. It measures the time until an outcome is
+recorded, not request-serving latency.</p>
+<p>The three exploration recipes are draft diagnostics. Upward exploration is an
+adaptive-decisioning policy KPI, not a predictive-model-quality metric. It uses
+a dedicated numeric-distribution processor so outcome filtering cannot change
+the population. <strong>Material upward exploration rate</strong> counts a decision only
+when the raw score is positive and
+<code>FinalPropensity - Propensity &gt; Propensity × threshold</code>. The threshold defaults
+to 10% and is editable during installation; equality at the boundary and
+zero/negative raw scores are excluded. The implied evidence value is a
+heuristic index, not a response count or fitted posterior parameter. Relative
+exploration variance is an unbounded ratio, not an uncertainty probability.
+Randomised control arms must be excluded from all three.</p>
 <h2 id="versioning-and-governance">Versioning and Governance<a class="headerlink" href="#versioning-and-governance" title="Permanent link">&para;</a></h2>
 <ul>
 <li>A recipe version is immutable once published. Calculation, input semantics,
@@ -2578,6 +2650,12 @@ deterministic state definition to <code>processors.yaml</code> (or the AI draft)
 the metric to that state. Default parameters are CPC <code>lg_k=11</code>, HLL/Theta
 <code>lg_k=12</code>, t-digest <code>k=500</code>, KLL <code>k=200</code>, and Top-K
 <code>lg_max_map_size=10</code>; they remain inspectable in the technical binding.</p>
+<p>A parameter that changes aggregate-state semantics is part of that state
+definition. The resolver reuses a state only when its normalized definition,
+including the resolved predicate value, matches exactly. Choosing a different
+material-upward threshold therefore proposes a distinct filtered count state,
+changes the processor computation hash, and requires materialization rather
+than silently reinterpreting existing counts.</p>
 <p>This configuration is intentionally allowed before any data is loaded. The
 preview names the changed processor states, source fields, source, and the
 processor computation-hash transition. The next normal source run materializes

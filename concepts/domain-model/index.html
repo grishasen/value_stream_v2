@@ -3640,9 +3640,10 @@ semantics.</p>
 default <code>value_format</code>, and <code>direction</code> (<code>higher_is_better</code>,
 <code>lower_is_better</code>, or <code>neutral</code>). Display metadata never changes the formula,
 processor computation hash, or stored aggregate state.</p>
-<p>A metric installed from a KPI Recipe may carry <code>recipe: {id, version}</code>
-provenance. The installed metric remains authoritative and does not track
-future recipe edits automatically.</p>
+<p>A metric installed from a KPI Recipe may carry
+<code>recipe: {id, version, parameters?}</code> provenance. Resolved parameter values are
+recorded when the recipe exposes them. The installed metric remains
+authoritative and does not track future recipe edits automatically.</p>
 <h3 id="partial">Partial<a class="headerlink" href="#partial" title="Permanent link">&para;</a></h3>
 <p>A Parquet file produced by one Processor processing one chunk. Lives at <code>aggregates/&lt;src&gt;/&lt;proc&gt;/daily/period=YYYY-MM/part-&lt;pipeline_run_id&gt;.parquet</code>. A "partial" is conceptually the smallest unit of write; compaction merges multiple partials into one.</p>
 <h3 id="period">Period<a class="headerlink" href="#period" title="Permanent link">&para;</a></h3>
@@ -3684,10 +3685,11 @@ inflate the published-row totals shown by operational surfaces.</p>
 <h3 id="kpi-recipe">KPI Recipe<a class="headerlink" href="#kpi-recipe" title="Permanent link">&para;</a></h3>
 <p>A versioned, inert authoring artifact that connects a business question to
 required Processor capabilities, a metric template, calculation/method
-guidance, and recommended report presentation. It is not part of a workspace
-Catalog and cannot execute. An explicit install maps its roles to persisted
-aggregate states/stages and materializes ordinary Metric and optional Tile
-YAML. See reference/kpi-recipes.md.</p>
+guidance, optional bounded install parameters, closed state templates, and
+recommended report presentation. It is not part of a workspace Catalog and
+cannot execute. An explicit install maps its roles to persisted aggregate
+states/stages and materializes ordinary Processor state, Metric, and optional
+Tile YAML. See reference/kpi-recipes.md.</p>
 <h3 id="run">Run<a class="headerlink" href="#run" title="Permanent link">&para;</a></h3>
 <p>Shorthand for a pipeline run.</p>
 <h3 id="snapshot">Snapshot<a class="headerlink" href="#snapshot" title="Permanent link">&para;</a></h3>
@@ -3707,7 +3709,7 @@ YAML. See reference/kpi-recipes.md.</p>
 <h3 id="theta-state">Theta state<a class="headerlink" href="#theta-state" title="Permanent link">&para;</a></h3>
 <p>A binary state holding a Theta sketch from Apache DataSketches. Used when set algebra (intersection / difference) is required, e.g. cohort retention, audience overlap.</p>
 <h3 id="tile">Tile<a class="headerlink" href="#tile" title="Permanent link">&para;</a></h3>
-<p>A single chart on a Dashboard page, bound to one metric and one chart kind. Required fields depend on the chart kind (e.g. <code>line</code> requires <code>x</code>; <code>treemap</code> requires <code>path</code> and derives Color from its metric). Typed common fields include <code>description</code>, <code>placement</code>, <code>kpi</code>, <code>scale_mode</code>, and <code>value_format</code>; chart-specific extras remain permissive. <code>placement: kpi_strip</code> is valid only for an ungrouped <code>kpi_card</code>. A KPI query must resolve to one numeric scalar and can request a target, an equal-length previous period, and an aggregate time-series sparkline. <code>scale_mode</code> is presentation-only and supports <code>absolute</code>, <code>index_100</code>, and <code>percent_change</code> for line/stacked-area charts.</p>
+<p>A single chart on a Dashboard page, bound to one metric and one chart kind. Required fields depend on the chart kind (e.g. <code>line</code> requires <code>x</code>; <code>treemap</code> requires <code>path</code> and derives Color from its metric). Typed common fields include <code>description</code>, <code>placement</code>, <code>kpi</code>, <code>scale_mode</code>, and <code>value_format</code>; chart-specific fields are strict. A <code>line</code> tile may independently map <code>color</code>, <code>line_dash</code>, and optional marker <code>symbol</code> to aggregate dimensions, so one dimension retains stable colors while another is distinguished by line and marker style. <code>placement: kpi_strip</code> is valid only for an ungrouped <code>kpi_card</code>. A KPI query must resolve to one numeric scalar and can request a target, an equal-length previous period, and an aggregate time-series sparkline. <code>scale_mode</code> is presentation-only and supports <code>absolute</code>, <code>index_100</code>, and <code>percent_change</code> for line/stacked-area charts.</p>
 <h3 id="page-filter">Page filter<a class="headerlink" href="#page-filter" title="Permanent link">&para;</a></h3>
 <p>An interactive Reports-page control authored under <code>page.filters</code>, with a safe
 inference fallback for older catalogs. Each filter declares its aggregate field,
@@ -3844,8 +3846,9 @@ adding a separate time-role system.</p>
 </tbody>
 </table>
 <p>Metric display metadata, dashboard/page/tile presentation, KPI comparison
-settings, and filters over existing aggregate dimensions are compatible changes
-and do not require reprocessing.</p>
+settings—including line color, dash, and marker-symbol dimension mappings—and
+filters over existing aggregate dimensions are compatible changes and do not
+require reprocessing.</p>
 <p>Adding a State to an existing Processor changes its computation hash. Queries
 under the updated Catalog read only aggregate partials carrying that new hash;
 older files remain available for the older configuration hash but are never
@@ -4049,7 +4052,7 @@ dashboards.yaml:
 <tr>
 <td>KPI Recipe</td>
 <td>State</td>
-<td>proposes when selected field/algorithm is not configured</td>
+<td>proposes when a selected capability or parameter-resolved state template is not configured</td>
 <td>1 : 0..N</td>
 </tr>
 <tr>

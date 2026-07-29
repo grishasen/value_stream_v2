@@ -3619,6 +3619,11 @@ in the same way as a merged result.</p>
 </tbody>
 </table>
 <p>reference/algorithms.md gives the full algorithmic detail.</p>
+<p><code>count</code> and <code>value_sum</code> states may carry a <code>where</code> expression on processors
+that accept those states. The predicate is applied to that state only, after
+the processor-wide filter and any processor deduplication. For a distinct
+count, excluded rows are removed before distinctness is evaluated; they do not
+create a synthetic null member.</p>
 <p>Configuration Builder exposes these kind-specific state settings through a
 <code>Parameters YAML</code> mapping beside the state name, type, and source column. The
 mapping is preserved in <code>processors.yaml</code>; <code>type</code> and <code>source_column</code> remain
@@ -4350,6 +4355,10 @@ the latest available <code>Day</code>. <code>last: Nd</code> is inclusive of the
 [offset_a, offset_b]</code> applies inclusive day/week offsets such as <code>[-30d,
 -1d]</code>. Windowed set queries require a configured daily grain so retention is
 computed from persisted sketches rather than raw events.</p>
+<p>An operand without <code>time_window</code> means all aggregate history through the
+anchor. When it is combined with a windowed operand, the planner removes the
+query's lower scan bound so the all-time operand is not shortened by a report
+date preset.</p>
 <p>Reports therefore read exact daily freshness for windowed set metrics and
 anchor relative presets to the latest common covered day across the page. A
 partial month ending on September 18 remains anchored to September 18; its
