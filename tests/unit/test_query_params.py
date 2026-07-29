@@ -206,6 +206,8 @@ def test_variant_compare_keeps_undefined_outputs_numeric() -> None:
 
     assert out["AbsoluteRateDifference"].dtype == pl.Float64
     assert out["AbsoluteRateDifference"][0] is None
+    assert out["Lift_CI_Low"].dtype == pl.Float64
+    assert out["Lift_CI_Low"][0] is None
 
 
 @pytest.mark.unit

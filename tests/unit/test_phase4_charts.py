@@ -1994,6 +1994,31 @@ def test_interval_chart_accepts_absolute_confidence_bounds() -> None:
 
 
 @pytest.mark.unit
+def test_interval_chart_plots_relative_lift_confidence_bounds() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "Channel": ["Web"],
+                "Lift": [0.5],
+                "Lift_CI_Low": [-0.084],
+                "Lift_CI_High": [1.456],
+            }
+        ),
+        {
+            "metric": "ExperimentLift",
+            "metric_output": "Lift",
+            "chart": "interval",
+            "x": "Channel",
+            "lower_output": "Lift_CI_Low",
+            "upper_output": "Lift_CI_High",
+        },
+    )
+
+    assert list(figure.data[0].error_y.array) == pytest.approx([0.956])
+    assert list(figure.data[0].error_y.arrayminus) == pytest.approx([0.584])
+
+
+@pytest.mark.unit
 def test_interval_chart_accepts_null_confidence_bounds() -> None:
     figure = render_chart(
         pl.DataFrame(

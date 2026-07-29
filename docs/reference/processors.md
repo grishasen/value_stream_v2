@@ -318,7 +318,7 @@ OUTPUT merge(F2)
 | `StdErr` | `formula` | `CTR, Positives + Negatives` | √(p(1-p)/n) |
 | `AvgTouchpoints` | `formula` | `Touchpoints, Positives` | mean per conversion |
 | `Revenue` | (state column) | `Revenue` | passthrough |
-| `Lift` | `variant_compare` | `Positives, Negatives` per variant | TestCTR, ControlCTR, Lift, Lift_Z_Score, Lift_P_Val, StdErr |
+| `Lift` | `variant_compare` | `Positives, Negatives` per variant | TestCTR, ControlCTR, AbsoluteRateDifference + CI, Lift + CI, Lift_Z_Score, Lift_P_Val, StdErr |
 | `Proportion_Significance` | `proportion_test` | `variant_column`, `test_role`, `control_role`, `Positives`, `Negatives` | Count, Positives, Negatives, z_score, z_p_val |
 | `Experiment_Significance` | `contingency_test` | `Positives, Negatives` per variant_column | chi2/G/z stats + odds ratio + CIs |
 | `UniqueCustomers` | `approx_distinct_count` | `UniqueCustomers_cpc` | scalar per row |

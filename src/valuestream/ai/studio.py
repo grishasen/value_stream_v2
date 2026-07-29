@@ -297,6 +297,8 @@ _METRIC_KIND_DICTIONARY: dict[str, Any] = {
             "AbsoluteRateDifference_CI_Low",
             "AbsoluteRateDifference_CI_High",
             "Lift",
+            "Lift_CI_Low",
+            "Lift_CI_High",
             "Lift_Z_Score",
             "Lift_P_Val",
             "StdErr",

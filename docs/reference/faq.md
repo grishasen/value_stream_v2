@@ -219,7 +219,11 @@ metrics:
     tests: [chi2, g, z]
 ```
 
-A tile with `metric: Lift` gets `TestCTR, ControlCTR, Lift, Lift_Z_Score, Lift_P_Val, StdErr` per group. reference/algorithms.md §3 has the math.
+A tile with `metric: Lift` gets `TestCTR, ControlCTR`,
+`AbsoluteRateDifference` with its confidence bounds, relative `Lift` with
+`Lift_CI_Low` / `Lift_CI_High`, `Lift_Z_Score`, `Lift_P_Val`, and `StdErr` per
+group. An `interval` tile can plot `Lift` with those relative bounds.
+reference/algorithms.md §3 has the math.
 
 **D7. How do I do a multi-variant experiment?**
 Use the `experiment` flavor of `binary_outcome`: include `ExperimentName` and `ExperimentGroup` in `group_by`, set `variant_column = ExperimentGroup`, and add a `filter` restricting to in-experiment rows. The `Experiment_Significance` metric runs chi-square, G-test, and z-test on the contingency.

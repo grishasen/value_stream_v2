@@ -273,8 +273,17 @@ dashboards:
       value_format: number
       kpi:
         target: 0.05
+    - id: engagement_lift_interval
+      title: Relative Engagement Lift with 95% Confidence Interval
+      metric: VS_ModelControl_Engagement_Compare
+      chart: interval
+      x: Channel
+      value_format: percent
+      metric_output: Lift
+      lower_output: Lift_CI_Low
+      upper_output: Lift_CI_High
     - id: engagement_effect_interval
-      title: Engagement Effect with 95% Confidence Interval
+      title: Absolute Engagement Effect with 95% Confidence Interval
       metric: VS_ModelControl_Engagement_Compare
       chart: interval
       x: Channel

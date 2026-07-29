@@ -24,7 +24,8 @@ uv run valuestream query examples/demo VS_ModelControl_Engagement_Compare --by C
 uv run valuestream query examples/demo VS_ModelControl_Engagement_Z_Test --by Channel --grain Day
 ```
 
-`variant_compare` returns per-variant rates, lift, and standard error;
+`variant_compare` returns per-variant rates, relative lift with confidence
+bounds, the absolute rate difference with confidence bounds, and standard error;
 `contingency_test` returns the experiment p-value. The formulas are in
 [Algorithms](../reference/algorithms.md).
 

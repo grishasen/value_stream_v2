@@ -561,8 +561,8 @@ metrics:
     confidence_level: 0.95
     outputs: [TestCTR, ControlCTR, TestSampleSize, ControlSampleSize,
               AbsoluteRateDifference, AbsoluteRateDifference_CI_Low,
-              AbsoluteRateDifference_CI_High, Lift, Lift_Z_Score,
-              Lift_P_Val, StdErr]
+              AbsoluteRateDifference_CI_High, Lift, Lift_CI_Low,
+              Lift_CI_High, Lift_Z_Score, Lift_P_Val, StdErr]
 
   ConversionRate:
     source: conversion
@@ -1574,7 +1574,8 @@ metrics:
     variant_column: ModelControlGroup
     test_role: Test
     control_role: Control
-    outputs: [TestCTR, ControlCTR, Lift, Lift_Z_Score, Lift_P_Val, StdErr]
+    outputs: [TestCTR, ControlCTR, Lift, Lift_CI_Low, Lift_CI_High,
+              Lift_Z_Score, Lift_P_Val, StdErr]
 
   UniqueCustomers:
     source: engagement

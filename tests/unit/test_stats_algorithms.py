@@ -24,9 +24,39 @@ def test_variant_comparison_returns_lift_and_two_proportion_z_test() -> None:
     assert result["AbsoluteRateDifference_CI_Low"] == pytest.approx(-0.0698803)
     assert result["AbsoluteRateDifference_CI_High"] == pytest.approx(0.2624816)
     assert result["Lift"] == pytest.approx(0.5)
+    assert result["Lift_CI_Low"] == pytest.approx(-0.0840392)
+    assert result["Lift_CI_High"] == pytest.approx(1.4564369)
     assert result["CTR"] == pytest.approx(0.25)
     assert result["Lift_Z_Score"] == pytest.approx(1.632993, rel=1e-5)
     assert result["Lift_P_Val"] == pytest.approx(0.10247, rel=1e-4)
+
+
+@pytest.mark.unit
+def test_variant_comparison_lift_interval_uses_configured_confidence_level() -> None:
+    result = variant_comparison(
+        test_positives=30,
+        test_negatives=70,
+        control_positives=20,
+        control_negatives=80,
+        confidence_level=0.8,
+    )
+
+    assert result["Lift_CI_Low"] == pytest.approx(0.0864857)
+    assert result["Lift_CI_High"] == pytest.approx(1.0708970)
+
+
+@pytest.mark.unit
+def test_variant_comparison_lift_interval_is_display_safe_without_control_rate() -> None:
+    result = variant_comparison(
+        test_positives=30,
+        test_negatives=70,
+        control_positives=0,
+        control_negatives=100,
+    )
+
+    assert result["Lift"] == 0.0
+    assert result["Lift_CI_Low"] == 0.0
+    assert result["Lift_CI_High"] == 0.0
 
 
 @pytest.mark.unit

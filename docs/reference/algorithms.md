@@ -191,6 +191,21 @@ Lift = (TestCTR - ControlCTR) / ControlCTR
 
 NaN/Inf-safe: replace `Inf` with `0.0`, NaN with `0.0` (no control = no lift to display).
 
+`Lift_CI_Low` and `Lift_CI_High` are the configured-confidence-level Katz
+log interval for the relative risk, shifted down by one so the bounds use the
+same relative-lift scale:
+
+```text
+RR = TestCTR / ControlCTR
+SE(log(RR)) = sqrt(1/TestPositives - 1/TestSampleSize
+                   + 1/ControlPositives - 1/ControlSampleSize)
+RR_CI = exp(log(RR) ± z * SE(log(RR)))
+Lift_CI = RR_CI - 1
+```
+
+When the relative-risk interval is undefined because an arm is empty or the
+control rate is zero, the bounds collapse to the display-safe `Lift` value.
+
 The same metric also returns `TestSampleSize`, `ControlSampleSize`, and the
 absolute rate effect:
 
@@ -210,9 +225,10 @@ AbsoluteRateDifference_CI_Low  = L_T - U_C
 AbsoluteRateDifference_CI_High = U_T - L_C
 ```
 
-This interval uses only persisted `Positives` and `Negatives`; it never needs
-raw assignments. The implementation reports the historical `Lift`, z-score,
-p-value, `CTR`, and `StdErr` outputs unchanged for compatibility.
+Both intervals use only persisted `Positives` and `Negatives`; neither needs
+raw assignments. The implementation retains the absolute rate difference and
+its bounds alongside relative `Lift`, its bounds, z-score, p-value, `CTR`, and
+`StdErr`.
 
 ### 3.4 Standard error of a proportion
 

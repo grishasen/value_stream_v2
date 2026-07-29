@@ -559,7 +559,14 @@ def test_variant_and_contingency_metrics_emit_complete_outputs(tmp_path: Path) -
     lift = query_metric(tmp_path, "Lift", group_by=["Channel"], grain="summary")
     significance = query_metric(tmp_path, "Significance", group_by=["Channel"], grain="summary")
     assert lift["Lift"][0] == pytest.approx(0.5)
-    assert {"CTR", "Lift_Z_Score", "Lift_P_Val", "StdErr"} <= set(lift.columns)
+    assert {
+        "CTR",
+        "Lift_CI_Low",
+        "Lift_CI_High",
+        "Lift_Z_Score",
+        "Lift_P_Val",
+        "StdErr",
+    } <= set(lift.columns)
     assert {"chi2_stat", "g_stat", "z_score"} <= set(significance.columns)
 
 

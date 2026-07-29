@@ -6,7 +6,7 @@ import math
 from collections.abc import Iterable
 
 from scipy.stats import chi2_contingency, norm  # type: ignore[import-untyped]
-from scipy.stats.contingency import odds_ratio  # type: ignore[import-untyped]
+from scipy.stats.contingency import odds_ratio, relative_risk  # type: ignore[import-untyped]
 
 _TEST_OUTPUTS = (
     "chi2_stat",
@@ -46,6 +46,13 @@ def variant_comparison(
     ctr = _safe_div(positives, total)
     lift = _safe_div(test_ctr - control_ctr, control_ctr)
     absolute_difference = test_ctr - control_ctr
+    lift_interval = _lift_interval(
+        test_positives=test_positives,
+        test_total=test_total,
+        control_positives=control_positives,
+        control_total=control_total,
+        confidence_level=confidence_level,
+    )
     test_interval = _wilson_interval(test_positives, test_total, confidence_level)
     control_interval = _wilson_interval(control_positives, control_total, confidence_level)
     std_err = math.sqrt(ctr * (1.0 - ctr) / total) if total else 0.0
@@ -64,6 +71,8 @@ def variant_comparison(
         "AbsoluteRateDifference_CI_Low": test_interval[0] - control_interval[1],
         "AbsoluteRateDifference_CI_High": test_interval[1] - control_interval[0],
         "Lift": lift,
+        "Lift_CI_Low": lift_interval[0],
+        "Lift_CI_High": lift_interval[1],
         "Lift_Z_Score": z_test["z_score"],
         "Lift_P_Val": z_test["z_p_val"],
         "StdErr": std_err,
@@ -72,6 +81,36 @@ def variant_comparison(
         "Positives": float(positives),
         "Negatives": float(negatives),
     }
+
+
+def _lift_interval(
+    *,
+    test_positives: int,
+    test_total: int,
+    control_positives: int,
+    control_total: int,
+    confidence_level: float,
+) -> tuple[float, float]:
+    """Return a Katz log confidence interval for relative lift."""
+
+    test_rate = _safe_div(test_positives, test_total)
+    control_rate = _safe_div(control_positives, control_total)
+    lift = _safe_div(test_rate - control_rate, control_rate)
+    if test_total <= 0 or control_total <= 0 or control_positives <= 0:
+        return lift, lift
+
+    risk = relative_risk(
+        test_positives,
+        test_total,
+        control_positives,
+        control_total,
+    )
+    interval = risk.confidence_interval(confidence_level=confidence_level)
+    low = float(interval.low) - 1.0
+    high = float(interval.high) - 1.0
+    if not math.isfinite(low) or not math.isfinite(high):
+        return lift, lift
+    return low, high
 
 
 def _wilson_interval(successes: int, total: int, confidence_level: float) -> tuple[float, float]:

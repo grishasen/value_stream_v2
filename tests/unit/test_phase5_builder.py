@@ -1868,7 +1868,7 @@ def test_metric_output_columns_return_multi_column_defaults() -> None:
 
     outputs = builder.metric_output_columns("Lift", metric)
 
-    assert {"Lift", "Lift_Z_Score", "Lift_P_Val"} <= set(outputs)
+    assert {"Lift", "Lift_CI_Low", "Lift_CI_High", "Lift_Z_Score", "Lift_P_Val"} <= set(outputs)
 
 
 @pytest.mark.unit
@@ -2510,6 +2510,8 @@ def test_interval_value_and_error_controls_offer_only_metric_outputs() -> None:
     assert "AbsoluteRateDifference" in expected
     assert "AbsoluteRateDifference_CI_Low" in expected
     assert "AbsoluteRateDifference_CI_High" in expected
+    assert "Lift_CI_Low" in expected
+    assert "Lift_CI_High" in expected
 
 
 @pytest.mark.unit

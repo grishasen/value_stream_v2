@@ -4956,6 +4956,8 @@ def _metric_output_fields(metric_name: str, metric_def: dict[str, Any]) -> list[
             "AbsoluteRateDifference_CI_Low",
             "AbsoluteRateDifference_CI_High",
             "Lift",
+            "Lift_CI_Low",
+            "Lift_CI_High",
             "Lift_P_Val",
             "TestSampleSize",
             "ControlSampleSize",

@@ -394,6 +394,8 @@ def test_reports_interval_value_and_error_controls_offer_only_metric_outputs() -
     assert "AbsoluteRateDifference" in expected
     assert "AbsoluteRateDifference_CI_Low" in expected
     assert "AbsoluteRateDifference_CI_High" in expected
+    assert "Lift_CI_Low" in expected
+    assert "Lift_CI_High" in expected
 
 
 @pytest.mark.unit

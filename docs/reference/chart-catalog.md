@@ -547,6 +547,16 @@ primitives except for the native Streamlit table on the Reports surface:
   metric: Clicks
   chart: sankey
   path: [Channel, CustomerType, Placement]
+
+- id: relative_lift
+  title: Relative lift with 95% confidence interval
+  metric: ExperimentLift
+  chart: interval
+  x: Channel
+  metric_output: Lift
+  lower_output: Lift_CI_Low
+  upper_output: Lift_CI_High
+  value_format: percent
 ```
 
 For Sankey, every adjacent pair in `path` becomes a link layer. Nodes are
