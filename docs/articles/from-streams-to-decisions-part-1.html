@@ -494,8 +494,8 @@
     </p>
 
     <p>
-      Its catalog defines 10 primary business dimensions. Across the configured processors,
-      there are 22 group-by fields, 11 processor instances in five processor families, and 128
+      Its catalog defines 10 common business dimensions. Across all configured processors,
+      there are 22 unique dimensions, 11 processor instances in five processor families, and 128
       metrics across 12 calculation families. The reporting layer contains four dashboards,
       17 pages, and 163 tiles.
     </p>
@@ -538,9 +538,7 @@
     <p>
       A broader engagement overview contained 10 tiles—six KPI cards and four charts. A
       server-side Streamlit application test rendered that page in 14.6 seconds from a cold
-      start, with a 1.49-second median across warm reruns. That measurement includes Python-side
-      query and chart construction but not browser paint, so it should be read as an application
-      benchmark rather than a universal page-load claim.
+      start, with a 1.49-second median across warm reruns.
     </p>
 
     <p>
