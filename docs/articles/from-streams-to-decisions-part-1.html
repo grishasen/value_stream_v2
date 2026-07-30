@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="An introduction to aggregate-first analytics, mergeable sketches, and real-time reporting on streaming data with modest hardware.">
+  <meta name="robots" content="index,follow">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="From Streams to Decisions, Part 1: Don’t Store Every Event">
+  <meta property="og:description" content="How aggregations and sketches turn billions of events into a compact, real-time queryable dataset.">
+  <meta property="og:image" content="assets/from-streams-to-decisions-part-1/hero-aggregate-first.png">
+  <title>From Streams to Decisions, Part 1: Don’t Store Every Event</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #596579;
+      --line: #dfe4eb;
+      --soft: #f5f7fa;
+      --accent: #087e8b;
+      --accent-dark: #075866;
+      --warm: #f6b84a;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: #ffffff;
+      font-size: 18px;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #ffffff;
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.68;
+      text-rendering: optimizeLegibility;
+    }
+
+    article {
+      width: min(100% - 2rem, 760px);
+      margin: 0 auto;
+      padding: 4rem 0 5rem;
+    }
+
+    header {
+      margin-bottom: 2.5rem;
+    }
+
+    .eyebrow,
+    .standfirst,
+    figcaption,
+    table,
+    .series-note,
+    .repo-link {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .eyebrow {
+      margin: 0 0 0.75rem;
+      color: var(--accent-dark);
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      color: #111827;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.16;
+      letter-spacing: -0.025em;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.35rem, 8vw, 4rem);
+      font-weight: 780;
+    }
+
+    h2 {
+      margin: 3.5rem 0 1rem;
+      font-size: clamp(1.65rem, 4vw, 2.2rem);
+    }
+
+    h3 {
+      margin: 2rem 0 0.7rem;
+      font-size: 1.2rem;
+    }
+
+    p {
+      margin: 0 0 1.35rem;
+    }
+
+    a {
+      color: var(--accent-dark);
+      text-decoration-thickness: 0.08em;
+      text-underline-offset: 0.15em;
+    }
+
+    .standfirst {
+      margin: 1.5rem 0 0;
+      color: #354055;
+      font-size: 1.18rem;
+      line-height: 1.55;
+    }
+
+    .repo-link {
+      margin-top: 1.5rem;
+      font-size: 0.93rem;
+    }
+
+    figure {
+      margin: 2.5rem 0;
+    }
+
+    figure.hero {
+      width: min(100vw - 2rem, 1080px);
+      margin-left: 50%;
+      transform: translateX(-50%);
+    }
+
+    img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+    }
+
+    figcaption {
+      margin-top: 0.65rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      text-align: center;
+    }
+
+    blockquote {
+      margin: 2.2rem 0;
+      padding: 0.15rem 0 0.15rem 1.3rem;
+      border-left: 4px solid var(--warm);
+      color: #303b50;
+      font-size: 1.22rem;
+      font-style: italic;
+    }
+
+    ul,
+    ol {
+      margin: 0 0 1.5rem;
+      padding-left: 1.35rem;
+    }
+
+    li {
+      margin: 0.45rem 0;
+      padding-left: 0.25rem;
+    }
+
+    code {
+      padding: 0.12em 0.3em;
+      border-radius: 4px;
+      background: var(--soft);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.88em;
+    }
+
+    .table-wrap {
+      margin: 2rem 0;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }
+
+    th,
+    td {
+      padding: 0.8rem 0.9rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--soft);
+      color: #273247;
+      font-weight: 720;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .series-note {
+      margin-top: 3.5rem;
+      padding: 1.4rem 1.5rem;
+      border: 1px solid #b9dadd;
+      border-radius: 12px;
+      background: #f1f9f9;
+      font-size: 0.95rem;
+      line-height: 1.55;
+    }
+
+    .series-note strong {
+      display: block;
+      margin-bottom: 0.35rem;
+      color: var(--accent-dark);
+      font-size: 1.05rem;
+    }
+
+    @media (max-width: 640px) {
+      html {
+        font-size: 17px;
+      }
+
+      article {
+        padding-top: 2.25rem;
+      }
+
+      figure.hero {
+        width: 100%;
+      }
+    }
+
+    @media print {
+      article {
+        width: 100%;
+        padding: 0;
+      }
+
+      a {
+        color: inherit;
+      }
+    }
+  </style>
+</head>
+<body>
+  <article>
+    <header>
+      <p class="eyebrow">From Streams to Decisions · Part 1</p>
+      <h1>Don’t Store Every Event</h1>
+      <p class="standfirst">
+        How aggregate-first processing and mergeable sketches turn a continuous stream of
+        events into a compact dataset that stays useful, queryable, and fast on modest hardware.
+      </p>
+      <p class="repo-link">
+        The open-source implementation discussed here is available on
+        <a href="https://github.com/grishasen/value_stream_v2">GitHub</a>.
+      </p>
+    </header>
+
+    <figure class="hero">
+      <img
+        src="assets/from-streams-to-decisions-part-1/hero-aggregate-first.png"
+        alt="A dense stream of events becoming compact aggregate and sketch states that feed an interactive dashboard"
+        width="1672"
+        height="941">
+      <figcaption>
+        Keep the information needed for decisions, not an indefinite copy of every event.
+      </figcaption>
+    </figure>
+
+    <p>
+      Most analytics architectures begin with an apparently harmless assumption: retain the raw
+      events now and decide what to calculate later. That is sensible when storage, processing
+      capacity, and operational attention are plentiful. It is much less attractive when data
+      arrives continuously and the reporting system must run on a laptop, an edge machine, or a
+      small server.
+    </p>
+
+    <p>
+      The alternative is not to stop asking useful questions. It is to decide which information
+      those questions require and update that information while the stream is being read.
+      Counts, sums, minima, maxima, means, variances, distributions, distinct populations, and
+      set relationships can all be represented as compact state. Raw rows can then disappear
+      after their contribution has been recorded.
+    </p>
+
+    <blockquote>
+      The unit of persistence is no longer the event. It is the smallest mergeable state that
+      can still answer the intended question.
+    </blockquote>
+
+    <p>
+      This is the central idea behind aggregate-first analytics. It changes the system from a
+      warehouse of past events into a continuously maintained model of what those events mean.
+    </p>
+
+    <h2>Reporting on a stream is a state-management problem</h2>
+
+    <p>
+      A dashboard does not usually need to replay every historical event. It needs current and
+      historical states: orders per day, revenue by channel, latency percentiles by service,
+      distinct customers per region, conversion rates by campaign, or overlaps between two
+      populations.
+    </p>
+
+    <p>
+      Each incoming chunk can therefore be reduced immediately. Exact measures are updated with
+      algebraic state—for example, a count and a sum. Questions that would otherwise require
+      unbounded memory are updated with a sketch. Both kinds of state are grouped by the
+      dimensions that matter to the business and persisted with their time window and
+      provenance.
+    </p>
+
+    <p>
+      This design has three practical consequences:
+    </p>
+
+    <ul>
+      <li>Memory use is bounded by the chunk and the aggregate state, rather than total history.</li>
+      <li>Processing can be deterministic and repeatable because each chunk produces mergeable partials.</li>
+      <li>Reports query a compact analytical dataset instead of scanning the original stream.</li>
+    </ul>
+
+    <p>
+      It also creates a discipline that traditional “store everything” systems can postpone:
+      dimensions, metrics, time grain, and acceptable error must be explicit before ingestion.
+      That discipline is a feature. It connects reporting requirements directly to the data
+      structures the system maintains.
+    </p>
+
+    <h2>Exact aggregation: compressing without approximation</h2>
+
+    <p>
+      Many measures can remain exact even when the raw rows are discarded. A count is a number.
+      A sum is a number. A minimum and maximum each require one value. A mean can be reconstructed
+      from a sum and count. A variance can be maintained with a mergeable statistical state.
+    </p>
+
+    <p>
+      Imagine events grouped by day, product, region, and channel. Instead of keeping every
+      event, the processor stores one state per observed combination of those fields. A report
+      asking for a month can merge the daily states. A report asking for all channels can roll
+      up the channel dimension. The stored result remains exact for the configured measure.
+    </p>
+
+    <p>
+      The important word is <em>configured</em>. Once a dimension has been omitted from the
+      aggregate key, it cannot be recovered later. Aggregate-first systems trade open-ended
+      forensic freedom for predictable cost and fast answers to defined questions. The trade is
+      often excellent for operational reporting, embedded analytics, and repeatable KPI suites.
+    </p>
+
+    <h2>When exact values are too expensive, keep a sketch</h2>
+
+    <p>
+      The most interesting analytical questions are not always reducible to a handful of exact
+      numbers. Consider three common requests:
+    </p>
+
+    <ul>
+      <li>How many unique customers did we see?</li>
+      <li>What were the median, 95th, and 99th percentile latencies?</li>
+      <li>How many users belong to both audience A and audience B?</li>
+    </ul>
+
+    <p>
+      An exact answer to the first question requires remembering every distinct identifier.
+      Exact percentiles require retaining—or repeatedly sorting—the distribution. Exact set
+      overlap requires materializing both sets. As the stream grows, those structures grow with
+      it.
+    </p>
+
+    <p>
+      A sketch is a compact probabilistic summary. It deliberately retains enough information
+      to estimate a property of the data with a known, controllable error profile. Crucially,
+      sketches are mergeable: a sketch created from Monday’s events can be combined with
+      Tuesday’s sketch without reading Monday’s raw events again.
+    </p>
+
+    <figure>
+      <img
+        src="assets/from-streams-to-decisions-part-1/exact-vs-sketch.png"
+        alt="Comparison of exact aggregate states with compact probabilistic sketch states"
+        width="1600"
+        height="900"
+        loading="lazy">
+      <figcaption>
+        Exact aggregates answer algebraic questions; sketches make otherwise unbounded questions practical.
+      </figcaption>
+    </figure>
+
+    <h3>Distinct counts</h3>
+
+    <p>
+      A distinct-count sketch hashes each identifier and updates a compact statistical state.
+      The state does not contain a recoverable list of customers; it contains evidence from which
+      cardinality can be estimated. Its memory is governed mainly by the configured precision,
+      not by whether the stream contains one million or one billion events.
+    </p>
+
+    <p>
+      This is a better contract than it may first appear. A dashboard usually needs to know
+      whether the active population is approximately 98 million or 103 million. It rarely needs
+      to enumerate every identifier merely to display that number. The sketch aligns storage
+      with the actual question.
+    </p>
+
+    <h3>Quantiles and percentiles</h3>
+
+    <p>
+      A quantile sketch summarizes the shape and rank order of a distribution. It can estimate
+      the median, tail percentiles, a cumulative distribution, or approximate histogram
+      boundaries without retaining every observation.
+    </p>
+
+    <p>
+      The error is naturally expressed in rank. For a requested 95th percentile, the returned
+      value may correspond to a nearby rank within the sketch’s documented error bound. That is
+      usually more honest than presenting a tail percentile with many decimal places while
+      ignoring sampling noise, instrumentation error, and changing traffic.
+    </p>
+
+    <h3>Sets, intersections, and similarity</h3>
+
+    <p>
+      Set sketches support population questions that are expensive with exact identifiers:
+      union, intersection, difference, containment, and similarity. This is useful for audience
+      analysis, repeat behavior, feature adoption, and funnel comparisons. Partial sketches can
+      be merged across chunks, dates, or partitions, which makes them a natural fit for streaming
+      ingestion.
+    </p>
+
+    <h3>Approximation is a product decision</h3>
+
+    <p>
+      “Approximate” should never mean “mysterious.” A useful metric definition states which
+      algorithm is used, which precision or capacity parameter controls it, and how the result
+      should be interpreted. Reports should distinguish estimated measures from exact ones and,
+      where useful, expose bounds or accuracy metadata.
+    </p>
+
+    <p>
+      It is also worth separating questions by consequence. Financial settlement, compliance
+      totals, and contractual billing may require exact arithmetic. Audience size, operational
+      percentiles, and behavioral overlap are often ideal sketch workloads. A single report can
+      combine both.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>Stored state</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>How many events?</td>
+            <td>Counter</td>
+            <td>Exact</td>
+          </tr>
+          <tr>
+            <td>What is total value?</td>
+            <td>Sum</td>
+            <td>Exact</td>
+          </tr>
+          <tr>
+            <td>How many unique entities?</td>
+            <td>Distinct-count sketch</td>
+            <td>Estimate with bounded error</td>
+          </tr>
+          <tr>
+            <td>What is the 99th percentile?</td>
+            <td>Quantile sketch</td>
+            <td>Rank estimate</td>
+          </tr>
+          <tr>
+            <td>How much do populations overlap?</td>
+            <td>Set sketch</td>
+            <td>Estimated set operation</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>A real workspace: from almost two billion rows to a queryable model</h2>
+
+    <p>
+      A useful example is a large generated workspace used to exercise the full reporting path.
+      These are observed workspace and run values, not a hypothetical benchmark.
+    </p>
+
+    <p>
+      Its catalog defines 10 primary business dimensions. Across the configured processors,
+      there are 22 group-by fields, 11 processor instances in five processor families, and 128
+      metrics across 12 calculation families. The reporting layer contains four dashboards,
+      17 pages, and 163 tiles.
+    </p>
+
+    <p>
+      In the latest successful ingestion run, 1,998,151,261 input records were read and
+      1,998,151,259 were retained by the configured filters. They arrived in 799 daily chunks
+      covering 14 April 2022 through 18 September 2024. The current run produced 2,274,653
+      aggregate records in about 25 minutes and 31 seconds: roughly an 878× reduction from
+      source rows to queryable aggregate records.
+    </p>
+
+    <p>
+      The aggregate directory occupied about 16 GB on that machine. That figure needs context:
+      the directory also retained physical partials from multiple runs, so it is not a clean
+      “compressed output size” measurement. It is an honest reading of the workspace as it
+      existed.
+    </p>
+
+    <figure>
+      <img
+        src="assets/from-streams-to-decisions-part-1/fat-workspace-scale.png"
+        alt="Observed scale of a workspace reducing nearly two billion source rows to about 2.27 million aggregate records"
+        width="1600"
+        height="900"
+        loading="lazy">
+      <figcaption>
+        Observed FAT-workspace values: 1.998 billion source rows became 2.275 million current-run aggregate records.
+      </figcaption>
+    </figure>
+
+    <p>
+      A monthly slice makes the reduction easier to picture. For 1–18 September 2024, the source
+      contained 55,007,727 rows. The corresponding aggregate slice contained 122,526 records,
+      about 449× fewer rows to scan, filter, merge, and visualize.
+    </p>
+
+    <p>
+      For one monthly click-through-rate query, the query layer scanned 835 relevant aggregate
+      records and returned two result rows. The first local execution took 393 milliseconds;
+      the median of subsequent warm executions was 187 milliseconds.
+    </p>
+
+    <p>
+      A broader engagement overview contained 10 tiles—six KPI cards and four charts. A
+      server-side Streamlit application test rendered that page in 14.6 seconds from a cold
+      start, with a 1.49-second median across warm reruns. That measurement includes Python-side
+      query and chart construction but not browser paint, so it should be read as an application
+      benchmark rather than a universal page-load claim.
+    </p>
+
+    <p>
+      The point is not that every workload will produce the same ratio or timing. Cardinality,
+      dimensions, metric families, hardware, and storage all matter. The point is that billions
+      of source events do not require billions of persisted report rows. Once events become
+      mergeable analytical state, ordinary hardware can answer useful questions from a much
+      smaller surface.
+    </p>
+
+    <h2>How the technical stack works together</h2>
+
+    <p>
+      The implementation combines specialized tools instead of asking one engine to do
+      everything.
+    </p>
+
+    <figure>
+      <img
+        src="assets/from-streams-to-decisions-part-1/stack-together.png"
+        alt="Technical flow from streaming chunks through Polars and DataSketches into Parquet, DuckDB, Streamlit, and Plotly"
+        width="1600"
+        height="900"
+        loading="lazy">
+      <figcaption>
+        Each library owns a clear stage: transform, summarize, persist, query, present, and visualize.
+      </figcaption>
+    </figure>
+
+    <p>
+      <strong>Polars</strong> reads and transforms incoming chunks with a columnar,
+      expression-based execution model. It handles typed projections, filtering, derived
+      dimensions, and exact grouped aggregation efficiently without requiring the entire input
+      history in memory.
+    </p>
+
+    <p>
+      <strong>Apache DataSketches</strong> supplies compact, mergeable probabilistic structures
+      for questions such as distinct counts, quantiles, frequencies, and set operations. Sketch
+      bytes travel beside exact aggregate state, using the same dimensions, time windows, and
+      provenance.
+    </p>
+
+    <p>
+      <strong>Parquet</strong> persists aggregate and sketch partials in a portable columnar
+      format. Raw input rows do not need to survive chunk processing; the durable artifacts are
+      the states required to reproduce report results.
+    </p>
+
+    <p>
+      <strong>DuckDB</strong> is the local analytical query layer. It scans the relevant Parquet
+      partitions, applies report filters, rolls up exact measures, and returns sketch payloads
+      for final merging or estimation. Because the persisted dataset is already aggregate-first,
+      DuckDB works over a far smaller surface than the source stream.
+    </p>
+
+    <p>
+      <strong>Streamlit</strong> turns the catalog into an interactive reporting application:
+      page navigation, filters, KPI cards, report composition, and cached execution. It is the
+      delivery layer rather than the place where metric semantics are invented.
+    </p>
+
+    <p>
+      <strong>Plotly</strong> renders the returned report frames as interactive charts. It
+      receives small, presentation-ready results rather than raw events, which keeps chart
+      construction separated from ingestion and metric computation.
+    </p>
+
+    <p>
+      Together, the flow is straightforward: Polars reduces each chunk; exact aggregators and
+      DataSketches update mergeable state; Parquet preserves those states; DuckDB selects and
+      rolls them up; Streamlit coordinates the report; and Plotly presents it. A YAML catalog
+      connects the stages by defining dimensions, processors, metrics, reports, and dashboards.
+    </p>
+
+    <h2>What aggregate-first design does—and does not—promise</h2>
+
+    <p>
+      This approach is powerful, but it is not a magical compression button.
+    </p>
+
+    <ul>
+      <li>
+        It promises bounded processing over chunks, provided processors do not retain raw history.
+      </li>
+      <li>
+        It promises mergeable results when metric state and sketch configuration are compatible.
+      </li>
+      <li>
+        It promises query cost proportional to relevant aggregates, not total source events.
+      </li>
+      <li>
+        It does not promise arbitrary future questions about dimensions that were never retained.
+      </li>
+      <li>
+        It does not make approximation appropriate for measures that require exact accounting.
+      </li>
+      <li>
+        It does not remove the need for provenance, configuration hashes, validation, and
+        idempotent ingestion.
+      </li>
+    </ul>
+
+    <p>
+      Those boundaries are useful. They make the architecture legible: business questions become
+      metric definitions; metric definitions select exact states or sketches; the states become
+      queryable reports; and the reports become dashboards.
+    </p>
+
+    <h2>Where the series goes next</h2>
+
+    <p>
+      This first article described the storage and processing principle. The next two parts
+      should move upward through the model.
+    </p>
+
+    <ol>
+      <li>
+        <strong>Next: Metrics.</strong> How to turn business definitions into exact or
+        approximate calculations; choose dimensions and time grains; define safe ratios; expose
+        sketch accuracy; and test metric behavior.
+      </li>
+      <li>
+        <strong>Then: Reports.</strong> How filters, rollups, time comparison, KPI cards, tables,
+        and charts query the aggregate layer without leaking computation into the UI.
+      </li>
+    </ol>
+
+    <p>
+      Later articles can cover dashboard composition, deterministic ingestion and recovery,
+      provenance, performance measurement, and the boundary between aggregate-first reporting
+      and systems that must retain raw events.
+    </p>
+
+    <p>
+      The guiding question throughout the series will remain the same: what is the smallest
+      durable state that preserves the decision we need to make?
+    </p>
+
+    <aside class="series-note">
+      <strong>Explore the implementation</strong>
+      Source, examples, and documentation are available in the
+      <a href="https://github.com/grishasen/value_stream_v2">Value Stream GitHub repository</a>.
+    </aside>
+  </article>
+</body>
+</html>
