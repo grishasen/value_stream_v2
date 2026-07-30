@@ -486,11 +486,11 @@
       </table>
     </div>
 
-    <h2>A real workspace: from almost two billion rows to a queryable model</h2>
+    <h2>A real-data example: from two billion rows to a queryable model</h2>
 
     <p>
-      A useful example is a large generated workspace used to exercise the full reporting path.
-      These are observed workspace and run values, not a hypothetical benchmark.
+      This example comes from a large real-data workspace used to exercise the full reporting
+      path. These are observed values, not a hypothetical benchmark.
     </p>
 
     <p>
@@ -501,11 +501,7 @@
     </p>
 
     <p>
-      In the latest successful ingestion run, 1,998,151,261 input records were read and
-      1,998,151,259 were retained by the configured filters. They arrived in 799 daily chunks
-      covering 14 April 2022 through 18 September 2024. The current run produced 2,274,653
-      aggregate records in about 25 minutes and 31 seconds: roughly an 878× reduction from
-      source rows to queryable aggregate records.
+      About two billion source records became about two million queryable aggregate records.
     </p>
 
     <p>
@@ -517,20 +513,20 @@
 
     <figure>
       <img
-        src="assets/from-streams-to-decisions-part-1/fat-workspace-scale.png"
-        alt="Observed scale of a workspace reducing nearly two billion source rows to about 2.27 million aggregate records"
+        src="assets/from-streams-to-decisions-part-1/real-data-scale.png"
+        alt="A real-data example reducing about two billion source rows to about two million queryable aggregate records"
         width="1600"
         height="900"
         loading="lazy">
       <figcaption>
-        Observed FAT-workspace values: 1.998 billion source rows became 2.275 million current-run aggregate records.
+        In one real-data example, roughly two billion source rows became roughly two million queryable aggregate records.
       </figcaption>
     </figure>
 
     <p>
-      A monthly slice makes the reduction easier to picture. For 1–18 September 2024, the source
-      contained 55,007,727 rows. The corresponding aggregate slice contained 122,526 records,
-      about 449× fewer rows to scan, filter, merge, and visualize.
+      An 18-day slice makes the reduction easier to picture. About 55 million source rows became
+      about 123 thousand aggregate records—roughly 449× fewer rows to scan, filter, merge, and
+      visualize.
     </p>
 
     <p>
