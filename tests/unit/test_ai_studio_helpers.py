@@ -3911,3 +3911,520 @@ def test_workspace_apply_requires_explicit_replacement_consent() -> None:
     assert not confirmed.exception
     apply_button = next(b for b in confirmed.button if b.label == "Apply to workspace")
     assert not apply_button.disabled
+
+
+@pytest.mark.unit
+def test_sync_source_filter_editor_keeps_or_logic_editable_as_rules() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        from valuestream.config import model as config_model  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        source = config_model.Source.model_validate(
+            {
+                "id": "ih",
+                "reader": {"kind": "csv", "file_pattern": "*.csv"},
+                "transforms": [
+                    {
+                        "kind": "filter",
+                        "expression": {
+                            "op": "or",
+                            "args": [
+                                {"op": "eq", "column": "Channel", "value": "Web"},
+                                {"op": "eq", "column": "Channel", "value": "Mobile"},
+                            ],
+                        },
+                    }
+                ],
+            }
+        )
+        page._sync_source_filter_editor(source)
+
+    at = AppTest.from_function(app).run()
+
+    assert not at.exception
+    # OR logic previously forced the read-only Raw AST fallback; Builder parity
+    # keeps it editable as Basic rule rows with an OR combine.
+    assert at.session_state["ai_studio_filter_mode"] == "Rules"
+    assert at.session_state["ai_studio_filter_rows_logic_mode"] == "Basic"
+    assert at.session_state["ai_studio_filter_rows_combine"] == "OR"
+    assert at.session_state["ai_studio_raw_filter"] == ""
+    assert [row["Ref"] for row in at.session_state["ai_studio_filter_rows"]] == ["E1", "E2"]
+
+
+@pytest.mark.unit
+def test_current_filter_expression_honors_combine_and_formula() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app(logic_mode: str, combine: str, formula: str) -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state["ai_studio_filter_mode"] = "Rules"
+        st.session_state["ai_studio_filter_rows"] = [
+            {"Field": "Channel", "Operator": "==", "Value": "Web", "Enabled": True},
+            {"Field": "Outcome", "Operator": "==", "Value": "Clicked", "Enabled": True},
+        ]
+        st.session_state["ai_studio_filter_rows_logic_mode"] = logic_mode
+        st.session_state["ai_studio_filter_rows_combine"] = combine
+        st.session_state["ai_studio_filter_rows_formula"] = formula
+        st.session_state["compiled"] = page._current_filter_expression()
+
+    basic_or = AppTest.from_function(
+        app, kwargs={"logic_mode": "Basic", "combine": "OR", "formula": ""}
+    ).run()
+    advanced = AppTest.from_function(
+        app, kwargs={"logic_mode": "Advanced", "combine": "AND", "formula": "E1 AND NOT E2"}
+    ).run()
+
+    assert not basic_or.exception
+    assert basic_or.session_state["compiled"]["op"] == "or"
+    assert not advanced.exception
+    compiled = advanced.session_state["compiled"]
+    assert compiled["op"] == "and"
+    assert compiled["args"][1]["op"] == "not"
+
+
+@pytest.mark.unit
+def test_processor_states_from_rows_round_trips_parameters_yaml() -> None:
+    rows = [
+        {
+            "State": "TopChannels",
+            "Type": "topk",
+            "Source Column": "Channel",
+            "Parameters": "{lg_max_map_size: 8}",
+            "Derived From": "custom state",
+            "Enabled": True,
+        }
+    ]
+
+    states = _processor_states_from_rows(rows, {})
+
+    assert states["TopChannels"] == {
+        "type": "topk",
+        "source_column": "Channel",
+        "lg_max_map_size": 8,
+    }
+
+
+@pytest.mark.unit
+def test_processor_states_from_rows_rejects_mismatched_sketch_parameter() -> None:
+    rows = [
+        {
+            "State": "TopChannels",
+            "Type": "topk",
+            "Source Column": "Channel",
+            "Parameters": "{k: 200}",
+            "Derived From": "custom state",
+            "Enabled": True,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="only valid"):
+        _processor_states_from_rows(rows, {})
+
+
+@pytest.mark.unit
+def test_processor_parameter_editor_renders_builder_parity_controls() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import polars as inner_pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        draft = {
+            "pipelines": {
+                "catalog_version": 2,
+                "workspace": "test",
+                "sources": [{"id": "ih", "reader": {"kind": "csv", "file_pattern": "*.csv"}}],
+            },
+            "processors": {
+                "catalog_version": 2,
+                "processors": [
+                    {
+                        "id": "engagement",
+                        "source": "ih",
+                        "kind": "binary_outcome",
+                        "group_by": ["Channel"],
+                        "time": {
+                            "property": "OutcomeTime",
+                            "grain": "daily",
+                            "calendar": {"Day": "Day"},
+                        },
+                        "dedup_keys": ["InteractionID"],
+                        "states": {
+                            "Count": {"type": "count"},
+                            "Positives": {"type": "count", "outcome": "positive"},
+                            "UniqueCustomers": {
+                                "type": "cpc",
+                                "source_column": "CustomerID",
+                                "lg_k": 11,
+                            },
+                        },
+                        "outcome": {
+                            "column": "Outcome",
+                            "positive_values": ["Clicked"],
+                            "negative_values": ["Impression"],
+                        },
+                        "filter": {
+                            "op": "or",
+                            "args": [
+                                {"op": "eq", "column": "Channel", "value": "Web"},
+                                {"op": "eq", "column": "Channel", "value": "Mobile"},
+                            ],
+                        },
+                    }
+                ],
+            },
+            "metrics": {"catalog_version": 2, "metrics": {}},
+            "dashboards": {"catalog_version": 2, "theme": {}, "dashboards": []},
+        }
+        working = inner_pl.DataFrame(
+            {"Channel": ["Web"], "Outcome": ["Clicked"], "CustomerID": ["c-1"]}
+        )
+        page._render_processor_parameter_editor(draft, working, ["Channel", "Outcome"])
+        st.session_state["editor_rendered"] = True
+
+    at = AppTest.from_function(app).run()
+
+    assert not at.exception
+    assert at.session_state["editor_rendered"] is True
+    labels = [widget.label for widget in at.multiselect]
+    assert "Dedup Keys" in labels
+    dedup = next(widget for widget in at.multiselect if widget.label == "Dedup Keys")
+    assert dedup.value == ["InteractionID"]
+    session_keys = list(at.session_state.filtered_state)
+    # The sketch grid session rows carry the Builder's Parameters and
+    # Derived From columns seeded from the draft's state contract.
+    state_rows_key = next(
+        key for key in session_keys if key.endswith("_state_rows") and "engagement" in key
+    )
+    rows_by_name = {row["State"]: row for row in at.session_state[state_rows_key]}
+    assert rows_by_name["UniqueCustomers"]["Parameters"] == "{lg_k: 11}"
+    assert rows_by_name["Positives"]["Derived From"] == "Outcome in [Clicked]"
+    # The OR processor filter stays editable as Basic rule rows.
+    filter_rows_key = next(
+        key
+        for key in session_keys
+        if key.endswith("_filter_rows") and "engagement" in key and "logic" not in key
+    )
+    assert [row["Ref"] for row in at.session_state[filter_rows_key]] == ["E1", "E2"]
+
+
+@pytest.mark.unit
+def test_metric_parameter_editor_shows_outputs_and_preserves_untouched_metric() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        draft = {
+            "pipelines": {
+                "catalog_version": 2,
+                "workspace": "test",
+                "sources": [{"id": "ih", "reader": {"kind": "csv", "file_pattern": "*.csv"}}],
+            },
+            "processors": {
+                "catalog_version": 2,
+                "processors": [
+                    {
+                        "id": "engagement",
+                        "source": "ih",
+                        "kind": "binary_outcome",
+                        "group_by": ["Channel"],
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
+                        "states": {
+                            "Count": {"type": "count"},
+                            "Positives": {"type": "count", "outcome": "positive"},
+                        },
+                        "outcome": {
+                            "column": "Outcome",
+                            "positive_values": ["Clicked"],
+                            "negative_values": ["Impression"],
+                        },
+                    }
+                ],
+            },
+            "metrics": {
+                "catalog_version": 2,
+                "metrics": {
+                    "Volume": {
+                        "processor": "engagement",
+                        "kind": "formula",
+                        "expression": {"col": "Count"},
+                        "recipe": {"id": "volume", "version": 1},
+                    }
+                },
+            },
+            "dashboards": {"catalog_version": 2, "theme": {}, "dashboards": []},
+        }
+        st.session_state["ai_studio_draft"] = draft
+        page._render_metric_parameter_editor(draft)
+
+    at = AppTest.from_function(app).run()
+
+    assert not at.exception
+    outputs = next(widget for widget in at.text_input if widget.label == "Outputs")
+    assert outputs.value
+    assert next(widget for widget in at.text_input if widget.label == "Metric Label") is not None
+
+    updated = next(button for button in at.button if button.label == "Update Metric In Draft")
+    assert not updated.disabled
+    at = updated.click().run()
+    assert not at.exception
+    # A no-op apply preserves the exact authored definition, including the
+    # recipe provenance the visual form does not manage.
+    metric = at.session_state["ai_studio_draft"]["metrics"]["metrics"]["Volume"]
+    assert metric.get("recipe") == {"id": "volume", "version": 1}
+
+
+@pytest.mark.unit
+def test_draft_catalog_emits_defaults_transform_without_rename_capitalize() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import polars as inner_pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state["ai_studio_defaults"] = [
+            {"Field": "Channel", "Default Value": "Unknown", "Enabled": True}
+        ]
+        st.session_state[page.AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = False
+        working = inner_pl.DataFrame(
+            {
+                "SubjectID": ["c-1"],
+                "Outcome": ["Clicked"],
+                "Channel": ["Web"],
+            }
+        )
+        st.session_state["draft"] = page._build_draft_catalog(working, ["Channel", "Outcome"])
+
+    at = AppTest.from_function(app).run()
+
+    assert not at.exception
+    source = at.session_state["draft"]["pipelines"]["sources"][0]
+    kinds = [transform.get("kind") for transform in source.get("transforms", [])]
+    assert "rename_capitalize" not in kinds
+    assert "defaults" in kinds
+    defaults = next(t for t in source["transforms"] if t.get("kind") == "defaults")
+    assert defaults["values"] == {"Channel": "Unknown"}
+
+
+@pytest.mark.unit
+def test_chat_review_edits_draft_chat_settings() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app() -> None:
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state.setdefault(
+            "ai_studio_draft",
+            {
+                "pipelines": {
+                    "catalog_version": 2,
+                    "workspace": "test",
+                    "sources": [{"id": "ih", "reader": {"kind": "csv", "file_pattern": "*.csv"}}],
+                },
+                "processors": {
+                    "catalog_version": 2,
+                    "processors": [
+                        {
+                            "id": "engagement",
+                            "source": "ih",
+                            "kind": "binary_outcome",
+                            "group_by": ["Channel"],
+                            "time": {"property": "OutcomeTime", "grain": "daily"},
+                            "states": {"Count": {"type": "count"}},
+                        }
+                    ],
+                },
+                "metrics": {
+                    "catalog_version": 2,
+                    "metrics": {
+                        "Volume": {
+                            "processor": "engagement",
+                            "kind": "formula",
+                            "expression": {"col": "Count"},
+                        }
+                    },
+                },
+                "dashboards": {"catalog_version": 2, "theme": {}, "dashboards": []},
+            },
+        )
+        page._chat_review()
+
+    at = AppTest.from_function(app).run()
+    assert not at.exception
+
+    prompt = next(widget for widget in at.text_area if widget.label == "Agent Prompt")
+    assert prompt.value  # seeded with the default agent prompt
+    at = prompt.set_value("Use Pega CDH terminology.").run()
+    at = (
+        next(button for button in at.button if button.label == "Update Chat Settings In Draft")
+        .click()
+        .run()
+    )
+
+    assert not at.exception
+    chat = at.session_state["ai_studio_draft"]["chat_with_data"]
+    assert chat["agent_prompt"] == "Use Pega CDH terminology."
+    # Dataset/processor/metric keys seed the description grids; empty
+    # descriptions are omitted from the stored map.
+    assert chat["dataset_descriptions"] == {}
+    assert chat["metric_descriptions"] == {}
+
+
+def _report_editor_draft() -> dict:
+    return {
+        "pipelines": {
+            "catalog_version": 2,
+            "workspace": "test",
+            "sources": [{"id": "ih", "reader": {"kind": "csv", "file_pattern": "*.csv"}}],
+        },
+        "processors": {
+            "catalog_version": 2,
+            "processors": [
+                {
+                    "id": "engagement",
+                    "source": "ih",
+                    "kind": "binary_outcome",
+                    "group_by": ["Channel"],
+                    "time": {"property": "OutcomeTime", "grain": "daily"},
+                    "states": {
+                        "Count": {"type": "count"},
+                        "Positives": {"type": "count", "outcome": "positive"},
+                    },
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked"],
+                        "negative_values": ["Impression"],
+                    },
+                }
+            ],
+        },
+        "metrics": {
+            "catalog_version": 2,
+            "metrics": {
+                "Volume": {
+                    "processor": "engagement",
+                    "kind": "formula",
+                    "expression": {"col": "Count"},
+                }
+            },
+        },
+        "dashboards": {
+            "catalog_version": 2,
+            "theme": {},
+            "dashboards": [
+                {
+                    "id": "overview",
+                    "title": "Overview",
+                    "layout": "tabs",
+                    "pages": [
+                        {
+                            "id": "volume",
+                            "title": "Volume",
+                            "tiles": [
+                                {
+                                    "id": "volume_trend",
+                                    "title": "Volume Trend",
+                                    "metric": "Volume",
+                                    "chart": "line",
+                                    "x": "Day",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+
+@pytest.mark.unit
+def test_report_tile_editor_updates_existing_tile_in_draft() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app(draft: dict) -> None:
+        import polars as inner_pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state.setdefault("ai_studio_draft", draft)
+        st.session_state.setdefault(
+            "ai_studio_tile_editor_selection", "overview/volume/volume_trend"
+        )
+        working = inner_pl.DataFrame(
+            {"Channel": ["Web"], "Outcome": ["Clicked"], "Day": ["2026-01-01"]}
+        )
+        page._render_report_tile_editor(st.session_state["ai_studio_draft"], working)
+
+    at = AppTest.from_function(app, kwargs={"draft": _report_editor_draft()}).run()
+
+    assert not at.exception
+    # Builder-parity landmarks: metric/chart selectors, page settings, YAML.
+    labels = [widget.label for widget in at.selectbox]
+    assert "Metric" in labels
+    assert "Chart" in labels
+    assert "Dashboard" in labels
+    assert "Page" in labels
+
+    title = next(widget for widget in at.text_input if widget.label == "Tile Title")
+    at = title.set_value("Volume Over Time").run()
+    apply_button = next(
+        button for button in at.button if button.label == "Update Report In Draft"
+    )
+    assert not apply_button.disabled
+    at = apply_button.click().run()
+
+    assert not at.exception
+    tile = at.session_state["ai_studio_draft"]["dashboards"]["dashboards"][0]["pages"][0][
+        "tiles"
+    ][0]
+    assert tile["title"] == "Volume Over Time"
+    assert tile["metric"] == "Volume"
+    assert tile["chart"] == "line"
+
+
+@pytest.mark.unit
+def test_report_tile_editor_deletes_tile_but_keeps_containers() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    def app(draft: dict) -> None:
+        import polars as inner_pl  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+
+        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+
+        st.session_state.setdefault("ai_studio_draft", draft)
+        st.session_state.setdefault(
+            "ai_studio_tile_editor_selection", "overview/volume/volume_trend"
+        )
+        working = inner_pl.DataFrame(
+            {"Channel": ["Web"], "Outcome": ["Clicked"], "Day": ["2026-01-01"]}
+        )
+        page._render_report_tile_editor(st.session_state["ai_studio_draft"], working)
+
+    at = AppTest.from_function(app, kwargs={"draft": _report_editor_draft()}).run()
+    at = next(button for button in at.button if button.label == "Delete tile").click().run()
+    at = (
+        next(button for button in at.button if button.label == "Remove tile from draft")
+        .click()
+        .run()
+    )
+
+    assert not at.exception
+    page_def = at.session_state["ai_studio_draft"]["dashboards"]["dashboards"][0]["pages"][0]
+    assert page_def["tiles"] == []
+    assert page_def["id"] == "volume"

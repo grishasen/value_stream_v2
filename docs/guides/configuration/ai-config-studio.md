@@ -100,6 +100,56 @@ An unknown column name cannot be typed into a source-field mapping. Defaults,
 filters, and calculated-field editors start empty; rows appear only after an
 explicit add action.
 
+## Builder-equivalent editors
+
+The Studio's editing surfaces reuse the Configuration Builder's editors, so
+authoring capability is equivalent in both tools:
+
+- **Defaults** offers the same field picker (observed columns plus mapped
+  aliases and calculated outputs), empty-state guidance, and enabled-by-default
+  rows. Authored default values always reach the generated source transforms,
+  with or without the Rename / Capitalize transform.
+- **Filters** supports rule rows with stable `E1..En` references, **Basic**
+  logic (AND/OR combine) and **Advanced** logic formulas such as
+  `E1 AND (E2 OR E3)`, plus an editable **Filter AST YAML** area in Raw AST
+  mode. A draft filter that decompiles to rows — including OR/NOT and nested
+  logic — stays editable as rules; only row-unmappable predicates fall back to
+  the raw editor. The Basic/Advanced logic state persists in the Studio
+  checkpoint together with the rows.
+- **Calculations** uses the Builder's focused expression editor: per-row
+  validation with friendly messages, an explicit **Apply expression** commit
+  with preserved working drafts, the visual case/when builder for AST YAML
+  rows, and the excluded-rows caption. An unapplied working expression is
+  reported as an Apply-readiness warning.
+- The **Processor Parameter Editor** shows the kind guide, calendar dimensions
+  in Group By, Dedup Keys for kinds that consume them, and the full sketch
+  grid with **Parameters YAML** and **Derived From** columns, the **Add
+  state** popover (duplicate-name and parameter validation), and automatic
+  numeric-distribution state sync. The processor filter offers the same
+  Rules / Raw AST modes as the Builder; invalid states or filters disable the
+  draft update action instead of silently dropping rows.
+- The **Metric Parameter Editor** leads with the metric label, shows the
+  kind definition, the read-only **Outputs** contract, and the plain-language
+  metric review. An incomplete kind form disables the draft update, and a
+  no-op update preserves the exact authored definition.
+- **Reports Review** includes the Builder-parity **Report Tile Editor**:
+  create, duplicate, edit, or delete one tile with Visual or Raw YAML modes,
+  the purpose-grouped chart library for new tiles, metric- and chart-aware
+  role selectors and chart settings, dashboard/page creation with layout and
+  page filters/time-range settings, staged tile deletion that keeps
+  containers, a **Manage dashboards** section for page/dashboard removal, and
+  the searchable report inventory. Every change is validated as a complete
+  report candidate before **Update Report In Draft** is enabled; the draft
+  revision then requires review again before Apply.
+- **Chat Review** edits the draft's Chat With Data guidance exactly like the
+  Builder: the agent prompt plus dataset, processor, and metric descriptions.
+  The guidance is stored in the draft's `chat_with_data` section, exported to
+  `ai.yaml`, and written on Apply; it is never part of the recovery
+  checkpoint.
+- **Settings** matches the Builder's workspace defaults: the grain options
+  include `Week`, grains already present in the draft remain selectable, and
+  the update action is gated on at least one grain and a parseable theme YAML.
+
 The **Suggested Group-By Fields** profile treats source-provided `Day`, `Month`,
 `Quarter`, and `Year` fields as explicit recommended calendar granularities,
 even when those fields are required source mappings. When the draft will derive
@@ -112,6 +162,15 @@ When both `DecisionTime` and `OutcomeTime` are available, the deterministic
 draft adds a `ResponseTime` calculation in seconds only if neither the effective
 sample schema nor an enabled user calculation already defines that output. A
 user-authored `ResponseTime` expression always wins.
+
+Before calendar or `ResponseTime` preview expressions run, Studio ensures the
+mapped time fields are temporal. If session state loses a format that the
+selected sample's source plan already inferred, Studio restores that format
+and persists it into the draft's preceding `parse_datetime` transform. If the
+format is genuinely unknown, or configured sample values do not match it,
+preview stops with a **Timestamp Format** correction instead of evaluating a
+date expression against string columns. Pega timestamps use
+`%Y%m%dT%H%M%S%.3f %Z`.
 
 ## Describe the outcome
 
@@ -217,6 +276,27 @@ as the approved schema and business requirements support. It must not stop at
 the deterministic minimal baseline, duplicate equivalent processors, or add an
 object whose required fields and valid state definitions are unavailable.
 
+AI draft, report-refresh, refinement, repair, and Copilot prompts share an
+analytics opportunity playbook calibrated against the production-shaped
+`examples/fat` catalog. It is a guarded capability menu, not a template to
+copy. The model evaluates approved field roles, effective dtypes, the current
+source plan, and business requirements before offering:
+
+- source readiness, defaults, dataset filters, and calculated-field patterns;
+- engagement/conversion, descriptive/latency, model-quality, experiment,
+  audience/reach, funnel, and lifecycle processor/metric bundles;
+- executive, engagement/conversion, descriptive/latency, model-quality,
+  experiment, audience, and funnel report-page patterns.
+
+Each selected pattern must be dependency-complete from preprocessing through
+report tiles. A pipelines-preserving draft may use only preprocessing already
+present in the source plan. Copilot may apply only operations in its operation
+dictionary; when parsing, casting, calendar, rename, or dedup work has no
+operation, it points to the required Studio/source-plan action. Timestamp-like
+names are never treated as proof of a temporal dtype: string timestamps must
+be parsed with a confirmed format before date arithmetic, so latency analytics
+cannot recreate the `str - str` failure.
+
 The deterministic draft uses the same validation and explicit review boundary
 but never calls a provider. Its first-run baseline contains one aggregate
 processor, four metrics, and a stable three-page/six-tile report set for
@@ -280,7 +360,12 @@ can produce quick-reply questions before any operation is attempted.
 On Filters, dataset requests modify the source filter before processor fan-out;
 processor filters remain a separate Processors concern. On Calculations,
 Copilot uses the closed expression AST catalog rather than executable code or
-free-form function strings.
+free-form function strings. When the user asks what is possible, Copilot offers
+two to four relevant playbook options for the active step and waits for a
+concrete selection before returning operations. Processor suggestions declare
+the states needed by their metrics; metric suggestions require those states;
+report suggestions use only existing metric outputs and compatible chart
+roles.
 
 ## Coverage and technical details
 

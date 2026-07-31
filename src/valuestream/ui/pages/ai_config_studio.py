@@ -54,7 +54,11 @@ from valuestream.ai.copilot import (
     draft_patch_bundles,
     merge_selected_draft_patch_bundles,
 )
-from valuestream.ai.settings import load_llm_settings_config, write_chat_with_data_config
+from valuestream.ai.settings import (
+    DEFAULT_CHAT_AGENT_PROMPT,
+    load_llm_settings_config,
+    write_chat_with_data_config,
+)
 from valuestream.ai.studio import (
     AI_PROVIDER_PREFLIGHT_MAX_TIMEOUT_SECONDS,
     AIProviderCallError,
@@ -87,6 +91,13 @@ from valuestream.ui.instrumentation import (
     record_event,
     start_journey,
 )
+
+# The Configuration Builder's row editors (filter logic, focused calculated
+# expressions, default values, sketch states) are key-parameterized and page
+# agnostic. Reusing them keeps the Studio functionally equivalent to the
+# Builder without duplicating the widget wiring.
+from valuestream.ui.pages import config_builder
+from valuestream.ui.presentation import humanize_identifier
 from valuestream.utils.logger import get_logger
 from valuestream.utils.names import capitalize_fields
 
@@ -981,7 +992,7 @@ def _render_selected_step(
         1: lambda: _required_fields(schema_sample, working),
         2: lambda: _defaults(schema_sample),
         3: lambda: _filters(schema_sample),
-        4: _calculations,
+        4: lambda: _calculations(schema_sample),
         5: lambda: _render_approve_fields_step(working),
         6: lambda: _ai_draft(
             ctx,
@@ -2049,6 +2060,9 @@ def _initialize_state(sample: pl.DataFrame) -> None:  # noqa: PLR0915
     st.session_state["ai_studio_defaults"] = []
     st.session_state["ai_studio_filter_rows"] = []
     st.session_state["ai_studio_filter_mode"] = "Rules"
+    st.session_state["ai_studio_filter_rows_logic_mode"] = "Basic"
+    st.session_state["ai_studio_filter_rows_combine"] = "AND"
+    st.session_state["ai_studio_filter_rows_formula"] = ""
     st.session_state["ai_studio_raw_filter"] = ""
     st.session_state["ai_studio_calculations"] = []
     st.session_state[AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = False
@@ -2335,50 +2349,21 @@ def _defaults(sample: pl.DataFrame) -> None:
 def _render_defaults_editor(sample: pl.DataFrame) -> None:
     with components.bordered_panel("Default Values", "Defaults are applied before filters."):
         editor_key = _schema_widget_key("ai_studio_defaults_editor")
-        picker_key = _schema_widget_key("ai_studio_defaults_field_picker")
-        picker_col, action_col = st.columns([0.78, 0.22], vertical_alignment="bottom")
-        selected_fields = picker_col.multiselect(
-            "Add Field",
-            [str(column) for column in sample.columns],
-            accept_new_options=True,
-            key=picker_key,
-            placeholder="Select existing or type new",
-            help=config_help.field_help("default.field"),
+        # Mirror the Builder's field-option breadth: observed sample columns
+        # plus mapped alias targets and calculated-field outputs.
+        alias_targets = [str(target) for target in _field_aliases() if str(target).strip()]
+        calculation_names = [
+            str(row.get("Name") or "").strip()
+            for row in st.session_state.get("ai_studio_calculations", []) or []
+            if isinstance(row, dict) and str(row.get("Name") or "").strip()
+        ]
+        config_builder._render_default_values_editor(
+            "ai_studio_defaults",
+            editor_key,
+            builder.dedupe(
+                [*(str(column) for column in sample.columns), *alias_targets, *calculation_names]
+            ),
         )
-        action_col.button(
-            "Add",
-            icon=":material/add:",
-            disabled=not selected_fields,
-            key=f"{picker_key}_add",
-            on_click=components.add_default_fields_from_picker,
-            args=("ai_studio_defaults", picker_key, editor_key),
-        )
-        default_frame = builder.editor_frame(
-            st.session_state.get("ai_studio_defaults", []),
-            ["Field", "Default Value", "Enabled"],
-            builder.blank_default_row,
-        )
-        edited = st.data_editor(
-            components.pinned_editor_input(editor_key, default_frame),
-            num_rows="dynamic",
-            hide_index=True,
-            width="stretch",
-            key=editor_key,
-            column_config={
-                "Field": st.column_config.TextColumn(
-                    "Field", width="medium", help=config_help.field_help("default.field")
-                ),
-                "Default Value": st.column_config.TextColumn(
-                    "Default Value",
-                    width="medium",
-                    help=config_help.field_help("default.value"),
-                ),
-                "Enabled": st.column_config.CheckboxColumn(
-                    "Enabled", width="small", help=config_help.field_help("row.enabled")
-                ),
-            },
-        )
-        st.session_state["ai_studio_defaults"] = builder.normalize_editor_rows(edited)
         _render_stale_preprocessing_field_feedback("Defaults")
         missing = [
             name
@@ -2394,83 +2379,77 @@ def _render_defaults_editor(sample: pl.DataFrame) -> None:
 
 
 def _filters(sample: pl.DataFrame) -> None:
-    filter_frame = builder.editor_frame(
-        st.session_state.get("ai_studio_filter_rows", []),
-        ["Field", "Operator", "Value", "Enabled"],
-        builder.blank_filter_row,
-    )
-    _render_filters_editor(sample, filter_frame)
+    _render_filters_editor(sample)
 
 
 @st.fragment()
-def _render_filters_editor(sample: pl.DataFrame, filter_frame: pl.DataFrame) -> None:
+def _render_filters_editor(sample: pl.DataFrame) -> None:
     with components.bordered_panel(
-        "Filters", "Define dataset-level filters before calculated fields."
+        "Filters", "Define dataset-level filters with rule rows or raw AST YAML."
     ):
-        st.session_state["ai_studio_filter_mode"] = st.segmented_control(
+        mode = st.segmented_control(
             "Filter Mode",
             ["Rules", "Raw AST"],
-            default=st.session_state["ai_studio_filter_mode"],
+            default=str(st.session_state.get("ai_studio_filter_mode") or "Rules"),
+            key="ai_studio_filter_mode_control",
             help=config_help.field_help("source.filter_mode"),
-        )
-        if st.session_state["ai_studio_filter_mode"] == "Rules":
-            filter_editor_key = _schema_widget_key("ai_studio_filter_editor")
-            edited = st.data_editor(
-                components.pinned_editor_input(filter_editor_key, filter_frame),
-                num_rows="dynamic",
-                hide_index=True,
-                width="stretch",
-                key=filter_editor_key,
-                column_config={
-                    "Field": st.column_config.SelectboxColumn(
-                        "Field",
-                        options=sample.columns,
-                        required=False,
-                        help=config_help.field_help("filter.field"),
-                    ),
-                    "Operator": st.column_config.SelectboxColumn(
-                        "Operator",
-                        options=builder.FILTER_OPERATORS,
-                        help=config_help.field_help("filter.operator"),
-                    ),
-                    "Value": st.column_config.TextColumn(
-                        "Value", help=config_help.field_help("filter.value")
-                    ),
-                    "Enabled": st.column_config.CheckboxColumn(
-                        "Enabled", help=config_help.field_help("row.enabled")
-                    ),
-                },
+        ) or str(st.session_state.get("ai_studio_filter_mode") or "Rules")
+        st.session_state["ai_studio_filter_mode"] = mode
+        if mode == "Rules":
+            # Build the frame inside the fragment so a fragment-scoped rerun
+            # (E-label maintenance after a row add/remove) pins fresh rows.
+            filter_frame = builder.editor_frame(
+                st.session_state.get("ai_studio_filter_rows", []),
+                ["Ref", "Field", "Operator", "Value", "Enabled"],
+                builder.blank_filter_row,
             )
-            st.session_state["ai_studio_filter_rows"] = builder.normalize_editor_rows(edited)
-            try:
-                builder.compile_filter_rows(st.session_state["ai_studio_filter_rows"])
-            except ValueError as exc:
-                st.error(f"Filters: {exc}")
+            filter_editor_key = _schema_widget_key("ai_studio_filter_editor")
+            config_builder._render_filter_rows_editor(
+                "ai_studio_filter_rows",
+                filter_editor_key,
+                filter_frame,
+                [str(column) for column in sample.columns],
+            )
         else:
+            editor_key = "ai_studio_raw_filter_editor"
+            raw_kwargs: dict[str, Any] = {"height": 220, "key": editor_key}
+            if editor_key not in st.session_state:
+                seed = str(st.session_state.get("ai_studio_raw_filter") or "")
+                if not seed.strip():
+                    # Mirror the Builder's seed-from-current-filter behavior:
+                    # entering Raw AST starts from the compiled rule rows.
+                    try:
+                        seed = builder.expression_yaml(
+                            config_builder._compiled_filter_expression("ai_studio_filter_rows")
+                        )
+                    except ValueError:
+                        seed = ""
+                raw_kwargs["value"] = seed
+            raw_filter = st.text_area(
+                "Filter AST YAML",
+                help=config_help.field_help("source.filter_ast"),
+                **raw_kwargs,
+            )
+            st.session_state["ai_studio_raw_filter"] = raw_filter
             try:
-                compiled = builder.compile_filter_rows(st.session_state["ai_studio_filter_rows"])
+                if raw_filter.strip():
+                    builder.parse_expression_yaml(raw_filter)
             except ValueError as exc:
-                compiled = None
-                st.error(f"Filters: {exc}")
-            st.code(builder.expression_yaml(compiled) or "{}", language="yaml")
+                st.error(f"Filter AST YAML is invalid: {exc}")
         _render_stale_preprocessing_field_feedback("Filters")
     _persist_ai_studio_checkpoint()
 
 
-def _calculations() -> None:
-    calculation_frame = builder.editor_frame(
-        st.session_state.get("ai_studio_calculations", []),
-        ["Name", "Mode", "Left", "Right Kind", "Right", "Expression", "Enabled"],
-        _blank_ai_calculation_row,
-    )
-    _render_calculations_editor(calculation_frame)
+def _calculations(sample: pl.DataFrame) -> None:
+    _render_calculations_editor(sample)
 
 
 @st.fragment()
-def _render_calculations_editor(
-    calculation_frame: pl.DataFrame,
-) -> None:
-    with components.bordered_panel("Calculated Fields", "Create named `derive_column` transforms."):
+def _render_calculations_editor(sample: pl.DataFrame) -> None:
+    with components.bordered_panel(
+        "Calculated Fields",
+        "Create `derive_column` transforms with builder rows, AST YAML, or Polars.",
+    ):
         with st.popover("Examples", icon=":material/flare:"):
             st.code(
                 "Name: Margin\nMode: Subtract\nLeft: Revenue\nRight Kind: Field\nRight: Cost",
@@ -2484,59 +2463,25 @@ def _render_calculations_editor(
                 'pl.col("Revenue") - pl.col("Cost")',
                 language="python",
             )
-        calculation_editor_key = _schema_widget_key("ai_studio_calculation_editor")
-        edited = st.data_editor(
-            components.pinned_editor_input(calculation_editor_key, calculation_frame),
-            num_rows="dynamic",
-            hide_index=True,
-            width="stretch",
-            key=calculation_editor_key,
-            column_config={
-                "Name": st.column_config.TextColumn(
-                    "Name", width="small", help=config_help.field_help("calculation.name")
-                ),
-                "Mode": st.column_config.SelectboxColumn(
-                    "Mode",
-                    options=builder.CALCULATION_MODES,
-                    width="medium",
-                    help=config_help.field_help("calculation.mode"),
-                ),
-                "Left": st.column_config.TextColumn(
-                    "Left", width="medium", help=config_help.field_help("calculation.left")
-                ),
-                "Right Kind": st.column_config.SelectboxColumn(
-                    "Right Kind",
-                    options=["Field", "Literal"],
-                    width="small",
-                    help=config_help.field_help("calculation.right_kind"),
-                ),
-                "Right": st.column_config.TextColumn(
-                    "Right", width="medium", help=config_help.field_help("calculation.right")
-                ),
-                "Expression": st.column_config.TextColumn(
-                    "Expression",
-                    width="large",
-                    help=config_help.field_help("calculation.expression"),
-                ),
-                "Enabled": st.column_config.CheckboxColumn(
-                    "Enabled", width="small", help=config_help.field_help("row.enabled")
-                ),
-            },
+        # Rows and the frame are (re)built inside the fragment so an applied
+        # focused-editor expression appears in the grid on the fragment rerun.
+        calc_rows = builder.calculated_rows_for_editor(
+            st.session_state.get("ai_studio_calculations", [])
         )
-        st.session_state["ai_studio_calculations"] = builder.normalize_editor_rows(edited)
+        st.session_state["ai_studio_calculations"] = calc_rows
+        calculation_frame = builder.editor_frame(
+            calc_rows,
+            ["Name", "Enabled", "Mode", "Expression", "Left", "Right Kind", "Right"],
+            _blank_ai_calculation_row,
+        )
+        calculation_editor_key = _schema_widget_key("ai_studio_calculation_editor")
+        config_builder._render_calculated_rows_editor(
+            "ai_studio_calculations",
+            calculation_editor_key,
+            calculation_frame,
+            [str(column) for column in sample.columns],
+        )
         _render_stale_preprocessing_field_feedback("Calculations")
-        try:
-            transforms = builder.build_derive_column_transforms(
-                st.session_state["ai_studio_calculations"]
-            )
-            with st.expander("Technical details · generated transforms", expanded=False):
-                st.code(
-                    yaml.safe_dump({"transforms": transforms}, sort_keys=False),
-                    language="yaml",
-                )
-        except Exception as exc:
-            _log_ai_operation_failure("Calculated transform preview", exc)
-            st.error(str(exc))
     _persist_ai_studio_checkpoint()
 
 
@@ -2992,7 +2937,7 @@ def _ai_draft(  # noqa: PLR0912, PLR0915
         st.info("Configure a LiteLLM model in the sidebar or use the deterministic draft.")
 
 
-def _studio_apply_readiness(  # noqa: PLR0912
+def _studio_apply_readiness(  # noqa: PLR0912, PLR0915
     ctx: ValueStreamContext,
     draft: dict[str, Any] | None,
     approved_fields: list[str],
@@ -3072,6 +3017,21 @@ def _studio_apply_readiness(  # noqa: PLR0912
                 expected_contract="Preprocessing completes with a valid working schema.",
                 remediation="Open the indicated Data step and correct the mapping or transform.",
                 target_step=_preprocessing_fix_step(preprocessing_error, steps),
+            )
+        )
+    if st.session_state.get("ai_studio_calculations_expression_pending"):
+        findings.append(
+            StudioReadinessIssue(
+                area="Data",
+                severity="warning",
+                object_path="calculations.focused_editor",
+                current_value="An unapplied focused-editor expression edit is preserved.",
+                expected_contract=(
+                    "Calculated expressions are committed with Apply expression "
+                    "before the draft is exported or applied."
+                ),
+                remediation="Open Calculations and apply or cancel the working expression.",
+                target_step=steps[4],
             )
         )
     if not isinstance(draft, dict):
@@ -3780,6 +3740,9 @@ def _render_processor_parameter_editor(
             "Source",
             source_options or [""],
             index=builder.option_index(source_options or [""], current_source),
+            format_func=lambda value: (
+                f"{builder.title_from_identifier(value)} — {value}" if value else value
+            ),
             key=f"{key_prefix}_source",
             help=config_help.field_help("processor.source"),
         )
@@ -3797,20 +3760,8 @@ def _render_processor_parameter_editor(
             key=f"{key_prefix}_description",
             help=config_help.field_help("processor.description"),
         ).strip()
+        config_builder._render_processor_kind_guide(kind)
 
-        field_options = forms.with_current(
-            sorted(approved_fields or list(working.columns), key=str.casefold),
-            _processor_dimensions(processor_def),
-        )
-        group_by = st.multiselect(
-            "Group By",
-            field_options,
-            default=[
-                field for field in _processor_dimensions(processor_def) if field in field_options
-            ],
-            key=f"{key_prefix}_group_by",
-            help=config_help.field_help("processor.group_by"),
-        )
         time_def = processor_def.get("time") if isinstance(processor_def.get("time"), dict) else {}
         time_col, grain_col = st.columns(2, gap="xsmall", vertical_alignment="bottom")
         with time_col:
@@ -3829,8 +3780,48 @@ def _render_processor_parameter_editor(
                 builder.display_grain(time_def.get("grain") or "summary"),
             ),
             key=f"{key_prefix}_grain",
-            help=config_help.field_help("processor.grains"),
+            help=(
+                "Finest stored time grain. Calendar dimensions at this grain and above "
+                "are available for Group By and report fields."
+            ),
         )
+
+        base_field_options = sorted(approved_fields or list(working.columns), key=str.casefold)
+        calendar_dimensions = builder.calendar_dimensions_for_grain(grain_label)
+        group_options = builder.dedupe(
+            [*base_field_options, *calendar_dimensions, *_processor_dimensions(processor_def)]
+        )
+        group_by = st.multiselect(
+            "Group By",
+            group_options,
+            default=[
+                field for field in _processor_dimensions(processor_def) if field in group_options
+            ],
+            accept_new_options=True,
+            key=f"{key_prefix}_group_by",
+            help=(
+                "Persisted report dimensions. Selecting a daily grain makes Day, Week, "
+                "Month, Quarter, and Year available here."
+            ),
+        )
+        dedup_keys: list[str] = []
+        if builder.processor_supports_dedup(kind):
+            seed_dedup_keys = [
+                str(value).strip()
+                for value in (processor_def.get("dedup_keys") or [])
+                if str(value).strip()
+            ]
+            dedup_keys = st.multiselect(
+                "Dedup Keys",
+                builder.dedupe([*base_field_options, *seed_dedup_keys]),
+                default=seed_dedup_keys,
+                accept_new_options=True,
+                key=f"{key_prefix}_dedup",
+                help=(
+                    "Rows sharing these column values within one load chunk are counted once. "
+                    "Leave empty to aggregate every row."
+                ),
+            )
 
         kind_fields = _processor_kind_parameter_fields(
             processor_def,
@@ -3839,9 +3830,25 @@ def _render_processor_parameter_editor(
             approved_fields,
             key_prefix=key_prefix,
         )
-        states = _processor_state_editor(processor_def, key_prefix=key_prefix)
-        filter_value = _processor_filter_editor(processor_def, key_prefix=key_prefix)
+        states, states_valid = _processor_state_editor(
+            processor_def,
+            kind,
+            kind_fields,
+            key_prefix=key_prefix,
+        )
+        filter_value, filter_valid = _processor_filter_editor(
+            processor_def,
+            working,
+            approved_fields,
+            key_prefix=key_prefix,
+        )
 
+        cleaned_dedup_keys = builder.dedupe(
+            [str(value).strip() for value in dedup_keys if str(value).strip()]
+        )
+        time_calendar = (
+            time_def.get("calendar") if isinstance(time_def.get("calendar"), dict) else {}
+        )
         edited_processor = _without_empty(
             {
                 **_processor_preserved_fields(processor_def),
@@ -3850,10 +3857,14 @@ def _render_processor_parameter_editor(
                 "kind": kind,
                 "description": description,
                 "group_by": group_by,
+                "dedup_keys": (
+                    cleaned_dedup_keys if builder.processor_supports_dedup(kind) else []
+                ),
                 "time": (
                     {
                         "property": time_column,
                         "grain": model.normalize_grain_name(grain_label),
+                        **({"calendar": time_calendar} if time_calendar else {}),
                     }
                     if time_column
                     else None
@@ -3870,7 +3881,12 @@ def _render_processor_parameter_editor(
                 language="yaml",
             )
 
-        if st.button("Update Processor In Draft", type="primary", key=f"{key_prefix}_apply"):
+        if st.button(
+            "Update Processor In Draft",
+            type="primary",
+            key=f"{key_prefix}_apply",
+            disabled=not states_valid or not filter_valid,
+        ):
             if not new_processor_id:
                 st.error("Processor ID is required.")
                 return
@@ -3907,68 +3923,161 @@ def _processor_kind_parameter_fields(
     )
 
 
-def _processor_state_editor(processor_def: dict[str, Any], *, key_prefix: str) -> dict[str, Any]:
-    rows = _processor_state_rows(processor_def)
-    frame = builder.editor_frame(
-        rows,
-        ["State", "Type", "Source Column", "Enabled"],
-        _blank_processor_state_row,
+def _processor_state_editor(
+    processor_def: dict[str, Any],
+    kind: str,
+    kind_fields: dict[str, Any],
+    *,
+    key_prefix: str,
+) -> tuple[dict[str, Any], bool]:
+    """Render the Builder-parity sketch grid and return (states, valid)."""
+
+    state_key = f"{key_prefix}_state_rows"
+    editor_key = f"{key_prefix}_states"
+    # Session rows survive reruns so the Add state popover and numeric sync can
+    # append rows; a draft-definition change (apply, AI repair, accepted patch)
+    # reseeds the grid from the updated states contract.
+    signature = _draft_signature({"states": builder.state_spec_definitions(processor_def)})
+    signature_key = f"{state_key}_signature"
+    if st.session_state.get(signature_key) != signature:
+        st.session_state[state_key] = _processor_state_rows(processor_def)
+        st.session_state[signature_key] = signature
+        components.clear_pinned_editor(editor_key)
+    if kind == "numeric_distribution":
+        current_rows = builder.normalize_editor_rows(st.session_state[state_key])
+        synced_rows = config_builder._with_numeric_property_state_rows(
+            current_rows,
+            builder.string_list(kind_fields.get("properties")),
+            str(kind_fields.get("quantile_engine") or "tdigest"),
+        )
+        if synced_rows != current_rows:
+            st.session_state[state_key] = synced_rows
+            components.clear_pinned_editor(editor_key)
+    state_frame = builder.editor_frame(
+        st.session_state[state_key],
+        ["State", "Type", "Source Column", "Parameters", "Derived From", "Enabled"],
+        config_builder._blank_state_row,
     )
-    edited = st.data_editor(
-        frame,
-        num_rows="dynamic",
-        hide_index=True,
-        width="stretch",
-        key=f"{key_prefix}_states",
-        column_config={
-            "State": st.column_config.TextColumn(
-                "State", width="medium", help=config_help.field_help("state.name")
-            ),
-            "Type": st.column_config.SelectboxColumn(
-                "Type",
-                options=list(builder.STATE_TYPES),
-                width="xsmall",
-                help=config_help.field_help("state.type"),
-            ),
-            "Source Column": st.column_config.TextColumn(
-                "Source Column",
-                width="medium",
-                help=config_help.field_help("state.source_column"),
-            ),
-            "Enabled": st.column_config.CheckboxColumn(
-                "Enabled", width="xsmall", help=config_help.field_help("row.enabled")
-            ),
-        },
-    )
-    return _processor_states_from_rows(
-        builder.normalize_editor_rows(edited),
-        _processor_state_specs(processor_def),
-    )
+    with components.bordered_panel(
+        "Processor Sketches",
+        "Aggregate states this processor materializes — counters and sketches.",
+    ):
+        config_builder._render_state_rows_editor(state_key, editor_key, state_frame)
+        st.caption(
+            "Sketch parameters omitted from the YAML use these effective defaults: "
+            + "; ".join(
+                f"{sketch_type}: " + ", ".join(f"{name}={value}" for name, value in params.items())
+                for sketch_type, params in model.DEFAULT_STATE_PARAMETERS.items()
+            )
+            + "."
+        )
+        st.caption(
+            "Applying a public t-digest or KLL state also creates its distribution "
+            "metric automatically. Numeric variance states also create a standard "
+            "deviation metric as sqrt(variance). Positive/negative outcome digests "
+            "remain inputs for curve and calibration metrics."
+        )
+        try:
+            states = _processor_states_from_rows(
+                builder.normalize_editor_rows(st.session_state[state_key]),
+                _processor_state_specs(processor_def),
+            )
+        except ValueError as exc:
+            st.warning(str(exc))
+            return _processor_state_specs(processor_def), False
+    return states, True
 
 
 def _processor_filter_editor(
-    processor_def: dict[str, Any], *, key_prefix: str
-) -> dict[str, Any] | None:
-    filter_value = processor_def.get("filter")
-    default_text = yaml.safe_dump(filter_value, sort_keys=False).strip() if filter_value else ""
-    components.sync_text_area(f"{key_prefix}_filter", default_text)
-    raw_filter = st.text_area(
-        "Processor Filter YAML",
-        key=f"{key_prefix}_filter",
-        height=160,
-        help=config_help.field_help("processor.filter_ast"),
+    processor_def: dict[str, Any],
+    working: pl.DataFrame,
+    approved_fields: list[str],
+    *,
+    key_prefix: str,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Builder-parity processor filter editor: rule rows, logic, or raw AST."""
+
+    filter_value = (
+        processor_def.get("filter") if isinstance(processor_def.get("filter"), dict) else None
     )
-    if not raw_filter.strip():
-        return None
-    try:
-        parsed = yaml.safe_load(raw_filter)
-    except yaml.YAMLError as exc:
-        st.warning(f"Filter YAML could not be parsed: {exc}")
-        return filter_value if isinstance(filter_value, dict) else None
-    if not isinstance(parsed, dict):
-        st.warning("Processor filter must be a YAML mapping.")
-        return filter_value if isinstance(filter_value, dict) else None
-    return parsed
+    filter_state = builder.condition_state_from_expression(filter_value)
+    rows_key = f"{key_prefix}_filter_rows"
+    mode_key = f"{key_prefix}_filter_mode"
+    raw_key = f"{key_prefix}_raw_filter"
+    # Reseed the editor whenever the draft definition's filter changes outside
+    # this editor (apply, AI repair, accepted patch bundle).
+    signature = _draft_signature({"filter": filter_value or {}})
+    signature_key = f"{rows_key}_signature"
+    if st.session_state.get(signature_key) != signature:
+        for stale_key in (
+            rows_key,
+            f"{rows_key}_logic_mode",
+            f"{rows_key}_combine",
+            f"{rows_key}_formula",
+            f"{mode_key}_control",
+            f"{rows_key}_logic_mode_control",
+            f"{rows_key}_combine_control",
+            f"{rows_key}_formula_input",
+            raw_key,
+            f"{raw_key}_editor",
+        ):
+            st.session_state.pop(stale_key, None)
+        components.clear_pinned_editor(f"{key_prefix}_filter_editor")
+        st.session_state[mode_key] = "Rules" if filter_state is not None else "Raw AST"
+        st.session_state[signature_key] = signature
+    with components.bordered_panel(
+        "Processor Filter", "Optional pre-aggregation filter for this processor."
+    ):
+        mode = st.segmented_control(
+            "Filter Mode",
+            ["Rules", "Raw AST"],
+            default=str(st.session_state.get(mode_key) or "Rules"),
+            key=f"{mode_key}_control",
+            help=config_help.field_help("processor.filter_mode"),
+        ) or str(st.session_state.get(mode_key) or "Rules")
+        st.session_state[mode_key] = mode
+        if mode == "Rules":
+            config_builder._seed_filter_editor_state(rows_key, filter_state)
+            filter_frame = builder.editor_frame(
+                st.session_state[rows_key],
+                ["Ref", "Field", "Operator", "Value", "Enabled"],
+                builder.blank_filter_row,
+            )
+            field_options = sorted(
+                approved_fields or [str(column) for column in working.columns],
+                key=str.casefold,
+            )
+            config_builder._render_filter_rows_editor(
+                rows_key,
+                f"{key_prefix}_filter_editor",
+                filter_frame,
+                field_options,
+                value_width="medium",
+            )
+            try:
+                return config_builder._compiled_filter_expression(rows_key), True
+            except ValueError:
+                # The rows editor already displayed the logic error inline.
+                return filter_value, False
+        editor_key = f"{raw_key}_editor"
+        if raw_key not in st.session_state:
+            st.session_state[raw_key] = builder.expression_yaml(filter_value)
+        raw_kwargs: dict[str, Any] = {"height": 220, "key": editor_key}
+        if editor_key not in st.session_state:
+            raw_kwargs["value"] = str(st.session_state[raw_key])
+        raw_filter = st.text_area(
+            "Filter AST YAML",
+            help=config_help.field_help("processor.filter_ast"),
+            **raw_kwargs,
+        )
+        st.session_state[raw_key] = raw_filter
+        try:
+            return (
+                builder.parse_expression_yaml(raw_filter) if raw_filter.strip() else None
+            ), True
+        except ValueError as exc:
+            st.error(f"Filter AST YAML is invalid: {exc}")
+            return filter_value, False
 
 
 def _processor_state_rows(processor_def: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3980,41 +4089,82 @@ def _processor_state_rows(processor_def: dict[str, Any]) -> list[dict[str, Any]]
         for name, spec in raw_states.items():
             spec_dict = spec if isinstance(spec, dict) else {"type": spec}
             merged_spec = specs.get(str(name), spec_dict)
-            rows.append(
-                {
-                    "State": str(name),
-                    "Type": str(merged_spec.get("type", "") or ""),
-                    "Source Column": str(merged_spec.get("source_column", "") or ""),
-                    "Enabled": True,
-                }
-            )
+            rows.append(_processor_state_row(processor_def, str(name), merged_spec))
             seen.add(str(name))
     elif isinstance(raw_states, list):
         for spec in raw_states:
             if isinstance(spec, dict):
                 name = spec.get("name") or spec.get("id") or spec.get("state") or spec.get("output")
                 merged_spec = specs.get(str(name or ""), spec)
-                rows.append(
-                    {
-                        "State": str(name or ""),
-                        "Type": str(merged_spec.get("type", "") or ""),
-                        "Source Column": str(merged_spec.get("source_column", "") or ""),
-                        "Enabled": True,
-                    }
-                )
+                rows.append(_processor_state_row(processor_def, str(name or ""), merged_spec))
                 if name:
                     seen.add(str(name))
     for name, spec in specs.items():
         if name not in seen:
-            rows.append(
-                {
-                    "State": name,
-                    "Type": str(spec.get("type", "") or ""),
-                    "Source Column": str(spec.get("source_column", "") or ""),
-                    "Enabled": True,
-                }
-            )
-    return rows or [_blank_processor_state_row()]
+            rows.append(_processor_state_row(processor_def, name, spec))
+    return rows or [config_builder._blank_state_row()]
+
+
+def _processor_state_row(
+    processor_def: dict[str, Any],
+    name: str,
+    spec: dict[str, Any],
+) -> dict[str, Any]:
+    """One Builder-shaped sketch grid row from a dict-form state spec."""
+
+    extra = {key: value for key, value in spec.items() if key != "type"}
+    return {
+        "State": name,
+        "Type": str(spec.get("type", "") or ""),
+        "Source Column": str(spec.get("source_column", "") or ""),
+        "Parameters": config_builder._state_parameters_yaml(extra),
+        "Derived From": _draft_state_derivation(processor_def, name, spec),
+        "Enabled": True,
+    }
+
+
+def _draft_state_derivation(  # noqa: PLR0911
+    processor_def: dict[str, Any],
+    state_name: str,
+    spec: dict[str, Any],
+) -> str:
+    """Dict-form analog of the Builder's state-provenance text."""
+
+    outcome = processor_def.get("outcome")
+    outcome_column = "Outcome"
+    positives: list[Any] = ["Clicked", "Conversion"]
+    negatives: list[Any] = ["Impression", "Pending"]
+    if isinstance(outcome, dict):
+        outcome_column = str(outcome.get("column", outcome_column))
+        positives = list(outcome.get("positive_values", positives))
+        negatives = list(outcome.get("negative_values", negatives))
+    state_type = str(spec.get("type", "") or "")
+    source_column = str(spec.get("source_column", "") or "")
+    if state_type == "count" and str(spec.get("outcome", "") or "") == "positive":
+        return f"{outcome_column} in {config_builder._compact_values(positives)}"
+    if state_type == "count" and str(spec.get("outcome", "") or "") == "negative":
+        return f"{outcome_column} in {config_builder._compact_values(negatives)}"
+    if state_type == "count" and str(spec.get("stage", "") or ""):
+        return f"rows matching funnel stage {spec.get('stage')}"
+    if state_type == "count":
+        return f"non-null {source_column}" if source_column else "included rows"
+    if state_type in {"cpc", "hll", "theta"}:
+        return f"approx distinct {source_column}" if source_column else "approx distinct values"
+    if state_type in {"tdigest", "kll"}:
+        outcome_role = str(spec.get("outcome", "") or "")
+        suffix = f" for {outcome_role} outcomes" if outcome_role else ""
+        return f"distribution of {source_column or state_name}{suffix}"
+    if state_type == "value_sum":
+        return f"sum of {source_column or state_name}"
+    if state_type == "min":
+        return f"minimum of {source_column or state_name}"
+    if state_type == "max":
+        return f"maximum of {source_column or state_name}"
+    if state_type == "pooled_mean":
+        return f"weighted mean of {source_column or state_name}"
+    if state_type == "pooled_variance":
+        return f"pooled variance of {source_column or state_name}"
+    return "included rows"
 
 
 def _processor_state_specs(processor_def: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -4032,7 +4182,7 @@ def _processor_states_from_rows(
     existing_specs = existing or {}
     states: dict[str, Any] = {}
     for row in rows:
-        if not _truthy_editor_value(row.get("Enabled", True)):
+        if not builder.editor_row_enabled(row.get("Enabled")):
             continue
         name = str(row.get("State", "") or "").strip()
         state_type = str(row.get("Type", "") or "").strip()
@@ -4040,6 +4190,19 @@ def _processor_states_from_rows(
             continue
         spec: dict[str, Any] = dict(existing_specs.get(name, {}))
         spec["type"] = state_type
+        if "Parameters" in row:
+            # The Parameters column is the authoritative sketch-settings source
+            # once it is shown; mirror the Builder's round-trip semantics.
+            for key in list(spec):
+                if key not in {"type", "source_column"}:
+                    spec.pop(key)
+            spec.update(
+                config_builder._parse_state_parameters(
+                    row.get("Parameters"),
+                    state_name=name,
+                    state_type=state_type,
+                )
+            )
         source_column = str(row.get("Source Column", "") or "").strip()
         if source_column:
             spec["source_column"] = source_column
@@ -4049,29 +4212,21 @@ def _processor_states_from_rows(
     return states
 
 
-def _blank_processor_state_row() -> dict[str, Any]:
-    return {"State": "", "Type": "count", "Source Column": "", "Enabled": True}
-
-
 def _processor_preserved_fields(processor_def: dict[str, Any]) -> dict[str, Any]:
+    # Managed kind-specific keys are re-emitted by the kind form for the
+    # selected kind, so preserving them would leak stale settings across a
+    # kind switch (mirrors the Builder's PROCESSOR_KIND_MANAGED_FIELDS pop).
     handled = {
         "id",
         "source",
         "kind",
         "description",
         "group_by",
+        "dedup_keys",
         "time",
         "states",
         "filter",
-        "entities",
-        "outcome",
-        "variant_column",
-        "properties",
-        "quantile_engine",
-        "score_properties",
-        "stages",
-        "snapshot_kind",
-        "cadence",
+        *forms.PROCESSOR_KIND_MANAGED_FIELDS,
     }
     return {key: value for key, value in processor_def.items() if key not in handled}
 
@@ -4303,7 +4458,7 @@ def _install_recipe_in_draft(
     return install_recipe_request_in_draft(draft, request)
 
 
-def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
+def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:  # noqa: PLR0915
     metrics = _draft_metric_definitions(draft)
     if not metrics:
         return
@@ -4355,6 +4510,7 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
             key=kind_key,
             help=config_help.field_help("metric.kind"),
         )
+        st.caption(builder.metric_kind_help(kind))
         metric_choices = _draft_metric_names_for_processor_kind(draft, processor, kind)
         if not metric_choices:
             st.info("Selected processor and kind have no editable metrics.")
@@ -4375,11 +4531,27 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
         metric_def = dict(metrics.get(metric_name, {}))
         key_prefix = f"ai_studio_metric_editor_{builder.widget_key_fragment(metric_name)}"
 
+        notice = st.session_state.pop("ai_studio_metric_editor_notice", None)
+        if notice:
+            st.success(str(notice), icon=":material/check_circle:")
         st.caption(f"Metric ID: `{metric_name}`")
         renamed_metric = metric_name
-        description = st.text_input(
+        seed_display = metric_def.get("display")
+        seed_display = dict(seed_display) if isinstance(seed_display, Mapping) else {}
+        metric_label = st.text_input(
+            "Metric Label",
+            value=str(seed_display.get("label", "") or ""),
+            placeholder=humanize_identifier(metric_name),
+            key=f"{key_prefix}_display_label",
+            help=(
+                "Human-readable name used in reports and selectors. "
+                "Leave blank to derive it from the Metric ID."
+            ),
+        )
+        description = st.text_area(
             "Description",
             value=str(metric_def.get("description", "") or ""),
+            height=80,
             key=f"{key_prefix}_description",
             help=config_help.field_help("metric.description"),
         ).strip()
@@ -4393,8 +4565,20 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
             key=f"{key_prefix}_depends_on",
             help=config_help.field_help("metric.depends_on"),
         )
-        display = _draft_metric_display_controls(metric_def.get("display"), key_prefix)
+        display = _draft_metric_display_controls(
+            metric_def.get("display"),
+            key_prefix,
+            label=metric_label,
+        )
 
+        kind_fields = _metric_kind_parameter_fields(
+            draft,
+            processor,
+            kind,
+            metric_def if str(metric_def.get("kind", "") or "") == kind else {},
+            key_prefix=key_prefix,
+        )
+        fields_ready = kind_fields is not None
         edited_metric = _without_empty(
             {
                 "processor": processor,
@@ -4402,15 +4586,29 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
                 "description": description,
                 "depends_on": depends_on,
                 "display": display,
-                **_metric_kind_parameter_fields(
-                    draft,
-                    processor,
-                    kind,
-                    metric_def,
-                    key_prefix=key_prefix,
-                ),
+                **(kind_fields or {}),
             }
         )
+
+        try:
+            metric_outputs = builder.metric_outputs_from_definition(metric_name, edited_metric)
+        except ValueError:
+            metric_outputs = []
+        st.text_input(
+            "Outputs",
+            value=", ".join(metric_outputs),
+            disabled=True,
+            key=(
+                f"{key_prefix}_outputs_"
+                f"{builder.widget_key_fragment('|'.join(metric_outputs))}"
+            ),
+            help=(
+                "Read-only columns produced by this metric. Report controls that consume "
+                "a metric output can select only from this list."
+            ),
+        )
+        with st.container(border=True):
+            config_builder._render_metric_review(metric_name, edited_metric)
 
         with st.expander("Metric YAML Preview", expanded=False):
             st.code(
@@ -4418,20 +4616,41 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:
                 language="yaml",
             )
 
-        if st.button("Update Metric In Draft", type="primary", key=f"{key_prefix}_apply"):
-            _set_draft(_update_metric_definition(draft, metric_name, renamed_metric, edited_metric))
+        if not fields_ready:
+            st.info("Complete the required metric parameters above to update the draft.")
+        if st.button(
+            "Update Metric In Draft",
+            type="primary",
+            key=f"{key_prefix}_apply",
+            disabled=not fields_ready,
+        ):
+            final_metric = config_builder._preserve_untouched_metric_definition(
+                dict(metrics.get(metric_name, {})),
+                edited_metric,
+            )
+            _set_draft(_update_metric_definition(draft, metric_name, renamed_metric, final_metric))
+            st.session_state["ai_studio_metric_editor_notice"] = (
+                f"Metric `{metric_name}` updated in the draft."
+            )
             st.rerun()
 
 
-def _draft_metric_display_controls(raw: Any, key_prefix: str) -> dict[str, Any]:
+def _draft_metric_display_controls(
+    raw: Any,
+    key_prefix: str,
+    *,
+    label: str | None = None,
+) -> dict[str, Any]:
     seed = dict(raw) if isinstance(raw, dict) else {}
     with st.expander("Report presentation", expanded=False):
-        label = st.text_input(
-            "Display label",
-            value=str(seed.get("label", "") or ""),
-            key=f"{key_prefix}_display_label",
-            help=config_help.field_help("metric.display_label"),
-        ).strip()
+        if label is None:
+            label = st.text_input(
+                "Display label",
+                value=str(seed.get("label", "") or ""),
+                key=f"{key_prefix}_display_label",
+                help=config_help.field_help("metric.display_label"),
+            )
+        label = str(label).strip()
         unit = st.text_input(
             "Unit",
             value=str(seed.get("unit", "") or ""),
@@ -4473,24 +4692,67 @@ def _metric_kind_parameter_fields(
     metric_def: dict[str, Any],
     *,
     key_prefix: str,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     processor = _draft_processor_by_id(draft, source)
     roles = processor.get("variant_role_map", {})
+    keys_def = processor.get("keys") if isinstance(processor.get("keys"), dict) else {}
     ctx = forms.MetricFormContext(
         state_options=lambda types: _draft_state_options(draft, source, state_types=set(types)),
         digest_pairs=_draft_digest_pair_options(draft, source),
         funnel_stages=_draft_funnel_stage_options(draft, source),
         default_variant_column=str(processor.get("variant_column", "") or ""),
         variant_roles=dict(roles) if isinstance(roles, dict) else {},
+        default_entity_column=str((keys_def or {}).get("customer_id", "") or ""),
+        state_label=lambda state: _draft_digest_state_label(processor, state),
+        default_digest_pair=lambda final: _draft_default_curve_digest_states(processor),
     )
-    fields = forms.metric_kind_fields(kind, metric_def, ctx, key_prefix=key_prefix)
-    if fields is None:
-        # Keep the previous kind-specific fields instead of writing a broken
-        # definition into the draft.
-        return {
-            key: value for key, value in metric_def.items() if key not in forms.METRIC_BASE_FIELDS
-        }
-    return fields
+    # Returning None (required inputs missing) keeps the previous definition in
+    # the draft; the caller disables the apply action instead of writing a
+    # broken definition.
+    return forms.metric_kind_fields(kind, metric_def, ctx, key_prefix=key_prefix)
+
+
+def _draft_digest_state_label(processor: dict[str, Any], state_name: str) -> str:
+    """Dict-form analog of the Builder's digest state labels."""
+
+    spec = builder.state_spec_definitions(processor).get(state_name)
+    if spec is None:
+        return state_name
+    source = str(spec.get("source_column") or spec.get("score_property") or "")
+    outcome = str(spec.get("outcome") or "")
+    details = ", ".join(item for item in (source, outcome) if item)
+    return f"{state_name} ({details})" if details else state_name
+
+
+def _draft_default_curve_digest_states(processor: dict[str, Any]) -> tuple[str, str] | None:
+    """Dict-form analog of ``builder.default_curve_digest_states``."""
+
+    specs = builder.state_spec_definitions(processor)
+    digest_states = [
+        name for name, spec in specs.items() if str(spec.get("type", "") or "") == "tdigest"
+    ]
+    if not digest_states:
+        return None
+    pairs = builder.digest_pair_options_from_definition(processor)
+    if pairs:
+        return pairs[0][1], pairs[0][2]
+    positives = [
+        name
+        for name in digest_states
+        if str(specs[name].get("outcome", "") or "") == "positive"
+    ]
+    negatives = [
+        name
+        for name in digest_states
+        if str(specs[name].get("outcome", "") or "") == "negative"
+    ]
+    if positives and negatives:
+        return positives[0], negatives[0]
+    named_positive = next((state for state in digest_states if "positive" in state.lower()), "")
+    named_negative = next((state for state in digest_states if "negative" in state.lower()), "")
+    if named_positive and named_negative:
+        return named_positive, named_negative
+    return None
 
 
 def _draft_digest_pair_options(
@@ -5022,7 +5284,7 @@ def _reports_review(working: pl.DataFrame, approved_fields: list[str]) -> None:
             )
     else:
         st.warning("The draft does not contain any dashboard tiles.")
-    _render_report_settings_editor(draft)
+    _render_report_tile_editor(draft, working)
     with st.expander("Technical details · dashboards.yaml", expanded=False):
         st.caption("Use this for report settings not exposed by the compact review table.")
         text = yaml.safe_dump(draft.get("dashboards", {}), sort_keys=False)
@@ -5086,235 +5348,703 @@ def _render_tile_keep_table(draft: dict[str, Any], *, revision: str) -> None:
         st.rerun(scope="app")
 
 
-def _render_report_settings_editor(  # noqa: PLR0912
-    draft: dict[str, Any],
-) -> None:
-    pages: list[tuple[int, int, str, dict[str, Any]]] = []
-    for dashboard_index, dashboard in enumerate(
-        draft.get("dashboards", {}).get("dashboards", []) or []
-    ):
+AI_STUDIO_NEW_TILE_KEY = "__ai_studio_new_tile__"
+
+
+def _draft_model_catalog(draft: dict[str, Any]) -> model.Catalog | None:
+    """Validate the draft sections into one in-memory catalog model."""
+
+    try:
+        return model.Catalog(
+            pipelines=model.Pipelines.model_validate(draft.get("pipelines") or {}),
+            processors=model.Processors.model_validate(draft.get("processors") or {}),
+            metrics=model.Metrics.model_validate(draft.get("metrics") or {}),
+            dashboards=model.Dashboards.model_validate(draft.get("dashboards") or {}),
+        )
+    except ValueError:
+        return None
+
+
+def _draft_tile_definitions(draft: dict[str, Any]) -> dict[str, tuple[str, str, dict[str, Any]]]:
+    """Map ``dashboard/page/tile`` keys to (dashboard_id, page_id, tile dict)."""
+
+    tiles: dict[str, tuple[str, str, dict[str, Any]]] = {}
+    for dashboard in draft.get("dashboards", {}).get("dashboards", []) or []:
         if not isinstance(dashboard, dict):
             continue
-        for page_index, page in enumerate(dashboard.get("pages", []) or []):
-            if isinstance(page, dict):
-                label = f"{dashboard.get('title', dashboard.get('id', 'Dashboard'))} / {page.get('title', page.get('id', 'Page'))}"
-                pages.append((dashboard_index, page_index, label, page))
-    if not pages:
+        for page in dashboard.get("pages", []) or []:
+            if not isinstance(page, dict):
+                continue
+            for tile in page.get("tiles", []) or []:
+                if isinstance(tile, dict) and tile.get("id"):
+                    key = f"{dashboard.get('id')}/{page.get('id')}/{tile.get('id')}"
+                    tiles[key] = (str(dashboard.get("id")), str(page.get("id")), dict(tile))
+    return tiles
+
+
+def _render_report_tile_editor(  # noqa: PLR0912, PLR0915
+    draft: dict[str, Any],
+    working: pl.DataFrame,
+) -> None:
+    """Builder-parity tile and page authoring scoped to the accepted draft."""
+
+    # Widget state scoped to an applied editor token is queued for cleanup so
+    # the pops happen before this run instantiates any of those widgets.
+    cleanup_token = st.session_state.pop("ai_studio_tile_widget_cleanup", None)
+    if cleanup_token:
+        for key in list(st.session_state.keys()):
+            if str(cleanup_token) in str(key):
+                st.session_state.pop(key, None)
+
+    catalog = _draft_model_catalog(draft)
+    if catalog is None:
+        st.info(
+            "Resolve draft validation issues to author tiles visually; the "
+            "dashboards.yaml expander below remains available."
+        )
         return
+    metric_names = sorted(catalog.metrics.metrics)
+    if not metric_names:
+        st.info("Add metrics to the draft before authoring report tiles.")
+        return
+
+    override = st.session_state.pop("ai_studio_tile_selection_override", None)
+    if override is not None:
+        st.session_state["ai_studio_tile_editor_selection"] = override
+    tile_definitions = _draft_tile_definitions(draft)
+    selection_options = [AI_STUDIO_NEW_TILE_KEY, *tile_definitions]
+    if st.session_state.get("ai_studio_tile_editor_selection") not in selection_options:
+        st.session_state.pop("ai_studio_tile_editor_selection", None)
+
     with components.bordered_panel(
-        "Report Settings",
-        "Edit aggregate-backed page controls and the selected tile without replacing other draft properties.",
+        "Report Tile Editor",
+        "Create or edit one tile and its page settings, then update the draft.",
     ):
-        page_key = st.selectbox(
+        selection = st.selectbox(
+            "Tile",
+            selection_options,
+            format_func=lambda key: (
+                "New tile draft"
+                if key == AI_STUDIO_NEW_TILE_KEY
+                else _tile_choice_label(draft, key)
+            ),
+            key="ai_studio_tile_editor_selection",
+            help=config_help.field_help("report.tile_title"),
+        )
+        is_new = selection == AI_STUDIO_NEW_TILE_KEY
+        seed_context = st.session_state.get("ai_studio_tile_editor_seed")
+        if is_new and isinstance(seed_context, tuple) and len(seed_context) == 3:
+            seed_dashboard, seed_page, seed_tile = seed_context
+        elif not is_new:
+            seed_dashboard, seed_page, seed_tile = tile_definitions[str(selection)]
+        else:
+            seed_dashboard, seed_page, seed_tile = None, None, {}
+        token = (
+            f"ais_tile_new_{int(st.session_state.get('ai_studio_tile_editor_new_counter', 0))}"
+            if is_new
+            else f"ais_tile_{builder.widget_key_fragment(str(selection))}"
+        )
+        if is_new:
+            st.caption("New tile draft")
+
+        new_col, duplicate_col, delete_col = st.columns(3)
+        if new_col.button("New", icon=":material/add_2:", key="ai_studio_tile_new"):
+            st.session_state["ai_studio_tile_editor_new_counter"] = (
+                int(st.session_state.get("ai_studio_tile_editor_new_counter", 0)) + 1
+            )
+            st.session_state.pop("ai_studio_tile_editor_seed", None)
+            st.session_state["ai_studio_tile_selection_override"] = AI_STUDIO_NEW_TILE_KEY
+            st.rerun()
+        if duplicate_col.button(
+            "Duplicate",
+            icon=":material/content_copy:",
+            key="ai_studio_tile_duplicate",
+            disabled=is_new,
+        ):
+            st.session_state["ai_studio_tile_editor_new_counter"] = (
+                int(st.session_state.get("ai_studio_tile_editor_new_counter", 0)) + 1
+            )
+            duplicated = dict(seed_tile)
+            duplicated.pop("id", None)
+            duplicated["title"] = f"{duplicated.get('title', 'Tile')} Copy"
+            st.session_state["ai_studio_tile_editor_seed"] = (
+                seed_dashboard,
+                seed_page,
+                duplicated,
+            )
+            st.session_state["ai_studio_tile_selection_override"] = AI_STUDIO_NEW_TILE_KEY
+            st.rerun()
+        if delete_col.button(
+            "Delete tile",
+            icon=":material/delete:",
+            key="ai_studio_tile_delete",
+            disabled=is_new,
+        ):
+            st.session_state["ai_studio_tile_pending_delete"] = selection
+
+        if st.session_state.get("ai_studio_tile_pending_delete") == selection and not is_new:
+            st.warning(
+                f"Tile `{selection}` will be removed from the draft. "
+                "Dashboard and page containers are kept."
+            )
+            confirm_col, cancel_col = st.columns(2)
+            if confirm_col.button(
+                "Remove tile from draft",
+                type="primary",
+                icon=":material/delete:",
+                key="ai_studio_tile_delete_confirm",
+            ):
+                updated = copy.deepcopy(draft)
+                for dashboard in updated.get("dashboards", {}).get("dashboards", []) or []:
+                    if not isinstance(dashboard, dict) or dashboard.get("id") != seed_dashboard:
+                        continue
+                    for page in dashboard.get("pages", []) or []:
+                        if isinstance(page, dict) and page.get("id") == seed_page:
+                            page["tiles"] = [
+                                tile
+                                for tile in page.get("tiles", []) or []
+                                if not (
+                                    isinstance(tile, dict)
+                                    and tile.get("id") == seed_tile.get("id")
+                                )
+                            ]
+                st.session_state.pop("ai_studio_tile_pending_delete", None)
+                st.session_state["ai_studio_tile_selection_override"] = AI_STUDIO_NEW_TILE_KEY
+                _set_draft(updated)
+                st.rerun()
+            if cancel_col.button("Keep tile", key="ai_studio_tile_delete_cancel"):
+                st.session_state.pop("ai_studio_tile_pending_delete", None)
+                st.rerun()
+            return
+
+        if is_new:
+            with st.expander(
+                "Report library — start from a chart",
+                expanded=False,
+                icon=":material/local_library:",
+            ):
+                group_ids = list(config_builder.REPORT_LIBRARY_GROUPS)
+                group_id = st.selectbox(
+                    "Purpose",
+                    group_ids,
+                    format_func=lambda gid: config_builder.REPORT_LIBRARY_GROUPS[gid].label,
+                    key="ai_studio_tile_library_group",
+                    help=config_help.field_help("report.chart"),
+                )
+                group = config_builder.REPORT_LIBRARY_GROUPS[group_id]
+                st.caption(group.description)
+                library_chart = st.selectbox(
+                    "Chart type",
+                    list(group.chart_types),
+                    format_func=builder.chart_kind_selector_label,
+                    key=f"ai_studio_tile_library_chart_{group_id}",
+                    help=config_help.field_help("report.chart"),
+                )
+                st.caption(builder.chart_kind_purpose(library_chart))
+                if st.button(
+                    "Start from this chart",
+                    icon=":material/magic_button:",
+                    key="ai_studio_tile_library_start",
+                ):
+                    st.session_state["ai_studio_tile_library_pick"] = library_chart
+                    st.session_state.pop(f"ai_studio_tile_chart_{token}", None)
+                    st.rerun()
+
+        mode_kwargs: dict[str, Any] = {
+            # Token-independent key: switching drafts keeps the chosen mode.
+            "key": "ai_studio_tile_editing_mode",
+            "help": config_help.field_help("report.editing_mode"),
+        }
+        if "ai_studio_tile_editing_mode" not in st.session_state:
+            mode_kwargs["default"] = "Visual"
+        mode = st.segmented_control("Editing Mode", ["Visual", "Raw YAML"], **mode_kwargs)
+
+        seed_metric = (
+            seed_tile.get("metric") if seed_tile.get("metric") in metric_names else None
+        )
+        if seed_metric is None and not is_new:
+            seed_metric = metric_names[0]
+        metric_name = st.selectbox(
+            "Metric",
+            metric_names,
+            index=metric_names.index(seed_metric) if seed_metric is not None else None,
+            placeholder="Select metric",
+            format_func=lambda name: config_builder._metric_choice_label(catalog, name),
+            key=f"ai_studio_tile_metric_{token}",
+            help=config_help.field_help("report.metric"),
+        )
+        chart_choices = (
+            builder.chart_choices_for_metric(catalog, metric_name) if metric_name else []
+        )
+        seed_chart_value = str(seed_tile.get("chart", "") or "")
+        if (
+            not is_new
+            and seed_chart_value
+            and chart_choices
+            and seed_chart_value not in chart_choices
+            and seed_chart_value in builder.CHART_DISPLAY_LABELS
+        ):
+            chart_choices = [*chart_choices, seed_chart_value]
+        seed_chart = (
+            seed_tile.get("chart") if seed_tile.get("chart") in chart_choices else None
+        )
+        if seed_chart is None and chart_choices and not is_new:
+            seed_chart = chart_choices[0]
+        library_pick = st.session_state.get("ai_studio_tile_library_pick")
+        chart_state_key = f"ai_studio_tile_chart_{token}"
+        if (
+            chart_state_key in st.session_state
+            and st.session_state[chart_state_key] is not None
+            and st.session_state[chart_state_key] not in chart_choices
+        ):
+            st.session_state.pop(chart_state_key, None)
+        chart_selectbox_kwargs: dict[str, Any] = {}
+        if chart_state_key not in st.session_state:
+            preferred_chart = seed_chart
+            if preferred_chart is None and library_pick in chart_choices:
+                preferred_chart = library_pick
+            chart_selectbox_kwargs["index"] = (
+                chart_choices.index(preferred_chart) if preferred_chart is not None else None
+            )
+        chart_kind = st.selectbox(
+            "Chart",
+            chart_choices,
+            placeholder="Select chart" if metric_name else "Select metric first",
+            disabled=not metric_name,
+            key=chart_state_key,
+            format_func=builder.chart_kind_selector_label,
+            help=config_help.field_help("report.chart"),
+            **chart_selectbox_kwargs,
+        )
+        if metric_name and chart_kind:
+            st.caption(
+                f"{builder.chart_kind_purpose(chart_kind)} Technical chart kind: `{chart_kind}`."
+            )
+            components.key_value_strip(
+                [
+                    {"label": key, "value": value}
+                    for key, value in builder.chart_recipe_summary(
+                        catalog, metric_name, chart_kind
+                    ).items()
+                ]
+            )
+        selection_matches_seed = bool(
+            not is_new
+            and metric_name == seed_tile.get("metric")
+            and chart_kind == seed_tile.get("chart")
+        )
+        if selection_matches_seed:
+            defaults = dict(seed_tile)
+        else:
+            defaults = (
+                builder.default_tile_fields(catalog, metric_name, chart_kind)
+                if metric_name and chart_kind
+                else {}
+            )
+            defaults.update(
+                {
+                    key: value
+                    for key, value in seed_tile.items()
+                    if key in builder.CHART_SETTING_FIELDS
+                }
+            )
+        field_options = (
+            ["", *builder.chart_field_options(catalog, metric_name)] if metric_name else [""]
+        )
+
+        dashboards_by_id = {dashboard.id: dashboard for dashboard in catalog.dashboards.dashboards}
+        dashboard_choices = [*dashboards_by_id, config_builder.NEW_DASHBOARD_KEY]
+        first_dashboard = (
+            seed_dashboard
+            if seed_dashboard in dashboards_by_id
+            else next(iter(dashboards_by_id), config_builder.NEW_DASHBOARD_KEY)
+        )
+        dashboard_choice = st.selectbox(
+            "Dashboard",
+            dashboard_choices,
+            index=builder.option_index(dashboard_choices, first_dashboard),
+            format_func=lambda value: config_builder._dashboard_choice_label(
+                value, dashboards_by_id
+            ),
+            key=f"ai_studio_tile_dashboard_{token}",
+            help=config_help.field_help("report.dashboard"),
+        )
+        if dashboard_choice == config_builder.NEW_DASHBOARD_KEY:
+            dashboard_title = st.text_input(
+                "Dashboard Name",
+                value=builder.title_from_identifier(seed_dashboard) if seed_dashboard else "",
+                key=f"ai_studio_tile_dashboard_name_{token}",
+                help=config_help.field_help("report.dashboard_id"),
+            )
+            dashboard_id = builder.stable_catalog_id(
+                dashboard_title,
+                fallback="dashboard",
+                existing_ids=dashboards_by_id,
+            )
+            existing_dashboard = None
+        else:
+            existing_dashboard = dashboards_by_id[str(dashboard_choice)]
+            dashboard_id = existing_dashboard.id
+            dashboard_title = st.text_input(
+                "Dashboard Name",
+                value=existing_dashboard.title,
+                key=(
+                    f"ai_studio_tile_dashboard_name_{token}_"
+                    f"{builder.widget_key_fragment(existing_dashboard.id)}"
+                ),
+                help=config_help.field_help("report.dashboard_id"),
+            )
+        dashboard_layout = st.selectbox(
+            "Dashboard Layout",
+            ["tabs", "grid", "stacked"],
+            index=builder.option_index(
+                ["tabs", "grid", "stacked"],
+                existing_dashboard.layout if existing_dashboard is not None else "tabs",
+            ),
+            format_func=lambda value: value.title(),
+            key=(
+                f"ai_studio_tile_dashboard_layout_{token}_"
+                f"{builder.widget_key_fragment(str(dashboard_choice))}"
+            ),
+            help="Choose how this dashboard organizes its report pages.",
+        )
+
+        pages_by_id = (
+            {page.id: page for page in existing_dashboard.pages} if existing_dashboard else {}
+        )
+        page_choices = [*pages_by_id, config_builder.NEW_PAGE_KEY]
+        first_page = (
+            seed_page
+            if seed_page in pages_by_id
+            else next(iter(pages_by_id), config_builder.NEW_PAGE_KEY)
+        )
+        page_context_key = (
+            "new_dashboard"
+            if dashboard_choice == config_builder.NEW_DASHBOARD_KEY
+            else builder.widget_key_fragment(str(dashboard_choice))
+        )
+        page_choice = st.selectbox(
             "Page",
-            list(range(len(pages))),
-            format_func=lambda index: pages[index][2],
-            key="ai_studio_report_settings_page",
+            page_choices,
+            index=builder.option_index(page_choices, first_page),
+            format_func=lambda value: config_builder._page_choice_label(value, pages_by_id),
+            key=f"ai_studio_tile_page_{token}_{page_context_key}",
             help=config_help.field_help("report.page"),
         )
-        dashboard_index, page_index, _, page = pages[int(page_key)]
-        filter_rows = [dict(row) for row in page.get("filters", []) if isinstance(row, dict)]
-        if not filter_rows:
-            filter_rows = [
-                {
-                    "field": "",
-                    "label": "",
-                    "display": "secondary",
-                    "scope": "compatible_tiles",
-                    "control": "multiselect",
-                }
-            ]
-        edited_filters = st.data_editor(
-            filter_rows,
-            num_rows="dynamic",
-            hide_index=True,
-            width="stretch",
-            key=f"ai_studio_report_filters_{dashboard_index}_{page_index}",
-            column_config={
-                "field": st.column_config.TextColumn(
-                    "Aggregate field", help=config_help.field_help("report.filter_field")
-                ),
-                "label": st.column_config.TextColumn(
-                    "Display label", help=config_help.field_help("report.filter_label")
-                ),
-                "display": st.column_config.SelectboxColumn(
-                    "Placement",
-                    options=["primary", "secondary"],
-                    help=config_help.field_help("report.filter_placement"),
-                ),
-                "scope": st.column_config.SelectboxColumn(
-                    "Coverage",
-                    options=["all_tiles", "compatible_tiles"],
-                    help=config_help.field_help("report.filter_scope"),
-                ),
-                "control": st.column_config.SelectboxColumn(
-                    "Control",
-                    options=["multiselect", "selectbox", "text"],
-                    help=config_help.field_help("report.filter_control"),
-                ),
-            },
-        )
-        time_seed = page.get("time_filter") if isinstance(page.get("time_filter"), dict) else {}
-        all_presets = [
-            "last_7_days",
-            "last_30_days",
-            "last_90_days",
-            "year_to_date",
-            "custom",
-            "all_time",
-        ]
-        presets = st.multiselect(
-            "Available time ranges",
-            all_presets,
-            default=[
-                value
-                for value in time_seed.get("presets", model.TimeFilterSpec().presets)
-                if value in all_presets
-            ],
-            key=f"ai_studio_report_time_presets_{dashboard_index}_{page_index}",
-            help=config_help.field_help("report.available_ranges"),
-        )
-        default_options = presets or ["all_time"]
-        default_time = st.selectbox(
-            "Default time range",
-            default_options,
-            index=builder.option_index(default_options, time_seed.get("default") or "all_time"),
-            key=f"ai_studio_report_time_default_{dashboard_index}_{page_index}",
-            help=config_help.field_help("report.default_range"),
-        )
-
-        tiles = [tile for tile in page.get("tiles", []) or [] if isinstance(tile, dict)]
-        tile_index = (
-            st.selectbox(
-                "Tile",
-                list(range(len(tiles))),
-                format_func=lambda index: str(
-                    tiles[index].get("title") or tiles[index].get("id") or "Tile"
-                ),
-                key=f"ai_studio_report_tile_{dashboard_index}_{page_index}",
-                help=config_help.field_help("report.tile_title"),
+        if page_choice == config_builder.NEW_PAGE_KEY:
+            page_title = st.text_input(
+                "Page Name",
+                value=builder.title_from_identifier(seed_page) if seed_page else "",
+                key=f"ai_studio_tile_page_name_{token}_{page_context_key}_new_page",
+                help=config_help.field_help("report.page_id"),
             )
-            if tiles
-            else None
-        )
-        tile_updates: dict[str, Any] = {}
-        if tile_index is not None:
-            tile = tiles[int(tile_index)]
-            description = st.text_area(
-                "Tile description",
-                value=str(tile.get("description", "") or ""),
-                height=80,
-                key=f"ai_studio_report_tile_description_{dashboard_index}_{page_index}_{tile_index}",
-                help=config_help.field_help("report.description"),
-            ).strip()
-            tile_updates["description"] = description
-            chart = str(tile.get("chart", ""))
-            if chart in {"line", "stacked_area"}:
-                tile_updates["scale_mode"] = st.selectbox(
-                    "Scale",
-                    ["absolute", "index_100", "percent_change"],
-                    index=builder.option_index(
-                        ["absolute", "index_100", "percent_change"],
-                        tile.get("scale_mode") or "absolute",
-                    ),
-                    key=f"ai_studio_report_tile_scale_{dashboard_index}_{page_index}_{tile_index}",
-                    help=config_help.field_help("report.scale"),
-                )
-            if chart == "kpi_card":
-                placement = st.selectbox(
-                    "Placement",
-                    ["content", "kpi_strip"],
-                    index=builder.option_index(
-                        ["content", "kpi_strip"], tile.get("placement") or "content"
-                    ),
-                    key=f"ai_studio_report_tile_placement_{dashboard_index}_{page_index}_{tile_index}",
-                    help=config_help.field_help("report.placement"),
-                )
-                tile_updates["placement"] = placement
-                if placement == "kpi_strip":
-                    raw_kpi = tile.get("kpi") if isinstance(tile.get("kpi"), dict) else {}
-                    tile_updates["kpi"] = _ai_kpi_settings(
-                        raw_kpi,
-                        key=f"{dashboard_index}_{page_index}_{tile_index}",
-                    )
-                else:
-                    tile_updates["kpi"] = None
+            page_id = builder.stable_catalog_id(
+                page_title,
+                fallback="page",
+                parent_id=dashboard_id,
+                existing_ids=pages_by_id,
+            )
+        else:
+            page_model = pages_by_id[str(page_choice)]
+            page_id = page_model.id
+            page_title = st.text_input(
+                "Page Name",
+                value=page_model.title,
+                key=(
+                    f"ai_studio_tile_page_name_{token}_"
+                    f"{builder.widget_key_fragment(dashboard_id)}_"
+                    f"{builder.widget_key_fragment(page_model.id)}"
+                ),
+                help=config_help.field_help("report.page_id"),
+            )
 
+        page_settings_suffix = (
+            f"{token}_{page_context_key}_new_page"
+            if page_choice == config_builder.NEW_PAGE_KEY
+            else f"{token}_{page_context_key}_{builder.widget_key_fragment(page_id)}"
+        )
+        page_filters, page_time_filter, page_settings_ready = (
+            config_builder._page_settings_editor(
+                dashboard_id=dashboard_id,
+                dashboard_title=dashboard_title,
+                page_id=page_id,
+                page_title=page_title,
+                page=pages_by_id.get(str(page_choice)),
+                key_suffix=page_settings_suffix,
+            )
+        )
+        existing_page_model = pages_by_id.get(str(page_choice))
+
+        default_tile_title = str(
+            seed_tile.get(
+                "title",
+                "" if is_new or not metric_name else metric_name.replace("_", " "),
+            )
+        )
+        title = st.text_input(
+            "Tile Title",
+            value=default_tile_title,
+            key=f"ai_studio_tile_title_{token}",
+            help=config_help.field_help("report.tile_title"),
+        )
+        tile_id = (
+            str(seed_tile["id"])
+            if seed_tile.get("id") and not is_new
+            else builder.stable_catalog_id(
+                title.strip() or str(metric_name or chart_kind or "tile"),
+                fallback="tile",
+                parent_id=page_id,
+                existing_ids=(
+                    [tile.id for tile in existing_page_model.tiles]
+                    if existing_page_model
+                    else []
+                ),
+            )
+        )
+
+        if mode == "Raw YAML":
+            default_raw_tile = seed_tile
+            if not default_raw_tile and metric_name and chart_kind and tile_id.strip():
+                default_raw_tile = builder.build_tile(
+                    tile_id=tile_id.strip(),
+                    title=title.strip() or metric_name,
+                    metric_name=metric_name,
+                    chart_kind=chart_kind,
+                    fields=defaults,
+                )
+            if default_raw_tile:
+                raw_default = yaml.safe_dump(default_raw_tile, sort_keys=False)
+            else:
+                raw_default = (
+                    "# Tile YAML replaces the whole tile definition.\n"
+                    "# id, title, metric, and chart are required.\n"
+                    "id: my_tile\n"
+                    "title: My tile\n"
+                    "metric: \n"
+                    "chart: \n"
+                )
+            raw_tile = st.text_area(
+                "Tile YAML",
+                value=raw_default,
+                height=360,
+                key=f"ai_studio_tile_raw_{token}",
+                help=config_help.field_help("report.tile_yaml"),
+            )
+            try:
+                loaded_tile = yaml.safe_load(raw_tile) or {}
+                built_tile = loaded_tile.get("tile", loaded_tile)
+                if not isinstance(built_tile, dict):
+                    raise ValueError("Tile YAML must be a mapping")
+            except Exception as exc:
+                built_tile = {}
+                _log_ai_operation_failure("Tile YAML parse", exc)
+                st.error(str(exc))
+        elif metric_name and chart_kind:
+            fields = config_builder._tile_field_controls(
+                chart_kind,
+                defaults,
+                field_options,
+                key_suffix=token,
+                catalog=catalog,
+                metric_name=metric_name,
+            )
+            built_tile = (
+                builder.build_tile(
+                    tile_id=tile_id.strip(),
+                    title=title.strip() or metric_name,
+                    metric_name=metric_name,
+                    chart_kind=chart_kind,
+                    fields=fields,
+                )
+                if tile_id.strip()
+                else {}
+            )
+        else:
+            built_tile = {}
+        if mode != "Raw YAML" and not is_new and built_tile:
+            built_tile = config_builder._merge_visual_tile_definition(
+                seed_tile, built_tile, chart_kind
+            )
+        if not is_new and built_tile:
+            built_tile = config_builder._preserve_untouched_tile_definition(seed_tile, built_tile)
+
+        report_candidate_ok = False
+        report_candidate_issues: list[str] = []
+        if built_tile and dashboard_id.strip() and page_id.strip() and page_settings_ready:
+            report_candidate_ok, report_candidate_issues = builder.validate_report_candidate(
+                catalog,
+                dashboard_id=dashboard_id.strip(),
+                dashboard_title=dashboard_title.strip()
+                or builder.title_from_identifier(dashboard_id),
+                dashboard_layout=str(dashboard_layout),
+                page_id=page_id.strip(),
+                page_title=page_title.strip() or builder.title_from_identifier(page_id),
+                filters=page_filters,
+                time_filter=page_time_filter,
+                tile=built_tile,
+                source_columns_by_id={
+                    source_id: [str(column) for column in working.columns]
+                    for source_id in _draft_source_ids(draft)
+                },
+            )
+        if report_candidate_issues:
+            with st.expander("Resolve report validation issues", expanded=True):
+                for issue in report_candidate_issues:
+                    st.error(issue)
+        report_ready = bool(
+            built_tile
+            and dashboard_id.strip()
+            and page_id.strip()
+            and page_settings_ready
+            and report_candidate_ok
+        )
         if st.button(
-            "Update Report Settings In Draft",
+            "Update Report In Draft",
             type="primary",
-            disabled=not presets,
-            key=f"ai_studio_report_settings_apply_{dashboard_index}_{page_index}",
+            key=f"ai_studio_tile_apply_{token}",
+            disabled=not report_ready,
         ):
             updated = copy.deepcopy(draft)
-            target_page = updated["dashboards"]["dashboards"][dashboard_index]["pages"][page_index]
-            target_page["filters"] = _normalize_report_filter_rows(edited_filters)
-            target_page["time_filter"] = {"default": default_time, "presets": presets}
-            if tile_index is not None:
-                target_tile = target_page["tiles"][int(tile_index)]
-                for key, value in tile_updates.items():
-                    if (
-                        (value in (None, "", {}, []) and key != "description")
-                        or (key == "scale_mode" and value == "absolute")
-                        or (key == "placement" and value == "content")
-                    ):
-                        target_tile.pop(key, None)
-                    else:
-                        target_tile[key] = value
+            dashboards_list = updated.setdefault("dashboards", {}).setdefault("dashboards", [])
+            resolved_dashboard_title = dashboard_title.strip() or builder.title_from_identifier(
+                dashboard_id
+            )
+            resolved_page_title = page_title.strip() or builder.title_from_identifier(page_id)
+            dashboard_def = builder._find_or_create_dashboard(
+                dashboards_list,
+                dashboard_id.strip(),
+                resolved_dashboard_title,
+                layout=str(dashboard_layout),
+            )
+            dashboard_def["title"] = resolved_dashboard_title
+            dashboard_def["layout"] = str(dashboard_layout)
+            page_def = builder._find_or_create_page(
+                dashboard_def, page_id.strip(), resolved_page_title
+            )
+            page_def["title"] = resolved_page_title
+            page_def["filters"] = page_filters
+            page_def["time_filter"] = page_time_filter
+            tiles_list = page_def.setdefault("tiles", [])
+            builder._replace_or_append(tiles_list, built_tile)
+            st.session_state.pop("ai_studio_tile_editor_seed", None)
+            st.session_state["ai_studio_tile_widget_cleanup"] = token
+            st.session_state["ai_studio_tile_selection_override"] = (
+                f"{dashboard_id.strip()}/{page_id.strip()}/{built_tile.get('id', '')}"
+            )
             _set_draft(updated)
             st.rerun()
 
+        with st.expander("Technical details · generated report YAML", expanded=False):
+            st.code(builder.tile_yaml(built_tile) if built_tile else "{}", language="yaml")
 
-def _ai_kpi_settings(seed: dict[str, Any], *, key: str) -> dict[str, Any]:
-    comparison = st.selectbox(
-        "KPI comparison",
-        ["none", "previous_period"],
-        index=builder.option_index(["none", "previous_period"], seed.get("comparison") or "none"),
-        key=f"ai_studio_report_kpi_comparison_{key}",
-        help=config_help.field_help("report.comparison"),
-    )
-    period = st.selectbox(
-        "KPI period",
-        ["day", "week", "month", "quarter", "year"],
-        index=builder.option_index(
-            ["day", "week", "month", "quarter", "year"],
-            seed.get("comparison_period") or "month",
-        ),
-        key=f"ai_studio_report_kpi_period_{key}",
-        help=config_help.field_help("report.comparison_period"),
-    )
-    sparkline = st.selectbox(
-        "KPI sparkline",
-        ["", "daily", "weekly", "monthly"],
-        index=builder.option_index(
-            ["", "daily", "weekly", "monthly"], seed.get("sparkline_grain") or ""
-        ),
-        format_func=lambda value: "None" if not value else value.title(),
-        key=f"ai_studio_report_kpi_sparkline_{key}",
-        help=config_help.field_help("report.sparkline_grain"),
-    )
-    return {
-        "comparison": comparison,
-        "comparison_period": period,
-        "sparkline_grain": sparkline or None,
-        "sparkline_points": int(seed.get("sparkline_points") or 30),
-        "target": seed.get("target"),
-    }
+    _render_draft_dashboard_manager(draft)
+    with st.expander("Report inventory", expanded=False, icon=":material/inventory_2:"):
+        st.caption("Search configured reports by human title, metric, or chart type.")
+        config_builder._report_inventory_tab(catalog)
 
 
-def _normalize_report_filter_rows(value: Any) -> list[dict[str, Any]]:
-    rows = value.to_dict(orient="records") if hasattr(value, "to_dict") else value
-    return [
-        {
-            "field": str(row.get("field", "")).strip(),
-            "label": str(row.get("label", "") or "").strip(),
-            "display": str(row.get("display") or "secondary"),
-            "scope": str(row.get("scope") or "compatible_tiles"),
-            "control": str(row.get("control") or "multiselect"),
-        }
-        for row in rows or []
-        if isinstance(row, dict) and str(row.get("field", "")).strip()
+def _render_draft_dashboard_manager(draft: dict[str, Any]) -> None:
+    """Delete whole pages or dashboards from the draft — mirrors the Builder."""
+
+    dashboards = [
+        dashboard
+        for dashboard in draft.get("dashboards", {}).get("dashboards", []) or []
+        if isinstance(dashboard, dict) and dashboard.get("id")
     ]
+    if not dashboards:
+        return
+    with st.expander("Manage dashboards", expanded=False, icon=":material/dashboard_customize:"):
+        st.caption(
+            "Remove an entire page (all of its tiles) or a whole dashboard from the draft. "
+            "Deleting the last page also removes its dashboard."
+        )
+        dashboard_ids = [str(dashboard.get("id")) for dashboard in dashboards]
+        dashboard_titles = {
+            str(dashboard.get("id")): str(dashboard.get("title") or dashboard.get("id"))
+            for dashboard in dashboards
+        }
+        dashboard_col, page_col = st.columns(2)
+        selected_dashboard = dashboard_col.selectbox(
+            "Dashboard to manage",
+            dashboard_ids,
+            format_func=lambda value: f"{dashboard_titles.get(value, value)} (`{value}`)",
+            key="ai_studio_manage_dashboard_select",
+        )
+        dashboard = next(
+            (entry for entry in dashboards if str(entry.get("id")) == selected_dashboard),
+            None,
+        )
+        pages = [
+            page
+            for page in (dashboard.get("pages", []) if isinstance(dashboard, dict) else []) or []
+            if isinstance(page, dict) and page.get("id")
+        ]
+        page_ids = [str(page.get("id")) for page in pages]
+        page_titles = {str(page.get("id")): str(page.get("title") or page.get("id")) for page in pages}
+        tile_counts = {str(page.get("id")): len(page.get("tiles", []) or []) for page in pages}
+        selected_page = page_col.selectbox(
+            "Page to manage",
+            page_ids,
+            format_func=lambda value: (
+                f"{page_titles.get(value, value)} · {tile_counts.get(value, 0)} tile(s)"
+            ),
+            key=f"ai_studio_manage_page_select_{selected_dashboard}",
+        )
+        total_tiles = sum(tile_counts.values())
+        delete_page_col, delete_dashboard_col = st.columns(2)
+        page_confirmed = False
+        with delete_page_col:
+            if selected_page:
+                page_confirmed = st.checkbox(
+                    f"Confirm deleting page `{selected_page}` from `{selected_dashboard}` "
+                    "and every tile on that page.",
+                    key=f"ai_studio_manage_confirm_page_{selected_dashboard}_{selected_page}",
+                )
+            else:
+                st.caption("This dashboard has no page to delete.")
+        if delete_page_col.button(
+            "Delete page",
+            icon=":material/delete:",
+            disabled=not (page_confirmed and selected_page),
+            width="stretch",
+            key=f"ai_studio_manage_delete_page_{selected_dashboard}_{selected_page}",
+        ):
+            updated = copy.deepcopy(draft)
+            remaining = []
+            for entry in updated.get("dashboards", {}).get("dashboards", []) or []:
+                if isinstance(entry, dict) and entry.get("id") == selected_dashboard:
+                    entry["pages"] = [
+                        page
+                        for page in entry.get("pages", []) or []
+                        if not (isinstance(page, dict) and page.get("id") == selected_page)
+                    ]
+                    if not entry["pages"]:
+                        continue
+                remaining.append(entry)
+            updated["dashboards"]["dashboards"] = remaining
+            _set_draft(updated)
+            st.rerun()
+        with delete_dashboard_col:
+            dashboard_confirmed = st.checkbox(
+                f"Confirm deleting dashboard `{selected_dashboard}`, all {len(pages)} page(s), "
+                f"and all {total_tiles} tile(s).",
+                key=f"ai_studio_manage_confirm_dashboard_{selected_dashboard}",
+            )
+        if delete_dashboard_col.button(
+            "Delete dashboard",
+            icon=":material/delete_forever:",
+            disabled=not dashboard_confirmed,
+            width="stretch",
+            key=f"ai_studio_manage_delete_dashboard_{selected_dashboard}",
+        ):
+            updated = copy.deepcopy(draft)
+            updated["dashboards"]["dashboards"] = [
+                entry
+                for entry in updated.get("dashboards", {}).get("dashboards", []) or []
+                if not (isinstance(entry, dict) and entry.get("id") == selected_dashboard)
+            ]
+            _set_draft(updated)
+            st.rerun()
 
 
 def _chat_review() -> None:
@@ -5353,6 +6083,104 @@ def _chat_review() -> None:
         "After applying the draft, open the Chat With Data page to ask questions over these "
         f"{len(metrics)} aggregate metric(s)."
     )
+    _chat_settings_review(draft)
+
+
+def _chat_settings_review(draft: dict[str, Any]) -> None:
+    """Builder-parity chat guidance editing scoped to the draft's ai.yaml settings."""
+
+    updated = copy.deepcopy(draft)
+    chat_config = (
+        updated.get("chat_with_data") if isinstance(updated.get("chat_with_data"), dict) else {}
+    )
+    agent_prompt = str(chat_config.get("agent_prompt") or DEFAULT_CHAT_AGENT_PROMPT)
+    dataset_descriptions = {
+        str(key): str(value)
+        for key, value in dict(chat_config.get("dataset_descriptions") or {}).items()
+    }
+    metric_descriptions = {
+        str(key): str(value)
+        for key, value in dict(chat_config.get("metric_descriptions") or {}).items()
+    }
+    components.sync_text_area("ai_studio_chat_agent_prompt", agent_prompt)
+
+    with components.bordered_panel(
+        "Chat Prompt",
+        "Edit chat-only guidance sent to the LLM planner. Governed query rules still apply.",
+    ):
+        edited_prompt = st.text_area(
+            "Agent Prompt",
+            key="ai_studio_chat_agent_prompt",
+            height=220,
+            help=config_help.field_help("chat.agent_prompt"),
+        )
+        st.caption(
+            "Use this for business context and terminology. It does not allow raw rows, SQL, "
+            "Python execution, or arbitrary chart code."
+        )
+
+    dataset_rows = config_builder._chat_description_rows(
+        [(source_id, "Dataset") for source_id in _draft_source_ids(updated)],
+        dataset_descriptions,
+    )
+    metric_keys = [
+        *[
+            (str(processor.get("id")), "Processor")
+            for processor in _draft_processor_definitions(updated)
+            if processor.get("id")
+        ],
+        *[
+            (name, "Metric")
+            for name in sorted(updated.get("metrics", {}).get("metrics", {}), key=str.casefold)
+        ],
+    ]
+    metric_rows = config_builder._chat_description_rows(metric_keys, metric_descriptions)
+
+    description_columns = {
+        "Type": st.column_config.TextColumn(
+            "Type",
+            disabled=True,
+            width="small",
+            help=config_help.field_help("chat.description_type"),
+        ),
+        "Key": st.column_config.TextColumn(
+            "Key", width="medium", help=config_help.field_help("chat.description_key")
+        ),
+        "Description": st.column_config.TextColumn(
+            "Description",
+            width="large",
+            help=config_help.field_help("chat.description"),
+        ),
+    }
+    with components.bordered_panel(
+        "Chat Descriptions",
+        "Correct dataset, processor, and metric descriptions for LLM planning only.",
+    ):
+        edited_dataset_rows = st.data_editor(
+            dataset_rows,
+            num_rows="dynamic",
+            hide_index=True,
+            width="stretch",
+            key="ai_studio_chat_dataset_descriptions",
+            column_config=description_columns,
+        )
+        edited_metric_rows = st.data_editor(
+            metric_rows,
+            num_rows="dynamic",
+            hide_index=True,
+            width="stretch",
+            key="ai_studio_chat_metric_descriptions",
+            column_config=description_columns,
+        )
+
+    if st.button("Update Chat Settings In Draft", type="primary"):
+        updated["chat_with_data"] = {
+            "agent_prompt": edited_prompt,
+            "dataset_descriptions": config_builder._chat_description_map(edited_dataset_rows),
+            "metric_descriptions": config_builder._chat_description_map(edited_metric_rows),
+        }
+        _set_draft(updated)
+        st.success("Draft chat settings updated.")
 
 
 def _settings_review() -> None:
@@ -5380,16 +6208,16 @@ def _settings_review() -> None:
             key="ai_studio_settings_time_zone",
             help=config_help.field_help("workspace.time_zone"),
         )
+        known_grains = ["Day", "Week", "Month", "Quarter", "Year", "Summary"]
+        current_grains = [
+            str(grain)
+            for grain in (calendar.get("grains") or ["Day", "Month", "Quarter", "Year", "Summary"])
+        ]
+        grain_options = builder.dedupe([*known_grains, *current_grains])
         calendar["grains"] = st.multiselect(
             "Calendar Grains",
-            ["Day", "Month", "Quarter", "Year", "Summary"],
-            default=[
-                grain
-                for grain in (
-                    calendar.get("grains") or ["Day", "Month", "Quarter", "Year", "Summary"]
-                )
-                if grain in {"Day", "Month", "Quarter", "Year", "Summary"}
-            ],
+            grain_options,
+            default=[grain for grain in current_grains if grain in grain_options],
             key="ai_studio_settings_grains",
             help=config_help.field_help("workspace.calendar_grains"),
         )
@@ -5402,13 +6230,15 @@ def _settings_review() -> None:
             key="ai_studio_settings_week_start",
             help=config_help.field_help("workspace.week_start"),
         )
+    theme_error: str | None = None
     with st.expander("Technical details · dashboard theme YAML", expanded=False):
+        st.caption("Edit permissive Plotly/dashboard theme tokens stored in dashboards.yaml.")
         theme_text = yaml.safe_dump(dashboards.get("theme", {}), sort_keys=False)
         components.sync_text_area("ai_studio_settings_theme_yaml", theme_text)
         raw_theme = st.text_area(
             "Theme YAML",
             key="ai_studio_settings_theme_yaml",
-            height=180,
+            height=220,
             help=config_help.field_help("workspace.theme_yaml"),
         )
         try:
@@ -5418,8 +6248,15 @@ def _settings_review() -> None:
             dashboards["theme"] = theme
         except Exception as exc:
             _log_ai_operation_failure("Dashboard theme YAML parse", exc)
-            st.warning(str(exc))
-    if st.button("Update Settings In Draft", type="primary"):
+            theme_error = str(exc)
+            st.warning(theme_error)
+    if not calendar["grains"]:
+        st.warning("Select at least one calendar grain.")
+    if st.button(
+        "Update Settings In Draft",
+        type="primary",
+        disabled=bool(theme_error) or not calendar["grains"],
+    ):
         _set_draft(updated)
         st.success("Draft settings updated.")
 
@@ -7575,6 +8412,13 @@ def _clear_schema_widget_state() -> None:
         "ai_studio_group_by_field_selector",
         "ai_studio_field_approval_search",
         "ai_studio_field_approval_editor",
+        # Widget-bound copies of the durable filter state; the durable keys
+        # themselves are reset by _initialize_state or the section syncers.
+        "ai_studio_filter_mode_control",
+        "ai_studio_raw_filter_editor",
+        "ai_studio_filter_rows_logic_mode_control",
+        "ai_studio_filter_rows_combine_control",
+        "ai_studio_filter_rows_formula_input",
     )
     for key in list(st.session_state.keys()):
         if key in schema_widget_bases or any(
@@ -7589,7 +8433,14 @@ def _clear_preprocessing_widget_state(sections: set[str]) -> None:
             "ai_studio_defaults_editor",
             "ai_studio_defaults_field_picker",
         ),
-        "source_filters": ("ai_studio_filter_editor",),
+        "source_filters": (
+            "ai_studio_filter_editor",
+            "ai_studio_filter_mode_control",
+            "ai_studio_raw_filter_editor",
+            "ai_studio_filter_rows_logic_mode_control",
+            "ai_studio_filter_rows_combine_control",
+            "ai_studio_filter_rows_formula_input",
+        ),
         "calculated_fields": ("ai_studio_calculation_editor",),
     }
     widget_bases = tuple(
@@ -7668,14 +8519,17 @@ def _sync_source_defaults_editor(source: model.Source) -> None:
 
 def _sync_source_filter_editor(source: model.Source) -> None:
     expression = builder.first_filter_expression(source)
-    filter_rows = builder.filter_rows_from_expression(expression)
-    if filter_rows is None:
+    state = builder.condition_state_from_expression(expression)
+    if state is None:
         st.session_state["ai_studio_filter_mode"] = "Raw AST"
         st.session_state["ai_studio_filter_rows"] = [builder.blank_filter_row()]
         st.session_state["ai_studio_raw_filter"] = builder.expression_yaml(expression)
         return
     st.session_state["ai_studio_filter_mode"] = "Rules"
-    st.session_state["ai_studio_filter_rows"] = filter_rows
+    st.session_state["ai_studio_filter_rows"] = list(state["rows"])
+    st.session_state["ai_studio_filter_rows_logic_mode"] = state["mode"]
+    st.session_state["ai_studio_filter_rows_combine"] = state["combine"]
+    st.session_state["ai_studio_filter_rows_formula"] = state["formula"]
     st.session_state["ai_studio_raw_filter"] = ""
 
 
@@ -7951,11 +8805,85 @@ def _alias_required_fields(frame: pl.DataFrame) -> pl.DataFrame:
     return frame.with_columns(expressions) if expressions else frame
 
 
-def _derive_time_fields(frame: pl.DataFrame) -> pl.DataFrame:  # noqa: PLR0912
-    fmt = st.session_state.get("ai_studio_timestamp_format", "")
+def _preview_timestamp_format(frame: pl.DataFrame, columns: list[str]) -> str:
+    """Return the configured format, recovering the selected sample-plan default."""
+
+    configured = str(st.session_state.get("ai_studio_timestamp_format") or "").strip()
+    if configured or not any(frame.schema.get(column) == pl.String for column in columns):
+        return configured
+    plan = st.session_state.get("ai_studio_sample_source_plan")
+    planned = (
+        str(plan.timestamp_format or "").strip() if isinstance(plan, SampleSourcePlan) else ""
+    )
+    if planned:
+        st.session_state["ai_studio_timestamp_format"] = planned
+    return planned
+
+
+def _prepare_preview_time_columns(
+    frame: pl.DataFrame,
+    columns: list[str],
+) -> pl.DataFrame:
+    """Ensure preview time columns are temporal before date expressions run."""
+
+    present = [column for column in columns if column in frame.columns]
+    string_columns = [
+        column for column in present if frame.schema.get(column) == pl.String
+    ]
+    fmt = _preview_timestamp_format(frame, present)
+    if string_columns and not fmt:
+        fields = ", ".join(string_columns)
+        raise ValueError(
+            f"{fields} are text columns. Set Timestamp Format in the Sample step before "
+            "AI Studio derives calendar fields or ResponseTime. For Pega timestamps use "
+            "`%Y%m%dT%H%M%S%.3f %Z`."
+        )
     out = frame
-    if "OutcomeTime" in out.columns and out.schema.get("OutcomeTime") == pl.String and fmt:
-        out = out.with_columns(pl.col("OutcomeTime").str.strptime(pl.Datetime, fmt, strict=False))
+    if string_columns:
+        source_non_null = {
+            column: len(frame.get_column(column)) - frame.get_column(column).null_count()
+            for column in string_columns
+        }
+        out = frame.with_columns(
+            [
+                pl.col(column).str.strptime(pl.Datetime, fmt, strict=False)
+                for column in string_columns
+            ]
+        )
+        failures = {
+            column: source_non_null[column]
+            - (len(out.get_column(column)) - out.get_column(column).null_count())
+            for column in string_columns
+        }
+        failures = {column: count for column, count in failures.items() if count}
+        if failures:
+            details = ", ".join(
+                f"{column}: {count}" for column, count in sorted(failures.items())
+            )
+            raise ValueError(
+                f"Timestamp Format {fmt!r} could not parse sample values ({details}). "
+                "Update Timestamp Format in the Sample step before continuing."
+            )
+    invalid = [
+        f"{column} ({out.schema[column]})"
+        for column in present
+        if not out.schema[column].is_temporal()
+    ]
+    if invalid:
+        raise ValueError(
+            "AI Studio time calculations require Date or Datetime columns; update the "
+            f"Sample field mappings or casts for: {', '.join(invalid)}."
+        )
+    return out
+
+
+def _derive_time_fields(frame: pl.DataFrame) -> pl.DataFrame:  # noqa: PLR0912
+    out = frame
+    time_columns = ["OutcomeTime"] if "OutcomeTime" in out.columns else []
+    if "OutcomeTime" in out.columns and "DecisionTime" in out.columns:
+        time_columns.append("DecisionTime")
+    if time_columns:
+        out = _prepare_preview_time_columns(out, time_columns)
     expressions: list[pl.Expr] = []
     if "OutcomeTime" in out.columns:
         time = pl.col("OutcomeTime")
@@ -7999,17 +8927,16 @@ def _derive_time_fields(frame: pl.DataFrame) -> pl.DataFrame:  # noqa: PLR0912
                     [month_text.str.slice(0, 4), pl.lit("_Q"), quarter.cast(pl.String)]
                 ).alias("Quarter")
             )
-    if "DecisionTime" in out.columns and "OutcomeTime" in out.columns:
-        if out.schema.get("DecisionTime") == pl.String and fmt:
-            out = out.with_columns(
-                pl.col("DecisionTime").str.strptime(pl.Datetime, fmt, strict=False)
-            )
-        if "ResponseTime" not in out.columns:
-            expressions.append(
-                (pl.col("OutcomeTime") - pl.col("DecisionTime"))
-                .dt.total_seconds()
-                .alias("ResponseTime")
-            )
+    if (
+        "DecisionTime" in out.columns
+        and "OutcomeTime" in out.columns
+        and "ResponseTime" not in out.columns
+    ):
+        expressions.append(
+            (pl.col("OutcomeTime") - pl.col("DecisionTime"))
+            .dt.total_seconds()
+            .alias("ResponseTime")
+        )
     return out.with_columns(expressions) if expressions else out
 
 
@@ -8111,7 +9038,7 @@ def _current_filter_expression() -> dict[str, Any] | None:
     if st.session_state.get("ai_studio_filter_mode") == "Raw AST":
         raw = st.session_state.get("ai_studio_raw_filter", "")
         return builder.parse_expression_yaml(raw) if raw.strip() else None
-    return builder.compile_filter_rows(st.session_state.get("ai_studio_filter_rows", []))
+    return config_builder._compiled_filter_expression("ai_studio_filter_rows")
 
 
 def _observed_outcome_groups(
@@ -8294,7 +9221,11 @@ def _build_draft_catalog(working: pl.DataFrame, approved_fields: list[str]) -> d
     transforms: list[dict[str, Any]] = []
     if rename_capitalize:
         transforms.append({"kind": "rename_capitalize"})
-    if rename_capitalize and default_values:
+    if default_values:
+        # Defaults authored on the Defaults step must reach the runtime source
+        # exactly like they shape the working sample — independently of the
+        # rename transform. They still run after rename_capitalize so the
+        # authored (effective) field names resolve.
         transforms.append({"kind": "defaults", "values": default_values})
     for target, source_column in _field_aliases().items():
         if source_column and source_column != target:

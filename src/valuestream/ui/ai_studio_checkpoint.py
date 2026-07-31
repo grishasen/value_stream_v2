@@ -44,6 +44,9 @@ _PREPROCESSING_KEYS = (
     "ai_studio_defaults",
     "ai_studio_filter_mode",
     "ai_studio_filter_rows",
+    "ai_studio_filter_rows_logic_mode",
+    "ai_studio_filter_rows_combine",
+    "ai_studio_filter_rows_formula",
     "ai_studio_raw_filter",
     "ai_studio_calculations",
 )

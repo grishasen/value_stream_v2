@@ -2915,14 +2915,19 @@ def test_accepting_preprocessing_patches_syncs_all_source_editors() -> None:
         {"Field": "ModelControlGroup", "Default Value": "Test", "Enabled": True}
     ]
     assert at.session_state["ai_studio_filter_mode"] == "Rules"
+    # Synced rows arrive labeled with Builder-style E-references plus the
+    # Basic/Advanced logic state decompiled from the accepted expression.
     assert at.session_state["ai_studio_filter_rows"] == [
         {
             "Field": "Channel",
             "Operator": "==",
             "Value": "Web",
             "Enabled": True,
+            "Ref": "E1",
         }
     ]
+    assert at.session_state["ai_studio_filter_rows_logic_mode"] == "Basic"
+    assert at.session_state["ai_studio_filter_rows_combine"] == "AND"
     calculation = at.session_state["ai_studio_calculations"][0]
     assert calculation["Name"] == "ChannelCopy"
     # A bare column copy now loads as the recognized Copy Field mode.

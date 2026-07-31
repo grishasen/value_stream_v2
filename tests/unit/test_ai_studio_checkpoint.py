@@ -51,6 +51,9 @@ def _workspace_state(sample_relative: str, sample_identity: str) -> dict[str, ob
         "ai_studio_filter_rows": [
             {"Field": "Outcome", "Operator": "==", "Value": "Clicked", "Enabled": True}
         ],
+        "ai_studio_filter_rows_logic_mode": "Advanced",
+        "ai_studio_filter_rows_combine": "OR",
+        "ai_studio_filter_rows_formula": "E1",
         "ai_studio_raw_filter": "",
         "ai_studio_calculations": [
             {"Name": "DayCopy", "Mode": "AST YAML", "Expression": "{col: OutcomeTime}"}
@@ -277,6 +280,9 @@ def test_ai_studio_checkpoint_restores_after_restart_and_revalidates(tmp_path: P
     assert refreshed.session_state["ai_studio_defaults"] == [
         {"Field": "Channel", "Default Value": "Unknown"}
     ]
+    assert refreshed.session_state["ai_studio_filter_rows_logic_mode"] == "Advanced"
+    assert refreshed.session_state["ai_studio_filter_rows_combine"] == "OR"
+    assert refreshed.session_state["ai_studio_filter_rows_formula"] == "E1"
     assert refreshed.session_state["ai_studio_rename_capitalize_enabled"] is True
     restored_draft = refreshed.session_state["ai_studio_draft"]
     restored_signature = studio_page._draft_signature(restored_draft)
