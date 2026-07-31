@@ -227,6 +227,15 @@
           "title": "Placement",
           "type": "string"
         },
+        "primary_mark": {
+          "default": "bar",
+          "enum": [
+            "bar",
+            "line"
+          ],
+          "title": "Primary Mark",
+          "type": "string"
+        },
         "scale_mode": {
           "default": "absolute",
           "enum": [
@@ -240,6 +249,11 @@
         "secondary_metric": {
           "title": "Secondary Metric",
           "type": "string"
+        },
+        "shared_y_axis": {
+          "default": false,
+          "title": "Shared Y Axis",
+          "type": "boolean"
         },
         "show_trend_delta": {
           "default": false,

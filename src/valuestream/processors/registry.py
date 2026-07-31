@@ -9,6 +9,7 @@ from valuestream.config import model
 from valuestream.processors.binary_outcome import BinaryOutcomeProcessor
 from valuestream.processors.entity_lifecycle import EntityLifecycleProcessor
 from valuestream.processors.entity_set import EntitySetProcessor
+from valuestream.processors.frequency_response import FrequencyResponseProcessor
 from valuestream.processors.funnel import FunnelProcessor
 from valuestream.processors.numeric_distribution import NumericDistributionProcessor
 from valuestream.processors.score_distribution import ScoreDistributionProcessor
@@ -16,6 +17,7 @@ from valuestream.processors.snapshot import SnapshotProcessor
 
 ProcessorRuntime: TypeAlias = (
     BinaryOutcomeProcessor
+    | FrequencyResponseProcessor
     | NumericDistributionProcessor
     | ScoreDistributionProcessor
     | EntityLifecycleProcessor
@@ -27,6 +29,7 @@ ProcessorFactory: TypeAlias = Callable[..., ProcessorRuntime]
 
 _PROCESSOR_FACTORIES: dict[str, ProcessorFactory] = {
     "binary_outcome": BinaryOutcomeProcessor,
+    "frequency_response": FrequencyResponseProcessor,
     "numeric_distribution": NumericDistributionProcessor,
     "score_distribution": ScoreDistributionProcessor,
     "entity_lifecycle": EntityLifecycleProcessor,

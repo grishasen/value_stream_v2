@@ -28,7 +28,7 @@ A recipe contains:
 | `default_metric_id` | Proposed ID; the installer adds a stable numeric suffix on collision |
 | `metric` | A normal metric definition with exact-value placeholders such as `${processor_id}` |
 | `method` | Calculation, accuracy class, algorithm, and caveat |
-| `report` | Recommended chart, placement, and optional KPI comparison defaults |
+| `report` | Recommended chart, placement, optional KPI comparison defaults, and optional required `x` axis for non-scalar charts |
 
 Template substitution is deliberately closed: a placeholder must occupy the
 whole YAML scalar. Metric-template placeholders must name a declared binding
@@ -185,6 +185,29 @@ internal state-ID choice.
 | `funnel.dropoff_rate` | Funnel stage loss | Ordered funnel stages | Exact | KPI card |
 | `lifecycle.summary` | Entity lifecycle measures | Entity lifecycle processor | Exact | Table |
 | `category.top_items` | Frequent categories | Frequent-items/Top-K state | Approximate | Table |
+| `contact_policy.frequency_marginal_ctr` | Focal marginal CTR by exposure bucket | Exact `Clicks` and `Contacts` states | Approximate fixed-window interpretation | Line |
+| `contact_policy.frequency_comparable_ctr` | Focal CTR on runner-comparable contacts | Exact `ComparableClicks` and `ComparableContacts` states | Approximate fixed-window interpretation | Line |
+| `contact_policy.runner_up_expected_ctr` | Mean selected-runner raw Propensity | Exact `RunnerPropensitySum` and `ComparableContacts` states | Approximate fixed-window interpretation | Line |
+| `contact_policy.runner_up_coverage` | Runner-comparable share of focal contacts | Exact `ComparableContacts` and `Contacts` states | Approximate fixed-window interpretation | KPI card |
+| `contact_policy.response_opportunity_margin` | Comparable focal response minus runner expectation | Exact `ComparableClicks`, `RunnerPropensitySum`, and shared `ComparableContacts` states | Approximate fixed-window interpretation | Bar |
+| `contact_policy.priority_opportunity_gap` | Comparable focal-minus-runner Priority index | Exact focal/runner comparable Priority sums and `PriorityComparableContacts` | Approximate arbitration diagnostic | Bar |
+
+The six **Contact policy** recipes target only the `frequency_response`
+processor and require the exact state names shown above. They never propose a
+generic count or sum as a substitute for those population contracts. Their
+line and bar recommendations use `ExposureBucket`, whose value is an upstream
+fixed-window approximation; changing a report date filter does not recompute
+customer contact history.
+
+`Contacts` are derived from the processor's configured exposure outcomes.
+When that outcome is `Impression`, it is an impression proxy rather than
+measured viewability; dismiss telemetry is never inferred when the source does
+not provide it. Runner selection means exact rank 2 when present, otherwise the
+next recorded rank, and runner response uses raw `Propensity` as the
+probability. Comparable focal CTR, runner expected CTR, and response opportunity
+margin use the same `ComparableContacts` denominator. `Priority` is retained
+only for the separate, neutral arbitration index; it is never treated as CTR
+or probability.
 
 The unique-entity recipe prefers CPC states created by current processor
 defaults while accepting HLL and Theta states. Theta is useful when the same

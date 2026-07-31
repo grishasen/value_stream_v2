@@ -23,6 +23,7 @@ from valuestream.processors import (
     BinaryOutcomeProcessor,
     EntityLifecycleProcessor,
     EntitySetProcessor,
+    FrequencyResponseProcessor,
     FunnelProcessor,
     NumericDistributionProcessor,
     ScoreDistributionProcessor,
@@ -37,6 +38,7 @@ from valuestream.utils.timer import timed
 _SketchPayload = bytes | bytearray | memoryview | None
 _Processor = (
     BinaryOutcomeProcessor
+    | FrequencyResponseProcessor
     | NumericDistributionProcessor
     | ScoreDistributionProcessor
     | EntityLifecycleProcessor

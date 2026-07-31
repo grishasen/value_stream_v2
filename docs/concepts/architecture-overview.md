@@ -33,6 +33,8 @@ workspace/
     ...
   aggregates/
     ...
+  .valuestream/
+    state/                 # optional, non-queryable processor checkpoints
   meta/
     chunks.duckdb
     pipeline_runs.duckdb
@@ -41,8 +43,8 @@ workspace/
     aggregate_views.duckdb
 ```
 
-Only `catalog/` and source files are required up front. Aggregate and metadata
-paths are created as the workspace runs.
+Only `catalog/` and source files are required up front. Aggregate, metadata,
+and optional processor-state paths are created as the workspace runs.
 
 ## Catalog Files
 
@@ -66,7 +68,9 @@ detection. Canonical payloads and file lineage are persisted in metadata.
 2. A durable pipeline-run row is inserted with `status=running`.
 3. Readers load chunk files as Polars frames.
 4. Transforms clean, normalize, enrich, filter, and deduplicate data.
-5. Processors fan out over the transformed frame.
+5. Processors fan out over the transformed frame. A bounded processor may
+   reuse a versioned, hash-sharded checkpoint instead of rescanning overlapping
+   source history.
 6. Each processor writes mergeable aggregate state and configured grains.
 7. Complete lineage commits before the chunk's final `status=ok` marker.
 8. The same run row becomes `ok`, `partial`, or `failed`, publishing only its
@@ -76,11 +80,22 @@ The ingestion engine is designed to be idempotent. A completed chunk is skipped
 only when its source computation hash and current input-file fingerprint match.
 Writes use immutable run-specific files plus atomic rename. Query visibility is
 gated by successful chunk and run ledger rows, so a failed replacement leaves
-the previous successful version visible.
+the previous successful version visible. A successful recomputation is the new
+publication marker even when it produces no aggregate rows, so it hides an
+older non-empty partial. Reuse checks the same globally latest successful
+attempt; rolling a source contract back reprocesses it instead of republishing
+an older hidden attempt.
 If a process dies while the run is still `running`, the next source invocation
 holds the same source lock, verifies committed chunk fingerprints, lineage,
 files, and computation hashes, finalizes the interrupted run, and reuses only
 the verified chunks.
+
+Processor checkpoints are ingestion-only acceleration state. They are
+versioned, source-fingerprint-addressed, bounded by configured retention, and
+rebuildable from the authoritative source;
+they do not create a successful chunk marker and no report/query path reads
+them. Aggregate-first is therefore the serving contract even when a processor
+retains the minimal identity state required for exact bounded computation.
 
 ## Processor and State Model
 
@@ -96,6 +111,7 @@ processor families include:
 | `entity_set` | Approximate set operations and cohort comparisons |
 | `funnel` | Stage counts and dropoff calculations |
 | `snapshot` | Periodic aggregate state |
+| `frequency_response` | Exact response/opportunity curves by bounded exposure frequency |
 
 See [Processor Specs](../reference/processors.md) and [Algorithms](../reference/algorithms.md)
 for implementation details.

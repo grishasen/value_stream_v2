@@ -57,6 +57,10 @@ A reader who works through this document and the reference/expression-dsl.md gra
    +-------------------------------+
 ```
 
+The main path shows the business/query contract. A bounded Processor may also
+write a rebuildable Processor Checkpoint beside this path during ingestion; the
+checkpoint feeds later ingestion only and has no edge to the Query Layer.
+
 ## 2. Term graph
 
 Lines mean "is composed of" or "refers to."
@@ -108,7 +112,10 @@ A row in a physical aggregate table, produced by a Processor. It contains group-
 Aggregates are **never raw rows.** A row in `aggregates/ih/engagement/daily/period=2024-08/part-00.parquet` represents one `(Day, Channel, PlacementType, Issue, Group, CustomerType, ModelControlGroup)` tuple — never a single Pega interaction.
 
 ### Aggregate Store
-The directory tree under `<workspace>/aggregates/` holding all physical aggregate Parquet files. The only place persisted business data lives.
+The directory tree under `<workspace>/aggregates/` holding all physical
+aggregate Parquet files. It is the only source-derived store exposed to the
+query layer and business read surfaces. Processor checkpoints live outside it
+and are not aggregates.
 
 ### AST (Abstract Syntax Tree)
 The internal representation of an expression in the closed expression DSL. AST nodes are JSON-shaped (e.g. `{op: safe_div, num: {col: P}, den: {col: N}}`). The evaluator turns an AST into a Polars expression. See reference/expression-dsl.md.
@@ -148,11 +155,29 @@ reused; it does not create another durable chunk-ledger row. For a successful
 chunk, complete lineage commits before `status=ok`, making that row the durable
 chunk commit marker.
 
+A processor kind may declare a **bounded lookback dependency**. The discovered
+chunk is still the target and receives the output provenance, while that
+target's input fingerprint includes the preceding calendar chunks required by
+the window and any configured partition-lag allowance. That allowance affects
+dependency discovery only; the processor's timestamp window remains unchanged.
+Only the lookback processor sees those additional transformed rows; ordinary
+processors still see the target files alone. Depending on its typed execution
+mode, the lookback processor either discards the transformed dependency rows
+after aggregation or first reduces each chunk to minimal, versioned internal
+checkpoint state. That state never becomes another Source, Aggregate, or
+queryable row-level table. See
+[ADR 0007](adr/0007-bounded-lookback-processors.md).
+
 ### Chunk ledger
 The DuckDB table at `meta/chunks.duckdb` recording every chunk processed by every run.
 Only an `ok` row whose parent run has reached a terminal state is query-visible
 and eligible for idempotent reuse. This includes successful chunks retained
-inside an otherwise failed run.
+inside an otherwise failed run. For each logical chunk, publication and
+idempotent reuse authorize only the globally latest successful attempt. A newer
+successful empty result therefore supersedes every older non-empty partial. If
+the catalog rolls back to an older computation hash, that older attempt is not
+reused; ingestion recomputes the chunk under the restored contract so it becomes
+the latest successful attempt.
 
 ### Compaction
 The process of reducing aggregate states with `groupby + state-merge`.
@@ -277,8 +302,25 @@ The most important concept in Value Stream. A Processor is a typed function `(So
 - `entity_set` — CPC/HLL/Theta distinct-count sketches, with Theta also supporting set algebra
 - `funnel` — per-stage counts for funnel KPIs
 - `snapshot` — periodic / accumulating snapshots for state KPIs
+- `frequency_response` — response and opportunity curves by exact bounded exposure frequency
 
 Processors implement the interface in reference/processors.md §1.
+
+### Processor Checkpoint
+An optional, ingestion-only acceleration artifact owned by a bounded Processor.
+For `frequency_response`, a checkpoint contains the minimal filtered,
+classified candidate rows needed to repeat exact cross-partition contact
+normalization, ordering, grouping/state calculation, and runner selection,
+split into deterministic customer-hash shards by a streaming sink. It is
+source-fingerprint-addressed by source/processor computation identity, chunk
+id, and raw-file fingerprint, with explicit state-schema, customer-dtype, and
+sharding revisions. Its daily partitions have bounded retention.
+
+A Processor Checkpoint is not a Source, Aggregate, Partial, ledger commit, or
+query cache. Reports and APIs cannot read it. It is safe to delete or vacuum
+independently because authoritative IH can rebuild it; deletion affects
+ingestion cost, not results. Hash sharding is only routing and does not
+anonymize a retained customer key.
 
 ### Reader
 A built-in component that turns a list of file paths into a Polars LazyFrame. Built-in readers:
@@ -362,6 +404,7 @@ Two distinct meanings; context disambiguates:
 A self-contained Value Stream environment. Has its own:
 - `catalog/` (YAML),
 - `aggregates/` (Parquet),
+- `.valuestream/state/` (optional, non-queryable processor checkpoints),
 - `snapshots/` (Parquet),
 - `meta/` (DuckDB metadata),
 - `duckdb/valuestream.duckdb` (views).

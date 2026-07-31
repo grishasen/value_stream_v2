@@ -380,6 +380,37 @@ def test_combo_chart_preserves_secondary_axis_semantics() -> None:
 
 
 @pytest.mark.unit
+def test_combo_chart_can_render_two_lines_on_one_shared_axis() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "ExposureFrequency": [1, 2, 3],
+                "ComparableCTR": [0.021, 0.014, 0.009],
+                "RunnerExpectedCTR": [0.006, 0.0062, 0.0065],
+            }
+        ),
+        {
+            "id": "frequency_response",
+            "metric": "ComparableCTR",
+            "metric_output": "ComparableCTR",
+            "chart": "combo",
+            "x": "ExposureFrequency",
+            "secondary_metric": "RunnerExpectedCTR",
+            "primary_mark": "line",
+            "shared_y_axis": True,
+            "y_axis_title": "Response probability",
+        },
+    )
+
+    assert [trace.type for trace in figure.data] == ["scatter", "scatter"]
+    assert all(trace.yaxis == "y" for trace in figure.data)
+    assert figure.layout.yaxis.title.text == "Response probability"
+    assert "yaxis2" not in figure.layout
+    assert list(figure.data[0].y) == pytest.approx([0.021, 0.014, 0.009])
+    assert list(figure.data[1].y) == pytest.approx([0.006, 0.0062, 0.0065])
+
+
+@pytest.mark.unit
 def test_table_chart_expands_topk_items_into_ranked_rows() -> None:
     rows = pl.DataFrame(
         {

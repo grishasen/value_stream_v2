@@ -103,7 +103,7 @@ def chunk_done(
     files: list[Path] | tuple[Path, ...],
     config_hash: str,
 ) -> bool:
-    """Return true for a matching successful chunk in a terminal prior run."""
+    """Return true when the latest successful attempt matches files and contract."""
     _ensure_ledger_read_dbs(workspace_path)
     chunks_db = meta_dir(workspace_path) / "chunks.duckdb"
     runs_db = meta_dir(workspace_path) / "pipeline_runs.duckdb"
@@ -112,15 +112,29 @@ def chunk_done(
         fingerprint = file_fingerprint(files)
         row = conn.execute(
             """
+            WITH latest_successful AS (
+                SELECT c.file_hash,
+                       r.config_hash,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY c.source_id, c.chunk_id
+                           ORDER BY c.finished_at DESC NULLS LAST,
+                                    r.finished_at DESC NULLS LAST,
+                                    c.started_at DESC NULLS LAST,
+                                    r.started_at DESC NULLS LAST,
+                                    CAST(c.pipeline_run_id AS VARCHAR) DESC
+                       ) AS attempt_rank
+                FROM chunks c
+                JOIN runs_db.pipeline_runs r ON c.pipeline_run_id = r.id
+                WHERE c.source_id = ?
+                  AND c.chunk_id = ?
+                  AND c.status = 'ok'
+                  AND r.status IN ('ok', 'partial', 'failed')
+            )
             SELECT COUNT(*)
-            FROM chunks c
-            JOIN runs_db.pipeline_runs r ON c.pipeline_run_id = r.id
-            WHERE c.source_id = ?
-              AND c.chunk_id = ?
-              AND c.status = 'ok'
-              AND c.file_hash = ?
-              AND r.config_hash = ?
-              AND r.status IN ('ok', 'partial', 'failed')
+            FROM latest_successful
+            WHERE attempt_rank = 1
+              AND file_hash = ?
+              AND config_hash = ?
             """,
             (source_id, chunk_id, fingerprint, config_hash),
         ).fetchone()
@@ -134,7 +148,7 @@ def done_chunk_ids(
     config_hash: str,
     file_hashes: Mapping[str, str] | None = None,
 ) -> set[str]:
-    """Return committed chunk ids from terminal runs under ``config_hash``.
+    """Return chunks whose latest successful attempt matches ``config_hash``.
 
     One query replaces a per-chunk :func:`chunk_done` loop when planning a
     source run.
@@ -146,13 +160,28 @@ def done_chunk_ids(
         _attach_runs_db(conn, runs_db)
         rows = conn.execute(
             """
-            SELECT c.chunk_id, c.file_hash
-            FROM chunks c
-            JOIN runs_db.pipeline_runs r ON c.pipeline_run_id = r.id
-            WHERE c.source_id = ?
-              AND c.status = 'ok'
-              AND r.config_hash = ?
-              AND r.status IN ('ok', 'partial', 'failed')
+            WITH latest_successful AS (
+                SELECT c.chunk_id,
+                       c.file_hash,
+                       r.config_hash,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY c.source_id, c.chunk_id
+                           ORDER BY c.finished_at DESC NULLS LAST,
+                                    r.finished_at DESC NULLS LAST,
+                                    c.started_at DESC NULLS LAST,
+                                    r.started_at DESC NULLS LAST,
+                                    CAST(c.pipeline_run_id AS VARCHAR) DESC
+                       ) AS attempt_rank
+                FROM chunks c
+                JOIN runs_db.pipeline_runs r ON c.pipeline_run_id = r.id
+                WHERE c.source_id = ?
+                  AND c.status = 'ok'
+                  AND r.status IN ('ok', 'partial', 'failed')
+            )
+            SELECT chunk_id, file_hash
+            FROM latest_successful
+            WHERE attempt_rank = 1
+              AND config_hash = ?
             """,
             (source_id, config_hash),
         ).fetchall()
@@ -193,7 +222,7 @@ def successful_chunk_keys(
     *,
     source_id: str,
 ) -> set[tuple[str, str]]:
-    """Return terminal-run ``(pipeline_run_id, chunk_id)`` pairs safe to query."""
+    """Return the latest successful terminal attempt for each logical chunk."""
     _ensure_ledger_read_dbs(workspace_path)
     chunks_db = meta_dir(workspace_path) / "chunks.duckdb"
     runs_db = meta_dir(workspace_path) / "pipeline_runs.duckdb"
@@ -207,6 +236,14 @@ def successful_chunk_keys(
             WHERE c.source_id = ?
               AND c.status = 'ok'
               AND r.status IN ('ok', 'partial', 'failed')
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY c.source_id, c.chunk_id
+                ORDER BY c.finished_at DESC NULLS LAST,
+                         r.finished_at DESC NULLS LAST,
+                         c.started_at DESC NULLS LAST,
+                         r.started_at DESC NULLS LAST,
+                         CAST(c.pipeline_run_id AS VARCHAR) DESC
+            ) = 1
             """,
             (source_id,),
         ).fetchall()

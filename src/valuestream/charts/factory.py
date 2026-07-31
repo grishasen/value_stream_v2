@@ -650,15 +650,26 @@ def _combo(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
     if y2 not in rows.columns:
         raise ValueError(f"combo chart secondary metric output {y2!r} is not available")
     plotted = rows.sort(x) if x in rows.columns else rows
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    shared_y_axis = bool(tile.get("shared_y_axis", False))
+    fig = make_subplots(specs=[[{"secondary_y": not shared_y_axis}]])
     color = _optional_column(plotted, tile.get("color"))
     groups = plotted.partition_by(color, as_dict=True) if color else {None: plotted}
     for group, sub in groups.items():
         suffix = f" · {group}" if group is not None else ""
-        fig.add_trace(
-            go.Bar(x=sub[x].to_list(), y=sub[y].to_list(), name=f"{y}{suffix}"),
-            secondary_y=False,
-        )
+        if tile.get("primary_mark", "bar") == "line":
+            primary_trace = go.Scatter(
+                x=sub[x].to_list(),
+                y=sub[y].to_list(),
+                mode="lines+markers",
+                name=f"{y}{suffix}",
+            )
+        else:
+            primary_trace = go.Bar(
+                x=sub[x].to_list(),
+                y=sub[y].to_list(),
+                name=f"{y}{suffix}",
+            )
+        fig.add_trace(primary_trace, secondary_y=False)
         fig.add_trace(
             go.Scatter(
                 x=sub[x].to_list(),
@@ -666,11 +677,12 @@ def _combo(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
                 mode="lines+markers",
                 name=f"{y2}{suffix}",
             ),
-            secondary_y=True,
+            secondary_y=not shared_y_axis,
         )
     fig.update_layout(title=str(tile.get("title", "")), barmode=str(tile.get("barmode", "group")))
     fig.update_yaxes(title_text=str(tile.get("y_axis_title") or y), secondary_y=False)
-    fig.update_yaxes(title_text=str(tile.get("y2_axis_title") or y2), secondary_y=True)
+    if not shared_y_axis:
+        fig.update_yaxes(title_text=str(tile.get("y2_axis_title") or y2), secondary_y=True)
     return fig
 
 
@@ -2376,7 +2388,7 @@ def _apply_y_axis_labels(
         secondary_axis_layout: dict[str, Any] = {"automargin": True}
         if standoff is not None:
             secondary_axis_layout["title_standoff"] = standoff
-        if chart == "combo":
+        if chart == "combo" and not bool(tile.get("shared_y_axis", False)):
             y2_title = str(
                 tile.get("y2_axis_title")
                 or tile.get("secondary_metric")
@@ -2384,7 +2396,8 @@ def _apply_y_axis_labels(
             )
             if y2_title:
                 secondary_axis_layout["title_text"] = y2_title
-        fig.update_yaxes(**secondary_axis_layout, secondary_y=True)
+        if chart != "combo" or not bool(tile.get("shared_y_axis", False)):
+            fig.update_yaxes(**secondary_axis_layout, secondary_y=True)
     else:
         fig.update_yaxes(**axis_layout)
 

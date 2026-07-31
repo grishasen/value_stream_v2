@@ -654,6 +654,40 @@ def test_query_reports_stale_aggregates_after_processor_config_changes(tmp_path:
 
 
 @pytest.mark.integration
+def test_processor_config_rollback_reprocesses_before_republishing(
+    tmp_path: Path,
+) -> None:
+    _seed_workspace(tmp_path)
+    processors = tmp_path / "catalog" / "processors.yaml"
+    contract_a = processors.read_text(encoding="utf-8")
+    first = run_source(tmp_path, "ih")
+    expected = query_metric(tmp_path, "CTR", grain="summary")
+
+    processors.write_text(
+        contract_a.replace(
+            "      positive_values: [Clicked]\n",
+            "      positive_values: [Conversion]\n",
+        ),
+        encoding="utf-8",
+    )
+    second = run_source(tmp_path, "ih")
+
+    processors.write_text(contract_a, encoding="utf-8")
+    rollback = run_source(tmp_path, "ih")
+    restored = query_metric(tmp_path, "CTR", grain="summary")
+    view = aggregate_view_name("ih", "engagement", "daily")
+    with duckdb.connect(str(views_db_path(tmp_path)), read_only=True) as conn:
+        restored_view_rows = conn.execute(f'SELECT COUNT(*) FROM "{view}"').fetchone()
+
+    assert first.chunks_ok == 2
+    assert second.chunks_ok == 2
+    assert rollback.chunks_ok == 2
+    assert rollback.chunks_skipped == 0
+    assert restored.equals(expected)
+    assert restored_view_rows == (3,)
+
+
+@pytest.mark.integration
 def test_query_uses_current_lineage_across_processor_state_schema_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

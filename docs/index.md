@@ -3,9 +3,11 @@
 Value Stream is a configuration-driven, aggregate-first business intelligence
 platform. It loads file-based exports (typically Pega CDH Interaction History
 and Product Holdings), reduces raw rows to persisted mergeable aggregate
-statistics during one chunk pass, and serves reports, dashboards, aggregate
-chat, SDK queries, and SQL exports from those aggregates. Raw event rows never
-survive the chunk pass.
+statistics during ingestion, and serves reports, dashboards, aggregate
+chat, SDK queries, and SQL exports from those aggregates. Aggregate-first is the
+query-serving contract and the preferred storage shape; bounded processors may
+retain minimal, versioned internal state when needed for efficient exact
+ingestion, but report and query surfaces never read that state.
 
 ## Find Your Path
 
@@ -37,7 +39,7 @@ than through per-role copies of the same content.
 | Area | Current status |
 |---|---|
 | Ingestion | File discovery, readers, transforms, chunk ledger, processor fan-out, and aggregate writes |
-| Analytics | Binary outcomes, numeric distributions, score distributions, lifecycle, sets, funnels, and snapshots |
+| Analytics | Binary outcomes, bounded frequency response, numeric and score distributions, lifecycle, sets, funnels, and snapshots |
 | Reports | Streamlit dashboards, report filters, chart rendering, inspection mode, and freshness metadata |
 | Configuration | YAML catalog, validation, direct editors, shared KPI recipe library, deterministic builder, and AI-assisted draft flow |
 | Operations | Validation, data load, run history, chunk detail, vacuum, and DuckDB export |

@@ -23,6 +23,7 @@ capabilities without reading processor code.
 | Area | What users can answer |
 |---|---|
 | Engagement | How many interactions occurred, how many were positive, and what was the engagement rate? |
+| Contact policy | How does response change as the same customer sees the same action again, and when does the observed response fall below the next recorded alternative's expected response? |
 | Conversion and revenue | Which channels, offers, or groups convert, and how much value do they generate? |
 | Model quality | How are propensity, priority, rank, ROC AUC, average precision, and calibration behaving? |
 | Adaptive decisioning | How often does the decisioning policy revise model scores for exploration, and is exploration narrowing as evidence accumulates? |
@@ -63,6 +64,24 @@ The Reports page presents configured dashboards from `dashboards.yaml`.
 This design keeps the report surface flexible while preserving the aggregate
 contract: a page can only filter by dimensions that were persisted during
 processing.
+
+### Frequency-response interpretation
+
+The `frequency_response` processor supports a contact-policy diagnostic from
+Interaction History without retaining contact rows. It assigns each rank-1
+exposure to a fixed trailing-window bucket for the same customer, action, and
+placement, then persists daily counts and sums by that bucket. The focal curve
+is observed click-through rate. The comparison curve uses the raw
+`Propensity` of rank 2, or the smallest recorded rank above 1 when rank 2 is
+absent, over exactly the contacts for which that propensity exists.
+
+`Priority` remains useful, but for a different question: it explains the
+arbitration score gap between the selected and alternative actions. It is not
+a probability and must not be plotted as expected CTR. Likewise, Interaction
+History cannot supply a dismiss/irritation curve or true viewability unless
+those events exist in the source. A configured Impression is therefore an
+exposure proxy, and the missing concepts stay visibly missing rather than
+being inferred.
 
 ## Configuration Workflow
 

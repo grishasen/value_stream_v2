@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import shutil
 import tempfile
 from collections.abc import Mapping, Set
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 import duckdb
 import polars as pl
@@ -16,6 +18,10 @@ import polars.selectors as cs
 from valuestream.config import model
 from valuestream.config.canonical import processor_computation_hash
 from valuestream.store.meta import meta_dir
+from valuestream.store.processor_state import (
+    CHECKPOINT_SCHEMA_REVISION,
+    SHARD_HASH_REVISION,
+)
 from valuestream.utils.timer import timed
 
 
@@ -45,6 +51,37 @@ class _FileMetadata:
 
 
 @timed
+def vacuum_processor_state(
+    workspace_path: str | Path,
+    catalog: model.Catalog,
+    *,
+    include_tmp: bool = True,
+    dry_run: bool = False,
+    source_ids: Set[str] | None = None,
+) -> VacuumResult:
+    """Apply bounded retention to rebuildable processor checkpoints only."""
+
+    workspace = Path(workspace_path)
+    scoped_source_ids = None if source_ids is None else frozenset(source_ids)
+    running_run_ids = _running_run_ids(workspace, scoped_source_ids)
+    deleted_dirs: list[Path] = []
+    checkpoint_dirs = _stale_processor_state_dirs(
+        workspace,
+        catalog,
+        source_ids=scoped_source_ids,
+        running_run_ids=running_run_ids,
+        include_tmp=include_tmp,
+    )
+    bytes_deleted = _remove_dirs(checkpoint_dirs, deleted_dirs, dry_run)
+    return VacuumResult(
+        files_deleted=0,
+        dirs_deleted=len(deleted_dirs),
+        bytes_deleted=bytes_deleted,
+        paths=tuple(deleted_dirs),
+    )
+
+
+@timed
 def vacuum_workspace(
     workspace_path: str | Path,
     catalog: model.Catalog,
@@ -54,7 +91,7 @@ def vacuum_workspace(
     source_ids: Set[str] | None = None,
     retained_run_ids: Mapping[str, str] | None = None,
 ) -> VacuumResult:
-    """Delete superseded aggregate files and orphan Pega export temp dirs.
+    """Delete superseded aggregates, processor checkpoints, and reader temp dirs.
 
     ``source_ids`` limits aggregate cleanup to those sources. When
     ``retained_run_ids`` is supplied, it must cover exactly that source scope;
@@ -93,6 +130,14 @@ def vacuum_workspace(
         deleted_files,
         dry_run,
     )
+    checkpoint_dirs = _stale_processor_state_dirs(
+        workspace,
+        catalog,
+        source_ids=scoped_source_ids,
+        running_run_ids=running_run_ids,
+        include_tmp=include_tmp,
+    )
+    bytes_deleted += _remove_dirs(checkpoint_dirs, deleted_dirs, dry_run)
     if include_tmp:
         bytes_deleted += _remove_dirs(_pega_temp_dirs(catalog), deleted_dirs, dry_run)
 
@@ -180,6 +225,144 @@ def _aggregate_files(workspace: Path, source_ids: Set[str] | None = None) -> lis
         for path in root.glob("*/*/*/period=*/*.parquet")
         if path.is_file() and _path_is_in_source_scope(root, path, source_ids)
     )
+
+
+def _stale_processor_state_dirs(  # noqa: PLR0912, PLR0915
+    workspace: Path,
+    catalog: model.Catalog,
+    *,
+    source_ids: Set[str] | None,
+    running_run_ids: Mapping[str, frozenset[str]],
+    include_tmp: bool,
+) -> list[Path]:
+    """Return stale immutable frequency-checkpoint generations.
+
+    Checkpoint publication is outside the business ledger. Vacuum therefore
+    scopes it independently, never removes state for a running source, retains
+    only the newest raw generation per current processor/chunk contract, and
+    drops generations for removed or source-scan processors.
+    """
+
+    root = workspace / ".valuestream" / "state" / "frequency_response"
+    if not root.exists():
+        return []
+    current_contracts = {
+        (processor.source, processor.id): (
+            processor_computation_hash(catalog, processor),
+            processor.checkpoint_retention_days,
+        )
+        for processor in catalog.processors.processors
+        if isinstance(processor, model.FrequencyResponseProcessor)
+        and processor.checkpoint.mode == "persistent_sharded"
+        and (source_ids is None or processor.source in source_ids)
+    }
+    stale: set[Path] = set()
+    candidates: dict[tuple[str, str, str, dt.date], list[tuple[int, Path]]] = {}
+    latest_dates: dict[tuple[str, str, str], dt.date] = {}
+    expected_runtime = (
+        f"schema={CHECKPOINT_SCHEMA_REVISION}",
+        f"hash={SHARD_HASH_REVISION}",
+        f"polars={quote(pl.__version__, safe='-._~')}",
+    )
+    generation_dirs = {
+        path
+        for path in root.glob(
+            "schema=*/hash=*/polars=*/source=*/processor=*/config=*/chunk=*/raw=*"
+        )
+        if path.is_dir()
+    }
+    if include_tmp:
+        generation_dirs.update(path for path in root.glob("**/*.tmp") if path.is_dir())
+    for directory in sorted(generation_dirs):
+        relative_parts = _processor_state_relative_parts(root, directory)
+        source_id = _processor_state_source(relative_parts)
+        if source_id is None:
+            if source_ids is None:
+                stale.add(directory)
+            continue
+        if source_ids is not None and source_id not in source_ids:
+            continue
+        if running_run_ids.get(source_id):
+            continue
+        if directory.name.startswith(".raw=") or directory.name.endswith(".tmp"):
+            if include_tmp:
+                stale.add(directory)
+            continue
+        if relative_parts[:3] != expected_runtime:
+            stale.add(directory)
+            continue
+        manifest_path = directory / "manifest.json"
+        identity = _processor_state_identity(manifest_path)
+        if identity is None:
+            stale.add(directory)
+            continue
+        manifest_source, processor_id, config_hash, chunk_id = identity
+        if manifest_source != source_id:
+            stale.add(directory)
+            continue
+        contract = current_contracts.get((source_id, processor_id))
+        if contract is None or contract[0] != config_hash:
+            stale.add(directory)
+            continue
+        try:
+            chunk_date = dt.date.fromisoformat(chunk_id)
+        except ValueError:
+            stale.add(directory)
+            continue
+        if chunk_date.isoformat() != chunk_id:
+            stale.add(directory)
+            continue
+        try:
+            created_order_ns = manifest_path.stat().st_mtime_ns
+        except FileNotFoundError:
+            stale.add(directory)
+            continue
+        candidates.setdefault((source_id, processor_id, config_hash, chunk_date), []).append(
+            (created_order_ns, directory)
+        )
+        processor_key = (source_id, processor_id, config_hash)
+        latest_dates[processor_key] = max(
+            chunk_date,
+            latest_dates.get(processor_key, chunk_date),
+        )
+    for (source_id, processor_id, config_hash, chunk_date), group in candidates.items():
+        retention_days = current_contracts[(source_id, processor_id)][1]
+        latest_date = latest_dates[(source_id, processor_id, config_hash)]
+        cutoff = latest_date - dt.timedelta(days=retention_days - 1)
+        if chunk_date < cutoff:
+            stale.update(path for _, path in group)
+            continue
+        keep = max(group, key=lambda item: (item[0], str(item[1])))[1]
+        stale.update(path for _, path in group if path != keep)
+    return sorted(stale)
+
+
+def _processor_state_identity(path: Path) -> tuple[str, str, str, str] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    values = tuple(
+        payload.get(name) for name in ("source_id", "processor_id", "config_hash", "chunk_id")
+    )
+    if any(not isinstance(value, str) or not value for value in values):
+        return None
+    return values  # type: ignore[return-value]
+
+
+def _processor_state_relative_parts(root: Path, path: Path) -> tuple[str, ...]:
+    try:
+        return path.relative_to(root).parts
+    except ValueError:
+        return ()
+
+
+def _processor_state_source(relative_parts: tuple[str, ...]) -> str | None:
+    if len(relative_parts) < 4 or not relative_parts[3].startswith("source="):
+        return None
+    return unquote(relative_parts[3].removeprefix("source="))
 
 
 def _aggregate_temp_files(
@@ -290,7 +473,15 @@ def _successful_chunk_keys(workspace: Path, source_id: str) -> set[tuple[str, st
             JOIN runs_meta.pipeline_runs r ON c.pipeline_run_id = r.id
             WHERE c.source_id = ?
               AND c.status = 'ok'
-              AND r.status IN ('ok', 'partial')
+              AND r.status IN ('ok', 'partial', 'failed')
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY c.source_id, c.chunk_id
+                ORDER BY c.finished_at DESC NULLS LAST,
+                         r.finished_at DESC NULLS LAST,
+                         c.started_at DESC NULLS LAST,
+                         r.started_at DESC NULLS LAST,
+                         CAST(c.pipeline_run_id AS VARCHAR) DESC
+            ) = 1
             """,
             (source_id,),
         ).fetchall()
@@ -350,10 +541,17 @@ def _remove_files(paths: list[Path], deleted: list[Path], dry_run: bool) -> int:
 def _remove_dirs(paths: list[Path], deleted: list[Path], dry_run: bool) -> int:
     bytes_deleted = 0
     for path in paths:
-        bytes_deleted += _dir_size(path)
+        size = _dir_size(path)
+        if dry_run:
+            bytes_deleted += size
+            deleted.append(path)
+            continue
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            continue
+        bytes_deleted += size
         deleted.append(path)
-        if not dry_run:
-            shutil.rmtree(path, ignore_errors=True)
     return bytes_deleted
 
 
@@ -372,4 +570,4 @@ def _dir_size(path: Path) -> int:
     return total
 
 
-__all__ = ["VacuumResult", "vacuum_workspace"]
+__all__ = ["VacuumResult", "vacuum_processor_state", "vacuum_workspace"]

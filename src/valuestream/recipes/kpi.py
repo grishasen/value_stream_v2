@@ -28,6 +28,7 @@ _REPLACING_STATE_KINDS = frozenset(
 
 RecipeProcessorKind = Literal[
     "binary_outcome",
+    "frequency_response",
     "numeric_distribution",
     "score_distribution",
     "entity_lifecycle",
@@ -132,6 +133,7 @@ class RecipeReport(_RecipeModel):
     chart: str = "kpi_card"
     placement: Literal["content", "kpi_strip"] = "kpi_strip"
     kpi: model.KpiSpec | None = None
+    x: str | None = None
 
 
 class KpiRecipe(_RecipeModel):
@@ -209,6 +211,8 @@ class KpiRecipe(_RecipeModel):
             "placement": self.report.placement,
             "kpi": self.report.kpi or None,
         }
+        if self.report.x:
+            tile_sample["x"] = self.report.x
         _TILE_ADAPTER.validate_python(tile_sample)
         return self
 
@@ -435,6 +439,8 @@ def instantiate_tile(
         raw["value_format"] = value_format
     if recipe.report.kpi:
         raw["kpi"] = recipe.report.kpi
+    if recipe.report.x:
+        raw["x"] = recipe.report.x
     return _TILE_ADAPTER.validate_python(raw).model_dump(
         mode="json", exclude_none=True, exclude_defaults=True
     )
@@ -546,7 +552,12 @@ def recipe_binding_options(
             )
         ]
 
-    if item.source != "state" or not proposal_fields or item.requires_where:
+    if (
+        item.source != "state"
+        or not proposal_fields
+        or item.requires_where
+        or item.require_preferred
+    ):
         return out
 
     fields = _dedupe_strings([*proposal_fields, *processor_recipe_fields(processor)])

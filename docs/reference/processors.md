@@ -92,8 +92,8 @@ The 5 provenance columns are added by the engine wrapper, not by the processor i
 
 | State type | Storage dtype | Build from | Merge rule | Used by |
 |---|---|---|---|---|
-| `count` | `INT64` | `pl.len()` or `pl.sum(<bool 0/1>)` | `SUM` | binary_outcome, numeric_distribution, score_distribution, entity_lifecycle, funnel, snapshot |
-| `value_sum` | `FLOAT64` | `pl.sum(col)` | `SUM` | binary_outcome, numeric_distribution, snapshot |
+| `count` | `INT64` | `pl.len()` or `pl.sum(<bool 0/1>)` | `SUM` | binary_outcome, frequency_response, numeric_distribution, score_distribution, entity_lifecycle, funnel, snapshot |
+| `value_sum` | `FLOAT64` | `pl.sum(col)` | `SUM` | binary_outcome, frequency_response, numeric_distribution, snapshot |
 | `min` | matches data | `pl.min(col)` | `MIN` | numeric_distribution, entity_lifecycle |
 | `max` | matches data | `pl.max(col)` | `MAX` | numeric_distribution, entity_lifecycle |
 | `pooled_mean` | `FLOAT64` (explicit `source_column` or recipe plus `weight`) | `pl.mean(col)` or named recipe | `weighted_mean(value, weight)` | numeric_distribution, score_distribution |
@@ -953,7 +953,235 @@ preserves atomic publication and history; vacuum removes superseded files.
 
 ---
 
-## 10. Putting it together — example workspace
+## 10. frequency_response processor
+
+### 10.1 Purpose
+
+`frequency_response` measures how response changes across repeated exposures to
+the same action in a fixed trailing time window. It also records the raw
+propensity of the best available alternative from the same interaction, so a
+frequency curve can be compared with the opportunity cost of occupying the
+placement.
+
+This is a sequence-aware processor. Its published contract remains
+aggregate-first: only daily count and sum states are queryable. Ingestion can
+either rescan bounded source history or retain a minimal, rebuildable sharded
+checkpoint that is never exposed to reports.
+
+### 10.2 YAML
+
+```yaml
+processors:
+  - id: frequency_response
+    source: ih
+    kind: frequency_response
+    time:
+      property: DecisionTime
+      grain: daily
+      calendar:
+        timezone: UTC
+    columns:
+      customer: CustomerID
+      interaction: InteractionID
+      action: ActionID
+      placement: Placement
+      rank: Rank
+      outcome: Outcome
+      propensity: Propensity
+      priority: Priority               # optional diagnostic
+    positive_values: [Clicked]
+    exposure_values: [Impression, Clicked]
+    candidate_values: [Pending, Impression, Clicked]
+    window_hours: 168
+    partition_lag_hours: 24          # default 0; dependency padding only
+    max_frequency: 7
+    frequency_column: ExposureBucket
+    checkpoint:
+      mode: persistent_sharded       # default: source_scan
+      shards: 64                     # default 64; routing, not anonymization
+      retention_days: 9              # optional; >= active history + current
+    group_by:
+      - Day
+      - Channel
+      - Placement
+      - ActionID
+      - ExposureBucket
+    states:
+      Contacts:                    {type: count}
+      Clicks:                      {type: count, source_column: ClickedContact}
+      ComparableContacts:         {type: count, source_column: ComparableContact}
+      ComparableClicks:           {type: count, source_column: ComparableClick}
+      RunnerAvailable:            {type: count, source_column: RunnerAvailable}
+      RunnerPropensitySum:        {type: value_sum, source_column: RunnerPropensity}
+      PriorityComparableContacts: {type: count, source_column: PriorityComparableContact}
+      FocalPriorityComparableSum: {type: value_sum, source_column: FocalPriorityComparable}
+      RunnerPriorityComparableSum: {type: value_sum, source_column: RunnerPriorityComparable}
+```
+
+The processor accepts only `count` and `value_sum` states. `Day` and the
+configured frequency column are derived by the processor; the other group-by
+columns must be present after source transforms. The transformed source must
+not already contain the configured frequency column because the processor owns
+that derived name. Raw bindings and state inputs may not use the reserved
+`__valuestream_` prefix. `rank` must have an integer dtype, while `propensity`
+and an optional `priority` must be numeric; configure strict source casts when
+the raw export uses text fields. These checks run on the target schema before
+it is combined with history, so relaxed union coercion cannot mask a bad target
+day.
+
+A processor-level `filter` runs on transformed source rows before contacts,
+frequency buckets, or virtual state columns are derived. It may reference only
+raw/transformed source fields—not `Day`, the frequency column,
+`ClickedContact`, `RunnerPropensity`, or another processor-created field.
+State-level `where` expressions run after enrichment and may use the documented
+virtual fields.
+
+### 10.3 Contact and frequency semantics
+
+For one target day, the engine plans the target chunk plus the bounded set of
+preceding calendar-day chunks needed to cover
+`window_hours + partition_lag_hours`. The latter field is an input-planning
+allowance for sources whose partition timestamp can trail the configured
+decision timestamp; it does not change the semantic exposure window.
+
+With `checkpoint.mode: source_scan`, the processor receives the transformed
+target/history rows in an ephemeral frame. With `persistent_sharded`, each raw
+chunk is transformed, filtered, classified, and projected through a partitioned
+streaming sink into customer-hash shards without collecting the complete
+prepared day. Candidate rows remain uncollapsed until current and history
+shards are combined, preserving cross-partition duplicate precedence. Target
+processing reads the corresponding shard from the current and history days.
+The two modes implement the same following rules:
+
+1. A contact is identified by customer, interaction, action, placement, and
+   rank. Repeated outcome rows for that contact are collapsed; a positive
+   outcome wins over a non-positive exposure.
+2. A focal contact is rank 1, has an exposure outcome, and belongs to the target
+   chunk. Historical rows influence frequency but are never emitted again.
+3. Exposure frequency is counted for the same customer, action, and placement
+   in the strict interval `(decision_time - window_hours, decision_time]`.
+   `max_frequency` is a terminal bucket: with a value of 7, every seventh or
+   later exposure is stored as `7` and may be labelled `7+` by a report.
+4. The response flag comes from `positive_values`. `Clicked` may therefore win
+   over an `Impression` row for the same contact.
+
+The fixed window makes the x-axis reproducible. It is not a calendar-week
+bucket and it does not reset at midnight or on Monday.
+
+### 10.4 Runner-up semantics
+
+The opportunity comparison is resolved **within customer and InteractionID**.
+The processor selects exact rank 2 when it exists; otherwise it selects the
+smallest recorded rank greater than 1. If no such row exists, the focal contact
+remains in the marginal response curve but is excluded from comparable curves.
+
+`RunnerPropensity` is the alternative's raw `Propensity`, interpreted as its
+expected response probability. `Priority` must not be substituted for this
+field: priority drives arbitration ranking, but it can also include context,
+business value, levers, and other multipliers, so it is neither a probability
+nor a CTR. When configured, focal and runner priority sums are retained as a
+separate arbitration diagnostic over rows where both values exist.
+
+Runner selection deliberately does not require the alternative to share the
+focal placement. Rank describes the interaction-wide arbitration result, and
+some interactions do not contain rank 2; requiring placement equality would
+discard valid fallback alternatives.
+
+### 10.5 Merge and derived KPIs
+
+All stored states merge by addition. Canonical formulas include:
+
+```text
+marginal CTR            = Clicks / Contacts
+comparable focal CTR    = ComparableClicks / ComparableContacts
+runner expected CTR     = RunnerPropensitySum / ComparableContacts
+runner coverage         = ComparableContacts / Contacts
+response opportunity    = (ComparableClicks - RunnerPropensitySum)
+                          / ComparableContacts
+priority opportunity gap = (FocalPriorityComparableSum
+                            - RunnerPriorityComparableSum)
+                           / PriorityComparableContacts
+```
+
+The comparable focal and runner curves use the same denominator and therefore
+belong on the same response-rate axis. Marginal CTR should remain visible as a
+separate all-contact curve or diagnostic because missing alternatives change
+its population.
+
+### 10.6 Dependency, idempotency, and limitations
+
+Sources bound to this processor must discover ISO `YYYY-MM-DD` chunk IDs. The
+target chunk remains the output and idempotency unit, while its input
+fingerprint includes every bounded history file. Changing a historical file
+therefore invalidates each later target whose window depends on it. Ordinary
+processors bound to the same source still receive only the target chunk.
+
+`partition_lag_hours` defaults to `0`. Set it to a conservative upper bound
+when chunk dates are based on a later event time (for example, outcome date
+versus decision time). The planner reads
+`ceil((window_hours + partition_lag_hours) / 24)` preceding calendar days, then
+the processor still enforces `(decision_time - window_hours, decision_time]`
+by timestamp. Exactness requires UTC-aligned daily chunk IDs, or an equivalent
+partition convention whose displacement from decision time stays within the
+configured allowance. Extra dependency days only increase source I/O.
+
+Every transformed history chunk is validated independently for the decision
+time, customer, interaction, action, placement, rank, outcome, and any
+processor-filter fields before it is combined or checkpointed. This prevents a
+relaxed multi-day schema union from turning a missing history key into null and
+silently undercounting exposure frequency.
+
+`checkpoint.mode` has these exact meanings:
+
+- `source_scan` (the compatibility default) retains no processor state and
+  rereads the bounded source closure for each target.
+- `persistent_sharded` persists only filtered candidate rows and fields required
+  to repeat exact cross-partition normalization, frequency, deduplication,
+  grouping/state calculation, and within-interaction runner selection. `shards`
+  is an integer from `1` through `4096` and defaults to
+  `64`; larger values lower per-shard memory while increasing file count.
+
+`retention_days` optionally sets the number of daily checkpoint partitions
+kept per processor. Its default is
+`ceil((window_hours + partition_lag_hours) / 24) + 1`, and an explicit value
+cannot be smaller. Retention runs after each terminal source run and during
+workspace vacuum. Replaying an older correction rebuilds any evicted IH
+partition for that bounded replay and may evict it again afterward.
+
+Persistent generations are source-fingerprint-addressed by the source and
+processor computation identity, chunk id, and raw-file fingerprint; their
+manifests also version the checkpoint schema, customer dtype, shard-hash
+algorithm/seeds, and Polars runtime used for native hashing. Before workers
+start, the parent validates the declared files, sizes, row counts, schemas, and
+SHA-256 digests once. Customer dtype must be stable across the bounded closure;
+normalize it in source transforms if exports drift. They live in the
+processor-state namespace, outside aggregates and ledger publication.
+Queries, reports, DuckDB views, API/MCP, and SQL export cannot read them. A
+missing, obsolete, or vacuumed generation is rebuilt from authoritative IH. A
+corrupt generation is rejected rather than used silently; a forced run safely
+replaces it from IH. A preparation failure fails only target chunks whose
+closures require that generation. Checkpoint retention therefore changes
+storage/rebuild cost rather than results.
+
+Customer hashing determines which exact shard to open; it does not anonymize
+the original customer key retained for exact comparison. Treat the checkpoint
+as sensitive source-derived data, apply workspace access/encryption and
+retention controls, and tokenize or HMAC identifiers upstream where required.
+Sampling or sketches are not a transparent replacement because they cannot
+preserve exact event order and runner joins.
+
+A late positive outcome that arrives in a later chunk is not allowed to rewrite
+an already materialized earlier-day contact; recompute the affected source
+history when corrected source files replace the original export. Its changed raw
+fingerprint creates a new checkpoint generation in persistent mode and
+invalidates the same bounded target set in both modes.
+
+An impression is only an exposure proxy unless the source explicitly guarantees
+viewability. The processor does not infer dismisses, irritation, or a dismiss
+rate from ordinary IH outcomes. Such a curve requires an explicit dismiss
+event in the source and a separately defined state contract.
+
+## 11. Putting it together — example workspace
 
 Catalog excerpt (pruned for clarity; full example in design/replacement-design.md Appendix A):
 
@@ -974,7 +1202,7 @@ A workspace can have any subset of these. The `ih` Source is shared across most 
 
 ---
 
-## 11. Implementation checklist
+## 12. Implementation checklist
 
 For each processor, the implementer must deliver:
 

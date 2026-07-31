@@ -17,7 +17,7 @@ Discriminated unions:
   ``derive_column``, ``filter``, ``dedup``, ``defaults``, ``cast``,
   ``drop_columns``, ``coalesce``).
 * :class:`Reader` — 4 built-in reader kinds.
-* :class:`Processor` — 7 built-in processor kinds.
+* :class:`Processor` — 8 built-in processor kinds.
 * :class:`Metric` — 9 built-in metric kinds.
 
 Catalog version 2 is intentionally strict: every accepted field is part of
@@ -31,6 +31,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from valuestream.expr.ast import Dtype, Expr
+from valuestream.expr.references import column_references
 
 # ---------------------------------------------------------------------------
 # Common building blocks.
@@ -127,9 +128,7 @@ class ParseDatetime(_TransformBase):
 class DeriveCalendar(_TransformBase):
     kind: Literal["derive_calendar"]
     from_: str = Field(alias="from")
-    outputs: list[str] = Field(
-        default_factory=lambda: ["Day", "Week", "Month", "Quarter", "Year"]
-    )
+    outputs: list[str] = Field(default_factory=lambda: ["Day", "Week", "Month", "Quarter", "Year"])
 
 
 class DeriveActionId(_TransformBase):
@@ -226,7 +225,11 @@ class CountState(_StrictModel):
 
     @model_validator(mode="after")
     def _one_count_selector(self) -> CountState:
-        selectors = [self.source_column is not None, self.outcome is not None, self.stage is not None]
+        selectors = [
+            self.source_column is not None,
+            self.outcome is not None,
+            self.stage is not None,
+        ]
         if sum(selectors) > 1:
             raise ValueError("count state accepts only one of source_column, outcome, or stage")
         if self.distinct and self.source_column is None:
@@ -427,6 +430,44 @@ class OutcomeSpec(_StrictModel):
     negative_values: list[Any]
 
 
+FREQUENCY_RESPONSE_VIRTUAL_COLUMNS = frozenset(
+    {
+        "ClickedContact",
+        "ComparableContact",
+        "ComparableClick",
+        "RunnerAvailable",
+        "RunnerPropensity",
+        "PriorityComparableContact",
+        "FocalPriorityComparable",
+        "RunnerPriorityComparable",
+    }
+)
+_FREQUENCY_RESPONSE_RESERVED_COLUMNS = frozenset(
+    {
+        "Day",
+        "pipeline_run_id",
+        "chunk_id",
+        "period",
+        "created_at",
+        "config_hash",
+        *FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
+    }
+)
+
+
+class FrequencyResponseColumns(_StrictModel):
+    """Raw source-column bindings for frequency-response materialization."""
+
+    customer: str = Field(min_length=1)
+    interaction: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    placement: str = Field(min_length=1)
+    rank: str = Field(min_length=1)
+    outcome: str = Field(min_length=1)
+    propensity: str = Field(min_length=1)
+    priority: str | None = Field(default=None, min_length=1)
+
+
 class EntitiesSpec(_StrictModel):
     subject: str
 
@@ -475,9 +516,7 @@ class _ProcessorBase(_StrictModel):
         levels = {base_grain: base_grain}
         if base_grain != "summary":
             levels["summary"] = (
-                "monthly"
-                if base_grain in {"hourly", "daily", "weekly", "monthly"}
-                else base_grain
+                "monthly" if base_grain in {"hourly", "daily", "weekly", "monthly"} else base_grain
             )
         return levels
 
@@ -492,6 +531,144 @@ class BinaryOutcomeProcessor(_ProcessorBase):
     dedup_keys: list[str] = Field(default_factory=list)
     entities: EntitiesSpec | None = None
     variant_column: str | None = None
+
+
+class FrequencyResponseCheckpoint(_StrictModel):
+    """Execution strategy for bounded frequency-response contact state."""
+
+    mode: Literal["source_scan", "persistent_sharded"] = "source_scan"
+    shards: int = Field(default=64, ge=1, le=4096)
+    retention_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class FrequencyResponseProcessor(_ProcessorBase):
+    """Frequency-window response states over a marked current chunk plus lookback."""
+
+    kind: Literal["frequency_response"]
+    columns: FrequencyResponseColumns
+    positive_values: list[Any] = Field(min_length=1)
+    exposure_values: list[Any] = Field(min_length=1)
+    candidate_values: list[Any] = Field(min_length=1)
+    window_hours: int = Field(default=168, gt=0)
+    partition_lag_hours: int = Field(default=0, ge=0)
+    max_frequency: int = Field(default=7, gt=0)
+    frequency_column: str = Field(default="ExposureBucket", min_length=1)
+    checkpoint: FrequencyResponseCheckpoint = Field(default_factory=FrequencyResponseCheckpoint)
+
+    @model_validator(mode="after")
+    def _frequency_contract_is_mergeable(  # noqa: PLR0912
+        self,
+    ) -> FrequencyResponseProcessor:
+        if self.time.grain != "daily":
+            raise ValueError("frequency_response requires time.grain 'daily'")
+        if self.frequency_column not in self.group_by:
+            raise ValueError("frequency_response frequency_column must be present in group_by")
+        minimum_retention_days = (self.window_hours + self.partition_lag_hours + 23) // 24 + 1
+        if (
+            self.checkpoint.mode == "persistent_sharded"
+            and self.checkpoint.retention_days is not None
+            and self.checkpoint.retention_days < minimum_retention_days
+        ):
+            raise ValueError(
+                "frequency_response checkpoint.retention_days must be at least "
+                f"{minimum_retention_days} for the configured window and partition lag"
+            )
+        if (
+            self.frequency_column in _FREQUENCY_RESPONSE_RESERVED_COLUMNS
+            or self.frequency_column.startswith("__valuestream_")
+        ):
+            raise ValueError("frequency_column must not use a reserved derived column name")
+        invalid_group_columns = sorted(
+            column
+            for column in self.group_by
+            if column in _FREQUENCY_RESPONSE_RESERVED_COLUMNS - {"Day"}
+            or column.startswith("__valuestream_")
+        )
+        if invalid_group_columns:
+            raise ValueError(
+                "frequency_response reserved derived columns cannot be used in group_by: "
+                + ", ".join(invalid_group_columns)
+            )
+        raw_columns = set(self.columns.model_dump(exclude_none=True).values())
+        invalid_input_bindings = sorted(
+            column
+            for column in {*raw_columns, self.time.property}
+            if column.startswith("__valuestream_")
+        )
+        if invalid_input_bindings:
+            raise ValueError(
+                "frequency_response raw input bindings cannot use internal column names: "
+                + ", ".join(invalid_input_bindings)
+            )
+        if self.frequency_column in raw_columns:
+            raise ValueError("frequency_column must be a derived column, not a raw input binding")
+        invalid_filter_columns = sorted(
+            column
+            for column in column_references(self.filter)
+            if column
+            in {
+                *FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
+                "Day",
+                self.frequency_column,
+            }
+            or column.startswith("__valuestream_")
+        )
+        if invalid_filter_columns:
+            raise ValueError(
+                "frequency_response filter runs before derived columns and cannot reference: "
+                + ", ".join(invalid_filter_columns)
+            )
+        colliding_states = sorted(
+            name
+            for name in self.states
+            if name
+            in set(self.group_by)
+            | (_FREQUENCY_RESPONSE_RESERVED_COLUMNS - FREQUENCY_RESPONSE_VIRTUAL_COLUMNS)
+            or name.startswith("__valuestream_")
+        )
+        if colliding_states:
+            raise ValueError(
+                "frequency_response state names collide with dimensions or reserved columns: "
+                + ", ".join(colliding_states)
+            )
+        for name, state in self.states.items():
+            source_column = getattr(state, "source_column", None)
+            internal_state_inputs = sorted(
+                {
+                    *(
+                        {source_column}
+                        if isinstance(source_column, str)
+                        and source_column.startswith("__valuestream_")
+                        else set()
+                    ),
+                    *(
+                        column
+                        for column in column_references(getattr(state, "where", None))
+                        if column.startswith("__valuestream_")
+                    ),
+                }
+            )
+            if internal_state_inputs:
+                raise ValueError(
+                    f"frequency_response state {name!r} cannot read internal columns: "
+                    + ", ".join(internal_state_inputs)
+                )
+            if state.type not in {"count", "value_sum"}:
+                raise ValueError(f"frequency_response state {name!r} must use count or value_sum")
+            if isinstance(state, CountState) and (state.outcome is not None or state.stage):
+                raise ValueError(
+                    f"frequency_response state {name!r} must bind a virtual/source column "
+                    "instead of an outcome or stage selector"
+                )
+        return self
+
+    @property
+    def checkpoint_retention_days(self) -> int:
+        """Return the bounded number of daily checkpoint partitions retained."""
+
+        if self.checkpoint.retention_days is not None:
+            return self.checkpoint.retention_days
+        return (self.window_hours + self.partition_lag_hours + 23) // 24 + 1
 
 
 class NumericDistributionProcessor(_ProcessorBase):
@@ -537,6 +714,7 @@ class SnapshotProcessor(_ProcessorBase):
 
 Processor = Annotated[
     BinaryOutcomeProcessor
+    | FrequencyResponseProcessor
     | NumericDistributionProcessor
     | ScoreDistributionProcessor
     | EntityLifecycleProcessor
@@ -967,6 +1145,8 @@ class ComboTile(_FacetedTile):
     chart: Literal["combo"]
     x: str
     secondary_metric: str
+    primary_mark: Literal["bar", "line"] = "bar"
+    shared_y_axis: bool = False
     y2_axis_title: str | None = None
 
 
@@ -1163,6 +1343,7 @@ class Catalog(_StrictModel):
 
 __all__ = [
     "DEFAULT_STATE_PARAMETERS",
+    "FREQUENCY_RESPONSE_VIRTUAL_COLUMNS",
     "ApproxDistinctCountMetric",
     "BinaryOutcomeProcessor",
     "Calendar",
@@ -1187,6 +1368,8 @@ __all__ = [
     "EntitySetProcessor",
     "FilterTransform",
     "FormulaMetric",
+    "FrequencyResponseColumns",
+    "FrequencyResponseProcessor",
     "FunnelDropoffMetric",
     "FunnelProcessor",
     "KpiSpec",

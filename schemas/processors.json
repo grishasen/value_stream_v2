@@ -1531,6 +1531,369 @@
       "title": "EntitySetProcessor",
       "type": "object"
     },
+    "FrequencyResponseCheckpoint": {
+      "additionalProperties": false,
+      "description": "Execution strategy for bounded frequency-response contact state.",
+      "properties": {
+        "mode": {
+          "default": "source_scan",
+          "enum": [
+            "source_scan",
+            "persistent_sharded"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "retention_days": {
+          "anyOf": [
+            {
+              "maximum": 3650,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retention Days"
+        },
+        "shards": {
+          "default": 64,
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Shards",
+          "type": "integer"
+        }
+      },
+      "title": "FrequencyResponseCheckpoint",
+      "type": "object"
+    },
+    "FrequencyResponseColumns": {
+      "additionalProperties": false,
+      "description": "Raw source-column bindings for frequency-response materialization.",
+      "properties": {
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "customer": {
+          "minLength": 1,
+          "title": "Customer",
+          "type": "string"
+        },
+        "interaction": {
+          "minLength": 1,
+          "title": "Interaction",
+          "type": "string"
+        },
+        "outcome": {
+          "minLength": 1,
+          "title": "Outcome",
+          "type": "string"
+        },
+        "placement": {
+          "minLength": 1,
+          "title": "Placement",
+          "type": "string"
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priority"
+        },
+        "propensity": {
+          "minLength": 1,
+          "title": "Propensity",
+          "type": "string"
+        },
+        "rank": {
+          "minLength": 1,
+          "title": "Rank",
+          "type": "string"
+        }
+      },
+      "required": [
+        "customer",
+        "interaction",
+        "action",
+        "placement",
+        "rank",
+        "outcome",
+        "propensity"
+      ],
+      "title": "FrequencyResponseColumns",
+      "type": "object"
+    },
+    "FrequencyResponseProcessor": {
+      "additionalProperties": false,
+      "description": "Frequency-window response states over a marked current chunk plus lookback.",
+      "properties": {
+        "candidate_values": {
+          "items": {},
+          "minItems": 1,
+          "title": "Candidate Values",
+          "type": "array"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/FrequencyResponseCheckpoint"
+        },
+        "columns": {
+          "$ref": "#/$defs/FrequencyResponseColumns"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "exposure_values": {
+          "items": {},
+          "minItems": 1,
+          "title": "Exposure Values",
+          "type": "array"
+        },
+        "filter": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Col"
+                },
+                {
+                  "$ref": "#/$defs/Lit"
+                },
+                {
+                  "$ref": "#/$defs/Param"
+                },
+                {
+                  "$ref": "#/$defs/PolarsExpr"
+                },
+                {
+                  "$ref": "#/$defs/UnaryArg"
+                },
+                {
+                  "$ref": "#/$defs/OpLog"
+                },
+                {
+                  "$ref": "#/$defs/OpRound"
+                },
+                {
+                  "$ref": "#/$defs/OpCast"
+                },
+                {
+                  "$ref": "#/$defs/LogicalNary"
+                },
+                {
+                  "$ref": "#/$defs/ArithmeticNary"
+                },
+                {
+                  "$ref": "#/$defs/OpSafeDiv"
+                },
+                {
+                  "$ref": "#/$defs/OpConcat"
+                },
+                {
+                  "$ref": "#/$defs/MinMaxNary"
+                },
+                {
+                  "$ref": "#/$defs/OpCoalesce"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonColumn"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonArgs"
+                },
+                {
+                  "$ref": "#/$defs/OpIn"
+                },
+                {
+                  "$ref": "#/$defs/OpNotIn"
+                },
+                {
+                  "$ref": "#/$defs/OpBetween"
+                },
+                {
+                  "$ref": "#/$defs/NullCheck"
+                },
+                {
+                  "$ref": "#/$defs/OpMatches"
+                },
+                {
+                  "$ref": "#/$defs/StrPrefixSuffix"
+                },
+                {
+                  "$ref": "#/$defs/OpCase"
+                },
+                {
+                  "$ref": "#/$defs/OpWhenThen"
+                },
+                {
+                  "$ref": "#/$defs/OpDateTrunc"
+                },
+                {
+                  "$ref": "#/$defs/OpDateDiff"
+                },
+                {
+                  "$ref": "#/$defs/OpDatePart"
+                },
+                {
+                  "$ref": "#/$defs/OpNow"
+                },
+                {
+                  "$ref": "#/$defs/OpStrftime"
+                },
+                {
+                  "$ref": "#/$defs/OpStrptime"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filter"
+        },
+        "frequency_column": {
+          "default": "ExposureBucket",
+          "minLength": 1,
+          "title": "Frequency Column",
+          "type": "string"
+        },
+        "group_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Group By",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "frequency_response",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_frequency": {
+          "default": 7,
+          "exclusiveMinimum": 0,
+          "title": "Max Frequency",
+          "type": "integer"
+        },
+        "partition_lag_hours": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Partition Lag Hours",
+          "type": "integer"
+        },
+        "positive_values": {
+          "items": {},
+          "minItems": 1,
+          "title": "Positive Values",
+          "type": "array"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "states": {
+          "additionalProperties": {
+            "discriminator": {
+              "mapping": {
+                "count": "#/$defs/CountState",
+                "cpc": "#/$defs/CpcState",
+                "hll": "#/$defs/HllState",
+                "kll": "#/$defs/KllState",
+                "max": "#/$defs/MaxState",
+                "min": "#/$defs/MinState",
+                "pooled_mean": "#/$defs/PooledMeanState",
+                "pooled_variance": "#/$defs/PooledVarianceState",
+                "tdigest": "#/$defs/TDigestState",
+                "theta": "#/$defs/ThetaState",
+                "topk": "#/$defs/TopKState",
+                "value_sum": "#/$defs/ValueSumState"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CountState"
+              },
+              {
+                "$ref": "#/$defs/ValueSumState"
+              },
+              {
+                "$ref": "#/$defs/MinState"
+              },
+              {
+                "$ref": "#/$defs/MaxState"
+              },
+              {
+                "$ref": "#/$defs/PooledMeanState"
+              },
+              {
+                "$ref": "#/$defs/PooledVarianceState"
+              },
+              {
+                "$ref": "#/$defs/TDigestState"
+              },
+              {
+                "$ref": "#/$defs/KllState"
+              },
+              {
+                "$ref": "#/$defs/CpcState"
+              },
+              {
+                "$ref": "#/$defs/HllState"
+              },
+              {
+                "$ref": "#/$defs/ThetaState"
+              },
+              {
+                "$ref": "#/$defs/TopKState"
+              }
+            ]
+          },
+          "minProperties": 1,
+          "title": "States",
+          "type": "object"
+        },
+        "time": {
+          "$ref": "#/$defs/ProcessorTime"
+        },
+        "window_hours": {
+          "default": 168,
+          "exclusiveMinimum": 0,
+          "title": "Window Hours",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "kind",
+        "time",
+        "states",
+        "columns",
+        "positive_values",
+        "exposure_values",
+        "candidate_values"
+      ],
+      "title": "FrequencyResponseProcessor",
+      "type": "object"
+    },
     "FunnelProcessor": {
       "additionalProperties": false,
       "properties": {
@@ -6103,6 +6466,7 @@
             "binary_outcome": "#/$defs/BinaryOutcomeProcessor",
             "entity_lifecycle": "#/$defs/EntityLifecycleProcessor",
             "entity_set": "#/$defs/EntitySetProcessor",
+            "frequency_response": "#/$defs/FrequencyResponseProcessor",
             "funnel": "#/$defs/FunnelProcessor",
             "numeric_distribution": "#/$defs/NumericDistributionProcessor",
             "score_distribution": "#/$defs/ScoreDistributionProcessor",
@@ -6113,6 +6477,9 @@
         "oneOf": [
           {
             "$ref": "#/$defs/BinaryOutcomeProcessor"
+          },
+          {
+            "$ref": "#/$defs/FrequencyResponseProcessor"
           },
           {
             "$ref": "#/$defs/NumericDistributionProcessor"

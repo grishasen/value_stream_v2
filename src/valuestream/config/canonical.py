@@ -46,6 +46,9 @@ _FILTERED_DISTINCT_COUNT_REVISION = 1
 # instead of summing in the source dtype and casting afterward. This avoids
 # integer/Float32 overflow but changes existing unfiltered state semantics.
 _FLOAT64_VALUE_SUM_REVISION = 1
+# Persistent frequency checkpoints store prepared candidate rows whose schema
+# and cross-partition normalization rules are part of deterministic computation.
+_FREQUENCY_CHECKPOINT_REVISION = 1
 
 
 def canonicalize(value: Any) -> Any:
@@ -223,6 +226,11 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
         revision["filtered_distinct_count"] = _FILTERED_DISTINCT_COUNT_REVISION
     if _has_float64_value_sum_state(processor):
         revision["float64_value_sum_inputs"] = _FLOAT64_VALUE_SUM_REVISION
+    if (
+        isinstance(processor, model.FrequencyResponseProcessor)
+        and processor.checkpoint.mode == "persistent_sharded"
+    ):
+        revision["frequency_persistent_checkpoint"] = _FREQUENCY_CHECKPOINT_REVISION
     if revision:
         payload["__valuestream_algorithm_revision"] = revision
     return payload

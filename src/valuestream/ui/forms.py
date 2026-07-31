@@ -21,6 +21,7 @@ from valuestream.ui import builder, components, config_help
 
 PROCESSOR_KIND_OPTIONS = (
     "binary_outcome",
+    "frequency_response",
     "numeric_distribution",
     "score_distribution",
     "entity_lifecycle",
@@ -57,6 +58,23 @@ PROCESSOR_KIND_GUIDE: dict[str, ProcessorKindGuide] = {
             "Positive Outcomes",
             "Unique Subjects",
             "Experiment Lift (z / chi2 / G)",
+        ),
+    ),
+    "frequency_response": ProcessorKindGuide(
+        summary=(
+            "Builds daily response and runner-opportunity states by repeated exposure "
+            "number in a fixed trailing time window."
+        ),
+        purposes=(
+            "Use for contact-policy saturation curves when source interactions carry "
+            "ranked alternatives and raw response propensity."
+        ),
+        example_kpis=(
+            "Marginal CTR by Frequency",
+            "Comparable Focal CTR",
+            "Runner Expected CTR",
+            "Runner Coverage",
+            "Response Opportunity Margin",
         ),
     ),
     "numeric_distribution": ProcessorKindGuide(

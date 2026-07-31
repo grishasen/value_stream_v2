@@ -1,6 +1,6 @@
 # Value Stream
 
-Value Stream is a configuration-driven, aggregate-first business intelligence platform. It ingests file-based exports (typically Pega CDH Interaction History and Product Holdings), reduces them to small mergeable sufficient statistics during one chunk pass, and serves business reports and dashboards from those persisted aggregates. Raw event rows never survive the chunk pass.
+Value Stream is a configuration-driven, aggregate-first business intelligence platform. It ingests file-based exports (typically Pega CDH Interaction History and Product Holdings), reduces them to small mergeable sufficient statistics, and serves business reports and dashboards only from those persisted aggregates. Aggregate-first is the preferred storage shape and strict query contract; a bounded processor may retain minimal, versioned, non-queryable acceleration state when exact ingestion would otherwise require repeated source scans.
 
 ## Documentation
 

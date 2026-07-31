@@ -82,6 +82,8 @@ synthetic 30-day ticks such as `Jul 31` or `Aug 30`.
 | `x` | str | most | column name on x axis |
 | `y` | str | scatter, corr, descriptive_line, experiment charts | explicit second dimension or specialist output |
 | `secondary_metric` | str | combo | compatible scalar metric ID with the same kind and backing processor as `metric` |
+| `primary_mark` | `bar` or `line` | combo | primary metric mark; defaults to `bar` |
+| `shared_y_axis` | bool | combo | plot both scalar metrics against one Y axis when their units are directly comparable |
 | `x_axis_title` / `y_axis_title` | str | cartesian charts | explicit primary-axis labels |
 | `y2_axis_title` | str | combo | explicit secondary-axis label; otherwise the secondary metric label is used |
 | `color` | str | most | column name to map to color; treemap color comes from `metric` |
@@ -534,7 +536,7 @@ primitives except for the native Streamlit table on the Reports surface:
 | `pareto` | `x`; Y comes from `metric` | Top campaigns/offers plus cumulative share |
 | `heatmap` | `x` and optional `y`; intensity comes from `metric` | Matrix, cohort, descriptive, or daily calendar intensity |
 | `sankey` | ordered `path` of 2+ dimensions; value comes from `metric` | Multi-step journey/path flow between stages or channels |
-| `combo` | `x, secondary_metric`; Y comes from `metric` | Bar + line dual-axis comparison of two compatible scalar metrics; use `y2_axis_title` to override the secondary-axis label |
+| `combo` | `x, secondary_metric`; Y comes from `metric` | Bar + line dual-axis comparison by default. Set `primary_mark: line` and `shared_y_axis: true` for two directly comparable curves such as observed and expected response probability; use `y2_axis_title` only in dual-axis mode. |
 | `interval` | `x, metric_output` plus optional `lower_output`/`upper_output` | Lift/estimate with uncertainty interval |
 | `donut` | `names`; values come from `metric` | Simple share-of-total for small category sets |
 | `geo_map` | `locations, value` or `lat, lon, value` | Country/region/city performance |

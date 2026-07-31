@@ -10,9 +10,36 @@ assessing exposure.
 Every read surface — Reports, Chat With Data, CLI `query`, the Python SDK,
 DuckDB export, MCP, and the HTTP API — reads through the same governed
 aggregate query layer. None of them expose raw source rows, raw aggregate
-parquet paths, or filesystem access. Raw event rows do not survive chunk
-processing; the durable store contains only mergeable aggregate statistics
-with provenance columns.
+parquet paths, or filesystem access. Raw source rows never enter the governed
+query store; it contains only mergeable aggregate statistics with provenance
+columns.
+
+Aggregate-first is the read-surface contract and preferred storage shape, not
+a claim that every ingestion implementation is stateless. A bounded processor
+may persist a minimal internal checkpoint when necessary for efficient exact
+aggregation. That namespace is not registered with the query planner, DuckDB
+views, SQL allowlist, API, MCP, Chat, SDK, or Reports.
+
+## Processor Checkpoint Boundary
+
+`frequency_response` can opt into `checkpoint.mode: persistent_sharded`. Treat
+the resulting checkpoint as sensitive source-derived data:
+
+- It contains only filtered candidate rows and fields required to repeat exact
+  cross-partition normalization, bounded frequency, deduplication,
+  grouping/state calculation, and runner selection, but may retain an exact customer key.
+- Customer hashing is used to route records to shards. It is not encryption,
+  anonymization, or a substitute for upstream tokenization/HMAC.
+- Generations are keyed by computation identity, chunk, and raw-file
+  fingerprint and version their schema, customer dtype, and sharding algorithm.
+  Partial, stale, incompatible, or integrity-invalid generations are not used.
+- The checkpoint is reconstructible from authoritative IH and has an
+  independent, bounded retention lifecycle. `checkpoint.retention_days`
+  defaults to the active dependency closure and is applied after ingestion and
+  by vacuum; backing it up is optional when source replay is acceptable.
+- Apply the same filesystem isolation, encryption-at-rest, deletion, and access
+  controls as for other sensitive workspace-local data. Deleting checkpoint
+  state changes ingestion time only; it never changes which data reports read.
 
 ## HTTP API Authentication
 

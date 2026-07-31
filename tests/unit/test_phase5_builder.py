@@ -2544,6 +2544,8 @@ def test_combo_validation_rejects_wrong_kind_or_processor_for_secondary_metric()
                                             {
                                                 **base,
                                                 "secondary_metric": "FunnelImpressions",
+                                                "primary_mark": "line",
+                                                "shared_y_axis": True,
                                             }
                                         ],
                                     }

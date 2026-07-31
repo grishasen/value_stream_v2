@@ -9,10 +9,19 @@ If a question feels load-bearing and isn't here, open a doc PR — these entries
 ## A. Architecture and storage
 
 **A1. Why aggregates first? Why not just persist raw events and aggregate on read?**
-Persisting raw events is expensive (storage, PII risk, retention legislation) and forces every dashboard to do the heavy lifting. Value Stream's premise is that 95% of business questions can be answered from small, mergeable summaries; the other 5% needs a different tool. Once you accept that, throwing away rows after the chunk pass is a feature, not a limitation.
+Persisting raw events is expensive (storage, PII risk, retention legislation) and forces every dashboard to do the heavy lifting. Value Stream's premise is that 95% of business questions can be answered from small, mergeable summaries; the other 5% needs a different tool. Once you accept that, not retaining a general raw-event query store is a feature, not a limitation.
+
+Aggregate-first is specifically the business/query contract and the preferred
+storage shape. It does not forbid a bounded processor from retaining minimal,
+versioned internal state when that avoids repeated source scans. Such a
+checkpoint is not queryable, is independently retained, and must be rebuildable
+from the authoritative source.
 
 **A2. Why DuckDB tables alongside Parquet — what does each one do?**
 Parquet is the resting form of every aggregate (one directory per `source/processor/grain`, hive-partitioned by `period`). DuckDB does three jobs that Parquet alone can't: it serves a SQL surface to ad-hoc users (`read_parquet(...)`), it hosts the small metadata DBs (`chunks`, `pipeline_runs`, `config_versions`, `lineage`), and it provides workspace-level views named identically to logical metrics (so power users can `SELECT * FROM v_metric_ctr_daily` without learning the file layout). Inside the engine, frames are still Polars.
+
+Optional processor checkpoints use a separate state namespace. DuckDB views,
+metric planning, SQL export, and the chunk publication ledger do not expose it.
 
 **A3. Why not keep Polars DataFrames in memory and skip persistence?**
 Process-bound DataFrames die on Streamlit reload, can't be shared across the API and the UI, and force the system to re-aggregate from raw on every restart. The current app already discovered this and bolted on a DuckDB-backed cache; Value Stream makes the persistence explicit and uniform.
@@ -144,6 +153,10 @@ Both surfaces are idempotent: a chunk is skipped only when the source computatio
 
 **C3. What happens when the same chunk is re-run?**
 The new partial Parquet writes alongside the old one with a new `pipeline_run_id`. Complete file lineage commits first, then the successful chunk row acts as the chunk commit marker. It becomes visible only after the parent run is finalized as successful/partial. If replacement fails, readers keep the previous successful partial. `valuestream vacuum` deletes superseded or orphaned partials.
+If the replacement succeeds but produces no aggregate rows, its successful
+ledger marker still supersedes the old partial, so queries return no stale data.
+Rolling configuration back reprocesses that chunk before the older contract can
+become current again.
 
 **C4. What if a file is corrupted mid-run?**
 That chunk fails (`status='failed'` in `meta/chunks.duckdb`). The other chunks finish. The run status becomes `partial`. The operator fixes or removes the bad file and re-runs; only failed/missing chunks are processed.
@@ -176,7 +189,12 @@ Three rules: (1) the grain must be ≥ the requested grain, (2) the group-by col
 For exact metrics (count-based, sum-based, pooled mean/variance) — they're identical to floating-point precision. For sketch-based metrics (CPC/HLL/Theta distinct, t-digest quantiles) daily and monthly answers can differ within the sketch error bound. CPC exposes lower/upper bounds directly; legacy HLL `lg_k=12` has approximately ±1.6% RSE. The UI should surface the applicable bound and sketch parameters.
 
 **D3. Can I get exact distinct counts?**
-Not at the aggregate-store layer. Value Stream's contract is "no raw rows," so distincts use CPC by default, HLL by explicit configuration, or Theta when set algebra is required. A snapshot can preserve one aggregate row per entity when its grain permits an exact query, but a CPC/HLL/Theta state remains approximate.
+Not from a report-visible identity set. The aggregate/query contract does not
+store raw customer rows, so distincts use CPC by default, HLL by explicit
+configuration, or Theta when set algebra is required. An internal bounded
+checkpoint is not queryable and does not change this rule. A snapshot can
+preserve one aggregate row per entity when its grain permits an exact query,
+but a CPC/HLL/Theta state remains approximate.
 
 **D4. How do I handle joins?**
 Two patterns. (1) Fold the foreign key into the source schema upstream or with a transform so it becomes a group-by column. (2) Use snapshot processors with shared group-by columns, then join in the metric DSL via `join` (planned post-MVP). Value Stream deliberately makes ad-hoc joins inconvenient because they undermine pre-aggregation.
@@ -323,13 +341,25 @@ stores.
 ## F. Security and compliance
 
 **F1. Is PII safe?**
-Raw rows never leave a chunk's process. Only state columns are persisted: counts, sums, sketches. CPC/HLL/Theta store hashed sketch state, but sketches are not a cryptographic anonymization boundary; tokenize or HMAC identifiers upstream where required. There is no `eval`, so config injection isn't a vector. Per-row provenance lets an auditor reconstruct the exact config that produced any number.
+Report and query surfaces expose only aggregate state: counts, sums, sketches,
+and other configured summaries. A bounded processor may also persist minimal
+identity-level checkpoint state for ingestion; it is outside all query paths,
+but it is still sensitive data at rest. Customer-hash shards and CPC/HLL/Theta
+hashes are not a cryptographic anonymization boundary, so tokenize or HMAC
+identifiers upstream and apply workspace retention/access controls where
+required. There is no `eval`, so config injection isn't a vector. Aggregate
+provenance lets an auditor reconstruct the exact config that produced any
+number.
 
 **F2. How does authentication work?**
 Current product: SDK and local stdio MCP run under the host process identity; UI auth is handled by Streamlit/basic auth or an upstream proxy; per-workspace filesystem permissions enforce hard isolation. The read-only HTTP API supports a single bearer token and the CLI refuses non-loopback binding without one. Remote HTTP MCP and OIDC/multi-user auth remain deferred.
 
 **F3. How do I redact a customer?**
-Drop the chunk that contained the customer's events and re-run the pipeline; the customer's contribution to all aggregates is removed because state types are associative. CPC/HLL/Theta states must be rebuilt from the remaining chunks; scalar states are recomputed through the same deterministic replay.
+Remove or redact the customer's records in the authoritative source, delete or
+vacuum affected processor-checkpoint generations, and re-run every target in
+the bounded dependency fan-out. The customer's contribution is then removed
+from recomputed aggregates. CPC/HLL/Theta states must be rebuilt from remaining
+source rows; scalar states are recomputed through the same deterministic replay.
 
 **F4. Can I disable a sketch type for compliance reasons?**
 Yes — `processors.<id>.states` is explicit, so a workspace can omit any `cpc`, `hll`, or `theta` state. The corresponding metrics simply aren't available; downstream tiles that depend on them error out at validate time, not at runtime.
@@ -348,7 +378,13 @@ chunk workers. Streaming reduces transient scan/transform memory, while
 `materialize_transforms: true` retains one transformed chunk through processor
 fan-out. Measure the actual catalog with the ingestion benchmark; if peak RSS is
 too high, split the grouping interval (for example, daily to hourly) and lower
-chunk-process parallelism.
+chunk-process parallelism. For `frequency_response`, persistent customer-hash
+shards bound target lookback work to one shard at a time; tune
+`checkpoint.shards` against file-count overhead. `checkpoint.retention_days`
+defaults to the active lookback plus the current partition; increase it only
+when reduced correction-replay I/O justifies retaining more identity state.
+Apply the same data policy to the checkpoint as to the source-derived identity
+fields it retains.
 
 **G3. What's the largest aggregate store Value Stream can serve?**
 DuckDB scans Parquet at multi-GB/s on local SSD. Aggregate stores up to a few hundred GB serve interactive dashboards comfortably; beyond that, increase the `monthly` grain's coverage and rely on summary aggregates for high-cardinality tiles.

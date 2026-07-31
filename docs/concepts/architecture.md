@@ -13,18 +13,19 @@
 
 ## 1. Mission and one-line description
 
-Value Stream is a configuration-driven, aggregate-first business intelligence platform for marketing, ML, and customer-lifecycle metrics. It ingests batch exports from upstream operational systems (typically Pega CDH Interaction History and Product Holdings), reduces them to small, mergeable sufficient statistics during a single chunk pass, and serves business reports and dashboards from those persisted aggregates — never from raw rows.
+Value Stream is a configuration-driven, aggregate-first business intelligence platform for marketing, ML, and customer-lifecycle metrics. It ingests batch exports from upstream operational systems (typically Pega CDH Interaction History and Product Holdings), reduces them to small, mergeable sufficient statistics, and serves business reports and dashboards from those persisted aggregates — never from source rows or processor checkpoints.
 
-Everything that can be expressed as a small, fixed-size summary per group-by tuple is in scope. Everything that requires raw event histories, exact identity sets across chunks, or per-entity ordered state is out of scope (or is approximated via sketches, or moved to a snapshot processor).
+Everything that can be expressed as a small, fixed-size summary per group-by tuple is in scope. A processor may declare a finite dependency window when that summary requires sequence context and may retain minimal, rebuildable internal state to avoid repeated source scans. Unbounded event histories, report-visible identity sets, and arbitrary per-entity feature serving remain out of scope (or are approximated via sketches, or moved to a snapshot processor).
 
 ## 2. Design forces and quality attributes
 
 | Quality attribute | What it means here | How the architecture satisfies it |
 |---|---|---|
-| Aggregate-only at rest | Raw event rows must not survive the chunk pass | Each `chunk_aggregate` produces a sufficient-statistics frame; raw rows are discarded after that |
+| Aggregate-first serving | Reports and queries must not process source or identity-level processor rows | Each processor publishes sufficient statistics; every read surface uses the governed aggregate query layer |
+| Bounded internal state | An exact bounded processor may avoid repeated source scans without creating another business source | Optional state is minimal, versioned, hash-sharded, immutable, independently retained, and rebuildable from authoritative input |
 | Configurable | Non-developers can add metrics, dashboards, and group-by columns | YAML DSL with JSON-Schema validation; closed expression AST replaces `eval`-strings |
 | Deterministic | Same computation contract + same file fingerprints = same numbers | computation hash covers workspace defaults, source behavior, and processor semantics; merge ops are associative-commutative |
-| Idempotent ingestion | Unchanged chunks are skipped; changed files are reprocessed | `(source, chunk, source-computation-hash, file_hash)` planning; latest-successful-run-wins reads |
+| Idempotent ingestion | Unchanged chunks are skipped; changed files are reprocessed | `(source, chunk, source-computation-hash, file_hash)` planning; the globally latest successful chunk attempt governs reads and reuse |
 | Observability first | Every number is traceable to a chunk and a config | `pipeline_run_id`, `chunk_id`, `period`, `created_at`, `config_hash` columns on every aggregate row |
 | Multi-grain queries | Same metric available at its base grain and every coarser calendar grain | Each processor stores one base-grain aggregate; the query layer merges it to the requested coarser grain |
 | Operates on one node | Targets ~10–100 GB raw input per workspace | Polars + DuckDB; chunk-level concurrency; optional shard-by-source |
@@ -121,7 +122,7 @@ Non-goals: streaming/CDC, distributed compute, ad-hoc warehouse SQL on raw event
 Container responsibilities:
 
 1. **Configuration store** — YAML files versioned in git: `pipelines.yaml`, `processors.yaml`, `metrics.yaml`, and `dashboards.yaml`. Loaded at startup, validated, hashed.
-2. **Aggregate store** — file-system-rooted Parquet directories with hive partitioning. The only place persisted business data lives.
+2. **Aggregate store** — file-system-rooted Parquet directories with hive partitioning. The only persisted data read by business query surfaces. A separate processor-state namespace may contain non-queryable, source-derived acceleration state for a bounded processor.
 3. **Metadata store** — small DuckDB databases tracking chunks, runs, config versions, lineage. Single-writer per database file; readers can be many.
 4. **Ingestion engine** — turns files into aggregates. Reads files lazily via Polars, applies transforms, fans out to processors, writes Parquet partials, runs compactions, updates the chunks ledger.
 5. **Query layer** — turns metric requests into reads from the aggregate store. Plans, scans Parquet via DuckDB, materializes Polars frames, applies derived metric DSL, returns rows.
@@ -236,8 +237,27 @@ below is collected once per chunk (with the Polars streaming engine when
 shared eager frame with the in-memory engine. The shared transformed frame is
 released after fan-out, and each processor/grain frame is released after its
 immutable aggregate is written. This is an execution strategy only: no raw or
-transformed row is persisted, and streaming/materialization settings do not
-change the computation hash.
+transformed row is persisted by ordinary processors, and
+streaming/materialization settings do not change the computation hash.
+
+An explicitly bounded lookback processor is the one exception to current-only
+processor input. For `frequency_response`, the dependency planner selects the
+target plus the preceding daily chunks needed to cover its configured window
+and optional partition-lag allowance. The allowance widens only that closure;
+timestamp predicates retain the exact semantic window. The target chunk's
+ledger fingerprint covers the complete raw dependency closure, and ordinary
+processors still consume only the target chunk.
+
+With `checkpoint.mode: source_scan`, the runner transforms that closure into an
+ephemeral current/history frame for the frequency processor. With
+`checkpoint.mode: persistent_sharded`, each raw chunk is filtered, classified,
+and projected into a source-fingerprint-addressed checkpoint by a partitioned
+streaming sink split on customer hash; checkpoint creation therefore does not
+collect the complete prepared day. Target processing opens only corresponding
+shards from the target and bounded history and releases each shard after
+aggregation. Both modes publish the same mergeable grouped states, and reports
+cannot address the checkpoint namespace.
+This is specified by [ADR 0007](adr/0007-bounded-lookback-processors.md).
 
 Order-sensitive bounded ML samples are the exception that proves the execution
 rule: when a score processor needs personalization or novelty, ingestion adds a
@@ -329,6 +349,9 @@ persisting the index.
 │       └── <processor_id>/
 │           └── <grain>/
 │               └── period=YYYY-MM/part-<run>-<chunk>.parquet
+├── .valuestream/
+│   └── state/              # non-queryable, rebuildable processor state
+│       └── frequency_response/...
 ├── meta/                   # metadata DBs (DuckDB)
 │   ├── chunks.duckdb
 │   ├── pipeline_runs.duckdb
@@ -336,6 +359,17 @@ persisting the index.
 │   ├── lineage.duckdb
 │   └── aggregate_views.duckdb  # governed views over successful aggregates
 ```
+
+The processor-state namespace is deliberately outside `aggregates/` and
+`meta/`: DuckDB views, metric planning, lineage publication, and chunk `ok`
+markers never expose it. A persistent frequency checkpoint is addressed by the
+source/processor computation identity, chunk id, and raw fingerprint and also
+records its state-schema, customer dtype, and sharding revisions. Existing
+shards are integrity-validated in the parent before workers run. Stale
+generations and partitions beyond `checkpoint.retention_days` are removed
+automatically after ingestion or by vacuum. Missing state is rebuilt from
+source IH; corrupt state is rejected, while an explicit forced run replaces it
+with a deterministic rebuild.
 
 The same workspace layout is used for every variant (BDT, RBB, NBS, Demo, …). Variants are **separate workspaces**; there is no commingling of variants inside one workspace.
 
@@ -501,7 +535,11 @@ Optional/future:
 - A **clean rebuild** acquires all selected source locks in deterministic order and holds them through forced ingestion, coverage validation, scoped cleanup, and aggregate-view refresh. This prevents a concurrent run from publishing files that cleanup could mistake for superseded output.
 - Inside a run, **chunks are processed sequentially by default** (predictable memory profile, simpler error semantics). The `--parallel <N>` flag runs chunks in a process pool of N workers: partial parquet part files are per-chunk so worker writes never collide, and all ledger writes stay in the parent process (the DuckDB metadata files are single-writer). Worker processes sidestep the GIL held by Python sketch building, so the initial load scales with cores.
 - Inside a chunk, **processors fan out through one batched `pl.collect_all`**: every processor's `chunk_aggregate` plan collects in a single pass (sharing the scan via common-subplan elimination), with a logged sequential fallback if the batch fails.
-- The **query layer is read-only**, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. The run's durable `running` row is the outer publication barrier. Within it, atomic Parquet writes and complete lineage commit before the chunk's `ok` row, which is the chunk commit marker. A committed chunk becomes visible only after its parent run reaches any terminal state; until then readers retain the previous successful version.
+- A bounded-lookback processor remains parallel-safe in either execution mode.
+  `source_scan` gives each target its own immutable dependency frame;
+  `persistent_sharded` workers read validated source-fingerprint-addressed generations and
+  never share mutable customer state.
+- The **query layer is read-only**, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. The run's durable `running` row is the outer publication barrier. Within it, atomic Parquet writes and complete lineage commit before the chunk's `ok` row, which is the chunk commit marker. A committed chunk becomes visible only after its parent run reaches any terminal state; until then readers retain the previous successful version. Publication keeps one globally latest successful attempt for each `(source, chunk)`, so a successful empty recomputation supersedes all older output. Idempotent reuse is subject to the same rule: after a catalog rollback, an older matching contract is reprocessed and becomes the latest attempt instead of being silently republished.
 
 ## 13. Caching strategy
 
@@ -509,7 +547,10 @@ Optional/future:
 - **UI metric cache** (Streamlit `st.cache_data`, in `ui/data.py`): query results are memoized keyed by workspace, metric, group-by, filters, grain, date range, and a signature derived from the catalog, the processor config hash, the aggregate files' (count, mtime, size), and the ledger DBs' (mtime, size). Any ingestion run therefore invalidates the cache automatically. This cache lives in the Streamlit surface only.
 - **Query layer** (`query/`): the executor itself is intentionally **stateless** — SDK, MCP, and CLI callers always read live aggregates. Predicate pushdown (config-hash filter and `period` partition pruning) keeps the per-call cost low, and DuckDB/Parquet plus the OS page cache absorb repeated reads. A process-level LRU at this layer is a possible future addition but is deliberately not present today, so headless callers never serve stale numbers.
 
-There is **no cache below the storage layer** (no in-memory copy of the aggregate store) — Parquet + the OS page cache do that work.
+There is **no query cache below the storage layer** (no in-memory copy of the
+aggregate store) — Parquet + the OS page cache do that work. Processor-owned
+checkpoints are ingestion acceleration state, not a query-result cache; deleting
+them cannot change report semantics.
 
 ## 14. Failure semantics
 
@@ -518,6 +559,8 @@ There is **no cache below the storage layer** (no in-memory copy of the aggregat
 | Reader can't open a file | I/O exception inside chunk loop | That chunk fails; run continues with next chunk | Operator fixes file; re-run the source; only failed chunks process |
 | Processor exception | Exception inside `chunk_aggregate` | The chunk fails and none of that run's partials become query-visible; the previous successful chunk version remains visible | Operator fixes config or code; re-run the source |
 | Partial Parquet write incomplete | Write done atomically (write-then-rename) | Incomplete file never visible to readers | None needed |
+| Processor checkpoint missing or stale | State-address lookup and manifest-version validation | No aggregate is published from absent state | Rebuild the checkpoint from authoritative source files and retry only dependent targets |
+| Processor checkpoint corrupt | Parent-side manifest/shard integrity validation or Parquet scan failure | Only targets depending on that generation fail closed; previous successful aggregates remain visible | Run with `--force` to replace the state from authoritative source files, or remove it and retry |
 | Grain materialization fails | Exception while deriving a configured grain | The chunk remains unpublished at every grain; previous successful data remains visible | Fix the cause and re-run the source |
 | Process is terminated before run finalization | A prior `running` row exists after the next caller acquires the source lock | The interrupted run remains invisible until its committed chunks are verified | The next normal source run verifies fingerprint, lineage, files, and computation hashes; valid chunks are published under a recovered `partial` run and reused, invalid chunks are reprocessed |
 | Config validation fails on load | JSON-Schema error | Engine refuses to start; CLI prints actionable error | Operator fixes YAML |
@@ -545,7 +588,8 @@ only the chunks whose final durable marker is `ok`.
 
 | Concern | Posture |
 |---|---|
-| Raw PII | Never persisted; only aggregate state lives at rest |
+| Source-derived identity state | Not query-visible. A bounded processor may persist a minimal checkpoint; it remains sensitive, independently retained, and rebuildable from the authoritative source. |
+| Customer hash shards | Routing optimization only, not anonymization; tokenize/HMAC upstream and encrypt/control the workspace where required. |
 | Identity sketches | CPC is the distinct-count default; HLL remains supported; Theta can answer distinct count and is preferred when the same state also needs set algebra. Sketches are not a cryptographic anonymization boundary, so identifiers should be tokenized/HMACed upstream when required. |
 | Code-injection via config | No `eval`; only the closed expression AST |
 | HTTP API auth | Optional bearer token on loopback; CLI requires one for non-loopback binds; OIDC remains deferred |

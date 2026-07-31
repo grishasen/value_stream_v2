@@ -6,11 +6,14 @@ import json
 from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 from jsonschema import Draft202012Validator
+from pydantic import TypeAdapter
 
+from valuestream.charts.recipes import RECIPES as CHART_RECIPES
 from valuestream.config import model
 from valuestream.recipes import (
     instantiate_metric,
@@ -36,10 +39,11 @@ def test_builtin_recipe_library_is_versioned_and_unique() -> None:
     Draft202012Validator(generate_schema()).validate(payload)
 
     assert library.schema_version == 1
-    assert len(library.recipes) == 16
+    assert len(library.recipes) == 22
     assert len({recipe.id for recipe in library.recipes}) == len(library.recipes)
     assert {recipe.domain for recipe in library.recipes} >= {
         "Audience",
+        "Contact policy",
         "Distribution",
         "Engagement",
         "Funnel",
@@ -47,6 +51,170 @@ def test_builtin_recipe_library_is_versioned_and_unique() -> None:
     documented = (repo_root / "docs" / "reference" / "kpi-recipes.md").read_text()
     for recipe in library.recipes:
         assert f"`{recipe.id}`" in documented
+
+
+@pytest.mark.unit
+def test_contact_policy_recipes_require_exact_frequency_response_states() -> None:
+    processor = _frequency_response_processor()
+    expected = {
+        "contact_policy.frequency_marginal_ctr": (
+            {"clicks": "Clicks", "contacts": "Contacts"},
+            {
+                "op": "safe_div",
+                "num": {"col": "Clicks"},
+                "den": {"col": "Contacts"},
+            },
+        ),
+        "contact_policy.frequency_comparable_ctr": (
+            {
+                "comparable_clicks": "ComparableClicks",
+                "comparable_contacts": "ComparableContacts",
+            },
+            {
+                "op": "safe_div",
+                "num": {"col": "ComparableClicks"},
+                "den": {"col": "ComparableContacts"},
+            },
+        ),
+        "contact_policy.runner_up_expected_ctr": (
+            {
+                "runner_propensity_sum": "RunnerPropensitySum",
+                "comparable_contacts": "ComparableContacts",
+            },
+            {
+                "op": "safe_div",
+                "num": {"col": "RunnerPropensitySum"},
+                "den": {"col": "ComparableContacts"},
+            },
+        ),
+        "contact_policy.runner_up_coverage": (
+            {
+                "comparable_contacts": "ComparableContacts",
+                "contacts": "Contacts",
+            },
+            {
+                "op": "safe_div",
+                "num": {"col": "ComparableContacts"},
+                "den": {"col": "Contacts"},
+            },
+        ),
+        "contact_policy.response_opportunity_margin": (
+            {
+                "comparable_clicks": "ComparableClicks",
+                "runner_propensity_sum": "RunnerPropensitySum",
+                "comparable_contacts": "ComparableContacts",
+            },
+            {
+                "op": "safe_div",
+                "num": {
+                    "op": "sub",
+                    "args": [
+                        {"col": "ComparableClicks"},
+                        {"col": "RunnerPropensitySum"},
+                    ],
+                },
+                "den": {"col": "ComparableContacts"},
+            },
+        ),
+        "contact_policy.priority_opportunity_gap": (
+            {
+                "focal_priority_comparable_sum": "FocalPriorityComparableSum",
+                "runner_priority_comparable_sum": "RunnerPriorityComparableSum",
+                "priority_comparable_contacts": "PriorityComparableContacts",
+            },
+            {
+                "op": "safe_div",
+                "num": {
+                    "op": "sub",
+                    "args": [
+                        {"col": "FocalPriorityComparableSum"},
+                        {"col": "RunnerPriorityComparableSum"},
+                    ],
+                },
+                "den": {"col": "PriorityComparableContacts"},
+            },
+        ),
+    }
+
+    for recipe_id, (bindings, expression) in expected.items():
+        recipe = _recipe(recipe_id)
+        readiness = recipe_readiness(recipe, processor)
+
+        assert recipe.maturity == "reviewed"
+        assert recipe.processor_kinds == ("frequency_response",)
+        assert recipe.metric.kind == "formula"
+        assert readiness.status == "ready"
+        assert readiness.resolved_inputs == bindings
+        assert {
+            item.role: item.preferred_names for item in recipe.inputs
+        } == {role: (state,) for role, state in bindings.items()}
+        assert all(item.require_preferred for item in recipe.inputs)
+        assert all(item.selection == "automatic" for item in recipe.inputs)
+        assert all(not item.state_template and not item.proposed_name for item in recipe.inputs)
+
+        metric = instantiate_metric(
+            recipe,
+            processor,
+            recipe.default_metric_id,
+            readiness.resolved_inputs,
+        )
+        assert metric["expression"] == expression
+        caveat = recipe.method.caveat.casefold()
+        assert "fixed-window approximation" in caveat
+        assert "exposurebucket" in caveat
+        assert "configured impression proxies" in caveat
+        assert "not measured viewability" in caveat
+        assert "no dismiss telemetry" in caveat
+        assert "rank 2" in caveat
+        assert "next recorded rank" in caveat
+        assert "raw propensity" in caveat
+        assert "response probability" in caveat
+        assert "arbitration diagnostic" in caveat
+        assert "never ctr" in caveat
+
+    priority = _recipe("contact_policy.priority_opportunity_gap")
+    assert priority.metric.display.unit == "index"
+    assert priority.metric.display.value_format == "number"
+    assert priority.metric.display.direction == "neutral"
+    assert all(
+        _recipe(recipe_id).metric.display.unit == "percent"
+        for recipe_id in set(expected) - {priority.id}
+    )
+
+
+@pytest.mark.unit
+def test_contact_policy_recipes_do_not_propose_generic_replacement_states() -> None:
+    recipe = _recipe("contact_policy.frequency_marginal_ctr")
+    processor = SimpleNamespace(
+        id="frequency",
+        kind="frequency_response",
+        states={
+            "GenericCount": TypeAdapter(model.StateSpec).validate_python({"type": "count"})
+        },
+    )
+    readiness = recipe_readiness(recipe, processor)
+
+    assert readiness.status == "backfill_required"
+    assert readiness.input_options == {"clicks": (), "contacts": ()}
+    for item in recipe.inputs:
+        assert recipe_binding_options(
+            item,
+            processor,
+            readiness.input_options[item.role],
+            proposal_fields=["AnyField"],
+        ) == []
+
+
+@pytest.mark.unit
+def test_frequency_response_supports_aggregate_recipe_charts() -> None:
+    for chart in ("line", "bar", "kpi_card", "combo", "table"):
+        assert "frequency_response" in CHART_RECIPES[chart].allowed_processor_kinds
+
+    recipe = _recipe("contact_policy.frequency_marginal_ctr")
+    processor = _frequency_response_processor()
+    tile = instantiate_tile(recipe, processor, recipe.default_metric_id, "frequency_curve")
+    assert tile["chart"] == "line"
+    assert tile["x"] == "ExposureBucket"
 
 
 @pytest.mark.unit
@@ -925,6 +1093,37 @@ def _material_upward_state(threshold: float) -> dict[str, object]:
             ],
         },
     }
+
+
+def _frequency_response_processor() -> SimpleNamespace:
+    state_adapter = TypeAdapter(model.StateSpec)
+    definitions = {
+        "Clicks": {"type": "count"},
+        "Contacts": {"type": "count"},
+        "ComparableClicks": {"type": "count"},
+        "ComparableContacts": {"type": "count"},
+        "RunnerPropensitySum": {
+            "type": "value_sum",
+            "source_column": "RunnerPropensity",
+        },
+        "FocalPriorityComparableSum": {
+            "type": "value_sum",
+            "source_column": "FocalPriority",
+        },
+        "RunnerPriorityComparableSum": {
+            "type": "value_sum",
+            "source_column": "RunnerPriority",
+        },
+        "PriorityComparableContacts": {"type": "count"},
+    }
+    return SimpleNamespace(
+        id="frequency",
+        kind="frequency_response",
+        states={
+            name: state_adapter.validate_python(definition)
+            for name, definition in definitions.items()
+        },
+    )
 
 
 def _binary_processor(states: dict[str, dict[str, object]]) -> model.BinaryOutcomeProcessor:

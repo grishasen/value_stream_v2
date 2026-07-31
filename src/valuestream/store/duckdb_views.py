@@ -113,7 +113,15 @@ def _refresh_successful_chunks_table(
         FROM chunks_meta.chunks c
         JOIN runs_meta.pipeline_runs r ON c.pipeline_run_id = r.id
         WHERE c.status = 'ok'
-          AND r.status IN ('ok', 'partial')
+          AND r.status IN ('ok', 'partial', 'failed')
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY c.source_id, c.chunk_id
+            ORDER BY c.finished_at DESC NULLS LAST,
+                     r.finished_at DESC NULLS LAST,
+                     c.started_at DESC NULLS LAST,
+                     r.started_at DESC NULLS LAST,
+                     CAST(c.pipeline_run_id AS VARCHAR) DESC
+        ) = 1
         """
     )
     conn.execute("DETACH chunks_meta")

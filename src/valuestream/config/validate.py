@@ -929,9 +929,18 @@ def _validate_source_expressions(
 def _processor_source_columns(processor: model.Processor) -> set[str]:
     """Return source fields declared outside expressions on one processor."""
 
-    columns = {str(column) for column in processor.group_by if str(column).strip()}
+    derived_group_columns: set[str] = set()
+    if isinstance(processor, model.FrequencyResponseProcessor):
+        derived_group_columns = {processor.frequency_column, "Day"}
+    columns = {
+        str(column)
+        for column in processor.group_by
+        if str(column).strip() and str(column) not in derived_group_columns
+    }
     if processor.time.column:
         columns.add(processor.time.column)
+    if isinstance(processor, model.FrequencyResponseProcessor):
+        columns.update(processor.columns.model_dump(exclude_none=True).values())
     if isinstance(processor, model.BinaryOutcomeProcessor | model.ScoreDistributionProcessor):
         columns.add(processor.outcome.column)
         columns.update(processor.dedup_keys)
@@ -952,11 +961,16 @@ def _processor_source_columns(processor: model.Processor) -> set[str]:
         if processor.as_of_property:
             columns.add(processor.as_of_property)
         columns.update(item.property for item in processor.milestones)
-    columns.update(
-        source_column
-        for state in processor.states.values()
-        if (source_column := state.model_dump().get("source_column"))
-    )
+    for state in processor.states.values():
+        source_column = state.model_dump().get("source_column")
+        if not source_column:
+            continue
+        if (
+            isinstance(processor, model.FrequencyResponseProcessor)
+            and source_column in model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS
+        ):
+            continue
+        columns.add(source_column)
     return columns
 
 

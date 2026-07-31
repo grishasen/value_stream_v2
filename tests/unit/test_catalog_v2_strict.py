@@ -125,6 +125,25 @@ def test_line_tile_accepts_dual_style_dimensions_only_for_lines() -> None:
 
 
 @pytest.mark.unit
+def test_combo_tile_accepts_shared_axis_line_pair() -> None:
+    tile = model.validate_tile(
+        {
+            "id": "frequency_response",
+            "title": "Observed versus expected response",
+            "metric": "ComparableCTR",
+            "chart": "combo",
+            "x": "ExposureBucket",
+            "secondary_metric": "RunnerExpectedCTR",
+            "primary_mark": "line",
+            "shared_y_axis": True,
+        }
+    )
+
+    assert tile.primary_mark == "line"
+    assert tile.shared_y_axis is True
+
+
+@pytest.mark.unit
 def test_boxplot_owns_its_distribution_through_the_selected_metric() -> None:
     base = {
         "id": "scores",

@@ -15,6 +15,7 @@ class ChartRecipe:
 
 _AGGREGATE_CHART_PROCESSORS = (
     "binary_outcome",
+    "frequency_response",
     "score_distribution",
     "numeric_distribution",
     "entity_lifecycle",
@@ -200,6 +201,7 @@ _TILE_RUNTIME_FIELDS = {
     "names",
     "path",
     "property",
+    "primary_mark",
     "reference",
     "references",
     "scale_mode",
@@ -207,6 +209,7 @@ _TILE_RUNTIME_FIELDS = {
     "secondary_metric",
     "show_trend_delta",
     "showlegend",
+    "shared_y_axis",
     "size",
     "sort_by",
     "sort_direction",

@@ -106,6 +106,7 @@ class TestFatWorkspace:
 
         assert {processor.kind for processor in catalog.processors.processors} == {
             "binary_outcome",
+            "frequency_response",
             "numeric_distribution",
             "score_distribution",
             "entity_set",
@@ -183,6 +184,7 @@ class TestFatWorkspace:
         assert pages_by_dashboard == {
             "fat_engagement": [
                 "engagement_overview",
+                "frequency_response",
                 "engagement_breakdowns",
                 "engagement_lift",
                 "engagement_actions",

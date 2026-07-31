@@ -20,7 +20,10 @@ The existing **CDH Value Dashboard** is a Streamlit application that ingests Peg
 
 The replacement, codenamed **Value Stream**, takes the chunked-aggregate idea and elevates it to the centerpiece of the architecture, while keeping the same core engineering stack (**Polars + DuckDB + Streamlit + Plotly**). Streamlit Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API share one governed aggregate tool layer; remote HTTP MCP and multi-user/OIDC deployment remain deferred. Value Stream is rethought from first principles around three invariants:
 
-1. **No raw event row is ever persisted past chunk processing.** Only mergeable sufficient statistics are stored.
+1. **Aggregates are the durable business/query contract.** Reports never scan
+   raw events or identity-level state. A bounded processor may persist minimal,
+   versioned, rebuildable internal state when that materially reduces exact
+   ingestion cost.
 2. **Pipelines, processors, metrics, and dashboards are first-class declarative artifacts** authored in YAML and validated against a published schema — not Python `eval` strings.
 3. **The same metric can be served from multiple physical aggregate tables at different grains**, and the query layer routes a request to the smallest aggregate that still answers it correctly.
 
@@ -70,7 +73,10 @@ These observations shape Value Stream's component boundaries below.
 
 ### 3.1 Goals
 
-1. **Aggregate-first.** Raw rows live only inside a single chunk's lazy pipeline; nothing raw is persisted, ever.
+1. **Aggregate-first.** Mergeable statistics are the only source-derived data
+   served to reports and queries. Minimal internal identity state is allowed for
+   a bounded processor when declared, versioned, independently retained, and
+   rebuildable from the authoritative source.
 2. **Configurable.** A user with no Python skills can author a new metric and a new dashboard tile in YAML, with schema validation and useful errors.
 3. **Multi-grain queries.** The same logical metric is queryable at the
    processor's base grain and every coarser calendar grain; only the base
@@ -92,10 +98,15 @@ These observations shape Value Stream's component boundaries below.
 
 ## 4. Core Design Principles
 
-1. **Sufficient statistics over rows.** A processor's job is to produce a small, fixed-size record per (chunk, group-by tuple). The merge rule for that record is associative and commutative.
+1. **Sufficient statistics over rows.** A processor's published job is to
+   produce a small, fixed-size record per (chunk, group-by tuple). The merge
+   rule for that record is associative and commutative. A bounded-lookback
+   processor may additionally retain minimal normalized identity state as an
+   internal acceleration structure; it remains outside the aggregate/query
+   contract and must be safe to rebuild from authoritative input.
 2. **One DSL, one validator.** YAML is the single source of truth for sources, processors, metrics, and dashboards. JSON Schema validates it; no ad-hoc Python expressions.
 3. **Closed expression language.** Where dynamic expressions are unavoidable (filters, derived columns), they are parsed into a small typed AST and translated to Polars expressions — never `eval`-ed.
-4. **Pluggable processor catalog.** Each processor is a Python class implementing a small interface (`schema`, `chunk_aggregate`, `merge`, `compact`, `derive`). Adding a processor never requires touching the engine.
+4. **Pluggable processor catalog.** Each processor is a Python class implementing a small interface (`schema`, `chunk_aggregate`, `merge`, `compact`, `derive`). Ordinary aggregate processors require no engine changes; processor kinds that declare bounded cross-chunk input dependencies additionally use the engine's dependency-planning contract.
 5. **Aggregate routing.** A report names a metric, not a physical table. A planner picks the smallest aggregate that satisfies the report's group-by columns, time grain, and sketch needs.
 6. **Idempotent chunks.** Re-running a chunk overwrites exactly that chunk's slice in the aggregate store; nothing else moves.
 7. **Provenance per row.** Every aggregate row records `pipeline_run_id`, `chunk_id`, `config_hash`, `created_at`. This lets you answer "is this dashboard fresh?" without scanning files.
@@ -177,6 +188,9 @@ The aggregate store is rooted at a configurable workspace path:
 │   │           ├── period=YYYY-MM/   # hive-partitioned
 │   │           │   └── part-<run>.parquet
 │   │           └── _manifest.json
+├── .valuestream/
+│   └── state/                       # optional processor-owned checkpoints
+│       └── frequency_response/...
 ├── snapshots/
 │   └── <snapshot_id>/
 │       └── as_of=YYYY-MM-DD/
@@ -189,6 +203,13 @@ The aggregate store is rooted at a configurable workspace path:
 └── duckdb/
     └── valuestream.duckdb             # views, dashboards, ad-hoc query target
 ```
+
+The processor-state namespace is deliberately separate from aggregate and
+metadata publication. It is never scanned by query planning or DuckDB views.
+Each persistent frequency-response generation is normally immutable,
+source-fingerprint-addressed, schema/customer-dtype/sharding-versioned, and
+rebuildable from IH; an explicit forced run may replace the same state address,
+and stale generations have an independent bounded-retention lifecycle.
 
 This replaces the current single `db/pov_data_<variant>.duckdb` monolith. Variants survive as the top-level **workspace** identifier.
 
@@ -826,6 +847,18 @@ ih.filter(outcome_in(positive ∪ negative))
 
 This is the same recipe the current app uses, but parameterized by config rather than hard-coded.
 
+#### frequency_response
+
+Daily count and sum states indexed by a fixed trailing exposure-frequency
+bucket. The target day is evaluated from either an ephemeral bounded history
+frame or an exact persistent customer-sharded checkpoint;
+frequency keys are customer + action + placement, while the recorded
+alternative is selected within customer + interaction (rank 2, otherwise the
+smallest rank greater than 1). The runner's raw propensity is retained as an
+expected-response sum. Priority, when configured, remains a separate
+arbitration diagnostic and is never treated as a probability. See the complete
+contract in [Processor Specifications §10](../reference/processors.md#10-frequency_response-processor).
+
 #### numeric_distribution
 
 State per numeric column `<prop>`: `Count, Sum, Mean, Var, Min, Max, tdigest`.
@@ -880,8 +913,9 @@ No monthly or summary copy is written. A monthly request scans the daily
 partial, groups by the requested dimensions plus `Month`, and merges each
 state with its registered merge rule. A summary request performs the same
 merge without a time bucket. Query-time merging combines the latest successful
-partial per chunk; `valuestream vacuum` later removes superseded physical
-files.
+terminal attempt per source/chunk; an attempt with no partial still supersedes
+older data through its ledger marker. `valuestream vacuum` later removes
+superseded physical files.
 
 ---
 
@@ -1052,6 +1086,7 @@ def run_source(source_id: str) -> RunReport:
     files = discover_files(source.reader)
     chunks = group_files_by_pattern(files, source.reader)
     processors = [p for p in cfg.processors if p.source == source_id]
+    plans = plan_chunk_dependencies(chunks, processors)
     recover_stale_running_runs(source, chunks, processors, config_hash)
     write_run(
         pipeline_runs,
@@ -1063,15 +1098,25 @@ def run_source(source_id: str) -> RunReport:
     )
 
     try:
-        for chunk_id, files in chunks.items():
-            if already_processed(source_id, chunk_id, config_hash):
+        for plan in plans:
+            chunk_id = plan.target.chunk_id
+            if already_processed(
+                source_id,
+                chunk_id,
+                config_hash,
+                fingerprint=hash_files(plan.dependency_files),
+            ):
                 continue
             with chunk_lifecycle(run_id, source_id, chunk_id):
-                lf = read_files_lazy(files, source.reader)
-                lf = apply_transforms(lf, source.transforms)
+                current = apply_transforms(
+                    read_files_lazy(plan.target.files, source.reader),
+                    source.transforms,
+                )
+                dependency_frame = prepare_bounded_dependency_frame(plan, source)
 
                 written = []
                 for proc in processors:
+                    lf = dependency_frame if proc.requires_bounded_history else current
                     partial = proc.chunk_aggregate(lf, ctx=ChunkCtx(run_id, chunk_id))
                     written.extend(write_partial(proc, chunk_id, partial))
 
@@ -1117,10 +1162,36 @@ remain invisible and are handled by retry/vacuum.
 
 A chunk is the unit of idempotency. `chunk_id` is derived from the filename via the `group_by_filename` regex; if the regex fails the basename is used. Multiple files can belong to one chunk (e.g. partitioned exports).
 
+The ordinary plan has one target and no dependencies. A processor that
+declares a bounded lookback plans the target plus only the earlier calendar
+chunks needed to cover that bound and any typed partition-lag allowance. The
+allowance changes dependency discovery, not the processor's timestamp
+predicate. Such sources require ISO `YYYY-MM-DD` chunk IDs. The target is still
+the sole output/idempotency unit, but its ledger fingerprint contains every raw
+dependency file. A changed source day therefore invalidates all later targets
+whose bounded windows include it; it does not invalidate targets beyond that
+closure. Processors without the dependency declaration continue to see only
+current-target rows even when they share the source.
+
+The bounded processor then uses its declared execution mode. `source_scan`
+builds a marked, ephemeral dependency frame. `persistent_sharded` filters,
+classifies, and projects a raw chunk through a partitioned streaming sink into
+customer-hash shards addressed by source and processor computation identity,
+chunk id, and raw fingerprint, then processes one corresponding target/history
+shard set at a time. Contact collapse happens after those shards are combined
+so both modes retain identical cross-partition duplicate precedence. Neither
+mode changes the raw dependency fingerprint or aggregate publication barrier.
+Checkpoint manifests and files are not ledger `ok` rows and are never
+query-visible.
+
 Re-processing a chunk:
 
 1. Pipeline writes a new partial parquet under the chunk's `period` partition with a new `pipeline_run_id`.
-2. The next compaction step reads only **the latest run** per chunk (by `created_at`), so older partials are ignored.
+2. Query publication keeps only the globally latest successful terminal attempt
+   per source/chunk. A successful attempt with no rows therefore hides an older
+   partial; a failed replacement leaves it visible. Idempotent reuse applies the
+   same rule, so a config rollback is recomputed rather than reviving a hidden
+   attempt.
 3. A janitor job (`valuestream vacuum`) periodically deletes superseded partials.
 
 The Data Load **Rebuild from scratch** operation is the coordinated retention
@@ -1130,6 +1201,15 @@ performs a source-scoped vacuum that retains only the new successful run for
 each selected source. Physical aggregate files from earlier or now-absent
 chunks are removed only after those checks. DuckDB run, chunk, lineage, and
 configuration-version metadata is not deleted.
+
+Processor-state retention is separate from aggregate publication retention.
+After a terminal source run, and during explicit vacuum, the engine removes
+incomplete or incompatible generations, superseded raw fingerprints, and daily
+partitions beyond `checkpoint.retention_days`. The default keeps exactly the
+active history closure plus the current partition. A target never relies on a
+checkpoint as authoritative data: if the required generation is absent after
+cleanup, ingestion rebuilds it from the discovered source chunk before
+calculating the aggregate.
 
 ### 10.3 Transform materialization and streaming
 
@@ -1145,20 +1225,29 @@ execution stages:
 
 The engine releases the shared transformed frame after processor fan-out and
 releases each collected processor frame after its aggregates are written. This
-bounds raw-frame ownership to one active chunk per worker, but it does not impose
-an RSS ceiling: the final transformed frame must still fit in memory and the
-allocator may retain freed pages for reuse. There is currently no automatic RSS
-pause or spill-to-Parquet path. Operators control memory with chunk size and
-bounded chunk-process parallelism, and verify peak RSS with the ingestion
-benchmark.
+bounds ordinary raw-frame ownership to one active chunk per worker. A bounded
+processor in `source_scan` mode additionally owns its dependency frame, so
+memory and scan cost scale with target size plus lookback. In
+`persistent_sharded` mode, checkpoint construction owns one transformed source
+lazy plan and streams it directly into partitioned Parquet without collecting
+the complete prepared day; target computation reads one customer shard across
+the bounded days at a time. Neither path guarantees a fixed RSS ceiling; an
+upstream blocking transform or the allocator may
+retain freed pages for reuse. Operators control memory with chunk size,
+checkpoint shard count, and bounded chunk-process parallelism, then verify peak
+RSS with the ingestion benchmark.
 
 ### 10.4 Processor fan-out
 
-Processor lazy plans are collected as one batch. With transform materialization
-they use the shared in-memory frame described above; without it they remain
-branches of the source lazy plan and use the configured source engine. If the
-batched collect fails, the chunk runner retries the processors sequentially;
-failure of that fallback fails the whole chunk.
+Processor lazy plans are collected as one batch. Ordinary processors fan out
+from the current-target frame; source-scanned bounded processors fan out from
+the marked dependency frame. Persistent bounded processors consume validated
+immutable checkpoint shards through their processor-specific path. With
+transform materialization the source-backed plans use the relevant shared
+in-memory frame described above; without it they remain branches of the source
+lazy plan and use the configured source engine. If the batched collect fails,
+the chunk runner retries the processors sequentially; failure of that fallback
+fails the whole chunk.
 
 ### 10.5 Failure semantics
 
@@ -1411,12 +1500,20 @@ For one release, the legacy Streamlit app and the new one can read the same work
 
 ## 14. Security and Privacy
 
-1. **No raw event row is persisted** — by design, the only PII present at rest is what the configured states explicitly carry (e.g. min/max purchase dates and sketch blobs). Sketches are not a cryptographic anonymization boundary; identifiers should be tokenized or HMACed upstream where required.
+1. **Aggregate-only read surfaces** — reports and query APIs read only governed
+   aggregates. An opted-in bounded processor checkpoint may retain minimal
+   identity-level state at rest, so it is governed as sensitive
+   source-derived data and removed according to its independent retention
+   policy. It is never a query surface and is rebuildable from the authoritative
+   source.
 2. **No `eval`** — all dynamic expressions are parsed AST. The migration tool flags any expression it can't translate.
-3. **Workspace isolation** — variants are isolated workspaces, each with its own `catalog/`, `aggregates/`, `meta/`, `duckdb/` roots.
+3. **Workspace isolation** — variants are isolated workspaces, each with its own `catalog/`, `aggregates/`, `.valuestream/state/`, `meta/`, and `duckdb/` roots.
 4. **Headless auth** — the read-only HTTP API supports a bearer token and requires one for non-loopback CLI binds. In-process SDK and local stdio MCP run under the host process identity; OIDC/SSO and remote HTTP MCP remain deferred.
 5. **Config provenance** — every aggregate row is tied to a `config_hash` and YAML body in `config_versions`. A reviewer can reconstruct the exact config that produced any number on a dashboard.
 6. **Cardinality-sketch caveat** — CPC is the generated distinct-count default and HLL remains supported. Theta also answers distinct count and should be selected when the same persisted state needs intersection/difference. Hashing inside a sketch is not a substitute for governed upstream tokenization.
+7. **Checkpoint-shard caveat** — customer hashing routes exact records to a
+   shard; it is not encryption, anonymization, or a substitute for upstream
+   tokenization/HMAC.
 
 ---
 
@@ -1651,15 +1748,18 @@ CREATE VIEW v_metric_ctr_daily AS
     Positives::DOUBLE / NULLIF(Positives + Negatives, 0) AS CTR,
     Positives, Negatives, Count
   FROM (
-    SELECT *,
+    SELECT e.*,
            ROW_NUMBER() OVER (
-             PARTITION BY Day, channel, placement, issue, "group",
-                          customer_type, ModelControlGroup, chunk_id
-             ORDER BY created_at DESC
+             PARTITION BY e.Day, e.channel, e.placement, e.issue, e."group",
+                          e.customer_type, e.ModelControlGroup, e.chunk_id
+             ORDER BY e.created_at DESC
            ) AS rn
-    FROM engagement_daily
+    FROM engagement_daily e
+    JOIN successful_chunks sc
+      ON e.pipeline_run_id = sc.pipeline_run_id
+     AND e.chunk_id = sc.chunk_id
   )
-  WHERE rn = 1;     -- pick the latest run per chunk
+  WHERE rn = 1;     -- latest row inside the ledger-authorized chunk attempt
 ```
 
 ---

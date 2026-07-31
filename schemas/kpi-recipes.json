@@ -1195,6 +1195,7 @@
           "items": {
             "enum": [
               "binary_outcome",
+              "frequency_response",
               "numeric_distribution",
               "score_distribution",
               "entity_lifecycle",
@@ -4413,6 +4414,18 @@
           ],
           "title": "Placement",
           "type": "string"
+        },
+        "x": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "X"
         }
       },
       "title": "RecipeReport",

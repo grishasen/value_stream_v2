@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,11 +29,39 @@ from valuestream.engine import ledger
 from valuestream.processors import grain_levels
 from valuestream.processors.binary_outcome import ChunkContext
 from valuestream.processors.context import SOURCE_ORDER_COLUMN
+from valuestream.processors.frequency_response import (
+    TARGET_CHUNK_COLUMN,
+)
+from valuestream.processors.frequency_response import (
+    FrequencyResponseProcessor as FrequencyResponseRuntime,
+)
+from valuestream.processors.frequency_response import (
+    required_history_input_columns as frequency_response_required_history_input_columns,
+)
+from valuestream.processors.frequency_response import (
+    required_input_columns as frequency_response_required_input_columns,
+)
+from valuestream.processors.frequency_response import (
+    validate_current_input_schema as validate_frequency_response_current_input_schema,
+)
 from valuestream.processors.registry import ProcessorRuntime, create_processor
 from valuestream.readers import cleanup_temporaries, discover, read
 from valuestream.readers.discovery import Chunk
 from valuestream.store.duckdb_views import refresh_aggregate_views
 from valuestream.store.parquet import AggregateWriteReceipt, write_aggregate_with_receipts
+from valuestream.store.processor_state import (
+    CheckpointManifest,
+)
+from valuestream.store.processor_state import (
+    load_manifest as load_processor_state_manifest,
+)
+from valuestream.store.processor_state import (
+    scan_shard as scan_processor_state_shard,
+)
+from valuestream.store.processor_state import (
+    write_checkpoint as write_processor_state_checkpoint,
+)
+from valuestream.store.vacuum import vacuum_processor_state
 from valuestream.transforms import apply_transforms
 from valuestream.utils.ids import new_pipeline_run_id
 from valuestream.utils.logger import get_logger
@@ -89,6 +118,34 @@ class _ChunkOutcome:
     started_at: dt.datetime
     finished_at: dt.datetime
     lineage: tuple[AggregateWriteReceipt, ...] = ()
+
+
+@dataclass(frozen=True)
+class _ChunkPlan:
+    """One target chunk plus its bounded raw-input dependency set."""
+
+    chunk: Chunk
+    history_chunks: tuple[Chunk, ...] = ()
+
+    @property
+    def chunk_id(self) -> str:
+        return self.chunk.chunk_id
+
+    @property
+    def history_files(self) -> tuple[Path, ...]:
+        return tuple(
+            sorted(
+                {
+                    file_path
+                    for history_chunk in self.history_chunks
+                    for file_path in history_chunk.files
+                }
+            )
+        )
+
+    @property
+    def dependency_files(self) -> tuple[Path, ...]:
+        return tuple(sorted({*self.chunk.files, *self.history_files}))
 
 
 @dataclass(frozen=True)
@@ -192,7 +249,7 @@ def run_source(
         )
 
 
-def _run_source_locked(  # noqa: PLR0915
+def _run_source_locked(  # noqa: PLR0912, PLR0915
     workspace_path: str | Path,
     source_id: str,
     *,
@@ -222,6 +279,8 @@ def _run_source_locked(  # noqa: PLR0915
         raise ValueError(f"unknown source {source_id!r}")
 
     processors = _processors_for_source(catalog, source_id)
+    chunks = discover(workspace, source)
+    chunk_plans = _plan_source_chunks(source, chunks, processors)
 
     run_id = new_pipeline_run_id()
     config_hash = source_computation_hash(catalog, source_id)
@@ -238,9 +297,10 @@ def _run_source_locked(  # noqa: PLR0915
         f"workspace={workspace}, force={force}, parallel={parallel}"
     )
 
-    chunks = discover(workspace, source)
-    chunks_total = len(chunks)
-    fingerprints = {chunk.chunk_id: ledger.file_fingerprint(chunk.files) for chunk in chunks}
+    chunks_total = len(chunk_plans)
+    fingerprints = {
+        plan.chunk_id: ledger.file_fingerprint(plan.dependency_files) for plan in chunk_plans
+    }
     expected_outputs = {
         (processor.id, grain): processor.config_hash
         for processor in processors
@@ -285,9 +345,10 @@ def _run_source_locked(  # noqa: PLR0915
     run_finalized = False
     try:
         results_by_order: dict[int, ChunkRunResult] = {}
-        to_process: list[tuple[int, Chunk]] = []
-        for chunk_order, chunk in enumerate(chunks, start=1):
-            if not force and chunk.chunk_id in done_chunks:
+        to_process: list[tuple[int, _ChunkPlan]] = []
+        for chunk_order, plan in enumerate(chunk_plans, start=1):
+            chunk = plan.chunk
+            if not force and plan.chunk_id in done_chunks:
                 _notify_chunk_progress(
                     progress_callback,
                     source=source,
@@ -301,7 +362,33 @@ def _run_source_locked(  # noqa: PLR0915
                     chunk_id=chunk.chunk_id, status="skipped"
                 )
                 continue
-            to_process.append((chunk_order, chunk))
+            to_process.append((chunk_order, plan))
+
+        checkpoint_failures = _ensure_persistent_frequency_checkpoints(
+            workspace,
+            source,
+            processors,
+            [plan for _, plan in to_process],
+            force=force,
+        )
+        ready_to_process: list[tuple[int, _ChunkPlan]] = []
+        for chunk_order, plan in to_process:
+            checkpoint_error = checkpoint_failures.get(plan.chunk_id)
+            if checkpoint_error is None:
+                ready_to_process.append((chunk_order, plan))
+                continue
+            _notify_chunk_progress(
+                progress_callback,
+                source=source,
+                chunk=plan.chunk,
+                chunk_order=chunk_order,
+                chunks_total=chunks_total,
+                status="processing",
+            )
+            outcome = _checkpoint_failure_outcome(plan, checkpoint_error)
+            _record_chunk_outcome(workspace, source_id, run_id, outcome)
+            results_by_order[chunk_order] = outcome.result
+        to_process = ready_to_process
 
         if parallel > 1 and len(to_process) > 1:
             _run_chunks_parallel(
@@ -316,7 +403,8 @@ def _run_source_locked(  # noqa: PLR0915
                 results_by_order=results_by_order,
             )
         else:
-            for chunk_order, chunk in to_process:
+            for chunk_order, plan in to_process:
+                chunk = plan.chunk
                 _notify_chunk_progress(
                     progress_callback,
                     source=source,
@@ -325,7 +413,7 @@ def _run_source_locked(  # noqa: PLR0915
                     chunks_total=chunks_total,
                     status="processing",
                 )
-                outcome = _process_chunk(workspace, source, processors, chunk, run_id)
+                outcome = _process_chunk(workspace, source, processors, plan, run_id)
                 _record_chunk_outcome(workspace, source_id, run_id, outcome)
                 results_by_order[chunk_order] = outcome.result
 
@@ -351,6 +439,26 @@ def _run_source_locked(  # noqa: PLR0915
         )
         run_finalized = True
         refresh_aggregate_views(workspace, catalog)
+        try:
+            checkpoint_vacuum = vacuum_processor_state(
+                workspace,
+                catalog,
+                source_ids={source_id},
+            )
+            if checkpoint_vacuum.dirs_deleted:
+                logger.info(
+                    "Pruned %s stale processor checkpoint generation(s): source=%s bytes=%s",
+                    checkpoint_vacuum.dirs_deleted,
+                    source_id,
+                    checkpoint_vacuum.bytes_deleted,
+                )
+        except Exception:
+            # Processor state is a rebuildable acceleration cache. A cleanup
+            # failure must be visible, but cannot roll back published aggregates.
+            logger.exception(
+                "Could not apply processor checkpoint retention: source=%s",
+                source_id,
+            )
         elapsed_ms = _elapsed_ms(started)
         logger.info(
             f"Source run finished: source={source_id}, run_id={run_id}, status={status}, "
@@ -402,10 +510,11 @@ def _process_chunk(
     workspace: Path,
     source: model.Source,
     processors: list[_Processor],
-    chunk: Chunk,
+    plan: _ChunkPlan,
     run_id: str,
 ) -> _ChunkOutcome:
     """Read, transform, aggregate, and write one chunk (no ledger writes)."""
+    chunk = plan.chunk
     perf_started = time.perf_counter()
     started_at = utc_now()
     rows_in = 0
@@ -413,12 +522,11 @@ def _process_chunk(
     debugging = _debugging_enabled(source)
     logger.debug(f"Processing chunk: {chunk.chunk_id}")
     try:
-        raw = read(source.reader, chunk.files)
-        if _requires_stable_source_order(processors):
-            # Polars may schedule group inputs differently between the regular
-            # and streaming engines. Preserve scan order explicitly for the
-            # score processor's bounded, order-sensitive sampling helpers.
-            raw = raw.with_row_index(SOURCE_ORDER_COLUMN)
+        raw, transformed, frequency_transformed = _prepare_chunk_frames(
+            source,
+            processors,
+            plan,
+        )
         if debugging:
             _log_chunk_schema(source, chunk, "raw", raw)
         ctx = ChunkContext(
@@ -427,34 +535,76 @@ def _process_chunk(
             created_at=dt.datetime.now(dt.UTC),
         )
         source_engine: _CollectEngine = "streaming" if source.reader.streaming else "auto"
-        transformed = apply_transforms(raw, source)
-        _validate_processor_input_columns(processors, transformed.collect_schema())
+        normal_processors = [
+            processor for processor in processors if not _is_frequency_processor(processor)
+        ]
+        frequency_processors = [
+            processor for processor in processors if _is_frequency_processor(processor)
+        ]
+        source_scan_frequency_processors = [
+            processor
+            for processor in frequency_processors
+            if not _is_persistent_frequency_processor(processor)
+        ]
+        directly_collected_processors = [
+            processor
+            for processor in processors
+            if not _is_persistent_frequency_processor(processor)
+        ]
+        current_schema = transformed.collect_schema()
+        _validate_processor_input_columns(normal_processors, current_schema)
+        if frequency_processors:
+            _validate_frequency_current_input_columns(
+                frequency_processors,
+                current_schema,
+            )
+        if source_scan_frequency_processors:
+            if frequency_transformed is None:  # pragma: no cover - construction invariant
+                raise RuntimeError("frequency-response processor input was not prepared")
+            _validate_processor_input_columns(
+                source_scan_frequency_processors,
+                frequency_transformed.collect_schema(),
+            )
         if debugging:
             _log_chunk_schema(source, chunk, "transformed", transformed)
+            if frequency_transformed is not None:
+                _log_chunk_schema(source, chunk, "frequency_transformed", frequency_transformed)
         if source.materialize_transforms:
             rows_in, rows_kept, processor_frames, written = _collect_chunk_materialized(
                 workspace,
                 source,
-                processors,
+                directly_collected_processors,
                 chunk,
                 run_id,
                 ctx,
                 source_engine,
                 raw,
                 transformed,
+                frequency_transformed,
             )
         else:
             rows_in, rows_kept, processor_frames, written = _collect_chunk_lazy(
                 workspace,
                 source,
-                processors,
+                directly_collected_processors,
                 chunk,
                 run_id,
                 ctx,
                 source_engine,
                 raw,
                 transformed,
+                frequency_transformed,
             )
+
+        processor_frames.extend(
+            _collect_persistent_frequency_frames(
+                workspace,
+                source,
+                frequency_processors,
+                plan,
+                ctx,
+            )
+        )
 
         # Transfer ownership before writing so the writer can drop each frame
         # without mutating the list returned by the collection stage.  Keeping
@@ -475,7 +625,7 @@ def _process_chunk(
         )
         return _finish_successful_chunk(
             source,
-            chunk,
+            plan,
             run_id,
             started_at,
             perf_started,
@@ -500,12 +650,322 @@ def _process_chunk(
                 elapsed_ms=elapsed_ms,
                 error=str(exc),
             ),
-            files=chunk.files,
+            files=plan.dependency_files,
             started_at=started_at,
             finished_at=finished_at,
         )
     finally:
         cleanup_temporaries()
+
+
+def _prepare_chunk_frames(
+    source: model.Source,
+    processors: list[_Processor],
+    plan: _ChunkPlan,
+) -> tuple[pl.LazyFrame, pl.LazyFrame, pl.LazyFrame | None]:
+    """Build current-only and optional bounded-history transform graphs."""
+
+    current_raw = read(source.reader, plan.chunk.files)
+    normal_raw = current_raw
+    if _requires_stable_source_order(processors):
+        # Polars may schedule group inputs differently between the regular and
+        # streaming engines. Preserve scan order explicitly for the score
+        # processor's bounded, order-sensitive sampling helpers.
+        normal_raw = normal_raw.with_row_index(SOURCE_ORDER_COLUMN)
+    current_transformed = apply_transforms(normal_raw, source)
+
+    source_scan_frequency_processors = [
+        processor
+        for processor in processors
+        if _is_frequency_processor(processor) and not _is_persistent_frequency_processor(processor)
+    ]
+    if not source_scan_frequency_processors:
+        return normal_raw, current_transformed, None
+
+    marked_current = current_transformed.with_columns(pl.lit(True).alias(TARGET_CHUNK_COLUMN))
+    if not plan.history_chunks:
+        return normal_raw, current_transformed, marked_current
+
+    # Source transforms are chunk-scoped semantics. In particular, configured
+    # deduplication must not remove a target row merely because the same key
+    # appeared in a history chunk. Transform each discovered chunk independently
+    # before building the ephemeral dependency frame.
+    history_columns = _frequency_history_input_columns(source_scan_frequency_processors)
+    marked_history: list[pl.LazyFrame] = []
+    for history_chunk in plan.history_chunks:
+        history = apply_transforms(read(source.reader, history_chunk.files), source)
+        history_schema = history.collect_schema()
+        _validate_frequency_history_input_columns(
+            source_scan_frequency_processors,
+            history_schema,
+            history_chunk.chunk_id,
+        )
+        # Only frequency keys, outcome/time, and raw processor-filter fields
+        # can affect a later target. Dropping every other history field avoids
+        # both unnecessary I/O through the lazy plan and irrelevant dtype drift
+        # when history is combined with the full current-day schema.
+        history = history.select(
+            *(name for name in history_schema.names() if name in history_columns)
+        )
+        marked_history.append(history.with_columns(pl.lit(False).alias(TARGET_CHUNK_COLUMN)))
+    frequency_transformed = pl.concat(
+        [*marked_history, marked_current],
+        how="diagonal_relaxed",
+    )
+    return normal_raw, current_transformed, frequency_transformed
+
+
+def _ensure_persistent_frequency_checkpoints(  # noqa: PLR0912, PLR0915
+    workspace: Path,
+    source: model.Source,
+    processors: list[_Processor],
+    plans: list[_ChunkPlan],
+    *,
+    force: bool = False,
+) -> dict[str, str]:
+    """Prepare and validate checkpoint dependencies, isolating failures by target."""
+
+    persistent = [
+        processor for processor in processors if _is_persistent_frequency_processor(processor)
+    ]
+    if not persistent or not plans:
+        return {}
+
+    required_chunks: dict[str, Chunk] = {}
+    for plan in plans:
+        for chunk in (*plan.history_chunks, plan.chunk):
+            required_chunks[chunk.chunk_id] = chunk
+
+    engine: Literal["auto", "streaming"] = "streaming" if source.reader.streaming else "auto"
+    manifests: dict[tuple[str, str], CheckpointManifest] = {}
+    failures: dict[tuple[str, str], str] = {}
+    for chunk_id in sorted(required_chunks):
+        chunk = required_chunks[chunk_id]
+        raw_fingerprint = ledger.file_fingerprint(chunk.files)
+        transformed: pl.LazyFrame | None = None
+        transformed_schema: pl.Schema | None = None
+        try:
+            for candidate in persistent:
+                processor = _as_persistent_frequency_processor(candidate)
+                key = (processor.id, chunk.chunk_id)
+                try:
+                    manifest = None
+                    if not force:
+                        # Validate every byte once in the parent before any worker
+                        # receives an unchecked manifest for shard-at-a-time reads.
+                        manifest = load_processor_state_manifest(
+                            workspace,
+                            source_id=source.id,
+                            processor_id=processor.id,
+                            config_hash=processor.config_hash,
+                            chunk_id=chunk.chunk_id,
+                            raw_fingerprint=raw_fingerprint,
+                            validate=True,
+                        )
+                    if manifest is None:
+                        logger.info(
+                            "Building persistent frequency checkpoint: "
+                            "source=%s processor=%s chunk=%s force=%s",
+                            source.id,
+                            processor.id,
+                            chunk.chunk_id,
+                            force,
+                        )
+                        if transformed is None:
+                            transformed = apply_transforms(read(source.reader, chunk.files), source)
+                            transformed_schema = transformed.collect_schema()
+                        if transformed_schema is None:  # pragma: no cover - paired assignment
+                            raise RuntimeError("transformed checkpoint schema was not prepared")
+                        _validate_frequency_current_input_columns([processor], transformed_schema)
+                        manifest = write_processor_state_checkpoint(
+                            processor.checkpoint_contacts_lazy(transformed),
+                            workspace,
+                            source_id=source.id,
+                            processor_id=processor.id,
+                            config_hash=processor.config_hash,
+                            chunk_id=chunk.chunk_id,
+                            raw_fingerprint=raw_fingerprint,
+                            customer_column=processor.config.columns.customer,
+                            shard_count=processor.config.checkpoint.shards,
+                            engine=engine,
+                            replace_existing=force,
+                        )
+                    _validate_checkpoint_manifest(processor, manifest)
+                    manifests[key] = manifest
+                except Exception as exc:
+                    failures[key] = str(exc)
+                    logger.exception(
+                        "Persistent frequency checkpoint failed: source=%s processor=%s chunk=%s",
+                        source.id,
+                        processor.id,
+                        chunk.chunk_id,
+                    )
+        finally:
+            cleanup_temporaries()
+
+    plan_failures: dict[str, str] = {}
+    for plan in plans:
+        errors: list[str] = []
+        closure = (*plan.history_chunks, plan.chunk)
+        for candidate in persistent:
+            processor = _as_persistent_frequency_processor(candidate)
+            closure_manifests: list[CheckpointManifest] = []
+            for chunk in closure:
+                key = (processor.id, chunk.chunk_id)
+                if key in failures:
+                    errors.append(
+                        f"processor {processor.id!r} checkpoint {chunk.chunk_id!r}: {failures[key]}"
+                    )
+                    continue
+                manifest = manifests.get(key)
+                if manifest is None:  # pragma: no cover - preparation invariant
+                    errors.append(
+                        f"processor {processor.id!r} checkpoint {chunk.chunk_id!r} was not prepared"
+                    )
+                    continue
+                closure_manifests.append(manifest)
+            try:
+                _validate_checkpoint_customer_dtypes(processor, closure_manifests)
+            except ValueError as exc:
+                errors.append(str(exc))
+        if errors:
+            plan_failures[plan.chunk_id] = "; ".join(dict.fromkeys(errors))
+    return plan_failures
+
+
+def _collect_persistent_frequency_frames(
+    workspace: Path,
+    source: model.Source,
+    processors: list[_Processor],
+    plan: _ChunkPlan,
+    ctx: ChunkContext,
+) -> list[tuple[_Processor, pl.DataFrame]]:
+    """Aggregate persistent checkpoint closures one bounded customer shard at a time."""
+
+    collected: list[tuple[_Processor, pl.DataFrame]] = []
+    for candidate in processors:
+        if not _is_persistent_frequency_processor(candidate):
+            continue
+        processor = _as_persistent_frequency_processor(candidate)
+        current = _load_checkpoint_manifest(workspace, source, processor, plan.chunk)
+        history = [
+            _load_checkpoint_manifest(workspace, source, processor, chunk)
+            for chunk in plan.history_chunks
+        ]
+        _validate_checkpoint_customer_dtypes(processor, [*history, current])
+        shard_partials: list[pl.DataFrame] = []
+        history_shards = [set(manifest.nonempty_shard_ids) for manifest in history]
+        for shard_id in current.nonempty_shard_ids:
+            current_scan = scan_processor_state_shard(current, shard_id)
+            historical_scans = [
+                scan_processor_state_shard(manifest, shard_id)
+                for manifest, available in zip(history, history_shards, strict=True)
+                if shard_id in available
+            ]
+            partial = processor.checkpoint_aggregate_lazy(
+                current_scan,
+                historical_scans,
+                ctx,
+            ).collect()
+            if not partial.is_empty():
+                shard_partials.append(partial)
+        daily = (
+            pl.concat(shard_partials, how="diagonal_relaxed") if shard_partials else pl.DataFrame()
+        )
+        collected.append((processor, daily))
+    return collected
+
+
+def _load_checkpoint_manifest(
+    workspace: Path,
+    source: model.Source,
+    processor: FrequencyResponseRuntime,
+    chunk: Chunk,
+) -> CheckpointManifest:
+    raw_fingerprint = ledger.file_fingerprint(chunk.files)
+    manifest = load_processor_state_manifest(
+        workspace,
+        source_id=source.id,
+        processor_id=processor.id,
+        config_hash=processor.config_hash,
+        chunk_id=chunk.chunk_id,
+        raw_fingerprint=raw_fingerprint,
+        validate=False,
+    )
+    if manifest is None:
+        raise RuntimeError(
+            f"persistent frequency checkpoint is missing for processor {processor.id!r}, "
+            f"chunk {chunk.chunk_id!r}"
+        )
+    _validate_checkpoint_manifest(processor, manifest)
+    return manifest
+
+
+def _validate_checkpoint_manifest(
+    processor: FrequencyResponseRuntime,
+    manifest: CheckpointManifest,
+) -> None:
+    expected_customer = processor.config.columns.customer
+    expected_shards = processor.config.checkpoint.shards
+    if manifest.customer_column != expected_customer:
+        raise ValueError(
+            f"frequency checkpoint customer column {manifest.customer_column!r} does not "
+            f"match {expected_customer!r}"
+        )
+    if manifest.shard_count != expected_shards:
+        raise ValueError(
+            f"frequency checkpoint shard count {manifest.shard_count} does not match "
+            f"{expected_shards}"
+        )
+
+
+def _validate_checkpoint_customer_dtypes(
+    processor: FrequencyResponseRuntime,
+    manifests: Sequence[CheckpointManifest],
+) -> None:
+    # Empty partitions route no identity and therefore cannot disagree with a
+    # non-empty partition's hash domain. In particular, an all-null source day
+    # can legitimately retain a zero-row checkpoint whose inferred dtype is
+    # ``Null`` after the processor drops unusable identities.
+    dtypes = sorted({manifest.customer_dtype for manifest in manifests if manifest.rows > 0})
+    if len(dtypes) > 1:
+        raise ValueError(
+            f"frequency checkpoint customer dtype drift for processor {processor.id!r}: "
+            f"{', '.join(dtypes)}; normalize the authoritative source identity type "
+            "before persistent sharding"
+        )
+
+
+def _checkpoint_failure_outcome(plan: _ChunkPlan, error: str) -> _ChunkOutcome:
+    timestamp = utc_now()
+    return _ChunkOutcome(
+        result=ChunkRunResult(
+            chunk_id=plan.chunk_id,
+            status="failed",
+            error=f"persistent frequency checkpoint preparation failed: {error}",
+        ),
+        files=plan.dependency_files,
+        started_at=timestamp,
+        finished_at=timestamp,
+    )
+
+
+def _processor_input_frames(
+    processors: list[_Processor],
+    current: pl.LazyFrame,
+    frequency: pl.LazyFrame | None,
+) -> list[tuple[_Processor, pl.LazyFrame]]:
+    """Bind each processor to its current-only or bounded-history frame."""
+
+    inputs: list[tuple[_Processor, pl.LazyFrame]] = []
+    for processor in processors:
+        if _is_frequency_processor(processor):
+            if frequency is None:  # pragma: no cover - construction invariant
+                raise RuntimeError("frequency-response processor input was not prepared")
+            inputs.append((processor, frequency))
+        else:
+            inputs.append((processor, current))
+    return inputs
 
 
 _ChunkFrames = tuple[
@@ -516,7 +976,7 @@ _ChunkFrames = tuple[
 ]
 
 
-def _collect_chunk_materialized(
+def _collect_chunk_materialized(  # noqa: PLR0917
     workspace: Path,
     source: model.Source,
     processors: list[_Processor],
@@ -526,27 +986,33 @@ def _collect_chunk_materialized(
     source_engine: _CollectEngine,
     raw: pl.LazyFrame,
     transformed: pl.LazyFrame,
+    frequency_transformed: pl.LazyFrame | None,
 ) -> _ChunkFrames:
     """Collect transforms once, then fan processors out over the materialized frame."""
-    counts_and_transformed = pl.collect_all(
-        [
-            raw.select(pl.len().alias("rows_in")),
-            transformed,
-        ],
-        engine=source_engine,
-    )
+    transform_plans = [
+        raw.select(pl.len().alias("rows_in")),
+        transformed,
+    ]
+    if frequency_transformed is not None:
+        transform_plans.append(frequency_transformed)
+    counts_and_transformed = pl.collect_all(transform_plans, engine=source_engine)
     rows_in = int(counts_and_transformed[0]["rows_in"][0])
     transformed_frame = counts_and_transformed[1]
+    frequency_frame = counts_and_transformed[2] if frequency_transformed is not None else None
     del counts_and_transformed
     rows_kept = transformed_frame.height
-    processor_input = transformed_frame.lazy()
+    processor_inputs = _processor_input_frames(
+        processors,
+        transformed_frame.lazy(),
+        frequency_frame.lazy() if frequency_frame is not None else None,
+    )
     processor_frames: list[tuple[_Processor, pl.DataFrame]] = []
     written: list[AggregateWriteReceipt] = []
     try:
         # Python sketch/map-groups nodes are not streaming-native.  The source
         # scan and transforms above use the configured engine; processor plans
         # run on the one in-memory transformed frame with the regular engine.
-        processor_frames = _collect_processor_frames(processors, processor_input, ctx, "in-memory")
+        processor_frames = _collect_processor_frames(processor_inputs, ctx, "in-memory")
     except Exception:
         logger.warning(
             f"Batched processor collect failed for chunk {chunk.chunk_id}; "
@@ -554,15 +1020,22 @@ def _collect_chunk_materialized(
             exc_info=True,
         )
         written = _run_processors_sequential(
-            workspace, source, processors, processor_input, ctx, run_id, chunk.chunk_id
+            workspace,
+            source,
+            processor_inputs,
+            ctx,
+            run_id,
+            chunk.chunk_id,
         )
     finally:
-        del processor_input
+        del processor_inputs
+        if frequency_frame is not None:
+            del frequency_frame
         del transformed_frame
     return rows_in, rows_kept, processor_frames, written
 
 
-def _collect_chunk_lazy(
+def _collect_chunk_lazy(  # noqa: PLR0917
     workspace: Path,
     source: model.Source,
     processors: list[_Processor],
@@ -572,14 +1045,20 @@ def _collect_chunk_lazy(
     engine: _CollectEngine,
     raw: pl.LazyFrame,
     transformed: pl.LazyFrame,
+    frequency_transformed: pl.LazyFrame | None,
 ) -> _ChunkFrames:
     """Collect counts and all processor plans in one batched pass."""
     processor_frames: list[tuple[_Processor, pl.DataFrame]] = []
     written: list[AggregateWriteReceipt] = []
     try:
+        processor_inputs = _processor_input_frames(
+            processors,
+            transformed,
+            frequency_transformed,
+        )
         processor_plans = [
-            (processor, processor.chunk_aggregate_lazy(transformed, ctx))
-            for processor in processors
+            (processor, processor.chunk_aggregate_lazy(processor_input, ctx))
+            for processor, processor_input in processor_inputs
         ]
         lazy_frames = [
             raw.select(pl.len().alias("rows_in")),
@@ -607,17 +1086,32 @@ def _collect_chunk_lazy(
             exc_info=True,
         )
         rows_in = int(raw.select(pl.len().alias("rows_in")).collect()["rows_in"][0])
-        transformed_frame = transformed.collect()
+        transform_plans = [transformed]
+        if frequency_transformed is not None:
+            transform_plans.append(frequency_transformed)
+        transformed_frames = pl.collect_all(transform_plans, engine=engine)
+        transformed_frame = transformed_frames[0]
+        frequency_frame = transformed_frames[1] if frequency_transformed is not None else None
         rows_kept = transformed_frame.height
+        processor_inputs = _processor_input_frames(
+            processors,
+            transformed_frame.lazy(),
+            frequency_frame.lazy() if frequency_frame is not None else None,
+        )
         written = _run_processors_sequential(
-            workspace, source, processors, transformed_frame.lazy(), ctx, run_id, chunk.chunk_id
+            workspace,
+            source,
+            processor_inputs,
+            ctx,
+            run_id,
+            chunk.chunk_id,
         )
     return rows_in, rows_kept, processor_frames, written
 
 
-def _finish_successful_chunk(
+def _finish_successful_chunk(  # noqa: PLR0917
     source: model.Source,
-    chunk: Chunk,
+    plan: _ChunkPlan,
     run_id: str,
     started_at: dt.datetime,
     perf_started: float,
@@ -626,6 +1120,7 @@ def _finish_successful_chunk(
     written: list[AggregateWriteReceipt],
     debugging: bool,
 ) -> _ChunkOutcome:
+    chunk = plan.chunk
     finished_at = utc_now()
     elapsed_ms = _elapsed_ms(perf_started)
     logger.debug(f"Chunk processing time: {elapsed_ms:.03f}ms")
@@ -645,7 +1140,7 @@ def _finish_successful_chunk(
             elapsed_ms=elapsed_ms,
             written=tuple(receipt.path for receipt in written),
         ),
-        files=chunk.files,
+        files=plan.dependency_files,
         started_at=started_at,
         finished_at=finished_at,
         lineage=tuple(written),
@@ -715,7 +1210,7 @@ def _run_chunks_parallel(
     workspace: Path,
     source: model.Source,
     processors: list[_Processor],
-    to_process: list[tuple[int, Chunk]],
+    to_process: list[tuple[int, _ChunkPlan]],
     run_id: str,
     *,
     parallel: int,
@@ -742,7 +1237,8 @@ def _run_chunks_parallel(
             f"source={source.id}, run_id={run_id}",
             exc_info=True,
         )
-        for chunk_order, chunk in to_process:
+        for chunk_order, plan in to_process:
+            chunk = plan.chunk
             _notify_chunk_progress(
                 progress_callback,
                 source=source,
@@ -751,13 +1247,14 @@ def _run_chunks_parallel(
                 chunks_total=chunks_total,
                 status="processing",
             )
-            outcome = _process_chunk(workspace, source, processors, chunk, run_id)
+            outcome = _process_chunk(workspace, source, processors, plan, run_id)
             _record_chunk_outcome(workspace, source.id, run_id, outcome)
             results_by_order[chunk_order] = outcome.result
         return
     with pool:
-        futures: dict[Future[_ChunkOutcome], tuple[int, Chunk]] = {}
-        for chunk_order, chunk in to_process:
+        futures: dict[Future[_ChunkOutcome], tuple[int, _ChunkPlan]] = {}
+        for chunk_order, plan in to_process:
+            chunk = plan.chunk
             _notify_chunk_progress(
                 progress_callback,
                 source=source,
@@ -766,8 +1263,8 @@ def _run_chunks_parallel(
                 chunks_total=chunks_total,
                 status="processing",
             )
-            future = pool.submit(_process_chunk, workspace, source, processors, chunk, run_id)
-            futures[future] = (chunk_order, chunk)
+            future = pool.submit(_process_chunk, workspace, source, processors, plan, run_id)
+            futures[future] = (chunk_order, plan)
         pending = set(futures)
         while pending:
             completed, pending = wait(pending, return_when=FIRST_COMPLETED)
@@ -780,12 +1277,14 @@ def _run_chunks_parallel(
 
 @timed
 def _collect_processor_frames(
-    processors: list[_Processor],
-    frame: pl.LazyFrame,
+    processor_inputs: list[tuple[_Processor, pl.LazyFrame]],
     ctx: ChunkContext,
     engine: _CollectEngine,
 ) -> list[tuple[_Processor, pl.DataFrame]]:
-    plans = [(processor, processor.chunk_aggregate_lazy(frame, ctx)) for processor in processors]
+    plans = [
+        (processor, processor.chunk_aggregate_lazy(frame, ctx))
+        for processor, frame in processor_inputs
+    ]
     if not plans:
         return []
     frames = pl.collect_all([plan for _, plan in plans], engine=engine)
@@ -825,17 +1324,16 @@ def _write_collected_processor_outputs(
 
 
 @timed
-def _run_processors_sequential(
+def _run_processors_sequential(  # noqa: PLR0917
     workspace: Path,
     source: model.Source,
-    processors: list[_Processor],
-    frame: pl.LazyFrame,
+    processor_inputs: list[tuple[_Processor, pl.LazyFrame]],
     ctx: ChunkContext,
     run_id: str,
     chunk_id: str,
 ) -> list[AggregateWriteReceipt]:
     written: list[AggregateWriteReceipt] = []
-    for processor in processors:
+    for processor, frame in processor_inputs:
         daily = processor.chunk_aggregate(frame, ctx)
         if _debugging_enabled(source):
             _log_processor_frame(source, chunk_id, processor, "base", daily)
@@ -855,7 +1353,7 @@ def _run_processors_sequential(
 
 
 @timed
-def _write_processor_outputs(
+def _write_processor_outputs(  # noqa: PLR0917
     workspace: Path,
     source: model.Source,
     processor: _Processor,
@@ -896,6 +1394,78 @@ def _processors_for_source(catalog: model.Catalog, source_id: str) -> list[_Proc
     return processors
 
 
+def _plan_source_chunks(
+    source: model.Source,
+    chunks: list[Chunk],
+    processors: list[_Processor],
+) -> list[_ChunkPlan]:
+    """Attach bounded calendar-day history to frequency-response targets."""
+
+    frequency_processors = [
+        processor for processor in processors if _is_frequency_processor(processor)
+    ]
+    if not frequency_processors:
+        return [_ChunkPlan(chunk) for chunk in chunks]
+
+    dated_chunks: list[tuple[dt.date, Chunk]] = []
+    for chunk in chunks:
+        try:
+            chunk_date = dt.date.fromisoformat(chunk.chunk_id)
+        except ValueError as exc:
+            raise ValueError(
+                f"source {source.id!r} uses frequency_response processors, so chunk IDs "
+                f"must use ISO YYYY-MM-DD calendar dates; got {chunk.chunk_id!r}"
+            ) from exc
+        if chunk_date.isoformat() != chunk.chunk_id:
+            raise ValueError(
+                f"source {source.id!r} uses frequency_response processors, so chunk IDs "
+                f"must use ISO YYYY-MM-DD calendar dates; got {chunk.chunk_id!r}"
+            )
+        dated_chunks.append((chunk_date, chunk))
+
+    lookback_days = _frequency_lookback_days(frequency_processors)
+    plans: list[_ChunkPlan] = []
+    for target_date, target in dated_chunks:
+        earliest = target_date - dt.timedelta(days=lookback_days)
+        history = tuple(
+            chunk
+            for chunk_date, chunk in sorted(dated_chunks, key=lambda item: item[0])
+            if earliest <= chunk_date < target_date
+        )
+        plans.append(_ChunkPlan(target, history))
+    return plans
+
+
+def _frequency_lookback_days(processors: list[_Processor]) -> int:
+    dependency_hours = max(
+        processor.config.window_hours + processor.config.partition_lag_hours
+        for processor in processors
+        if isinstance(processor.config, model.FrequencyResponseProcessor)
+    )
+    return math.ceil(dependency_hours / 24)
+
+
+def _is_frequency_processor(processor: _Processor) -> bool:
+    return isinstance(processor.config, model.FrequencyResponseProcessor)
+
+
+def _is_persistent_frequency_processor(processor: _Processor) -> bool:
+    return (
+        isinstance(processor.config, model.FrequencyResponseProcessor)
+        and processor.config.checkpoint.mode == "persistent_sharded"
+    )
+
+
+def _as_persistent_frequency_processor(
+    processor: _Processor,
+) -> FrequencyResponseRuntime:
+    if not isinstance(processor, FrequencyResponseRuntime):
+        raise TypeError(f"processor {processor.id!r} is not a frequency-response runtime")
+    if processor.config.checkpoint.mode != "persistent_sharded":
+        raise TypeError(f"processor {processor.id!r} does not use persistent checkpoints")
+    return processor
+
+
 def _requires_stable_source_order(processors: list[_Processor]) -> bool:
     return any(
         isinstance(processor.config, model.ScoreDistributionProcessor)
@@ -919,43 +1489,111 @@ def _validate_processor_input_columns(  # noqa: PLR0912
     failures: list[str] = []
     for processor in processors:
         config = processor.config
-        required = set(config.group_by)
-        if config.time.column:
-            required.add(config.time.column)
-        required.update(_configured_state_source_columns(config))
-        required.update(str(value) for value in getattr(config, "dedup_keys", []))
+        if isinstance(config, model.FrequencyResponseProcessor):
+            required = set(frequency_response_required_input_columns(config))
+        else:
+            required = set(config.group_by)
+            if config.time.column:
+                required.add(config.time.column)
+            required.update(_configured_state_source_columns(config))
+            required.update(str(value) for value in getattr(config, "dedup_keys", []))
 
-        if isinstance(config, model.BinaryOutcomeProcessor | model.ScoreDistributionProcessor):
-            required.add(config.outcome.column)
-        if isinstance(config, model.NumericDistributionProcessor):
-            required.update(config.properties)
-        elif isinstance(config, model.ScoreDistributionProcessor):
-            for spec in model.effective_processor_states(config).values():
-                if spec.type == "tdigest":
-                    required.add(_score_state_source_column(spec))
-            if "personalization" in model.effective_processor_states(config):
-                required.update({"CustomerID", "Name"})
-            if "novelty" in model.effective_processor_states(config):
-                required.update({"CustomerID", "InteractionID", "Name"})
-        elif isinstance(config, model.EntityLifecycleProcessor):
-            required.update(config.keys.model_dump().values())
-        elif isinstance(config, model.EntitySetProcessor):
-            required.add(config.entity)
-        elif isinstance(config, model.FunnelProcessor):
-            if config.entity:
+            if isinstance(config, model.BinaryOutcomeProcessor | model.ScoreDistributionProcessor):
+                required.add(config.outcome.column)
+            if isinstance(config, model.NumericDistributionProcessor):
+                required.update(config.properties)
+            elif isinstance(config, model.ScoreDistributionProcessor):
+                for spec in model.effective_processor_states(config).values():
+                    if spec.type == "tdigest":
+                        required.add(_score_state_source_column(spec))
+                if "personalization" in model.effective_processor_states(config):
+                    required.update({"CustomerID", "Name"})
+                if "novelty" in model.effective_processor_states(config):
+                    required.update({"CustomerID", "InteractionID", "Name"})
+            elif isinstance(config, model.EntityLifecycleProcessor):
+                required.update(config.keys.model_dump().values())
+            elif isinstance(config, model.EntitySetProcessor):
                 required.add(config.entity)
-        elif isinstance(config, model.SnapshotProcessor):
-            if config.snapshot_kind == "accumulating":
-                required.add(config.entity)
-            if config.as_of_property:
-                required.add(config.as_of_property)
-            required.update(milestone.property for milestone in config.milestones)
+            elif isinstance(config, model.FunnelProcessor):
+                if config.entity:
+                    required.add(config.entity)
+            elif isinstance(config, model.SnapshotProcessor):
+                if config.snapshot_kind == "accumulating":
+                    required.add(config.entity)
+                if config.as_of_property:
+                    required.add(config.as_of_property)
+                required.update(milestone.property for milestone in config.milestones)
 
         missing = sorted(column for column in required if column and column not in existing)
         if missing:
             failures.append(f"{config.id}: {', '.join(missing)}")
     if failures:
         raise ValueError("processor input columns are missing: " + "; ".join(failures))
+
+
+def _validate_frequency_current_input_columns(
+    processors: Sequence[_Processor],
+    schema: pl.Schema,
+) -> None:
+    """Reject target-day schema gaps that bounded history could otherwise mask."""
+
+    failures: list[str] = []
+    for processor in processors:
+        config = processor.config
+        if not isinstance(config, model.FrequencyResponseProcessor):
+            continue
+        try:
+            validate_frequency_response_current_input_schema(config, schema)
+        except (TypeError, ValueError) as exc:
+            failures.append(str(exc))
+    if failures:
+        raise ValueError(
+            "frequency-response target chunk input schema is invalid: " + "; ".join(failures)
+        )
+
+
+def _frequency_history_input_columns(processors: list[_Processor]) -> frozenset[str]:
+    """Return the union of narrow history fields needed by frequency processors."""
+
+    columns: set[str] = set()
+    for processor in processors:
+        config = processor.config
+        if isinstance(config, model.FrequencyResponseProcessor):
+            columns.update(frequency_response_required_history_input_columns(config))
+    return frozenset(columns)
+
+
+def _validate_frequency_history_input_columns(
+    processors: list[_Processor],
+    schema: pl.Schema,
+    chunk_id: str,
+) -> None:
+    """Reject dependency-day schema gaps before a relaxed history union masks them."""
+
+    existing = set(schema.names())
+    failures: list[str] = []
+    for processor in processors:
+        config = processor.config
+        if not isinstance(config, model.FrequencyResponseProcessor):
+            continue
+        required = frequency_response_required_history_input_columns(config)
+        missing = sorted(required - existing)
+        if missing:
+            failures.append(f"{config.id}: missing {', '.join(missing)}")
+            continue
+        decision_dtype = schema[config.time.property]
+        if decision_dtype.base_type() != pl.Datetime:
+            failures.append(
+                f"{config.id}: {config.time.property} must be datetime, got {decision_dtype}"
+            )
+        rank_dtype = schema[config.columns.rank]
+        if not rank_dtype.is_integer():
+            failures.append(f"{config.id}: {config.columns.rank} must be integer, got {rank_dtype}")
+    if failures:
+        raise ValueError(
+            f"frequency-response history chunk {chunk_id!r} has invalid input schema: "
+            + "; ".join(failures)
+        )
 
 
 def _configured_state_source_columns(config: model.Processor) -> set[str]:
@@ -971,7 +1609,7 @@ def _score_state_source_column(spec: model.StateSpec) -> str:
     source_column = getattr(spec, "source_column", None)
     if not source_column:
         raise ValueError("score digest state requires source_column")
-    return source_column
+    return str(source_column)
 
 
 def _elapsed_ms(started: float) -> float:

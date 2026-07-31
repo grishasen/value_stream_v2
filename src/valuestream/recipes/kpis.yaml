@@ -744,3 +744,320 @@ recipes:
       algorithm: Apache DataSketches frequent-items sketch.
       caveat: Error guarantees depend on the configured mode and sketch capacity.
     report: { chart: table, placement: content }
+
+  - id: contact_policy.frequency_marginal_ctr
+    version: 1
+    title: Frequency marginal CTR
+    domain: Contact policy
+    summary: Observed focal click rate by an upstream fixed-window exposure bucket.
+    business_questions:
+      - How does focal response change as repeated-contact frequency increases?
+    tags: [ contact-policy, frequency, ctr, exposure, approximation ]
+    maturity: reviewed
+    processor_kinds: [ frequency_response ]
+    inputs:
+      - role: clicks
+        label: Focal click count
+        description: Exact frequency-response state containing focal clicks.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Clicks ]
+        selection: automatic
+        require_preferred: true
+      - role: contacts
+        label: Focal contact count
+        description: Exact frequency-response state containing all focal contact proxies.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Contacts ]
+        selection: automatic
+        require_preferred: true
+        different_from: clicks
+    default_metric_id: VS_Frequency_Marginal_CTR
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      description: Focal clicks divided by focal Impression-proxy contacts.
+      display:
+        label: Frequency marginal CTR
+        unit: percent
+        value_format: percent
+        direction: higher_is_better
+      expression:
+        op: safe_div
+        num: { col: "${clicks}" }
+        den: { col: "${contacts}" }
+    method:
+      calculation: Clicks / Contacts
+      accuracy: approximate
+      algorithm: Safe division over mergeable fixed-window frequency-response counts.
+      caveat: This all-contact rate is not directly comparable with a runner expectation unless their populations match. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+    report: { chart: line, placement: content, x: ExposureBucket }
+
+  - id: contact_policy.frequency_comparable_ctr
+    version: 1
+    title: Comparable focal CTR
+    domain: Contact policy
+    summary: Observed focal click rate on contacts that have a comparable recorded runner-up.
+    business_questions:
+      - What is the focal response rate on the same eligible population used for runner comparison?
+    tags: [ contact-policy, frequency, ctr, comparable-population, approximation ]
+    maturity: reviewed
+    processor_kinds: [ frequency_response ]
+    inputs:
+      - role: comparable_clicks
+        label: Comparable focal click count
+        description: Exact focal-click count restricted to the runner-comparable population.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ ComparableClicks ]
+        selection: automatic
+        require_preferred: true
+      - role: comparable_contacts
+        label: Comparable focal contact count
+        description: Exact focal-contact count with a recorded comparable runner propensity.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ ComparableContacts ]
+        selection: automatic
+        require_preferred: true
+        different_from: comparable_clicks
+    default_metric_id: VS_Frequency_Comparable_CTR
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      description: Comparable focal clicks divided by the same comparable contact population.
+      display:
+        label: Comparable focal CTR
+        unit: percent
+        value_format: percent
+        direction: higher_is_better
+      expression:
+        op: safe_div
+        num: { col: "${comparable_clicks}" }
+        den: { col: "${comparable_contacts}" }
+    method:
+      calculation: ComparableClicks / ComparableContacts
+      accuracy: approximate
+      algorithm: Safe division over matched, mergeable frequency-response counts.
+      caveat: ComparableClicks and every runner comparison must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+    report: { chart: line, placement: content, x: ExposureBucket }
+
+  - id: contact_policy.runner_up_expected_ctr
+    version: 1
+    title: Runner-up expected CTR
+    domain: Contact policy
+    summary: Mean raw response Propensity of the selected runner-up on comparable contacts.
+    business_questions:
+      - What response probability did the recorded runner-up carry at each exposure bucket?
+    tags: [ contact-policy, frequency, runner-up, propensity, approximation ]
+    maturity: reviewed
+    processor_kinds: [ frequency_response ]
+    inputs:
+      - role: runner_propensity_sum
+        label: Runner raw-Propensity sum
+        description: Exact sum of selected runner raw Propensity over comparable contacts.
+        source: state
+        state_types: [ value_sum ]
+        preferred_names: [ RunnerPropensitySum ]
+        selection: automatic
+        require_preferred: true
+      - role: comparable_contacts
+        label: Comparable focal contact count
+        description: Exact denominator shared with the comparable focal response rate.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ ComparableContacts ]
+        selection: automatic
+        require_preferred: true
+    default_metric_id: VS_Runner_Up_Expected_CTR
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      description: Runner raw-Propensity sum divided by comparable focal contacts.
+      display:
+        label: Runner-up expected CTR
+        unit: percent
+        value_format: percent
+        direction: neutral
+      expression:
+        op: safe_div
+        num: { col: "${runner_propensity_sum}" }
+        den: { col: "${comparable_contacts}" }
+    method:
+      calculation: RunnerPropensitySum / ComparableContacts
+      accuracy: approximate
+      algorithm: Safe division over a mergeable raw-Propensity sum and its matched count.
+      caveat: RunnerPropensitySum and the comparable focal rate must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+    report: { chart: line, placement: content, x: ExposureBucket }
+
+  - id: contact_policy.runner_up_coverage
+    version: 1
+    title: Runner-up coverage
+    domain: Contact policy
+    summary: Share of focal contacts with a comparable recorded runner-up propensity.
+    business_questions:
+      - How much of the focal contact population supports a runner comparison?
+    tags: [ contact-policy, frequency, runner-up, coverage, approximation ]
+    maturity: reviewed
+    processor_kinds: [ frequency_response ]
+    inputs:
+      - role: comparable_contacts
+        label: Comparable focal contact count
+        description: Exact count of focal contacts with a comparable runner propensity.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ ComparableContacts ]
+        selection: automatic
+        require_preferred: true
+      - role: contacts
+        label: Focal contact count
+        description: Exact count of all focal Impression-proxy contacts.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Contacts ]
+        selection: automatic
+        require_preferred: true
+        different_from: comparable_contacts
+    default_metric_id: VS_Runner_Up_Coverage
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      description: Comparable focal contacts divided by all focal contact proxies.
+      display:
+        label: Runner-up coverage
+        unit: percent
+        value_format: percent
+        direction: higher_is_better
+      expression:
+        op: safe_div
+        num: { col: "${comparable_contacts}" }
+        den: { col: "${contacts}" }
+    method:
+      calculation: ComparableContacts / Contacts
+      accuracy: approximate
+      algorithm: Safe division over mergeable comparable and all-contact counts.
+      caveat: ComparableContacts must be a subset of Contacts, and comparable focal and runner response metrics must retain that same eligible denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+    report: { chart: kpi_card, placement: kpi_strip }
+
+  - id: contact_policy.response_opportunity_margin
+    version: 1
+    title: Response opportunity margin
+    domain: Contact policy
+    summary: Comparable focal click contribution minus runner raw response expectation.
+    business_questions:
+      - At which exposure bucket does the repeated focal action trail the recorded alternative?
+    tags: [ contact-policy, frequency, opportunity-cost, propensity, approximation ]
+    maturity: reviewed
+    processor_kinds: [ frequency_response ]
+    inputs:
+      - role: comparable_clicks
+        label: Comparable focal click count
+        description: Exact focal-click count restricted to runner-comparable contacts.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ ComparableClicks ]
+        selection: automatic
+        require_preferred: true
+      - role: runner_propensity_sum
+        label: Runner raw-Propensity sum
+        description: Exact sum of selected runner raw Propensity on the same contacts.
+        source: state
+        state_types: [ value_sum ]
+        preferred_names: [ RunnerPropensitySum ]
+        selection: automatic
+        require_preferred: true
+      - role: comparable_contacts
+        label: Comparable focal contact count
+        description: Exact denominator shared by both response contributions.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ ComparableContacts ]
+        selection: automatic
+        require_preferred: true
+        different_from: comparable_clicks
+    default_metric_id: VS_Response_Opportunity_Margin
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      description: Comparable focal clicks minus runner raw-Propensity sum, divided by comparable contacts.
+      display:
+        label: Response opportunity margin
+        unit: percent
+        value_format: percent
+        direction: higher_is_better
+      expression:
+        op: safe_div
+        num:
+          op: sub
+          args:
+            - { col: "${comparable_clicks}" }
+            - { col: "${runner_propensity_sum}" }
+        den: { col: "${comparable_contacts}" }
+    method:
+      calculation: (ComparableClicks - RunnerPropensitySum) / ComparableContacts
+      accuracy: approximate
+      algorithm: Difference of matched response contributions over one mergeable denominator.
+      caveat: ComparableClicks and RunnerPropensitySum must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+    report: { chart: bar, placement: content, x: ExposureBucket }
+
+  - id: contact_policy.priority_opportunity_gap
+    version: 1
+    title: Priority opportunity gap
+    domain: Contact policy
+    summary: Mean focal-minus-runner arbitration Priority contribution on comparable contacts.
+    business_questions:
+      - Does the focal action retain an arbitration advantage after repeated contact?
+    tags: [ contact-policy, frequency, priority, arbitration, approximation ]
+    maturity: reviewed
+    processor_kinds: [ frequency_response ]
+    inputs:
+      - role: focal_priority_comparable_sum
+        label: Comparable focal Priority sum
+        description: Exact focal Priority contribution on the priority-comparable population.
+        source: state
+        state_types: [ value_sum ]
+        preferred_names: [ FocalPriorityComparableSum ]
+        selection: automatic
+        require_preferred: true
+      - role: runner_priority_comparable_sum
+        label: Comparable runner Priority sum
+        description: Exact selected-runner Priority sum on the same population.
+        source: state
+        state_types: [ value_sum ]
+        preferred_names: [ RunnerPriorityComparableSum ]
+        selection: automatic
+        require_preferred: true
+        different_from: focal_priority_comparable_sum
+      - role: priority_comparable_contacts
+        label: Priority-comparable contact count
+        description: Exact denominator shared by both comparable Priority sums.
+        source: state
+        state_types: [ count ]
+        preferred_names: [ PriorityComparableContacts ]
+        selection: automatic
+        require_preferred: true
+    default_metric_id: VS_Priority_Opportunity_Gap
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      description: Comparable focal Priority minus runner Priority, averaged per comparable contact.
+      display:
+        label: Priority opportunity gap
+        unit: index
+        value_format: number
+        direction: neutral
+      expression:
+        op: safe_div
+        num:
+          op: sub
+          args:
+            - { col: "${focal_priority_comparable_sum}" }
+            - { col: "${runner_priority_comparable_sum}" }
+        den: { col: "${priority_comparable_contacts}" }
+    method:
+      calculation: (FocalPriorityComparableSum - RunnerPriorityComparableSum) / PriorityComparableContacts
+      accuracy: approximate
+      algorithm: Difference of matched arbitration sums over one mergeable denominator.
+      caveat: FocalPriorityComparableSum and RunnerPriorityComparableSum must use the same PriorityComparableContacts denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+    report: { chart: bar, placement: content, x: ExposureBucket }

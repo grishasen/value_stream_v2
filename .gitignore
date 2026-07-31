@@ -39,6 +39,7 @@ docs/.obsidian/workspace.json
 # Project transient
 *.duckdb
 *.duckdb.wal
+.valuestream/
 
 # R cruft (the original directory had .Rhistory; keep it ignored going forward)
 .Rhistory

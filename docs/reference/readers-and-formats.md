@@ -96,6 +96,12 @@ covers sorted absolute paths, nanosecond mtimes, and sizes. Unchanged inputs are
 skipped; changed files or behavior are reprocessed without invalidating the
 previous successful aggregate until the new run commits.
 
+For a bounded-lookback target, `file_hash` covers the complete raw dependency
+closure, not only the target files. This remains true when a processor uses a
+persistent checkpoint: the checkpoint is an acceleration artifact keyed by the
+per-chunk raw fingerprint, never the source of the idempotency decision or a
+successful ledger marker.
+
 ### 2.4 Chunk granularity
 
 - **Daily file groups** are the recommended default for IH-shaped sources. The regex `\d{8}(?=\d{6}_)` captures `YYYYMMDD` from filenames like `interaction-XYZ-20240821000000_001.json.zip`.
@@ -425,11 +431,26 @@ fan-out, and processor output frames are released one at a time after their
 aggregate files are written. The allocator may retain released pages for later
 chunks, so process RSS need not fall immediately.
 
+A bounded processor adds one of two memory profiles. `source_scan` owns the
+target plus its declared dependency closure for that calculation. A
+`persistent_sharded` frequency processor transforms a source chunk once to
+build a checkpoint through a partitioned streaming sink, then reads only one
+customer shard across the target and bounded history at a time. Increasing
+`checkpoint.shards` reduces per-shard working data at the cost of more files.
+The checkpoint is processor state rather than a reader cache: it is
+source-fingerprint-addressed, has bounded daily retention, and is always
+rebuildable from the source files.
+
 There is currently no automatic RSS threshold, processing pause, or spill of a
 materialized chunk to temporary Parquet. If a transformed chunk does not fit,
 reduce the chunk grouping interval and run with lower chunk-process parallelism.
 Use the ingestion benchmark to measure peak RSS for the actual source and
 processor catalog.
+
+Hash sharding is not anonymization. Persistent state may contain the original
+customer key needed for exact grouping; apply the controls in
+[Security](../guides/operations/security.md) and upstream tokenization/HMAC as
+required.
 
 ---
 
