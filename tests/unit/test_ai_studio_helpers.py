@@ -1496,11 +1496,13 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
     assert "Metric kind dictionary:" in prompt
     assert "Chart required-field dictionary:" in prompt
     assert "Expression AST dictionary:" in prompt
+    assert "Analytics opportunity playbook:" in prompt
     assert "Approved field role dictionary:" in prompt
     assert "optional chat_with_data" in prompt
     assert "chat_with_data.agent_prompt" in prompt
     assert "distribution:" in prompt
     assert "quantile:" in prompt
+    assert "topk_items:" in prompt
     assert "allowed_tests:" in prompt
     assert "safe_dimension_candidates:" in prompt
     assert "- Channel" in prompt
@@ -1519,11 +1521,58 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
         "and business requirements."
     ) in prompt
     assert "Do not stop after a minimal baseline" in prompt
+    assert "Evaluate every analytics opportunity bundle" in prompt
+    assert "Never subtract or date-diff String fields" in prompt
     assert "Maximize useful processor coverage while keeping the catalog coherent" in prompt
     assert "Prefer a small useful set over a large speculative catalog" not in prompt
     assert "Every report/dashboard tile metric exists in metrics." in prompt
     assert "Output valid YAML only." in prompt
     assert "Return valid YAML only. Do not wrap the answer in prose or Markdown fences." in prompt
+
+
+@pytest.mark.unit
+def test_analytics_opportunity_playbook_covers_fat_workspace_patterns() -> None:
+    from typing import get_args  # noqa: PLC0415 - test-only introspection
+
+    dictionaries = ai_studio.catalog_prompt_dictionaries()
+    playbook = dictionaries["analytics_opportunities"]
+
+    preprocessing = playbook["preprocessing_opportunities"]
+    bundles = playbook["processor_metric_bundles"]
+    reports = playbook["report_opportunities"]
+
+    assert {
+        "source_plan_readiness",
+        "defaults",
+        "dataset_filters",
+        "calculated_fields",
+        "datetime_safety",
+    } <= set(preprocessing)
+    assert {
+        "engagement_or_conversion",
+        "descriptive_or_latency",
+        "model_quality",
+        "business_experiment",
+        "audience_or_reach",
+        "journey_funnel",
+    } <= set(bundles)
+    assert {
+        "executive_overview",
+        "engagement_and_conversion",
+        "descriptive_and_latency",
+        "model_quality",
+        "experiments",
+        "audience_and_funnel",
+    } <= set(reports)
+    assert "Never subtract String fields" in " ".join(preprocessing["datetime_safety"])
+    assert dictionaries["metric_kinds"]["topk_items"]["state_type"] == "topk"
+    metric_union = get_args(model.Metric)[0]
+    supported_metric_kinds = {
+        kind
+        for metric_model in get_args(metric_union)
+        for kind in get_args(metric_model.model_fields["kind"].annotation)
+    }
+    assert set(dictionaries["metric_kinds"]) == supported_metric_kinds
 
 
 @pytest.mark.unit
@@ -2887,6 +2936,83 @@ def test_deterministic_demo_timestamp_plan_preprocesses_without_error() -> None:
     assert error is None
     assert working.schema["OutcomeTime"] == pl.Datetime(time_zone="UTC")
     assert {"Day", "Month", "Quarter", "Year"} <= set(working.columns)
+
+
+@pytest.mark.unit
+def test_working_sample_recovers_timestamp_format_from_sample_plan() -> None:
+    st.session_state.clear()
+    st.session_state["ai_studio_defaults"] = []
+    st.session_state["ai_studio_filter_mode"] = "Rules"
+    st.session_state["ai_studio_filter_rows"] = []
+    st.session_state["ai_studio_calculations"] = []
+    st.session_state["ai_studio_timestamp_format"] = ""
+    st.session_state["ai_studio_sample_source_plan"] = ai_config_studio_page.SampleSourcePlan(
+        "Parquet",
+        "sample",
+        "parquet",
+        "data/studio",
+        "**/*.parquet",
+        timestamp_format="%Y%m%dT%H%M%S%.3f %Z",
+    )
+    sample = pl.DataFrame(
+        {
+            "OutcomeTime": ["20260522T091752.763 GMT"],
+            "DecisionTime": ["20260522T091751.200 GMT"],
+        }
+    )
+
+    working, error = _working_sample(sample)
+
+    assert error is None
+    assert st.session_state["ai_studio_timestamp_format"] == "%Y%m%dT%H%M%S%.3f %Z"
+    assert working.schema["OutcomeTime"].is_temporal()
+    assert working.schema["DecisionTime"].is_temporal()
+    assert working.schema["ResponseTime"] == pl.Int64
+
+
+@pytest.mark.unit
+def test_working_sample_reports_missing_timestamp_format_before_polars_subtraction() -> None:
+    st.session_state.clear()
+    st.session_state["ai_studio_defaults"] = []
+    st.session_state["ai_studio_filter_mode"] = "Rules"
+    st.session_state["ai_studio_filter_rows"] = []
+    st.session_state["ai_studio_calculations"] = []
+    st.session_state["ai_studio_timestamp_format"] = ""
+    sample = pl.DataFrame(
+        {
+            "OutcomeTime": ["2026-05-22T09:17:52Z"],
+            "DecisionTime": ["2026-05-22T09:17:51Z"],
+        }
+    )
+
+    _working, error = _working_sample(sample)
+
+    assert error is not None
+    assert "Set Timestamp Format" in error
+    assert "sub operation not supported" not in error
+
+
+@pytest.mark.unit
+def test_working_sample_reports_timestamp_values_that_do_not_match_format() -> None:
+    st.session_state.clear()
+    st.session_state["ai_studio_defaults"] = []
+    st.session_state["ai_studio_filter_mode"] = "Rules"
+    st.session_state["ai_studio_filter_rows"] = []
+    st.session_state["ai_studio_calculations"] = []
+    st.session_state["ai_studio_timestamp_format"] = "%Y-%m-%d"
+    sample = pl.DataFrame(
+        {
+            "OutcomeTime": ["not-a-date"],
+            "DecisionTime": ["also-not-a-date"],
+        }
+    )
+
+    _working, error = _working_sample(sample)
+
+    assert error is not None
+    assert "could not parse sample values" in error
+    assert "OutcomeTime: 1" in error
+    assert "DecisionTime: 1" in error
 
 
 @pytest.mark.unit

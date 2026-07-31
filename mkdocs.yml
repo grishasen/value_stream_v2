@@ -102,6 +102,8 @@ nav:
           - 0002 YAML catalog: concepts/adr/0002-yaml-catalog-as-source-of-behavior.md
           - 0003 Closed expression AST: concepts/adr/0003-closed-expression-ast.md
           - 0004 Chunk-ledger idempotency: concepts/adr/0004-chunk-ledger-idempotency.md
+          - 0005 Unified metric-owned heatmaps: concepts/adr/0005-unified-metric-owned-heatmaps.md
+          - 0006 Strict catalog v2: concepts/adr/0006-strict-catalog-v2.md
           - 0007 Bounded lookback processors: concepts/adr/0007-bounded-lookback-processors.md
   - Reference:
       - CLI: reference/cli.md

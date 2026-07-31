@@ -196,6 +196,7 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
             "formula",
             "variant_compare",
             "contingency_test",
+            "proportion_test",
             "approx_distinct_count",
         ],
     },
@@ -243,13 +244,13 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
     },
     "entity_set": {
         "purpose": "unique reach, audience overlap, cohorts, retention, and set algebra",
-        "key_fields": ["states with cpc, hll, or theta source_column"],
-        "compatible_metrics": ["set_op", "approx_distinct_count", "formula"],
+        "key_fields": ["states with cpc, hll, theta, or topk source_column"],
+        "compatible_metrics": ["set_op", "approx_distinct_count", "topk_items", "formula"],
     },
     "funnel": {
         "purpose": "ordered journey stages and stage-to-stage drop-off",
         "key_fields": ["stages: [{name, when}] where when is a Boolean expression AST"],
-        "compatible_metrics": ["funnel_dropoff", "formula"],
+        "compatible_metrics": ["funnel_dropoff", "approx_distinct_count", "formula"],
     },
     "snapshot": {
         "purpose": "periodic or accumulating status snapshots",
@@ -268,6 +269,17 @@ _METRIC_KIND_DICTIONARY: dict[str, Any] = {
         "requires": ["state"],
         "state_type": "cpc, hll, or theta",
         "outputs": ["metric_id"],
+    },
+    "topk_items": {
+        "requires": ["state"],
+        "state_type": "topk",
+        "optional": {
+            "limit": "positive integer; default 10",
+            "error_type": "NO_FALSE_POSITIVES or NO_FALSE_NEGATIVES",
+        },
+        "outputs": [
+            "metric_id containing ranked item objects with item, estimate, lower_bound, and upper_bound"
+        ],
     },
     "distribution": {
         "requires": ["state"],
@@ -334,7 +346,8 @@ _METRIC_KIND_DICTIONARY: dict[str, Any] = {
         ],
     },
     "proportion_test": {
-        "requires": ["outputs optional"],
+        "requires": ["variant_column", "test_role", "control_role"],
+        "optional": ["outputs"],
         "processor_needs": ["Positives", "Negatives"],
         "outputs": ["metric_id"],
     },
@@ -596,6 +609,201 @@ _EXPRESSION_AST_DICTIONARY: dict[str, Any] = {
     },
 }
 
+_ANALYTICS_OPPORTUNITY_DICTIONARY: dict[str, Any] = {
+    "selection_contract": [
+        "Treat these patterns as a capability menu, not a checklist or a template to copy.",
+        "Match requirements to approved field roles, effective dtypes, and the current source plan.",
+        "Offer only bundles whose required roles are present; ask a focused question when role "
+        "values such as positive/negative outcomes, stage order, or experiment roles are ambiguous.",
+        "Never invent an input field, copy example field names, or group by high-cardinality "
+        "entity, interaction, timestamp, or free-text fields.",
+        "For each selected bundle, keep preprocessing, processor states, metrics, and report "
+        "tiles dependency-complete. Omit unsupported layers instead of emitting placeholders.",
+    ],
+    "preprocessing_opportunities": {
+        "source_plan_readiness": {
+            "offer": [
+                "schema aliases or rename/capitalization normalization",
+                "dtype-compatible defaults for missing semantic fields",
+                "timestamp parsing before calendar or elapsed-time calculations",
+                "numeric casts before arithmetic, value sums, score analysis, or distributions",
+                "calendar derivation from a verified temporal field",
+                "dataset-level validity and scope filters before processor fan-out",
+                "deduplication only when stable natural-key roles and intended semantics are known",
+            ],
+            "operation_boundary": (
+                "Copilot may mutate only preprocessing actions listed in operation_dictionary. "
+                "For source-plan parsing, casting, calendar, rename, or dedup work that has no "
+                "listed operation, explain the required Studio/source-plan action instead of "
+                "inventing an operation."
+            ),
+        },
+        "defaults": {
+            "use_for": "known fields whose missing values have a business-approved scalar meaning",
+            "guard": "value must match the effective field dtype; never guess a business default",
+        },
+        "dataset_filters": {
+            "use_for": [
+                "valid event/outcome populations",
+                "approved channel, product, model, or business scope",
+                "removal of unusable nulls before a dependent bundle",
+            ],
+            "guard": "preserve all rows needed by every selected downstream outcome, stage, and variant",
+        },
+        "calculated_fields": [
+            {
+                "pattern": "composite business key",
+                "examples": "combine approved action, issue, group, name, product, or treatment roles",
+                "expression": "concat after explicit casts where needed",
+            },
+            {
+                "pattern": "deterministic segment or placement",
+                "examples": "case expression from approved low-cardinality business rules",
+                "expression": "case or when_then",
+            },
+            {
+                "pattern": "event value marker",
+                "examples": "assign a confirmed value only for a qualifying event",
+                "expression": "case plus a numeric literal or approved numeric value field",
+            },
+            {
+                "pattern": "response or conversion latency",
+                "requires": "verified temporal start and end roles",
+                "expression": "date_diff with the requested unit",
+            },
+            {
+                "pattern": "score diagnostics",
+                "requires": "approved numeric score roles",
+                "examples": "score bucket, score delta, variance/evidence term, or exploration magnitude",
+                "expression": "case, sub, mul, abs, log, or safe_div as appropriate",
+            },
+            {
+                "pattern": "age or recency",
+                "requires": "verified temporal reference and event roles",
+                "expression": "date_diff, optionally bounded with least/greatest",
+            },
+        ],
+        "datetime_safety": [
+            "A timestamp-like name does not make a String column temporal.",
+            "Before date_diff, date_trunc, date_part, or strftime, verify temporal dtypes in the "
+            "approved schema or a preceding parse_datetime transform in the current source plan.",
+            "Never subtract String fields. If a reusable source timestamp is String, prefer a "
+            "preceding parse_datetime transform with a confirmed format; inside one calculated "
+            "expression, strptime is valid only when that format is confirmed.",
+            "If temporal typing is not ready, offer the preprocessing correction first and do not "
+            "create dependent latency processors, metrics, or reports.",
+        ],
+    },
+    "processor_metric_bundles": {
+        "engagement_or_conversion": {
+            "requires": "binary event/outcome role with confirmed positive and negative values",
+            "processor": "binary_outcome with Count, Positives, Negatives",
+            "optional_states": [
+                "value_sum for an approved numeric business-value role",
+                "filtered count states for meaningful event subsets",
+                "cpc/hll/theta states for approved stable entity or action roles",
+            ],
+            "metrics": [
+                "volume and positive/negative counts",
+                "rate via safe_div",
+                "value total and value-per-event/entity formulas",
+                "approximate distinct reach",
+            ],
+        },
+        "descriptive_or_latency": {
+            "requires": "approved numeric properties or a date-safe derived latency/age property",
+            "processor": (
+                "numeric_distribution with explicit count, value_sum, pooled_mean, "
+                "pooled_variance, min, max, and tdigest/kll states as needed"
+            ),
+            "metrics": ["distribution", "quantile", "mean/variance formulas"],
+        },
+        "model_quality": {
+            "requires": "approved numeric score role plus binary outcome role",
+            "processor": (
+                "score_distribution with Count and positive/negative outcome-conditioned "
+                "tdigest states for every evaluated score"
+            ),
+            "optional_states": "pooled_mean personalization or novelty recipes only when their inputs exist",
+            "metrics": [
+                "ROC AUC and ROC curve",
+                "average precision and precision-recall curve",
+                "calibration",
+                "score distributions and quantiles",
+            ],
+        },
+        "business_experiment": {
+            "requires": "binary outcome role plus variant role and confirmed test/control values",
+            "processor": (
+                "binary_outcome with variant_column; never duplicate variant_column in group_by"
+            ),
+            "metrics": [
+                "variant_compare with rate difference, lift, confidence intervals, z score, and p value",
+                "proportion_test",
+                "contingency_test when requested",
+            ],
+        },
+        "audience_or_reach": {
+            "requires": "approved stable entity or item role; keep it out of group_by",
+            "processor": "entity_set with cpc/hll/theta and optional filtered theta/topk states",
+            "metrics": [
+                "approx_distinct_count",
+                "set_op union/intersection/minus only across compatible theta states",
+                "topk_items for a declared topk state",
+                "reach/frequency formulas when their states exist",
+            ],
+        },
+        "journey_funnel": {
+            "requires": "ordered stage values with confirmed business order",
+            "processor": (
+                "funnel with Boolean stage expressions, stage count states, and optional "
+                "stage-specific entity sketches"
+            ),
+            "metrics": ["stage volumes", "stage rates", "funnel_dropoff count or rate"],
+        },
+        "entity_lifecycle": {
+            "requires": "entity, transaction, monetary, purchase-date, and optional holding roles",
+            "processor": "entity_lifecycle with every required lifecycle state",
+            "metrics": ["lifecycle_summary", "approximate entities", "RFM/CLV formulas"],
+        },
+    },
+    "report_opportunities": {
+        "executive_overview": [
+            "scalar KPI cards only in kpi_strip",
+            "time trends for primary rates, counts, values, or reach",
+            "low-cardinality breakdown bars or tables",
+        ],
+        "engagement_and_conversion": [
+            "rate/count/value KPI cards",
+            "trend and business-dimension breakdown pages",
+            "reach/frequency or product/action mix when matching metrics exist",
+        ],
+        "descriptive_and_latency": [
+            "distribution, histogram, boxplot, and quantile views",
+            "latency KPI and trend/breakdown views",
+        ],
+        "model_quality": [
+            "ROC, precision-recall, gain, lift, and calibration charts",
+            "score distribution and model comparison views",
+        ],
+        "experiments": [
+            "test/control KPI comparison",
+            "interval, odds-ratio, z-score, and evidence tables",
+        ],
+        "audience_and_funnel": [
+            "distinct reach and overlap KPIs/tables",
+            "top-k table or mix chart",
+            "funnel plus stage/drop-off trends",
+        ],
+        "authoring_rules": [
+            "Choose charts by metric output shape using chart_required_fields.",
+            "Use time and approved low-cardinality dimensions for axes, facets, and page filters.",
+            "Create coherent pages rather than one page per metric, and avoid duplicate KPI/trend tiles.",
+            "Do not author a report tile until its metric and every required chart field exist.",
+        ],
+    },
+}
+
 
 def catalog_prompt_dictionaries() -> dict[str, Any]:
     """Return the shared catalog dictionaries embedded in AI prompts."""
@@ -607,6 +815,7 @@ def catalog_prompt_dictionaries() -> dict[str, Any]:
         "metric_kinds": _METRIC_KIND_DICTIONARY,
         "chart_required_fields": _CHART_REQUIRED_FIELD_DICTIONARY,
         "expression_ast": _EXPRESSION_AST_DICTIONARY,
+        "analytics_opportunities": _ANALYTICS_OPPORTUNITY_DICTIONARY,
     }
 
 
@@ -950,6 +1159,12 @@ def prompt_for_config_draft(
             "Keep source definitions from pipelines.yaml unchanged.",
             "You may replace processors, metrics, and dashboards.",
             "You may add chat_with_data.agent_prompt and chat_with_data metric/dataset descriptions for Chat With Data guidance.",
+            "Evaluate every analytics opportunity bundle against the approved field roles, "
+            "effective dtypes, business requirements, and current source plan. For each supported "
+            "bundle, create coherent processor, metric, and report coverage.",
+            "This task preserves pipelines: use preprocessing that already exists in the current "
+            "source plan, and never invent a missing transform or derived field. Step-aware "
+            "Copilot can offer required preprocessing separately.",
             "Use only approved fields as source dimensions, filters, chart axes, or tile settings.",
             "Every metric.processor must reference a processor id in processors.yaml.",
             "Every dashboard tile.metric must reference a metric id in metrics.yaml.",
@@ -988,6 +1203,8 @@ def prompt_for_report_refresh(
             "Do not change pipelines, processors, or metrics.",
             "Every tile.metric must reference an existing metric id from the current draft.",
             "Choose chart kinds compatible with the metric outputs and processor dimensions.",
+            "Use the report opportunities as page-level coverage patterns, selecting only "
+            "patterns supported by existing metrics and avoiding duplicate KPI or trend tiles.",
             "Use only approved fields or known metric output columns in tile settings.",
             "Use kpi_strip only with scalar kpi_card tiles and configure comparison or target behavior explicitly.",
             "Preserve or author page filters and time_filter presets from aggregate-backed dimensions.",
@@ -2020,6 +2237,8 @@ def _catalog_prompt(
         f"{yaml.safe_dump(_CHART_REQUIRED_FIELD_DICTIONARY, sort_keys=False)}\n"
         "Expression AST dictionary:\n"
         f"{yaml.safe_dump(_EXPRESSION_AST_DICTIONARY, sort_keys=False)}\n"
+        "Analytics opportunity playbook:\n"
+        f"{yaml.safe_dump(_ANALYTICS_OPPORTUNITY_DICTIONARY, sort_keys=False)}\n"
         "Approved field role dictionary:\n"
         f"{yaml.safe_dump(field_roles, sort_keys=False)}\n"
         f"Rules:\n{rules}\n\n"
@@ -2050,8 +2269,12 @@ def _approved_field_role_dictionary(
         "time_candidates": [],
         "numeric_property_candidates": [],
         "outcome_candidates": [],
+        "event_or_stage_candidates": [],
         "experiment_candidates": [],
         "score_candidates": [],
+        "entity_candidates": [],
+        "value_candidates": [],
+        "action_or_item_candidates": [],
         "clv_candidates": [],
         "avoid_for_group_by_or_filters": [],
     }
@@ -2074,6 +2297,37 @@ def _approved_field_role_dictionary(
             roles["experiment_candidates"].append(field)
         if _matches_any(normalized, ("score", "propensity", "probability", "prediction", "rank")):
             roles["score_candidates"].append(field)
+        if _is_numeric_dtype(dtype) and _matches_any(
+            normalized,
+            ("value", "revenue", "amount", "price", "cost", "sales", "monetary"),
+        ):
+            roles["value_candidates"].append(field)
+        for role, candidates in (
+            (
+                "event_or_stage_candidates",
+                ("outcome", "event", "stage", "status", "response", "conversion", "click"),
+            ),
+            (
+                "entity_candidates",
+                ("subject", "entity", "customer", "account", "visitor", "person", "user"),
+            ),
+            (
+                "action_or_item_candidates",
+                (
+                    "action",
+                    "issue",
+                    "group",
+                    "name",
+                    "treatment",
+                    "product",
+                    "content",
+                    "item",
+                    "offer",
+                ),
+            ),
+        ):
+            if _matches_any(normalized, candidates):
+                roles[role].append(field)
         if _matches_any(
             normalized,
             ("clv", "lifetime", "purchase", "holding", "monetary", "revenue", "customer"),
@@ -2151,6 +2405,9 @@ def _hard_output_rules() -> tuple[str, ...]:
         "Use group_by as the only processor grouping key; values must be approved fields.",
         "For time-based processors and dashboards, use available Day, Month, Quarter, and Year fields where relevant.",
         "Use processor time.property only when the timestamp field is approved or already present in the current draft.",
+        "A timestamp-like field name is not proof of a temporal dtype. Before using date_diff, "
+        "date_trunc, date_part, or strftime, verify temporal operands in the approved schema or "
+        "a preceding parse_datetime transform. Never subtract or date-diff String fields.",
         "Do not emit legacy TOML-only settings such as metrics.global_filters; this catalog has no metrics.global_filters.",
         "Keep filters, tile facets, and non-time processor group_by fields limited to safe low-cardinality business dimensions.",
         "Do not use hidden fields, IDs, raw timestamps, free text, or high-cardinality fields as filters or chart facets.",
@@ -2196,6 +2453,8 @@ def _self_check_rules() -> tuple[str, ...]:
         "measure roles come from metric or metric_output and are never authored as y/value/values/r.",
         "Every report/dashboard tile field exists in approved fields, time fields, or known metric output columns.",
         "No experiment, CLV, model-score, or descriptive object is present without the required approved fields.",
+        "Every temporal expression has temporal operands supplied by the approved schema, a "
+        "preceding parse_datetime transform, or an explicit strptime with a confirmed format.",
         "No legacy TOML-only keys are present.",
         "Output valid YAML only.",
     )

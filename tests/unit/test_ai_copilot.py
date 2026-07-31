@@ -2475,6 +2475,43 @@ def test_calculations_step_prompt_exposes_concat_and_complete_expression_dsl() -
     assert "concatenation:" in prompt
     assert "multi_branch_conditional:" in prompt
     assert "datetime_parse:" in prompt
+    assert "Never subtract String fields" in prompt
+    assert "response or conversion latency" in prompt
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("step", "expected_guidance"),
+    [
+        ("8. Processors", "offer every supported aggregate family"),
+        ("9. Metrics", "offer compatible metric families"),
+        ("10. AI Reports", "offer coherent page-level coverage"),
+    ],
+)
+def test_catalog_steps_offer_supported_analytics_bundles(step: str, expected_guidance: str) -> None:
+    prompt = prompt_for_copilot(
+        step=step,
+        user_message="What else can this workspace support?",
+        history=[],
+        user_goals="Improve engagement, model quality, and experiment reporting.",
+        approved_schema=[
+            {"column": "Channel", "dtype": "String", "unique": 3},
+            {"column": "Outcome", "dtype": "String", "unique": 4},
+            {"column": "Propensity", "dtype": "Float64", "unique": 500},
+            {"column": "Variant", "dtype": "String", "unique": 2},
+        ],
+        approved_fields=["Channel", "Outcome", "Propensity", "Variant"],
+        hidden_fields=[],
+        current_draft=_base_draft(),
+    )
+
+    assert "analytics_opportunities:" in prompt
+    assert expected_guidance in prompt
+    assert "two to four relevant, dependency-complete options" in prompt
+    assert "engagement_or_conversion:" in prompt
+    assert "model_quality:" in prompt
+    assert "business_experiment:" in prompt
+    assert "Do not return operations until the user selects" in prompt
 
 
 @pytest.mark.unit

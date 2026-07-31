@@ -182,7 +182,10 @@ _QUANTILE_RESULT_SUFFIXES = frozenset({"Median", "p25", "p75", "p90", "p95", "Mi
 
 OPERATION_DICTIONARY: dict[str, Any] = {
     "set_source_default": {
-        "purpose": "Add or replace one scalar default on an existing source.",
+        "purpose": (
+            "Add or replace one business-approved, dtype-compatible scalar default on an "
+            "existing source."
+        ),
         "shape": {
             "op": "set_source_default",
             "source": "existing source id",
@@ -218,7 +221,9 @@ OPERATION_DICTIONARY: dict[str, Any] = {
     "set_calculated_field": {
         "purpose": (
             "Add or replace one derive_column transform on an existing source. The complete "
-            "supported expression language is listed in catalog dictionaries > expression_ast."
+            "supported expression language is listed in catalog dictionaries > expression_ast. "
+            "Temporal operands must already be temporal or be parsed with strptime using a "
+            "confirmed format before date arithmetic."
         ),
         "shape": {
             "op": "set_calculated_field",
@@ -303,18 +308,35 @@ OPERATION_DICTIONARY: dict[str, Any] = {
 _STEP_HINTS: dict[str, str] = {
     "Sample": "The user is describing the source sample and runtime settings.",
     "Required Fields": "The user is mapping subject, outcome, and time columns.",
-    "Defaults": "The user is filling default values for missing source fields.",
-    "Filters": "The user is restricting which source rows are ingested.",
-    "Calculations": "The user is adding derived columns to the working schema.",
+    "Defaults": (
+        "The user is filling business-approved, dtype-compatible defaults for missing source fields."
+    ),
+    "Filters": (
+        "The user is restricting source rows while preserving every event needed downstream."
+    ),
+    "Calculations": (
+        "The user is adding schema-safe derived columns that can unlock aggregate analytics."
+    ),
     "Approve Fields": "The user decides which fields AI generation may use.",
     "AI Draft": "The user is generating the first full catalog draft.",
     "Draft": "The user is generating the first full catalog draft.",
     "Workspace Draft": "The user is reviewing the draft loaded from the workspace catalog.",
-    "Processors": "The user is reviewing processor definitions.",
-    "Metrics": "The user is reviewing metric definitions.",
-    "AI Reports": "The user is regenerating dashboards from the current metrics.",
-    "Reports": "The user is regenerating dashboards from the current metrics.",
-    "Reports Review": "The user is reviewing dashboard tiles.",
+    "Processors": (
+        "The user is reviewing aggregate processor definitions and their explicit persisted states."
+    ),
+    "Metrics": (
+        "The user is reviewing metric definitions: query-time measures backed by existing "
+        "processor states."
+    ),
+    "AI Reports": (
+        "The user is regenerating coherent dashboard pages from the current metric outputs."
+    ),
+    "Reports": (
+        "The user is regenerating coherent dashboard pages from the current metric outputs."
+    ),
+    "Reports Review": (
+        "The user is reviewing dashboard tiles, page filters, and output-shape-compatible charts."
+    ),
     "Chat": "The user is preparing Chat With Data descriptions.",
     "Settings": "The user is adjusting dashboard theme and layout settings.",
     "Save & Export": "The user is validating and applying the draft to the workspace.",
@@ -3722,6 +3744,11 @@ def prompt_for_copilot(
         "- questions: when the request is ambiguous, ask before guessing and offer two to "
         "four concrete options per question. Leave empty otherwise.\n"
         "- Never return operations and questions in the same response. Resolve questions first.\n"
+        "- When the user asks what is possible, what is missing, or what you recommend, use "
+        "catalog dictionaries > analytics_opportunities as a guarded capability menu. Offer "
+        "two to four relevant, dependency-complete options grounded in approved roles, effective "
+        "dtypes, business requirements, and the current draft. Do not return operations until "
+        "the user selects or concretely requests a change.\n"
         "- Use only approved input fields, existing source ids, existing processor ids, and "
         "existing metric ids in operations. A new default or calculated output field is allowed "
         "only when the user explicitly names or requests it. Calculated expressions may reference "
@@ -3757,12 +3784,16 @@ def _step_operation_rule(step: str) -> str:
     return {
         "Defaults": (
             "On this step, source default requests must use set_source_default or "
-            "remove_source_default; do not edit a processor."
+            "remove_source_default; do not edit a processor. Offer defaults only where a missing "
+            "value has a confirmed business meaning and the scalar matches the effective dtype; "
+            "never guess a semantic default."
         ),
         "Filters": (
             "On this step, dataset filter requests must use set_source_filter or "
             "remove_source_filter so the filter runs in the source pipeline before processor "
-            "fan-out; do not use set_processor for a dataset filter."
+            "fan-out; do not use set_processor for a dataset filter. Offer validity, null "
+            "readiness, and approved business-scope filters, but preserve every outcome, funnel "
+            "stage, and experiment role required by selected downstream bundles."
         ),
         "Calculations": (
             "On this step, calculated-field requests must use set_calculated_field or "
@@ -3770,7 +3801,46 @@ def _step_operation_rule(step: str) -> str:
             "dictionary is the complete supported DSL. Do not claim an operation is unavailable "
             "when it is listed there. For concatenation, emit an expression such as "
             '{"op":"concat","args":[{"col":"Issue"},{"col":"Group"}],"sep":"/"}; '
-            "do not emit a concat(...) function-call string."
+            "do not emit a concat(...) function-call string. Offer schema-supported composite "
+            "business keys, deterministic segments, event-value markers, latency/age measures, "
+            "and score buckets or diagnostics. Before date arithmetic, verify temporal dtypes or "
+            "a preceding parse_datetime transform. Never subtract String fields; when temporal "
+            "typing is not ready, explain the required source-plan correction first."
+        ),
+        "AI Draft": (
+            "Use analytics_opportunities to offer dependency-complete preprocessing, processor, "
+            "metric, and report bundles supported by approved roles and the current source plan."
+        ),
+        "Draft": (
+            "Use analytics_opportunities to offer dependency-complete preprocessing, processor, "
+            "metric, and report bundles supported by approved roles and the current source plan."
+        ),
+        "Processors": (
+            "Use analytics_opportunities.processor_metric_bundles to offer every supported "
+            "aggregate family: engagement/conversion, descriptive/latency, model quality, "
+            "experiments, audience/reach, funnel, or lifecycle. Each proposed processor must "
+            "declare the explicit states required by its intended metrics."
+        ),
+        "Metrics": (
+            "Use analytics_opportunities.processor_metric_bundles to offer compatible metric "
+            "families only when the current processor declares every required state. Include "
+            "rate/value/reach, distribution/quantile, model-quality, experiment, set/top-k, "
+            "funnel, or lifecycle measures when supported."
+        ),
+        "AI Reports": (
+            "Use analytics_opportunities.report_opportunities to offer coherent page-level "
+            "coverage from existing metrics. Match chart kind and required fields to each "
+            "metric output shape; avoid duplicate KPI and trend tiles."
+        ),
+        "Reports": (
+            "Use analytics_opportunities.report_opportunities to offer coherent page-level "
+            "coverage from existing metrics. Match chart kind and required fields to each "
+            "metric output shape; avoid duplicate KPI and trend tiles."
+        ),
+        "Reports Review": (
+            "Use analytics_opportunities.report_opportunities to identify useful missing views "
+            "from existing metrics. Match chart kind and required fields to each output shape "
+            "and preserve aggregate-backed filters."
         ),
     }.get(_step_name(step), "")
 
