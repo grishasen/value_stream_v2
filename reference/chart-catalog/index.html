@@ -1602,6 +1602,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3016,6 +3100,18 @@ synthetic 30-day ticks such as <code>Jul 31</code> or <code>Aug 30</code>.</p>
 <td>compatible scalar metric ID with the same kind and backing processor as <code>metric</code></td>
 </tr>
 <tr>
+<td><code>primary_mark</code></td>
+<td><code>bar</code> or <code>line</code></td>
+<td>combo</td>
+<td>primary metric mark; defaults to <code>bar</code></td>
+</tr>
+<tr>
+<td><code>shared_y_axis</code></td>
+<td>bool</td>
+<td>combo</td>
+<td>plot both scalar metrics against one Y axis when their units are directly comparable</td>
+</tr>
+<tr>
 <td><code>x_axis_title</code> / <code>y_axis_title</code></td>
 <td>str</td>
 <td>cartesian charts</td>
@@ -3585,7 +3681,7 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <tr>
 <td><code>combo</code></td>
 <td><code>x, secondary_metric</code>; Y comes from <code>metric</code></td>
-<td>Bar + line dual-axis comparison of two compatible scalar metrics; use <code>y2_axis_title</code> to override the secondary-axis label</td>
+<td>Bar + line dual-axis comparison by default. Set <code>primary_mark: line</code> and <code>shared_y_axis: true</code> for two directly comparable curves such as observed and expected response probability; use <code>y2_axis_title</code> only in dual-axis mode.</td>
 </tr>
 <tr>
 <td><code>interval</code></td>

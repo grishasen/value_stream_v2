@@ -1602,6 +1602,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3407,6 +3491,11 @@ workspace defaults, source behavior, and all bound processors. <code>file_hash</
 covers sorted absolute paths, nanosecond mtimes, and sizes. Unchanged inputs are
 skipped; changed files or behavior are reprocessed without invalidating the
 previous successful aggregate until the new run commits.</p>
+<p>For a bounded-lookback target, <code>file_hash</code> covers the complete raw dependency
+closure, not only the target files. This remains true when a processor uses a
+persistent checkpoint: the checkpoint is an acceleration artifact keyed by the
+per-chunk raw fingerprint, never the source of the idempotency decision or a
+successful ledger marker.</p>
 <h3 id="24-chunk-granularity">2.4 Chunk granularity<a class="headerlink" href="#24-chunk-granularity" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Daily file groups</strong> are the recommended default for IH-shaped sources. The regex <code>\d{8}(?=\d{6}_)</code> captures <code>YYYYMMDD</code> from filenames like <code>interaction-XYZ-20240821000000_001.json.zip</code>.</li>
@@ -3696,11 +3785,24 @@ streaming-native. The shared frame is released immediately after processor
 fan-out, and processor output frames are released one at a time after their
 aggregate files are written. The allocator may retain released pages for later
 chunks, so process RSS need not fall immediately.</p>
+<p>A bounded processor adds one of two memory profiles. <code>source_scan</code> owns the
+target plus its declared dependency closure for that calculation. A
+<code>persistent_sharded</code> frequency processor transforms a source chunk once to
+build a checkpoint through a partitioned streaming sink, then reads only one
+customer shard across the target and bounded history at a time. Increasing
+<code>checkpoint.shards</code> reduces per-shard working data at the cost of more files.
+The checkpoint is processor state rather than a reader cache: it is
+source-fingerprint-addressed, has bounded daily retention, and is always
+rebuildable from the source files.</p>
 <p>There is currently no automatic RSS threshold, processing pause, or spill of a
 materialized chunk to temporary Parquet. If a transformed chunk does not fit,
 reduce the chunk grouping interval and run with lower chunk-process parallelism.
 Use the ingestion benchmark to measure peak RSS for the actual source and
 processor catalog.</p>
+<p>Hash sharding is not anonymization. Persistent state may contain the original
+customer key needed for exact grouping; apply the controls in
+<a href="../../guides/operations/security/">Security</a> and upstream tokenization/HMAC as
+required.</p>
 <hr />
 <h2 id="11-logging">11. Logging<a class="headerlink" href="#11-logging" title="Permanent link">&para;</a></h2>
 <p>For each chunk, the reader emits structured log lines:</p>

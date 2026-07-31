@@ -1057,6 +1057,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#builder-equivalent-editors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Builder-equivalent editors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#describe-the-outcome" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1816,6 +1827,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adr/0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adr/0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adr/0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2427,6 +2522,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#builder-equivalent-editors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Builder-equivalent editors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#describe-the-outcome" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2687,6 +2793,55 @@ even when it remains inside the two-second safety ceiling.</p>
 An unknown column name cannot be typed into a source-field mapping. Defaults,
 filters, and calculated-field editors start empty; rows appear only after an
 explicit add action.</p>
+<h2 id="builder-equivalent-editors">Builder-equivalent editors<a class="headerlink" href="#builder-equivalent-editors" title="Permanent link">&para;</a></h2>
+<p>The Studio's editing surfaces reuse the Configuration Builder's editors, so
+authoring capability is equivalent in both tools:</p>
+<ul>
+<li><strong>Defaults</strong> offers the same field picker (observed columns plus mapped
+  aliases and calculated outputs), empty-state guidance, and enabled-by-default
+  rows. Authored default values always reach the generated source transforms,
+  with or without the Rename / Capitalize transform.</li>
+<li><strong>Filters</strong> supports rule rows with stable <code>E1..En</code> references, <strong>Basic</strong>
+  logic (AND/OR combine) and <strong>Advanced</strong> logic formulas such as
+  <code>E1 AND (E2 OR E3)</code>, plus an editable <strong>Filter AST YAML</strong> area in Raw AST
+  mode. A draft filter that decompiles to rows — including OR/NOT and nested
+  logic — stays editable as rules; only row-unmappable predicates fall back to
+  the raw editor. The Basic/Advanced logic state persists in the Studio
+  checkpoint together with the rows.</li>
+<li><strong>Calculations</strong> uses the Builder's focused expression editor: per-row
+  validation with friendly messages, an explicit <strong>Apply expression</strong> commit
+  with preserved working drafts, the visual case/when builder for AST YAML
+  rows, and the excluded-rows caption. An unapplied working expression is
+  reported as an Apply-readiness warning.</li>
+<li>The <strong>Processor Parameter Editor</strong> shows the kind guide, calendar dimensions
+  in Group By, Dedup Keys for kinds that consume them, and the full sketch
+  grid with <strong>Parameters YAML</strong> and <strong>Derived From</strong> columns, the <strong>Add
+  state</strong> popover (duplicate-name and parameter validation), and automatic
+  numeric-distribution state sync. The processor filter offers the same
+  Rules / Raw AST modes as the Builder; invalid states or filters disable the
+  draft update action instead of silently dropping rows.</li>
+<li>The <strong>Metric Parameter Editor</strong> leads with the metric label, shows the
+  kind definition, the read-only <strong>Outputs</strong> contract, and the plain-language
+  metric review. An incomplete kind form disables the draft update, and a
+  no-op update preserves the exact authored definition.</li>
+<li><strong>Reports Review</strong> includes the Builder-parity <strong>Report Tile Editor</strong>:
+  create, duplicate, edit, or delete one tile with Visual or Raw YAML modes,
+  the purpose-grouped chart library for new tiles, metric- and chart-aware
+  role selectors and chart settings, dashboard/page creation with layout and
+  page filters/time-range settings, staged tile deletion that keeps
+  containers, a <strong>Manage dashboards</strong> section for page/dashboard removal, and
+  the searchable report inventory. Every change is validated as a complete
+  report candidate before <strong>Update Report In Draft</strong> is enabled; the draft
+  revision then requires review again before Apply.</li>
+<li><strong>Chat Review</strong> edits the draft's Chat With Data guidance exactly like the
+  Builder: the agent prompt plus dataset, processor, and metric descriptions.
+  The guidance is stored in the draft's <code>chat_with_data</code> section, exported to
+  <code>ai.yaml</code>, and written on Apply; it is never part of the recovery
+  checkpoint.</li>
+<li><strong>Settings</strong> matches the Builder's workspace defaults: the grain options
+  include <code>Week</code>, grains already present in the draft remain selectable, and
+  the update action is gated on at least one grain and a parseable theme YAML.</li>
+</ul>
 <p>The <strong>Suggested Group-By Fields</strong> profile treats source-provided <code>Day</code>, <code>Month</code>,
 <code>Quarter</code>, and <code>Year</code> fields as explicit recommended calendar granularities,
 even when those fields are required source mappings. When the draft will derive
@@ -2698,6 +2853,14 @@ low-cardinality business dimensions.</p>
 draft adds a <code>ResponseTime</code> calculation in seconds only if neither the effective
 sample schema nor an enabled user calculation already defines that output. A
 user-authored <code>ResponseTime</code> expression always wins.</p>
+<p>Before calendar or <code>ResponseTime</code> preview expressions run, Studio ensures the
+mapped time fields are temporal. If session state loses a format that the
+selected sample's source plan already inferred, Studio restores that format
+and persists it into the draft's preceding <code>parse_datetime</code> transform. If the
+format is genuinely unknown, or configured sample values do not match it,
+preview stops with a <strong>Timestamp Format</strong> correction instead of evaluating a
+date expression against string columns. Pega timestamps use
+<code>%Y%m%dT%H%M%S%.3f %Z</code>.</p>
 <h2 id="describe-the-outcome">Describe the outcome<a class="headerlink" href="#describe-the-outcome" title="Permanent link">&para;</a></h2>
 <p>The Sample and Draft steps include <strong>Business Requirements</strong>. Describe the
 decision or measure in plain language, such as “weekly conversion by channel
@@ -2785,6 +2948,26 @@ control it cannot honor.</p>
 as the approved schema and business requirements support. It must not stop at
 the deterministic minimal baseline, duplicate equivalent processors, or add an
 object whose required fields and valid state definitions are unavailable.</p>
+<p>AI draft, report-refresh, refinement, repair, and Copilot prompts share an
+analytics opportunity playbook calibrated against the production-shaped
+<code>examples/fat</code> catalog. It is a guarded capability menu, not a template to
+copy. The model evaluates approved field roles, effective dtypes, the current
+source plan, and business requirements before offering:</p>
+<ul>
+<li>source readiness, defaults, dataset filters, and calculated-field patterns;</li>
+<li>engagement/conversion, descriptive/latency, model-quality, experiment,
+  audience/reach, funnel, and lifecycle processor/metric bundles;</li>
+<li>executive, engagement/conversion, descriptive/latency, model-quality,
+  experiment, audience, and funnel report-page patterns.</li>
+</ul>
+<p>Each selected pattern must be dependency-complete from preprocessing through
+report tiles. A pipelines-preserving draft may use only preprocessing already
+present in the source plan. Copilot may apply only operations in its operation
+dictionary; when parsing, casting, calendar, rename, or dedup work has no
+operation, it points to the required Studio/source-plan action. Timestamp-like
+names are never treated as proof of a temporal dtype: string timestamps must
+be parsed with a confirmed format before date arithmetic, so latency analytics
+cannot recreate the <code>str - str</code> failure.</p>
 <p>The deterministic draft uses the same validation and explicit review boundary
 but never calls a provider. Its first-run baseline contains one aggregate
 processor, four metrics, and a stable three-page/six-tile report set for
@@ -2839,7 +3022,12 @@ can produce quick-reply questions before any operation is attempted.</p>
 <p>On Filters, dataset requests modify the source filter before processor fan-out;
 processor filters remain a separate Processors concern. On Calculations,
 Copilot uses the closed expression AST catalog rather than executable code or
-free-form function strings.</p>
+free-form function strings. When the user asks what is possible, Copilot offers
+two to four relevant playbook options for the active step and waits for a
+concrete selection before returning operations. Processor suggestions declare
+the states needed by their metrics; metric suggestions require those states;
+report suggestions use only existing metric outputs and compatible chart
+roles.</p>
 <h2 id="coverage-and-technical-details">Coverage and technical details<a class="headerlink" href="#coverage-and-technical-details" title="Permanent link">&para;</a></h2>
 <p>Requirements Coverage maps business requirements to existing measures and
 reports. Returned metric and tile references are checked against the current

@@ -1767,6 +1767,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2504,6 +2588,8 @@ The Streamlit app entry point is <code>src/valuestream/ui/app.py</code>.</p>
     ...
   aggregates/
     ...
+  .valuestream/
+    state/                 # optional, non-queryable processor checkpoints
   meta/
     chunks.duckdb
     pipeline_runs.duckdb
@@ -2511,8 +2597,8 @@ The Streamlit app entry point is <code>src/valuestream/ui/app.py</code>.</p>
     lineage.duckdb
     aggregate_views.duckdb
 </code></pre></div>
-<p>Only <code>catalog/</code> and source files are required up front. Aggregate and metadata
-paths are created as the workspace runs.</p>
+<p>Only <code>catalog/</code> and source files are required up front. Aggregate, metadata,
+and optional processor-state paths are created as the workspace runs.</p>
 <h2 id="catalog-files">Catalog Files<a class="headerlink" href="#catalog-files" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2552,7 +2638,9 @@ detection. Canonical payloads and file lineage are persisted in metadata.</p>
 <li>A durable pipeline-run row is inserted with <code>status=running</code>.</li>
 <li>Readers load chunk files as Polars frames.</li>
 <li>Transforms clean, normalize, enrich, filter, and deduplicate data.</li>
-<li>Processors fan out over the transformed frame.</li>
+<li>Processors fan out over the transformed frame. A bounded processor may
+   reuse a versioned, hash-sharded checkpoint instead of rescanning overlapping
+   source history.</li>
 <li>Each processor writes mergeable aggregate state and configured grains.</li>
 <li>Complete lineage commits before the chunk's final <code>status=ok</code> marker.</li>
 <li>The same run row becomes <code>ok</code>, <code>partial</code>, or <code>failed</code>, publishing only its
@@ -2562,11 +2650,21 @@ detection. Canonical payloads and file lineage are persisted in metadata.</p>
 only when its source computation hash and current input-file fingerprint match.
 Writes use immutable run-specific files plus atomic rename. Query visibility is
 gated by successful chunk and run ledger rows, so a failed replacement leaves
-the previous successful version visible.
+the previous successful version visible. A successful recomputation is the new
+publication marker even when it produces no aggregate rows, so it hides an
+older non-empty partial. Reuse checks the same globally latest successful
+attempt; rolling a source contract back reprocesses it instead of republishing
+an older hidden attempt.
 If a process dies while the run is still <code>running</code>, the next source invocation
 holds the same source lock, verifies committed chunk fingerprints, lineage,
 files, and computation hashes, finalizes the interrupted run, and reuses only
 the verified chunks.</p>
+<p>Processor checkpoints are ingestion-only acceleration state. They are
+versioned, source-fingerprint-addressed, bounded by configured retention, and
+rebuildable from the authoritative source;
+they do not create a successful chunk marker and no report/query path reads
+them. Aggregate-first is therefore the serving contract even when a processor
+retains the minimal identity state required for exact bounded computation.</p>
 <h2 id="processor-and-state-model">Processor and State Model<a class="headerlink" href="#processor-and-state-model" title="Permanent link">&para;</a></h2>
 <p>Processors define the durable aggregate state that metrics can query. Current
 processor families include:</p>
@@ -2605,6 +2703,10 @@ processor families include:</p>
 <tr>
 <td><code>snapshot</code></td>
 <td>Periodic aggregate state</td>
+</tr>
+<tr>
+<td><code>frequency_response</code></td>
+<td>Exact response/opportunity curves by bounded exposure frequency</td>
 </tr>
 </tbody>
 </table>

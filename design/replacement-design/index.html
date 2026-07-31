@@ -1602,6 +1602,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2472,6 +2556,17 @@
     <span class="md-ellipsis">
       
         binary_outcome
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#frequency_response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        frequency_response
       
     </span>
   </a>
@@ -3402,6 +3497,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#frequency_response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        frequency_response
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#numeric_distribution" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4004,7 +4110,10 @@
 <p>The existing <strong>CDH Value Dashboard</strong> is a Streamlit application that ingests Pega Customer Decision Hub Interaction History (IH) and Product Holdings exports, computes a fixed catalogue of marketing/ML/CLV metrics, and renders Plotly dashboards. It already implements <em>part</em> of the desired architecture: a chunked, file-group-based pipeline that emits <strong>mergeable sufficient statistics</strong> (counts, sums, t-digests, HLL sketches) into per-metric DuckDB tables.</p>
 <p>The replacement, codenamed <strong>Value Stream</strong>, takes the chunked-aggregate idea and elevates it to the centerpiece of the architecture, while keeping the same core engineering stack (<strong>Polars + DuckDB + Streamlit + Plotly</strong>). Streamlit Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API share one governed aggregate tool layer; remote HTTP MCP and multi-user/OIDC deployment remain deferred. Value Stream is rethought from first principles around three invariants:</p>
 <ol>
-<li><strong>No raw event row is ever persisted past chunk processing.</strong> Only mergeable sufficient statistics are stored.</li>
+<li><strong>Aggregates are the durable business/query contract.</strong> Reports never scan
+   raw events or identity-level state. A bounded processor may persist minimal,
+   versioned, rebuildable internal state when that materially reduces exact
+   ingestion cost.</li>
 <li><strong>Pipelines, processors, metrics, and dashboards are first-class declarative artifacts</strong> authored in YAML and validated against a published schema — not Python <code>eval</code> strings.</li>
 <li><strong>The same metric can be served from multiple physical aggregate tables at different grains</strong>, and the query layer routes a request to the smallest aggregate that still answers it correctly.</li>
 </ol>
@@ -4086,7 +4195,10 @@
 <h2 id="3-goals-and-non-goals">3. Goals and Non-Goals<a class="headerlink" href="#3-goals-and-non-goals" title="Permanent link">&para;</a></h2>
 <h3 id="31-goals">3.1 Goals<a class="headerlink" href="#31-goals" title="Permanent link">&para;</a></h3>
 <ol>
-<li><strong>Aggregate-first.</strong> Raw rows live only inside a single chunk's lazy pipeline; nothing raw is persisted, ever.</li>
+<li><strong>Aggregate-first.</strong> Mergeable statistics are the only source-derived data
+   served to reports and queries. Minimal internal identity state is allowed for
+   a bounded processor when declared, versioned, independently retained, and
+   rebuildable from the authoritative source.</li>
 <li><strong>Configurable.</strong> A user with no Python skills can author a new metric and a new dashboard tile in YAML, with schema validation and useful errors.</li>
 <li><strong>Multi-grain queries.</strong> The same logical metric is queryable at the
    processor's base grain and every coarser calendar grain; only the base
@@ -4107,10 +4219,15 @@
 <hr />
 <h2 id="4-core-design-principles">4. Core Design Principles<a class="headerlink" href="#4-core-design-principles" title="Permanent link">&para;</a></h2>
 <ol>
-<li><strong>Sufficient statistics over rows.</strong> A processor's job is to produce a small, fixed-size record per (chunk, group-by tuple). The merge rule for that record is associative and commutative.</li>
+<li><strong>Sufficient statistics over rows.</strong> A processor's published job is to
+   produce a small, fixed-size record per (chunk, group-by tuple). The merge
+   rule for that record is associative and commutative. A bounded-lookback
+   processor may additionally retain minimal normalized identity state as an
+   internal acceleration structure; it remains outside the aggregate/query
+   contract and must be safe to rebuild from authoritative input.</li>
 <li><strong>One DSL, one validator.</strong> YAML is the single source of truth for sources, processors, metrics, and dashboards. JSON Schema validates it; no ad-hoc Python expressions.</li>
 <li><strong>Closed expression language.</strong> Where dynamic expressions are unavoidable (filters, derived columns), they are parsed into a small typed AST and translated to Polars expressions — never <code>eval</code>-ed.</li>
-<li><strong>Pluggable processor catalog.</strong> Each processor is a Python class implementing a small interface (<code>schema</code>, <code>chunk_aggregate</code>, <code>merge</code>, <code>compact</code>, <code>derive</code>). Adding a processor never requires touching the engine.</li>
+<li><strong>Pluggable processor catalog.</strong> Each processor is a Python class implementing a small interface (<code>schema</code>, <code>chunk_aggregate</code>, <code>merge</code>, <code>compact</code>, <code>derive</code>). Ordinary aggregate processors require no engine changes; processor kinds that declare bounded cross-chunk input dependencies additionally use the engine's dependency-planning contract.</li>
 <li><strong>Aggregate routing.</strong> A report names a metric, not a physical table. A planner picks the smallest aggregate that satisfies the report's group-by columns, time grain, and sketch needs.</li>
 <li><strong>Idempotent chunks.</strong> Re-running a chunk overwrites exactly that chunk's slice in the aggregate store; nothing else moves.</li>
 <li><strong>Provenance per row.</strong> Every aggregate row records <code>pipeline_run_id</code>, <code>chunk_id</code>, <code>config_hash</code>, <code>created_at</code>. This lets you answer "is this dashboard fresh?" without scanning files.</li>
@@ -4183,6 +4300,9 @@
 │   │           ├── period=YYYY-MM/   # hive-partitioned
 │   │           │   └── part-&lt;run&gt;.parquet
 │   │           └── _manifest.json
+├── .valuestream/
+│   └── state/                       # optional processor-owned checkpoints
+│       └── frequency_response/...
 ├── snapshots/
 │   └── &lt;snapshot_id&gt;/
 │       └── as_of=YYYY-MM-DD/
@@ -4195,6 +4315,12 @@
 └── duckdb/
     └── valuestream.duckdb             # views, dashboards, ad-hoc query target
 </code></pre></div>
+<p>The processor-state namespace is deliberately separate from aggregate and
+metadata publication. It is never scanned by query planning or DuckDB views.
+Each persistent frequency-response generation is normally immutable,
+source-fingerprint-addressed, schema/customer-dtype/sharding-versioned, and
+rebuildable from IH; an explicit forced run may replace the same state address,
+and stale generations have an independent bounded-retention lifecycle.</p>
 <p>This replaces the current single <code>db/pov_data_&lt;variant&gt;.duckdb</code> monolith. Variants survive as the top-level <strong>workspace</strong> identifier.</p>
 <h3 id="62-why-parquet-for-aggregates-and-duckdb-for-query">6.2 Why Parquet for aggregates and DuckDB for query<a class="headerlink" href="#62-why-parquet-for-aggregates-and-duckdb-for-query" title="Permanent link">&para;</a></h3>
 <p>Parquet at rest gives:</p>
@@ -4872,6 +4998,16 @@ reprocessing.</p>
   <span class="o">.</span><span class="n">with_columns</span><span class="p">((</span><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;Count&quot;</span><span class="p">)</span> <span class="o">-</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;Positives&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">alias</span><span class="p">(</span><span class="s2">&quot;Negatives&quot;</span><span class="p">))</span>
 </code></pre></div>
 <p>This is the same recipe the current app uses, but parameterized by config rather than hard-coded.</p>
+<h4 id="frequency_response">frequency_response<a class="headerlink" href="#frequency_response" title="Permanent link">&para;</a></h4>
+<p>Daily count and sum states indexed by a fixed trailing exposure-frequency
+bucket. The target day is evaluated from either an ephemeral bounded history
+frame or an exact persistent customer-sharded checkpoint;
+frequency keys are customer + action + placement, while the recorded
+alternative is selected within customer + interaction (rank 2, otherwise the
+smallest rank greater than 1). The runner's raw propensity is retained as an
+expected-response sum. Priority, when configured, remains a separate
+arbitration diagnostic and is never treated as a probability. See the complete
+contract in <a href="../../reference/processors/#10-frequency_response-processor">Processor Specifications §10</a>.</p>
 <h4 id="numeric_distribution">numeric_distribution<a class="headerlink" href="#numeric_distribution" title="Permanent link">&para;</a></h4>
 <p>State per numeric column <code>&lt;prop&gt;</code>: <code>Count, Sum, Mean, Var, Min, Max, tdigest</code>.
 Pooled-variance compaction follows Welford-merge:</p>
@@ -4965,8 +5101,9 @@ merging resolves conflicts by <code>MAX(as_of_date)</code> and then <code>create
 partial, groups by the requested dimensions plus <code>Month</code>, and merges each
 state with its registered merge rule. A summary request performs the same
 merge without a time bucket. Query-time merging combines the latest successful
-partial per chunk; <code>valuestream vacuum</code> later removes superseded physical
-files.</p>
+terminal attempt per source/chunk; an attempt with no partial still supersedes
+older data through its ledger marker. <code>valuestream vacuum</code> later removes
+superseded physical files.</p>
 <hr />
 <h2 id="9-query-layer">9. Query Layer<a class="headerlink" href="#9-query-layer" title="Permanent link">&para;</a></h2>
 <h3 id="91-planner">9.1 Planner<a class="headerlink" href="#91-planner" title="Permanent link">&para;</a></h3>
@@ -5111,6 +5248,7 @@ authentication simplicity.</p>
     <span class="n">files</span> <span class="o">=</span> <span class="n">discover_files</span><span class="p">(</span><span class="n">source</span><span class="o">.</span><span class="n">reader</span><span class="p">)</span>
     <span class="n">chunks</span> <span class="o">=</span> <span class="n">group_files_by_pattern</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">source</span><span class="o">.</span><span class="n">reader</span><span class="p">)</span>
     <span class="n">processors</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">cfg</span><span class="o">.</span><span class="n">processors</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">source</span> <span class="o">==</span> <span class="n">source_id</span><span class="p">]</span>
+    <span class="n">plans</span> <span class="o">=</span> <span class="n">plan_chunk_dependencies</span><span class="p">(</span><span class="n">chunks</span><span class="p">,</span> <span class="n">processors</span><span class="p">)</span>
     <span class="n">recover_stale_running_runs</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">chunks</span><span class="p">,</span> <span class="n">processors</span><span class="p">,</span> <span class="n">config_hash</span><span class="p">)</span>
     <span class="n">write_run</span><span class="p">(</span>
         <span class="n">pipeline_runs</span><span class="p">,</span>
@@ -5122,15 +5260,25 @@ authentication simplicity.</p>
     <span class="p">)</span>
 
     <span class="k">try</span><span class="p">:</span>
-        <span class="k">for</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">files</span> <span class="ow">in</span> <span class="n">chunks</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-            <span class="k">if</span> <span class="n">already_processed</span><span class="p">(</span><span class="n">source_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">config_hash</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">plan</span> <span class="ow">in</span> <span class="n">plans</span><span class="p">:</span>
+            <span class="n">chunk_id</span> <span class="o">=</span> <span class="n">plan</span><span class="o">.</span><span class="n">target</span><span class="o">.</span><span class="n">chunk_id</span>
+            <span class="k">if</span> <span class="n">already_processed</span><span class="p">(</span>
+                <span class="n">source_id</span><span class="p">,</span>
+                <span class="n">chunk_id</span><span class="p">,</span>
+                <span class="n">config_hash</span><span class="p">,</span>
+                <span class="n">fingerprint</span><span class="o">=</span><span class="n">hash_files</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">dependency_files</span><span class="p">),</span>
+            <span class="p">):</span>
                 <span class="k">continue</span>
             <span class="k">with</span> <span class="n">chunk_lifecycle</span><span class="p">(</span><span class="n">run_id</span><span class="p">,</span> <span class="n">source_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">):</span>
-                <span class="n">lf</span> <span class="o">=</span> <span class="n">read_files_lazy</span><span class="p">(</span><span class="n">files</span><span class="p">,</span> <span class="n">source</span><span class="o">.</span><span class="n">reader</span><span class="p">)</span>
-                <span class="n">lf</span> <span class="o">=</span> <span class="n">apply_transforms</span><span class="p">(</span><span class="n">lf</span><span class="p">,</span> <span class="n">source</span><span class="o">.</span><span class="n">transforms</span><span class="p">)</span>
+                <span class="n">current</span> <span class="o">=</span> <span class="n">apply_transforms</span><span class="p">(</span>
+                    <span class="n">read_files_lazy</span><span class="p">(</span><span class="n">plan</span><span class="o">.</span><span class="n">target</span><span class="o">.</span><span class="n">files</span><span class="p">,</span> <span class="n">source</span><span class="o">.</span><span class="n">reader</span><span class="p">),</span>
+                    <span class="n">source</span><span class="o">.</span><span class="n">transforms</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">dependency_frame</span> <span class="o">=</span> <span class="n">prepare_bounded_dependency_frame</span><span class="p">(</span><span class="n">plan</span><span class="p">,</span> <span class="n">source</span><span class="p">)</span>
 
                 <span class="n">written</span> <span class="o">=</span> <span class="p">[]</span>
                 <span class="k">for</span> <span class="n">proc</span> <span class="ow">in</span> <span class="n">processors</span><span class="p">:</span>
+                    <span class="n">lf</span> <span class="o">=</span> <span class="n">dependency_frame</span> <span class="k">if</span> <span class="n">proc</span><span class="o">.</span><span class="n">requires_bounded_history</span> <span class="k">else</span> <span class="n">current</span>
                     <span class="n">partial</span> <span class="o">=</span> <span class="n">proc</span><span class="o">.</span><span class="n">chunk_aggregate</span><span class="p">(</span><span class="n">lf</span><span class="p">,</span> <span class="n">ctx</span><span class="o">=</span><span class="n">ChunkCtx</span><span class="p">(</span><span class="n">run_id</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">))</span>
                     <span class="n">written</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">write_partial</span><span class="p">(</span><span class="n">proc</span><span class="p">,</span> <span class="n">chunk_id</span><span class="p">,</span> <span class="n">partial</span><span class="p">))</span>
 
@@ -5170,10 +5318,34 @@ still precede the chunk marker. Files or lineage without a committed chunk row
 remain invisible and are handled by retry/vacuum.</p>
 <h3 id="102-discovery-and-grouping">10.2 Discovery and grouping<a class="headerlink" href="#102-discovery-and-grouping" title="Permanent link">&para;</a></h3>
 <p>A chunk is the unit of idempotency. <code>chunk_id</code> is derived from the filename via the <code>group_by_filename</code> regex; if the regex fails the basename is used. Multiple files can belong to one chunk (e.g. partitioned exports).</p>
+<p>The ordinary plan has one target and no dependencies. A processor that
+declares a bounded lookback plans the target plus only the earlier calendar
+chunks needed to cover that bound and any typed partition-lag allowance. The
+allowance changes dependency discovery, not the processor's timestamp
+predicate. Such sources require ISO <code>YYYY-MM-DD</code> chunk IDs. The target is still
+the sole output/idempotency unit, but its ledger fingerprint contains every raw
+dependency file. A changed source day therefore invalidates all later targets
+whose bounded windows include it; it does not invalidate targets beyond that
+closure. Processors without the dependency declaration continue to see only
+current-target rows even when they share the source.</p>
+<p>The bounded processor then uses its declared execution mode. <code>source_scan</code>
+builds a marked, ephemeral dependency frame. <code>persistent_sharded</code> filters,
+classifies, and projects a raw chunk through a partitioned streaming sink into
+customer-hash shards addressed by source and processor computation identity,
+chunk id, and raw fingerprint, then processes one corresponding target/history
+shard set at a time. Contact collapse happens after those shards are combined
+so both modes retain identical cross-partition duplicate precedence. Neither
+mode changes the raw dependency fingerprint or aggregate publication barrier.
+Checkpoint manifests and files are not ledger <code>ok</code> rows and are never
+query-visible.</p>
 <p>Re-processing a chunk:</p>
 <ol>
 <li>Pipeline writes a new partial parquet under the chunk's <code>period</code> partition with a new <code>pipeline_run_id</code>.</li>
-<li>The next compaction step reads only <strong>the latest run</strong> per chunk (by <code>created_at</code>), so older partials are ignored.</li>
+<li>Query publication keeps only the globally latest successful terminal attempt
+   per source/chunk. A successful attempt with no rows therefore hides an older
+   partial; a failed replacement leaves it visible. Idempotent reuse applies the
+   same rule, so a config rollback is recomputed rather than reviving a hidden
+   attempt.</li>
 <li>A janitor job (<code>valuestream vacuum</code>) periodically deletes superseded partials.</li>
 </ol>
 <p>The Data Load <strong>Rebuild from scratch</strong> operation is the coordinated retention
@@ -5183,6 +5355,14 @@ performs a source-scoped vacuum that retains only the new successful run for
 each selected source. Physical aggregate files from earlier or now-absent
 chunks are removed only after those checks. DuckDB run, chunk, lineage, and
 configuration-version metadata is not deleted.</p>
+<p>Processor-state retention is separate from aggregate publication retention.
+After a terminal source run, and during explicit vacuum, the engine removes
+incomplete or incompatible generations, superseded raw fingerprints, and daily
+partitions beyond <code>checkpoint.retention_days</code>. The default keeps exactly the
+active history closure plus the current partition. A target never relies on a
+checkpoint as authoritative data: if the required generation is absent after
+cleanup, ingestion rebuilds it from the discovered source chunk before
+calculating the aggregate.</p>
 <h3 id="103-transform-materialization-and-streaming">10.3 Transform materialization and streaming<a class="headerlink" href="#103-transform-materialization-and-streaming" title="Permanent link">&para;</a></h3>
 <p>Polars streaming execution is opt-in per source (<code>reader.streaming: true</code>).
 When <code>materialize_transforms: true</code> is also set, one chunk has two explicit
@@ -5196,18 +5376,27 @@ execution stages:</p>
 </ol>
 <p>The engine releases the shared transformed frame after processor fan-out and
 releases each collected processor frame after its aggregates are written. This
-bounds raw-frame ownership to one active chunk per worker, but it does not impose
-an RSS ceiling: the final transformed frame must still fit in memory and the
-allocator may retain freed pages for reuse. There is currently no automatic RSS
-pause or spill-to-Parquet path. Operators control memory with chunk size and
-bounded chunk-process parallelism, and verify peak RSS with the ingestion
-benchmark.</p>
+bounds ordinary raw-frame ownership to one active chunk per worker. A bounded
+processor in <code>source_scan</code> mode additionally owns its dependency frame, so
+memory and scan cost scale with target size plus lookback. In
+<code>persistent_sharded</code> mode, checkpoint construction owns one transformed source
+lazy plan and streams it directly into partitioned Parquet without collecting
+the complete prepared day; target computation reads one customer shard across
+the bounded days at a time. Neither path guarantees a fixed RSS ceiling; an
+upstream blocking transform or the allocator may
+retain freed pages for reuse. Operators control memory with chunk size,
+checkpoint shard count, and bounded chunk-process parallelism, then verify peak
+RSS with the ingestion benchmark.</p>
 <h3 id="104-processor-fan-out">10.4 Processor fan-out<a class="headerlink" href="#104-processor-fan-out" title="Permanent link">&para;</a></h3>
-<p>Processor lazy plans are collected as one batch. With transform materialization
-they use the shared in-memory frame described above; without it they remain
-branches of the source lazy plan and use the configured source engine. If the
-batched collect fails, the chunk runner retries the processors sequentially;
-failure of that fallback fails the whole chunk.</p>
+<p>Processor lazy plans are collected as one batch. Ordinary processors fan out
+from the current-target frame; source-scanned bounded processors fan out from
+the marked dependency frame. Persistent bounded processors consume validated
+immutable checkpoint shards through their processor-specific path. With
+transform materialization the source-backed plans use the relevant shared
+in-memory frame described above; without it they remain branches of the source
+lazy plan and use the configured source engine. If the batched collect fails,
+the chunk runner retries the processors sequentially; failure of that fallback
+fails the whole chunk.</p>
 <h3 id="105-failure-semantics">10.5 Failure semantics<a class="headerlink" href="#105-failure-semantics" title="Permanent link">&para;</a></h3>
 <ul>
 <li>A processor failure fails the whole chunk. None of that chunk's new files are
@@ -5577,12 +5766,20 @@ and generated-code analysis remain later surfaces. See
 <hr />
 <h2 id="14-security-and-privacy">14. Security and Privacy<a class="headerlink" href="#14-security-and-privacy" title="Permanent link">&para;</a></h2>
 <ol>
-<li><strong>No raw event row is persisted</strong> — by design, the only PII present at rest is what the configured states explicitly carry (e.g. min/max purchase dates and sketch blobs). Sketches are not a cryptographic anonymization boundary; identifiers should be tokenized or HMACed upstream where required.</li>
+<li><strong>Aggregate-only read surfaces</strong> — reports and query APIs read only governed
+   aggregates. An opted-in bounded processor checkpoint may retain minimal
+   identity-level state at rest, so it is governed as sensitive
+   source-derived data and removed according to its independent retention
+   policy. It is never a query surface and is rebuildable from the authoritative
+   source.</li>
 <li><strong>No <code>eval</code></strong> — all dynamic expressions are parsed AST. The migration tool flags any expression it can't translate.</li>
-<li><strong>Workspace isolation</strong> — variants are isolated workspaces, each with its own <code>catalog/</code>, <code>aggregates/</code>, <code>meta/</code>, <code>duckdb/</code> roots.</li>
+<li><strong>Workspace isolation</strong> — variants are isolated workspaces, each with its own <code>catalog/</code>, <code>aggregates/</code>, <code>.valuestream/state/</code>, <code>meta/</code>, and <code>duckdb/</code> roots.</li>
 <li><strong>Headless auth</strong> — the read-only HTTP API supports a bearer token and requires one for non-loopback CLI binds. In-process SDK and local stdio MCP run under the host process identity; OIDC/SSO and remote HTTP MCP remain deferred.</li>
 <li><strong>Config provenance</strong> — every aggregate row is tied to a <code>config_hash</code> and YAML body in <code>config_versions</code>. A reviewer can reconstruct the exact config that produced any number on a dashboard.</li>
 <li><strong>Cardinality-sketch caveat</strong> — CPC is the generated distinct-count default and HLL remains supported. Theta also answers distinct count and should be selected when the same persisted state needs intersection/difference. Hashing inside a sketch is not a substitute for governed upstream tokenization.</li>
+<li><strong>Checkpoint-shard caveat</strong> — customer hashing routes exact records to a
+   shard; it is not encryption, anonymization, or a substitute for upstream
+   tokenization/HMAC.</li>
 </ol>
 <hr />
 <h2 id="15-phased-implementation-plan">15. Phased Implementation Plan<a class="headerlink" href="#15-phased-implementation-plan" title="Permanent link">&para;</a></h2>
@@ -5833,15 +6030,18 @@ and generated-code analysis remain later surfaces. See
 <span class="w">    </span><span class="n">Positives</span><span class="p">::</span><span class="n">DOUBLE</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="k">NULLIF</span><span class="p">(</span><span class="n">Positives</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">Negatives</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">CTR</span><span class="p">,</span>
 <span class="w">    </span><span class="n">Positives</span><span class="p">,</span><span class="w"> </span><span class="n">Negatives</span><span class="p">,</span><span class="w"> </span><span class="k">Count</span>
 <span class="w">  </span><span class="k">FROM</span><span class="w"> </span><span class="p">(</span>
-<span class="w">    </span><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="p">,</span>
+<span class="w">    </span><span class="k">SELECT</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="o">*</span><span class="p">,</span>
 <span class="w">           </span><span class="n">ROW_NUMBER</span><span class="p">()</span><span class="w"> </span><span class="n">OVER</span><span class="w"> </span><span class="p">(</span>
-<span class="w">             </span><span class="n">PARTITION</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="k">Day</span><span class="p">,</span><span class="w"> </span><span class="n">channel</span><span class="p">,</span><span class="w"> </span><span class="n">placement</span><span class="p">,</span><span class="w"> </span><span class="n">issue</span><span class="p">,</span><span class="w"> </span><span class="ss">&quot;group&quot;</span><span class="p">,</span>
-<span class="w">                          </span><span class="n">customer_type</span><span class="p">,</span><span class="w"> </span><span class="n">ModelControlGroup</span><span class="p">,</span><span class="w"> </span><span class="n">chunk_id</span>
-<span class="w">             </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">created_at</span><span class="w"> </span><span class="k">DESC</span>
+<span class="w">             </span><span class="n">PARTITION</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="k">Day</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">channel</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">placement</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">issue</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="ss">&quot;group&quot;</span><span class="p">,</span>
+<span class="w">                          </span><span class="n">e</span><span class="p">.</span><span class="n">customer_type</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">ModelControlGroup</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">chunk_id</span>
+<span class="w">             </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">created_at</span><span class="w"> </span><span class="k">DESC</span>
 <span class="w">           </span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">rn</span>
-<span class="w">    </span><span class="k">FROM</span><span class="w"> </span><span class="n">engagement_daily</span>
+<span class="w">    </span><span class="k">FROM</span><span class="w"> </span><span class="n">engagement_daily</span><span class="w"> </span><span class="n">e</span>
+<span class="w">    </span><span class="k">JOIN</span><span class="w"> </span><span class="n">successful_chunks</span><span class="w"> </span><span class="n">sc</span>
+<span class="w">      </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">pipeline_run_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sc</span><span class="p">.</span><span class="n">pipeline_run_id</span>
+<span class="w">     </span><span class="k">AND</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">chunk_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sc</span><span class="p">.</span><span class="n">chunk_id</span>
 <span class="w">  </span><span class="p">)</span>
-<span class="w">  </span><span class="k">WHERE</span><span class="w"> </span><span class="n">rn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">     </span><span class="c1">-- pick the latest run per chunk</span>
+<span class="w">  </span><span class="k">WHERE</span><span class="w"> </span><span class="n">rn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">     </span><span class="c1">-- latest row inside the ledger-authorized chunk attempt</span>
 </code></pre></div>
 <hr />
 <h2 id="appendix-c-http-metric-query-request-response-example">Appendix C — HTTP metric query — request / response example<a class="headerlink" href="#appendix-c-http-metric-query-request-response-example" title="Permanent link">&para;</a></h2>

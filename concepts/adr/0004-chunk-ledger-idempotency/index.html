@@ -14,7 +14,7 @@
         <link rel="prev" href="../0003-closed-expression-ast/">
       
       
-        <link rel="next" href="../../../reference/cli/">
+        <link rel="next" href="../0005-unified-metric-owned-heatmaps/">
       
       
         
@@ -1692,6 +1692,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2344,19 +2428,29 @@ outer publication barrier. Within a chunk, atomic aggregate files are followed
 by one complete lineage transaction; only then is <code>chunks.status='ok'</code>
 inserted as the durable chunk commit marker. The existing run row is finally
 updated to <code>ok</code>, <code>partial</code>, or <code>failed</code>.</p>
+<p>For each <code>(source, chunk)</code>, publication selects one globally latest successful
+attempt from terminal runs. A later successful attempt supersedes the prior one
+even when no processor emits aggregate rows; the ledger row therefore acts as
+an empty-result tombstone without persisting a data row. A failed attempt does
+not replace the last success. Idempotent skip checks use the same latest-success
+rule, so rolling configuration back to an older hash causes a recomputation
+instead of making a previously superseded attempt visible again.</p>
 <p>After acquiring a source lock, a new invocation treats older <code>running</code> rows for
 that source as interrupted. It publishes a stale run as <code>partial</code> only after
 verifying retained chunks against current input fingerprints, source and
 processor computation hashes, lineage, physical files, and embedded
 provenance. Unverified chunks are made failed/invisible and processed again.
-This permits recovery without persisting raw rows or introducing a second
-chunk identity.</p>
+This permits recovery without introducing a second chunk identity. Optional
+processor checkpoints are independently validated acceleration state; they do
+not create ledger rows or participate in query publication.</p>
 <h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>valuestream run</code> is safe for cron and humans alike; re-runs are no-ops
   unless inputs or config actually changed.</li>
 <li>A failed replacement leaves the previous successful version visible —
   readers never observe partial state.</li>
+<li>A successful empty replacement hides the previous non-empty version without
+  requiring a synthetic aggregate row.</li>
 <li>A hard-terminated run reuses already committed and verified chunks on the
   next invocation instead of replaying them from raw input.</li>
 <li>Config changes automatically invalidate exactly the chunks whose

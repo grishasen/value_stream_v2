@@ -1692,6 +1692,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2325,7 +2409,7 @@
 
 
 <h1 id="adr-0001-aggregate-first-storage">ADR 0001 — Aggregate-First Storage<a class="headerlink" href="#adr-0001-aggregate-first-storage" title="Permanent link">&para;</a></h1>
-<p><strong>Status:</strong> Accepted (backfilled 2026-07-13 from the replacement design)</p>
+<p><strong>Status:</strong> Accepted (backfilled 2026-07-13; clarified by ADR 0007 on 2026-07-31)</p>
 <h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
 <p>The legacy CDH Value Dashboard queried raw event exports repeatedly. Large
 file exports were slow to re-query, raw rows accumulated without bound, and
@@ -2333,19 +2417,30 @@ every report carried the cost and exposure of raw-event access. Most business
 questions were answered from a small set of grouped statistics.</p>
 <h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
 <p>Raw event rows are reduced to small, mergeable sufficient statistics (counts,
-sums, sketches, digests, funnel states, snapshots) during a single chunk pass,
-and only those aggregates are persisted. Raw rows never survive the chunk
-pass; every read surface — reports, chat, CLI, SDK, API, MCP, SQL export —
-reads through the aggregate query layer.</p>
+sums, sketches, digests, funnel states, snapshots) during ingestion. Those
+aggregates are the only persisted business/query contract: every read surface —
+reports, chat, CLI, SDK, API, MCP, and SQL export — reads through the aggregate
+query layer.</p>
+<p>Aggregate-first is a strong storage and serving preference, chosen to minimize
+retained data and the amount processed while rendering reports. It is not a
+rigid ban on processor-internal state. As specified by
+<a href="../0007-bounded-lookback-processors/">ADR 0007</a>, a bounded processor may retain
+minimal identity-level state when it is needed to compute exact aggregates
+efficiently. Such state must be versioned, bounded, non-queryable, and
+rebuildable from the authoritative source; it does not become a second source
+of business truth.</p>
 <h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Queries stay fast and cheap regardless of source volume; storage is compact.</li>
 <li>Distinct counts, quantiles, and model-quality curves are approximate
   (bounded-error sketches) and are labeled as such in reports.</li>
 <li>Adding a new group-by dimension or changing outcome definitions usually
-  requires raw source replay, because the raw rows are gone.</li>
+  requires authoritative source replay, because checkpoints are not a general
+  raw-event history or query substrate.</li>
 <li>Raw-event SQL and a raw event warehouse are permanently out of scope.</li>
-<li>The aggregate-only contract doubles as the security boundary
+<li>The aggregate-only <strong>read-surface</strong> contract remains a security boundary.
+  Processor checkpoints that retain identity-level state expand the
+  data-at-rest boundary and require explicit access and retention controls
   (<a href="../../../guides/operations/security/">Security</a>).</li>
 </ul>
 <p>See <a href="../../../design/replacement-design/">replacement design §4–6</a> for the full

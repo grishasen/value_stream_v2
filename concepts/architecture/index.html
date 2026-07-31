@@ -1894,6 +1894,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2767,8 +2851,8 @@
 </table>
 <hr />
 <h2 id="1-mission-and-one-line-description">1. Mission and one-line description<a class="headerlink" href="#1-mission-and-one-line-description" title="Permanent link">&para;</a></h2>
-<p>Value Stream is a configuration-driven, aggregate-first business intelligence platform for marketing, ML, and customer-lifecycle metrics. It ingests batch exports from upstream operational systems (typically Pega CDH Interaction History and Product Holdings), reduces them to small, mergeable sufficient statistics during a single chunk pass, and serves business reports and dashboards from those persisted aggregates — never from raw rows.</p>
-<p>Everything that can be expressed as a small, fixed-size summary per group-by tuple is in scope. Everything that requires raw event histories, exact identity sets across chunks, or per-entity ordered state is out of scope (or is approximated via sketches, or moved to a snapshot processor).</p>
+<p>Value Stream is a configuration-driven, aggregate-first business intelligence platform for marketing, ML, and customer-lifecycle metrics. It ingests batch exports from upstream operational systems (typically Pega CDH Interaction History and Product Holdings), reduces them to small, mergeable sufficient statistics, and serves business reports and dashboards from those persisted aggregates — never from source rows or processor checkpoints.</p>
+<p>Everything that can be expressed as a small, fixed-size summary per group-by tuple is in scope. A processor may declare a finite dependency window when that summary requires sequence context and may retain minimal, rebuildable internal state to avoid repeated source scans. Unbounded event histories, report-visible identity sets, and arbitrary per-entity feature serving remain out of scope (or are approximated via sketches, or moved to a snapshot processor).</p>
 <h2 id="2-design-forces-and-quality-attributes">2. Design forces and quality attributes<a class="headerlink" href="#2-design-forces-and-quality-attributes" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2780,9 +2864,14 @@
 </thead>
 <tbody>
 <tr>
-<td>Aggregate-only at rest</td>
-<td>Raw event rows must not survive the chunk pass</td>
-<td>Each <code>chunk_aggregate</code> produces a sufficient-statistics frame; raw rows are discarded after that</td>
+<td>Aggregate-first serving</td>
+<td>Reports and queries must not process source or identity-level processor rows</td>
+<td>Each processor publishes sufficient statistics; every read surface uses the governed aggregate query layer</td>
+</tr>
+<tr>
+<td>Bounded internal state</td>
+<td>An exact bounded processor may avoid repeated source scans without creating another business source</td>
+<td>Optional state is minimal, versioned, hash-sharded, immutable, independently retained, and rebuildable from authoritative input</td>
 </tr>
 <tr>
 <td>Configurable</td>
@@ -2797,7 +2886,7 @@
 <tr>
 <td>Idempotent ingestion</td>
 <td>Unchanged chunks are skipped; changed files are reprocessed</td>
-<td><code>(source, chunk, source-computation-hash, file_hash)</code> planning; latest-successful-run-wins reads</td>
+<td><code>(source, chunk, source-computation-hash, file_hash)</code> planning; the globally latest successful chunk attempt governs reads and reuse</td>
 </tr>
 <tr>
 <td>Observability first</td>
@@ -2909,7 +2998,7 @@
 <p>Container responsibilities:</p>
 <ol>
 <li><strong>Configuration store</strong> — YAML files versioned in git: <code>pipelines.yaml</code>, <code>processors.yaml</code>, <code>metrics.yaml</code>, and <code>dashboards.yaml</code>. Loaded at startup, validated, hashed.</li>
-<li><strong>Aggregate store</strong> — file-system-rooted Parquet directories with hive partitioning. The only place persisted business data lives.</li>
+<li><strong>Aggregate store</strong> — file-system-rooted Parquet directories with hive partitioning. The only persisted data read by business query surfaces. A separate processor-state namespace may contain non-queryable, source-derived acceleration state for a bounded processor.</li>
 <li><strong>Metadata store</strong> — small DuckDB databases tracking chunks, runs, config versions, lineage. Single-writer per database file; readers can be many.</li>
 <li><strong>Ingestion engine</strong> — turns files into aggregates. Reads files lazily via Polars, applies transforms, fans out to processors, writes Parquet partials, runs compactions, updates the chunks ledger.</li>
 <li><strong>Query layer</strong> — turns metric requests into reads from the aggregate store. Plans, scans Parquet via DuckDB, materializes Polars frames, applies derived metric DSL, returns rows.</li>
@@ -3013,8 +3102,25 @@ below is collected once per chunk (with the Polars streaming engine when
 shared eager frame with the in-memory engine. The shared transformed frame is
 released after fan-out, and each processor/grain frame is released after its
 immutable aggregate is written. This is an execution strategy only: no raw or
-transformed row is persisted, and streaming/materialization settings do not
-change the computation hash.</p>
+transformed row is persisted by ordinary processors, and
+streaming/materialization settings do not change the computation hash.</p>
+<p>An explicitly bounded lookback processor is the one exception to current-only
+processor input. For <code>frequency_response</code>, the dependency planner selects the
+target plus the preceding daily chunks needed to cover its configured window
+and optional partition-lag allowance. The allowance widens only that closure;
+timestamp predicates retain the exact semantic window. The target chunk's
+ledger fingerprint covers the complete raw dependency closure, and ordinary
+processors still consume only the target chunk.</p>
+<p>With <code>checkpoint.mode: source_scan</code>, the runner transforms that closure into an
+ephemeral current/history frame for the frequency processor. With
+<code>checkpoint.mode: persistent_sharded</code>, each raw chunk is filtered, classified,
+and projected into a source-fingerprint-addressed checkpoint by a partitioned
+streaming sink split on customer hash; checkpoint creation therefore does not
+collect the complete prepared day. Target processing opens only corresponding
+shards from the target and bounded history and releases each shard after
+aggregation. Both modes publish the same mergeable grouped states, and reports
+cannot address the checkpoint namespace.
+This is specified by <a href="../adr/0007-bounded-lookback-processors/">ADR 0007</a>.</p>
 <p>Order-sensitive bounded ML samples are the exception that proves the execution
 rule: when a score processor needs personalization or novelty, ingestion adds a
 temporary scan-order index before transforms and uses it inside those callbacks.
@@ -3100,6 +3206,9 @@ persisting the index.</p>
 │       └── &lt;processor_id&gt;/
 │           └── &lt;grain&gt;/
 │               └── period=YYYY-MM/part-&lt;run&gt;-&lt;chunk&gt;.parquet
+├── .valuestream/
+│   └── state/              # non-queryable, rebuildable processor state
+│       └── frequency_response/...
 ├── meta/                   # metadata DBs (DuckDB)
 │   ├── chunks.duckdb
 │   ├── pipeline_runs.duckdb
@@ -3107,6 +3216,16 @@ persisting the index.</p>
 │   ├── lineage.duckdb
 │   └── aggregate_views.duckdb  # governed views over successful aggregates
 </code></pre></div>
+<p>The processor-state namespace is deliberately outside <code>aggregates/</code> and
+<code>meta/</code>: DuckDB views, metric planning, lineage publication, and chunk <code>ok</code>
+markers never expose it. A persistent frequency checkpoint is addressed by the
+source/processor computation identity, chunk id, and raw fingerprint and also
+records its state-schema, customer dtype, and sharding revisions. Existing
+shards are integrity-validated in the parent before workers run. Stale
+generations and partitions beyond <code>checkpoint.retention_days</code> are removed
+automatically after ingestion or by vacuum. Missing state is rebuilt from
+source IH; corrupt state is rejected, while an explicit forced run replaces it
+with a deterministic rebuild.</p>
 <p>The same workspace layout is used for every variant (BDT, RBB, NBS, Demo, …). Variants are <strong>separate workspaces</strong>; there is no commingling of variants inside one workspace.</p>
 <h2 id="10-configuration-model">10. Configuration model<a class="headerlink" href="#10-configuration-model" title="Permanent link">&para;</a></h2>
 <p>Four YAML files form the catalog; each has a published JSON Schema in <code>schemas/</code>.</p>
@@ -3340,7 +3459,11 @@ with <code>VALUESTREAM_AUTHORING_V2=0</code> during measured rollout. See the
 <li>A <strong>clean rebuild</strong> acquires all selected source locks in deterministic order and holds them through forced ingestion, coverage validation, scoped cleanup, and aggregate-view refresh. This prevents a concurrent run from publishing files that cleanup could mistake for superseded output.</li>
 <li>Inside a run, <strong>chunks are processed sequentially by default</strong> (predictable memory profile, simpler error semantics). The <code>--parallel &lt;N&gt;</code> flag runs chunks in a process pool of N workers: partial parquet part files are per-chunk so worker writes never collide, and all ledger writes stay in the parent process (the DuckDB metadata files are single-writer). Worker processes sidestep the GIL held by Python sketch building, so the initial load scales with cores.</li>
 <li>Inside a chunk, <strong>processors fan out through one batched <code>pl.collect_all</code></strong>: every processor's <code>chunk_aggregate</code> plan collects in a single pass (sharing the scan via common-subplan elimination), with a logged sequential fallback if the batch fails.</li>
-<li>The <strong>query layer is read-only</strong>, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. The run's durable <code>running</code> row is the outer publication barrier. Within it, atomic Parquet writes and complete lineage commit before the chunk's <code>ok</code> row, which is the chunk commit marker. A committed chunk becomes visible only after its parent run reaches any terminal state; until then readers retain the previous successful version.</li>
+<li>A bounded-lookback processor remains parallel-safe in either execution mode.
+  <code>source_scan</code> gives each target its own immutable dependency frame;
+  <code>persistent_sharded</code> workers read validated source-fingerprint-addressed generations and
+  never share mutable customer state.</li>
+<li>The <strong>query layer is read-only</strong>, fully concurrent — Streamlit, SDK, SQL export, MCP, and API reads can run while the engine is writing because Parquet writes go to immutable run-specific files. The run's durable <code>running</code> row is the outer publication barrier. Within it, atomic Parquet writes and complete lineage commit before the chunk's <code>ok</code> row, which is the chunk commit marker. A committed chunk becomes visible only after its parent run reaches any terminal state; until then readers retain the previous successful version. Publication keeps one globally latest successful attempt for each <code>(source, chunk)</code>, so a successful empty recomputation supersedes all older output. Idempotent reuse is subject to the same rule: after a catalog rollback, an older matching contract is reprocessed and becomes the latest attempt instead of being silently republished.</li>
 </ul>
 <h2 id="13-caching-strategy">13. Caching strategy<a class="headerlink" href="#13-caching-strategy" title="Permanent link">&para;</a></h2>
 <ul>
@@ -3348,7 +3471,10 @@ with <code>VALUESTREAM_AUTHORING_V2=0</code> during measured rollout. See the
 <li><strong>UI metric cache</strong> (Streamlit <code>st.cache_data</code>, in <code>ui/data.py</code>): query results are memoized keyed by workspace, metric, group-by, filters, grain, date range, and a signature derived from the catalog, the processor config hash, the aggregate files' (count, mtime, size), and the ledger DBs' (mtime, size). Any ingestion run therefore invalidates the cache automatically. This cache lives in the Streamlit surface only.</li>
 <li><strong>Query layer</strong> (<code>query/</code>): the executor itself is intentionally <strong>stateless</strong> — SDK, MCP, and CLI callers always read live aggregates. Predicate pushdown (config-hash filter and <code>period</code> partition pruning) keeps the per-call cost low, and DuckDB/Parquet plus the OS page cache absorb repeated reads. A process-level LRU at this layer is a possible future addition but is deliberately not present today, so headless callers never serve stale numbers.</li>
 </ul>
-<p>There is <strong>no cache below the storage layer</strong> (no in-memory copy of the aggregate store) — Parquet + the OS page cache do that work.</p>
+<p>There is <strong>no query cache below the storage layer</strong> (no in-memory copy of the
+aggregate store) — Parquet + the OS page cache do that work. Processor-owned
+checkpoints are ingestion acceleration state, not a query-result cache; deleting
+them cannot change report semantics.</p>
 <h2 id="14-failure-semantics">14. Failure semantics<a class="headerlink" href="#14-failure-semantics" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3377,6 +3503,18 @@ with <code>VALUESTREAM_AUTHORING_V2=0</code> during measured rollout. See the
 <td>Write done atomically (write-then-rename)</td>
 <td>Incomplete file never visible to readers</td>
 <td>None needed</td>
+</tr>
+<tr>
+<td>Processor checkpoint missing or stale</td>
+<td>State-address lookup and manifest-version validation</td>
+<td>No aggregate is published from absent state</td>
+<td>Rebuild the checkpoint from authoritative source files and retry only dependent targets</td>
+</tr>
+<tr>
+<td>Processor checkpoint corrupt</td>
+<td>Parent-side manifest/shard integrity validation or Parquet scan failure</td>
+<td>Only targets depending on that generation fail closed; previous successful aggregates remain visible</td>
+<td>Run with <code>--force</code> to replace the state from authoritative source files, or remove it and retry</td>
 </tr>
 <tr>
 <td>Grain materialization fails</td>
@@ -3436,8 +3574,12 @@ only the chunks whose final durable marker is <code>ok</code>.</p>
 </thead>
 <tbody>
 <tr>
-<td>Raw PII</td>
-<td>Never persisted; only aggregate state lives at rest</td>
+<td>Source-derived identity state</td>
+<td>Not query-visible. A bounded processor may persist a minimal checkpoint; it remains sensitive, independently retained, and rebuildable from the authoritative source.</td>
+</tr>
+<tr>
+<td>Customer hash shards</td>
+<td>Routing optimization only, not anonymization; tokenize/HMAC upstream and encrypt/control the workspace where required.</td>
 </tr>
 <tr>
 <td>Identity sketches</td>

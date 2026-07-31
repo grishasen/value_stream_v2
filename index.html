@@ -1691,6 +1691,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts/adr/0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts/adr/0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="concepts/adr/0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2338,9 +2422,11 @@
 <p>Value Stream is a configuration-driven, aggregate-first business intelligence
 platform. It loads file-based exports (typically Pega CDH Interaction History
 and Product Holdings), reduces raw rows to persisted mergeable aggregate
-statistics during one chunk pass, and serves reports, dashboards, aggregate
-chat, SDK queries, and SQL exports from those aggregates. Raw event rows never
-survive the chunk pass.</p>
+statistics during ingestion, and serves reports, dashboards, aggregate
+chat, SDK queries, and SQL exports from those aggregates. Aggregate-first is the
+query-serving contract and the preferred storage shape; bounded processors may
+retain minimal, versioned internal state when needed for efficient exact
+ingestion, but report and query surfaces never read that state.</p>
 <h2 id="find-your-path">Find Your Path<a class="headerlink" href="#find-your-path" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2445,7 +2531,7 @@ than through per-role copies of the same content.</p>
 </tr>
 <tr>
 <td>Analytics</td>
-<td>Binary outcomes, numeric distributions, score distributions, lifecycle, sets, funnels, and snapshots</td>
+<td>Binary outcomes, bounded frequency response, numeric and score distributions, lifecycle, sets, funnels, and snapshots</td>
 </tr>
 <tr>
 <td>Reports</td>

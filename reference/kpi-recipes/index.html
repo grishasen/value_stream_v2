@@ -1602,6 +1602,90 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2448,7 +2532,7 @@ Configuration Studio.</p>
 </tr>
 <tr>
 <td><code>report</code></td>
-<td>Recommended chart, placement, and optional KPI comparison defaults</td>
+<td>Recommended chart, placement, optional KPI comparison defaults, and optional required <code>x</code> axis for non-scalar charts</td>
 </tr>
 </tbody>
 </table>
@@ -2716,8 +2800,65 @@ internal state-ID choice.</p>
 <td>Approximate</td>
 <td>Table</td>
 </tr>
+<tr>
+<td><code>contact_policy.frequency_marginal_ctr</code></td>
+<td>Focal marginal CTR by exposure bucket</td>
+<td>Exact <code>Clicks</code> and <code>Contacts</code> states</td>
+<td>Approximate fixed-window interpretation</td>
+<td>Line</td>
+</tr>
+<tr>
+<td><code>contact_policy.frequency_comparable_ctr</code></td>
+<td>Focal CTR on runner-comparable contacts</td>
+<td>Exact <code>ComparableClicks</code> and <code>ComparableContacts</code> states</td>
+<td>Approximate fixed-window interpretation</td>
+<td>Line</td>
+</tr>
+<tr>
+<td><code>contact_policy.runner_up_expected_ctr</code></td>
+<td>Mean selected-runner raw Propensity</td>
+<td>Exact <code>RunnerPropensitySum</code> and <code>ComparableContacts</code> states</td>
+<td>Approximate fixed-window interpretation</td>
+<td>Line</td>
+</tr>
+<tr>
+<td><code>contact_policy.runner_up_coverage</code></td>
+<td>Runner-comparable share of focal contacts</td>
+<td>Exact <code>ComparableContacts</code> and <code>Contacts</code> states</td>
+<td>Approximate fixed-window interpretation</td>
+<td>KPI card</td>
+</tr>
+<tr>
+<td><code>contact_policy.response_opportunity_margin</code></td>
+<td>Comparable focal response minus runner expectation</td>
+<td>Exact <code>ComparableClicks</code>, <code>RunnerPropensitySum</code>, and shared <code>ComparableContacts</code> states</td>
+<td>Approximate fixed-window interpretation</td>
+<td>Bar</td>
+</tr>
+<tr>
+<td><code>contact_policy.priority_opportunity_gap</code></td>
+<td>Comparable focal-minus-runner Priority index</td>
+<td>Exact focal/runner comparable Priority sums and <code>PriorityComparableContacts</code></td>
+<td>Approximate arbitration diagnostic</td>
+<td>Bar</td>
+</tr>
 </tbody>
 </table>
+<p>The six <strong>Contact policy</strong> recipes target only the <code>frequency_response</code>
+processor and require the exact state names shown above. They never propose a
+generic count or sum as a substitute for those population contracts. Their
+line and bar recommendations use <code>ExposureBucket</code>, whose value is an upstream
+fixed-window approximation; changing a report date filter does not recompute
+customer contact history.</p>
+<p><code>Contacts</code> are derived from the processor's configured exposure outcomes.
+When that outcome is <code>Impression</code>, it is an impression proxy rather than
+measured viewability; dismiss telemetry is never inferred when the source does
+not provide it. Runner selection means exact rank 2 when present, otherwise the
+next recorded rank, and runner response uses raw <code>Propensity</code> as the
+probability. Comparable focal CTR, runner expected CTR, and response opportunity
+margin use the same <code>ComparableContacts</code> denominator. <code>Priority</code> is retained
+only for the separate, neutral arbitration index; it is never treated as CTR
+or probability.</p>
 <p>The unique-entity recipe prefers CPC states created by current processor
 defaults while accepting HLL and Theta states. Theta is useful when the same
 persisted set also supports intersections or differences. The recipe does not

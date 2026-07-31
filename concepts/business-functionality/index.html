@@ -1411,6 +1411,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Reports Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#frequency-response-interpretation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frequency-response interpretation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1732,6 +1749,90 @@
     
   
     0004 Chunk-ledger idempotency
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0005-unified-metric-owned-heatmaps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0005 Unified metric-owned heatmaps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0006-strict-catalog-v2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0006 Strict catalog v2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0007-bounded-lookback-processors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0007 Bounded lookback processors
   
 
     
@@ -2369,6 +2470,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Reports Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#frequency-response-interpretation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frequency-response interpretation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2497,6 +2615,10 @@ capabilities without reading processor code.</p>
 <td>How many interactions occurred, how many were positive, and what was the engagement rate?</td>
 </tr>
 <tr>
+<td>Contact policy</td>
+<td>How does response change as the same customer sees the same action again, and when does the observed response fall below the next recorded alternative's expected response?</td>
+</tr>
+<tr>
 <td>Conversion and revenue</td>
 <td>Which channels, offers, or groups convert, and how much value do they generate?</td>
 </tr>
@@ -2566,6 +2688,21 @@ capabilities without reading processor code.</p>
 <p>This design keeps the report surface flexible while preserving the aggregate
 contract: a page can only filter by dimensions that were persisted during
 processing.</p>
+<h3 id="frequency-response-interpretation">Frequency-response interpretation<a class="headerlink" href="#frequency-response-interpretation" title="Permanent link">&para;</a></h3>
+<p>The <code>frequency_response</code> processor supports a contact-policy diagnostic from
+Interaction History without retaining contact rows. It assigns each rank-1
+exposure to a fixed trailing-window bucket for the same customer, action, and
+placement, then persists daily counts and sums by that bucket. The focal curve
+is observed click-through rate. The comparison curve uses the raw
+<code>Propensity</code> of rank 2, or the smallest recorded rank above 1 when rank 2 is
+absent, over exactly the contacts for which that propensity exists.</p>
+<p><code>Priority</code> remains useful, but for a different question: it explains the
+arbitration score gap between the selected and alternative actions. It is not
+a probability and must not be plotted as expected CTR. Likewise, Interaction
+History cannot supply a dismiss/irritation curve or true viewability unless
+those events exist in the source. A configured Impression is therefore an
+exposure proxy, and the missing concepts stay visibly missing rather than
+being inferred.</p>
 <h2 id="configuration-workflow">Configuration Workflow<a class="headerlink" href="#configuration-workflow" title="Permanent link">&para;</a></h2>
 <p>Business users and data engineers can update workspaces in three ways:</p>
 <table>
