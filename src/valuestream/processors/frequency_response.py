@@ -180,7 +180,8 @@ class FrequencyResponseProcessor:
 
         The checkpoint retains filtered/projected current candidate rows because
         cross-partition contact normalization must see duplicates before collapsing
-        them. Historical scans narrow the stored rows to exposed rank-one contacts.
+        them. A separate history payload is derived from this prepared target
+        payload after it has been streamed to checkpoint storage.
         """
 
         source_schema = frame.collect_schema()
@@ -188,6 +189,36 @@ class FrequencyResponseProcessor:
         marked = frame.with_columns(pl.lit(True).alias(TARGET_CHUNK_COLUMN))
         marked_schema = marked.collect_schema()
         return self._prepare_checkpoint_rows(marked, marked_schema)
+
+    def checkpoint_history_contacts_lazy(self, frame: pl.LazyFrame) -> pl.LazyFrame:
+        """Project staged target candidates to the exact bounded-history payload."""
+
+        columns = self.config.columns
+        history_columns = list(
+            dict.fromkeys(
+                [
+                    columns.customer,
+                    columns.interaction,
+                    columns.action,
+                    columns.placement,
+                    self.config.time.property,
+                    _ROW_ORDER_COLUMN,
+                    _RANK_COLUMN,
+                    _POSITIVE_COLUMN,
+                    _EXPOSED_COLUMN,
+                ]
+            )
+        )
+        schema = frame.collect_schema()
+        missing = sorted(set(history_columns) - set(schema.names()))
+        if missing:
+            raise ValueError(
+                f"frequency_response processor {self.id!r} target checkpoint is missing "
+                f"history column(s): {', '.join(missing)}"
+            )
+        return frame.filter(pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)).select(
+            history_columns
+        )
 
     @timed
     def checkpoint_aggregate_lazy(

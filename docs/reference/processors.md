@@ -1073,9 +1073,12 @@ With `checkpoint.mode: source_scan`, the processor receives the transformed
 target/history rows in an ephemeral frame. With `persistent_sharded`, each raw
 chunk is transformed, filtered, classified, and projected through a partitioned
 streaming sink into customer-hash shards without collecting the complete
-prepared day. Candidate rows remain uncollapsed until current and history
-shards are combined, preserving cross-partition duplicate precedence. Target
-processing reads the corresponding shard from the current and history days.
+prepared day. That complete target payload is the source for a second, narrow
+history payload in the same atomic generation, so building the history role
+does not reread raw IH. Candidate rows remain uncollapsed until current and
+history shards are combined, preserving cross-partition duplicate precedence.
+Target processing reads the complete corresponding target shard and only the
+narrow history shard from each earlier day.
 The two modes implement the same following rules:
 
 1. A contact is identified by customer, interaction, action, placement, and
@@ -1171,10 +1174,16 @@ silently undercounting the number of impressions.
 
 - `source_scan` (the compatibility default) retains no processor state and
   rereads the bounded source closure for each target.
-- `persistent_sharded` persists only filtered candidate rows and fields required
-  to repeat exact cross-partition normalization, number-of-impressions bucketing,
-  deduplication, grouping/state calculation, and configured alternative-group
-  selected rank-2 action resolution. `shards`
+- `persistent_sharded` persists a complete target-candidate role containing the
+  fields required to repeat exact cross-partition normalization,
+  number-of-impressions bucketing, deduplication, grouping/state calculation,
+  and configured alternative-group selected rank-2 action resolution. In the
+  same generation it persists a history role filtered to exposed rank-1 rows
+  and projected to customer, interaction, action, placement, decision time,
+  contact classification, and deterministic local order. The history role is
+  derived from staged target shards and deliberately omits propensity,
+  priority, report/alternative groups, outcome, and all rank>1 candidates.
+  `shards`
   is an integer from `1` through `4096` and defaults to
   `64`; larger values lower per-shard memory while increasing file count.
 
@@ -1206,7 +1215,13 @@ processor semantic computation identity, independent checkpoint-layout
 identity, chunk id, and raw-file fingerprint; their manifests also version the
 checkpoint schema, customer dtype, shard-hash algorithm/seeds, and Polars
 runtime used for native hashing. Before workers start, the parent validates the
-declared files, sizes, row counts, schemas, and SHA-256 digests once. Customer
+manifest plus the exact payload roles pending work can open: `target` for a
+current chunk, `history` for a historical dependency, or both when the chunk is
+needed in both roles. Each selected role's declared files, sizes, row counts,
+schemas, and SHA-256 digests are checked once; a history-only validation never
+reads the complete target payload. A newly written shard supplies its manifest
+metadata from that first inspection; publication revalidates the JSON against
+those entries rather than hashing and scanning the file again. Customer
 dtype must be stable across the bounded closure; normalize it in source
 transforms if exports drift. They live in the processor-state namespace,
 outside aggregates and ledger publication.

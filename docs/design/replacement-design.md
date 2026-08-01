@@ -1182,13 +1182,15 @@ builds a marked, ephemeral dependency frame. `persistent_sharded` filters,
 classifies, and projects a raw chunk through a partitioned streaming sink into
 customer-hash shards addressed by source, processor semantic computation
 identity, independent checkpoint-layout identity, chunk id, and raw
-fingerprint, then processes one corresponding target/history shard set at a
-time. Contact collapse happens after those shards are combined so both modes
-retain identical cross-partition duplicate precedence. Neither mode changes the
-raw dependency fingerprint or aggregate publication barrier. Checkpoint mode,
-shard count, and retention remain in the full catalog hash but not in processor
-or source computation hashes. Checkpoint manifests and files are not ledger
-`ok` rows and are never query-visible.
+fingerprint. The resulting atomic generation has a complete target payload and
+a narrow history payload derived from those staged target shards without a
+second raw scan, then processes one corresponding target/history shard set at
+a time. Contact collapse happens after those shards are combined so both modes
+retain identical cross-partition duplicate precedence. Neither mode changes
+the raw dependency fingerprint or aggregate publication barrier. Checkpoint
+mode, shard count, and retention remain in the full catalog hash but not in
+processor or source computation hashes. Checkpoint manifests and files are not
+ledger `ok` rows and are never query-visible.
 
 Re-processing a chunk:
 
@@ -1239,8 +1241,10 @@ processor in `source_scan` mode additionally owns its dependency frame, so
 memory and scan cost scale with target size plus lookback. In
 `persistent_sharded` mode, checkpoint construction owns one transformed source
 lazy plan and streams it directly into partitioned Parquet without collecting
-the complete prepared day; target computation reads one customer shard across
-the bounded days at a time. Neither path guarantees a fixed RSS ceiling; an
+the complete prepared day. It derives a narrow historical payload from the
+staged target Parquet and target computation reads one complete current shard
+plus only narrow historical shards across the bounded days at a time. Neither
+path guarantees a fixed RSS ceiling; an
 upstream blocking transform or the allocator may
 retain freed pages for reuse. Operators control memory with chunk size,
 checkpoint shard count, and bounded chunk-process parallelism, then verify peak

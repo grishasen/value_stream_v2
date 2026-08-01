@@ -212,7 +212,8 @@ def test_frequency_response_pipeline_replays_bounded_dependencies_and_hides_empt
     )
     # Default retention is exactly seven history partitions plus current.
     assert len(checkpoint_manifests) == 8
-    assert all(list(path.parent.glob("shard=*.parquet")) for path in checkpoint_manifests)
+    assert all(list(path.parent.glob("target-shard=*.parquet")) for path in checkpoint_manifests)
+    assert all(list(path.parent.glob("history-shard=*.parquet")) for path in checkpoint_manifests)
 
     before = query_metric_result(
         tmp_path,
@@ -391,7 +392,7 @@ def test_checkpoint_failure_only_fails_targets_that_depend_on_it(tmp_path: Path)
 
     corrupted = next(
         (tmp_path / ".valuestream" / "state" / "frequency_response").glob(
-            f"**/chunk={_DAYS[1]}/**/shard=*.parquet"
+            f"**/chunk={_DAYS[1]}/**/target-shard=*.parquet"
         )
     )
     with corrupted.open("ab") as handle:

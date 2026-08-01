@@ -13,7 +13,7 @@ import os
 import re
 import shutil
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
@@ -22,7 +22,7 @@ from uuid import uuid4
 
 import polars as pl
 
-CHECKPOINT_SCHEMA_REVISION = 3
+CHECKPOINT_SCHEMA_REVISION = 4
 SHARD_HASH_REVISION = 1
 SHARD_HASH_ALGORITHM = "polars.Expr.hash"
 SHARD_HASH_SEEDS = (
@@ -36,6 +36,7 @@ MANIFEST_FILENAME = "manifest.json"
 
 _HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
 _FrameT = TypeVar("_FrameT", pl.DataFrame, pl.LazyFrame)
+CheckpointPayload = Literal["target", "history"]
 
 
 class CheckpointValidationError(ValueError):
@@ -74,6 +75,8 @@ class CheckpointManifest:
     shard_count: int
     rows: int
     shards: tuple[CheckpointShard, ...]
+    history_rows: int
+    history_shards: tuple[CheckpointShard, ...]
 
     @property
     def directory(self) -> Path:
@@ -83,14 +86,28 @@ class CheckpointManifest:
 
     @property
     def nonempty_shard_ids(self) -> tuple[int, ...]:
-        """Sorted IDs of shards that have at least one contact."""
+        """Sorted IDs of target shards that have at least one candidate."""
 
         return tuple(shard.shard_id for shard in self.shards)
 
+    @property
+    def nonempty_history_shard_ids(self) -> tuple[int, ...]:
+        """Sorted IDs of history shards that have at least one exposure."""
+
+        return tuple(shard.shard_id for shard in self.history_shards)
+
     def shard(self, shard_id: int) -> CheckpointShard:
-        """Return metadata for ``shard_id`` or raise ``KeyError`` when empty."""
+        """Return target metadata for ``shard_id`` or raise when empty."""
 
         for shard in self.shards:
+            if shard.shard_id == shard_id:
+                return shard
+        raise KeyError(shard_id)
+
+    def history_shard(self, shard_id: int) -> CheckpointShard:
+        """Return history metadata for ``shard_id`` or raise when empty."""
+
+        for shard in self.history_shards:
             if shard.shard_id == shard_id:
                 return shard
         raise KeyError(shard_id)
@@ -192,14 +209,18 @@ def write_checkpoint(
     raw_fingerprint: str,
     customer_column: str,
     shard_count: int,
+    history_projection: Callable[[pl.LazyFrame], pl.LazyFrame],
     engine: Literal["auto", "streaming"] = "auto",
     replace_existing: bool = False,
 ) -> CheckpointManifest:
     """Atomically publish or reuse a sharded prepared-contact checkpoint.
 
     A valid directory at the state address is immutable and reused without
-    touching any files.  A corrupt directory raises instead of being silently
-    overwritten, preserving a visible failure boundary for cache repair.
+    touching any files. The complete target payload is written first; the
+    narrow history payload is then derived from those staged target shards so
+    authoritative source input is not scanned twice. A corrupt directory
+    raises instead of being silently overwritten, preserving a visible failure
+    boundary for cache repair.
     """
 
     final_directory = checkpoint_path(
@@ -248,11 +269,21 @@ def write_checkpoint(
         )
     )
     try:
-        _sink_shards(sharded, temporary_directory, engine=engine)
+        _sink_shards(sharded, temporary_directory, payload="target", engine=engine)
         shards = _inspect_written_shards(
             temporary_directory,
+            payload="target",
             customer_column=customer_column,
             customer_dtype=customer_dtype,
+        )
+        history_shards = _derive_history_shards(
+            temporary_directory,
+            shards=shards,
+            history_projection=history_projection,
+            customer_column=customer_column,
+            customer_dtype=customer_dtype,
+            shard_count=shard_count,
+            engine=engine,
         )
         payload = _manifest_payload(
             source_id=source_id,
@@ -266,10 +297,12 @@ def write_checkpoint(
             shard_count=shard_count,
             rows=sum(shard.rows for shard in shards),
             shards=shards,
+            history_rows=sum(shard.rows for shard in history_shards),
+            history_shards=history_shards,
         )
         temporary_manifest = temporary_directory / MANIFEST_FILENAME
         _write_manifest(temporary_manifest, payload)
-        _parse_manifest(
+        inspected_manifest = _parse_manifest(
             temporary_manifest,
             expected={
                 "source_id": source_id,
@@ -279,7 +312,18 @@ def write_checkpoint(
                 "chunk_id": chunk_id,
                 "raw_fingerprint": raw_fingerprint,
             },
-            validate_files=True,
+            validate_files=False,
+        )
+        _validate_manifest_request(
+            inspected_manifest,
+            customer_column=customer_column,
+            customer_dtype=customer_dtype,
+            shard_count=shard_count,
+        )
+        _validate_inspected_manifest(
+            inspected_manifest,
+            shards=shards,
+            history_shards=history_shards,
         )
         _fsync_directory(temporary_directory)
 
@@ -377,9 +421,9 @@ def load_manifest(
     layout_hash: str,
     chunk_id: str,
     raw_fingerprint: str,
-    validate: bool = True,
+    validate: bool | CheckpointPayload = True,
 ) -> CheckpointManifest | None:
-    """Load one checkpoint manifest, returning ``None`` when it is absent."""
+    """Load a manifest and validate both payloads or one requested role."""
 
     path = checkpoint_manifest_path(
         workspace_path,
@@ -411,10 +455,15 @@ def load_manifest(
     )
 
 
-def scan_shard(manifest: CheckpointManifest, shard_id: int) -> pl.LazyFrame:
-    """Lazily scan one non-empty shard from a validated manifest."""
+def scan_shard(
+    manifest: CheckpointManifest,
+    shard_id: int,
+    *,
+    payload: CheckpointPayload = "target",
+) -> pl.LazyFrame:
+    """Lazily scan one non-empty target or history shard."""
 
-    shard = manifest.shard(shard_id)
+    shard = manifest.shard(shard_id) if payload == "target" else manifest.history_shard(shard_id)
     return pl.scan_parquet(manifest.directory / shard.filename, glob=False)
 
 
@@ -422,6 +471,7 @@ def _sink_shards(
     frame: pl.LazyFrame,
     directory: Path,
     *,
+    payload: CheckpointPayload,
     engine: Literal["auto", "streaming"],
 ) -> None:
     """Stream a prepared frame into one deterministic file per non-empty shard."""
@@ -429,7 +479,7 @@ def _sink_shards(
     def shard_path(args: Any) -> str:
         if args.index_in_partition != 0:
             raise RuntimeError("checkpoint partition unexpectedly split across files")
-        return _shard_filename(int(args.partition_keys.item(0, 0)))
+        return _shard_filename(int(args.partition_keys.item(0, 0)), payload=payload)
 
     frame.sink_parquet(
         pl.PartitionBy(
@@ -451,14 +501,15 @@ def _sink_shards(
 def _inspect_written_shards(
     directory: Path,
     *,
+    payload: CheckpointPayload,
     customer_column: str,
     customer_dtype: str,
 ) -> tuple[CheckpointShard, ...]:
     """Build manifest entries without materializing checkpoint rows."""
 
     shards: list[CheckpointShard] = []
-    for path in sorted(directory.glob("*.parquet")):
-        shard_id = _shard_id_from_filename(path.name)
+    for path in sorted(directory.glob(f"{payload}-shard=*.parquet")):
+        shard_id = _shard_id_from_filename(path.name, payload=payload)
         scan = pl.scan_parquet(path, glob=False)
         schema = scan.collect_schema()
         if customer_column not in schema.names():
@@ -495,6 +546,49 @@ def _inspect_written_shards(
     return tuple(shards)
 
 
+def _derive_history_shards(
+    directory: Path,
+    *,
+    shards: tuple[CheckpointShard, ...],
+    history_projection: Callable[[pl.LazyFrame], pl.LazyFrame],
+    customer_column: str,
+    customer_dtype: str,
+    shard_count: int,
+    engine: Literal["auto", "streaming"],
+) -> tuple[CheckpointShard, ...]:
+    """Derive the bounded-history payload from staged target files."""
+
+    if not shards:
+        return ()
+    staged_target = pl.scan_parquet(
+        [directory / shard.filename for shard in shards],
+        glob=False,
+    )
+    history = history_projection(staged_target)
+    _validate_shard_request(
+        history,
+        customer_column=customer_column,
+        shard_count=shard_count,
+    )
+    sharded_history = assign_customer_shard(
+        history,
+        customer_column=customer_column,
+        shard_count=shard_count,
+    )
+    _sink_shards(
+        sharded_history,
+        directory,
+        payload="history",
+        engine=engine,
+    )
+    return _inspect_written_shards(
+        directory,
+        payload="history",
+        customer_column=customer_column,
+        customer_dtype=customer_dtype,
+    )
+
+
 def _manifest_payload(
     *,
     source_id: str,
@@ -508,6 +602,8 @@ def _manifest_payload(
     shard_count: int,
     rows: int,
     shards: tuple[CheckpointShard, ...],
+    history_rows: int,
+    history_shards: tuple[CheckpointShard, ...],
 ) -> dict[str, Any]:
     return {
         "schema_revision": CHECKPOINT_SCHEMA_REVISION,
@@ -535,6 +631,17 @@ def _manifest_payload(
             }
             for shard in shards
         ],
+        "history_rows": history_rows,
+        "history_shards": [
+            {
+                "shard_id": shard.shard_id,
+                "filename": shard.filename,
+                "rows": shard.rows,
+                "size_bytes": shard.size_bytes,
+                "sha256": shard.sha256,
+            }
+            for shard in history_shards
+        ],
     }
 
 
@@ -556,7 +663,7 @@ def _parse_manifest(
     path: Path,
     *,
     expected: Mapping[str, str],
-    validate_files: bool,
+    validate_files: bool | CheckpointPayload,
 ) -> CheckpointManifest:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -580,12 +687,34 @@ def _parse_manifest(
     raw_shards = payload.get("shards")
     if not isinstance(raw_shards, list):
         raise CheckpointValidationError("checkpoint shards must be a list")
-    shards = tuple(_parse_shard(value, shard_count=shard_count) for value in raw_shards)
+    shards = tuple(
+        _parse_shard(value, shard_count=shard_count, payload="target") for value in raw_shards
+    )
     shard_ids = [shard.shard_id for shard in shards]
     if shard_ids != sorted(set(shard_ids)):
         raise CheckpointValidationError("checkpoint shards must have unique, sorted IDs")
     if sum(shard.rows for shard in shards) != rows:
         raise CheckpointValidationError("checkpoint shard row counts do not match total rows")
+
+    history_rows = _manifest_int(payload, "history_rows", minimum=0)
+    raw_history_shards = payload.get("history_shards")
+    if not isinstance(raw_history_shards, list):
+        raise CheckpointValidationError("checkpoint history_shards must be a list")
+    history_shards = tuple(
+        _parse_shard(value, shard_count=shard_count, payload="history")
+        for value in raw_history_shards
+    )
+    history_shard_ids = [shard.shard_id for shard in history_shards]
+    if history_shard_ids != sorted(set(history_shard_ids)):
+        raise CheckpointValidationError("checkpoint history shards must have unique, sorted IDs")
+    if sum(shard.rows for shard in history_shards) != history_rows:
+        raise CheckpointValidationError(
+            "checkpoint history shard row counts do not match total rows"
+        )
+    if not set(history_shard_ids).issubset(shard_ids):
+        raise CheckpointValidationError(
+            "checkpoint history shards must be a subset of target shards"
+        )
 
     manifest = CheckpointManifest(
         path=path,
@@ -605,9 +734,10 @@ def _parse_manifest(
         shard_count=shard_count,
         rows=rows,
         shards=shards,
+        history_rows=history_rows,
+        history_shards=history_shards,
     )
-    if validate_files:
-        _validate_shard_files(manifest)
+    _validate_requested_shard_files(manifest, validate_files)
     return manifest
 
 
@@ -650,7 +780,12 @@ def _parse_hash_contract(
     return schema_revision, hash_revision, algorithm, seeds, polars_version
 
 
-def _parse_shard(value: object, *, shard_count: int) -> CheckpointShard:
+def _parse_shard(
+    value: object,
+    *,
+    shard_count: int,
+    payload: CheckpointPayload,
+) -> CheckpointShard:
     if not isinstance(value, dict):
         raise CheckpointValidationError("checkpoint shard entries must be objects")
     shard_id = _manifest_int(value, "shard_id", minimum=0)
@@ -659,7 +794,7 @@ def _parse_shard(value: object, *, shard_count: int) -> CheckpointShard:
             f"checkpoint shard {shard_id} is outside configured count {shard_count}"
         )
     filename = _manifest_string(value, "filename")
-    if filename != _shard_filename(shard_id):
+    if filename != _shard_filename(shard_id, payload=payload):
         raise CheckpointValidationError(
             f"checkpoint shard {shard_id} has unexpected filename {filename!r}"
         )
@@ -679,15 +814,28 @@ def _parse_shard(value: object, *, shard_count: int) -> CheckpointShard:
     )
 
 
-def _validate_shard_files(manifest: CheckpointManifest) -> None:
-    declared = {shard.filename for shard in manifest.shards}
-    actual = {path.name for path in manifest.directory.glob("*.parquet") if path.is_file()}
+def _validate_shard_files(
+    manifest: CheckpointManifest,
+    *,
+    payload: CheckpointPayload | None = None,
+) -> None:
+    if payload == "target":
+        shards = manifest.shards
+        pattern = "target-shard=*.parquet"
+    elif payload == "history":
+        shards = manifest.history_shards
+        pattern = "history-shard=*.parquet"
+    else:
+        shards = (*manifest.shards, *manifest.history_shards)
+        pattern = "*.parquet"
+    declared = {shard.filename for shard in shards}
+    actual = {path.name for path in manifest.directory.glob(pattern) if path.is_file()}
     if actual != declared:
         raise CheckpointValidationError(
             f"checkpoint Parquet files do not match manifest: declared={sorted(declared)}, "
             f"actual={sorted(actual)}"
         )
-    for shard in manifest.shards:
+    for shard in shards:
         path = manifest.directory / shard.filename
         try:
             if path.stat().st_size != shard.size_bytes:
@@ -722,6 +870,18 @@ def _validate_shard_files(manifest: CheckpointManifest) -> None:
             ) from exc
 
 
+def _validate_requested_shard_files(
+    manifest: CheckpointManifest,
+    request: bool | CheckpointPayload,
+) -> None:
+    if request is False:
+        return
+    if request is True:
+        _validate_shard_files(manifest)
+        return
+    _validate_shard_files(manifest, payload=request)
+
+
 def _validate_manifest_request(
     manifest: CheckpointManifest,
     *,
@@ -742,6 +902,31 @@ def _validate_manifest_request(
     if manifest.shard_count != shard_count:
         raise CheckpointValidationError(
             f"checkpoint shard count {manifest.shard_count} does not match {shard_count}"
+        )
+
+
+def _validate_inspected_manifest(
+    manifest: CheckpointManifest,
+    *,
+    shards: tuple[CheckpointShard, ...],
+    history_shards: tuple[CheckpointShard, ...],
+) -> None:
+    """Match parsed JSON to the metadata already inspected during this write.
+
+    The inspected tuples already contain the only file scan and SHA-256 pass
+    needed before publication. Reopening those same files here would duplicate
+    the dominant checkpoint-write validation cost.
+    """
+
+    if manifest.shards != shards or manifest.rows != sum(shard.rows for shard in shards):
+        raise CheckpointValidationError(
+            "checkpoint manifest target payload does not match inspected shard metadata"
+        )
+    if manifest.history_shards != history_shards or manifest.history_rows != sum(
+        shard.rows for shard in history_shards
+    ):
+        raise CheckpointValidationError(
+            "checkpoint manifest history payload does not match inspected shard metadata"
         )
 
 
@@ -811,12 +996,12 @@ def _component(value: str) -> str:
     return quote(value, safe="-._~")
 
 
-def _shard_filename(shard_id: int) -> str:
-    return f"shard={shard_id:05d}.parquet"
+def _shard_filename(shard_id: int, *, payload: CheckpointPayload) -> str:
+    return f"{payload}-shard={shard_id:05d}.parquet"
 
 
-def _shard_id_from_filename(filename: str) -> int:
-    match = re.fullmatch(r"shard=(\d{5})\.parquet", filename)
+def _shard_id_from_filename(filename: str, *, payload: CheckpointPayload) -> int:
+    match = re.fullmatch(rf"{payload}-shard=(\d{{5}})\.parquet", filename)
     if match is None:
         raise CheckpointValidationError(f"unexpected checkpoint shard filename {filename!r}")
     return int(match.group(1))
@@ -861,6 +1046,7 @@ __all__ = [
     "SHARD_HASH_REVISION",
     "SHARD_HASH_SEEDS",
     "CheckpointManifest",
+    "CheckpointPayload",
     "CheckpointShard",
     "CheckpointValidationError",
     "assign_customer_shard",

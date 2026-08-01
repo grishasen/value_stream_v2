@@ -312,7 +312,10 @@ For `frequency_response`, a checkpoint contains the minimal filtered,
 classified candidate rows needed to repeat exact cross-partition contact
 normalization, ordering, grouping/state calculation, and the processor's
 configured alternative-group selected rank-2 action resolution,
-split into deterministic customer-hash shards by a streaming sink. It is
+split into deterministic customer-hash shards by a streaming sink. One atomic
+generation contains a complete target payload and a narrow, staged-target-
+derived history payload containing only exposed rank-1 identity, time,
+classification, and order fields. It is
 source-fingerprint-addressed by source, processor semantic computation
 identity, independent checkpoint-layout identity, chunk id, and raw-file
 fingerprint, with explicit state-schema, customer-dtype, and sharding

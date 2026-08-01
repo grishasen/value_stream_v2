@@ -253,10 +253,16 @@ ephemeral current/history frame for the frequency processor. With
 `checkpoint.mode: persistent_sharded`, each raw chunk is filtered, classified,
 and projected into a source-fingerprint-addressed checkpoint by a partitioned
 streaming sink split on customer hash; checkpoint creation therefore does not
-collect the complete prepared day. Target processing opens only corresponding
-shards from the target and bounded history and releases each shard after
-aggregation. Both modes publish the same mergeable grouped states, and reports
-cannot address the checkpoint namespace.
+collect the complete prepared day. The atomic generation contains a complete
+target-candidate payload and a narrow history payload derived from the staged
+target shards, not from a second raw-source scan. Target processing opens the
+complete corresponding target shard, while bounded historical reads open only
+exposed-rank-1 identity/time/order fields from the corresponding history shard;
+parent-side integrity validation follows the same role boundary and does not
+hash a historical chunk's complete target payload unless that chunk is also a
+pending target. Each shard is released after aggregation. Both modes publish
+the same mergeable grouped states, and reports cannot address the checkpoint
+namespace.
 This is specified by [ADR 0007](adr/0007-bounded-lookback-processors.md).
 
 Order-sensitive bounded ML samples are the exception that proves the execution

@@ -58,15 +58,20 @@ A bounded processor may choose one of two exact execution strategies:
    target and persists no processor state. This remains the compatibility
    default and the correctness reference.
 2. `persistent_sharded` filters, classifies, and projects each source chunk
-   once per processor into a processor-owned checkpoint, uses a partitioned
-   streaming sink to route it by a deterministic customer hash, and reads only
-   matching shards for the target and bounded history. Candidate rows are
+   once per processor into a processor-owned checkpoint and uses a partitioned
+   streaming sink to route it by a deterministic customer hash. Each atomic
+   generation has a complete `target` payload plus a role-specific `history`
+   payload derived from the staged target shards without rereading Interaction
+   History. Target calculation reads the complete matching target shard;
+   bounded lookback reads only matching history shards. Candidate rows are
    retained before cross-partition contact collapse so duplicate/outcome
    precedence remains exactly equivalent to `source_scan`.
    The checkpoint may retain identity-level keys and values needed for exact
    ordering, deduplication, number-of-impressions bucketing, grouping/state
    calculation, and the configured alternative-group selected rank-2 action
-   resolution.
+   resolution. The history role retains only exposed rank-1 contact identity,
+   time, classification, and local-order fields; historical alternatives and
+   target-only grouping/state values are excluded.
 
 The strategy is operational rather than semantic. `checkpoint.mode`,
 `checkpoint.shards`, and `checkpoint.retention_days` remain in the full catalog
@@ -81,10 +86,11 @@ Persistent processor state is permitted only under these constraints:
 - Interaction History remains authoritative. A checkpoint is not a Source,
   aggregate, business record, publication marker, or queryable table. Deleting
   it may make ingestion slower, but cannot change a reported result.
-- The stored schema is the smallest prepared candidate state required by the
-  processor; unrelated source columns and outcomes are excluded. State is
-  bounded by the declared dependency semantics and its retention policy,
-  rather than becoming an unbounded raw-event archive.
+- Each stored role uses the smallest prepared state required by that role;
+  unrelated source columns and outcomes are excluded. A role-specific history
+  payload may duplicate a narrow subset of target rows when that lowers bounded
+  replay I/O. State is bounded by the declared dependency semantics and its
+  retention policy, rather than becoming an unbounded raw-event archive.
 - Every generation is identity-addressed by source, processor semantic
   computation identity, independent checkpoint-layout identity, chunk id, and
   raw-file fingerprint. The layout identity currently covers shard count;
@@ -96,11 +102,17 @@ Persistent processor state is permitted only under these constraints:
   forced run rebuilds and safely replaces the same address as well, so a
   metadata-preserving source-file replacement cannot force reuse of stale
   acceleration state.
-- Every existing manifest and shard is size-, row-count-, schema-, file-set-,
-  and SHA-256-validated once in the parent run before workers open individual
-  shards. The recorded customer identity dtype must agree across a target's
-  complete closure; dtype drift fails that target instead of routing equal
-  logical keys to different shards silently.
+- Every existing manifest is structurally validated in the parent run. Each
+  payload role that a pending target can open is then file-set-, size-,
+  row-count-, schema-, and SHA-256-validated once: the current chunk validates
+  `target`, a historical dependency validates `history`, and a chunk needed in
+  both roles validates both. This prevents integrity validation from rereading
+  target-only columns during a history-only replay. During a new atomic write,
+  each shard is scanned and hashed once to construct its manifest entry; the
+  serialized manifest is checked against those already inspected entries
+  without reopening the same files. The recorded customer identity dtype must
+  agree across a target's complete closure; dtype drift fails that target
+  instead of routing equal logical keys to different shards silently.
 - Checkpoints do not create chunk-ledger `ok` rows and are not covered by query
   publication. The target aggregate still commits through the normal lineage
   and chunk-ledger barrier, whose fingerprint covers the complete raw

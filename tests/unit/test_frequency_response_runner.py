@@ -14,8 +14,10 @@ import pytest
 
 from valuestream.config import model
 from valuestream.engine import ledger, runner
+from valuestream.processors.context import ChunkContext
 from valuestream.processors.frequency_response import FrequencyResponseProcessor
 from valuestream.readers.discovery import Chunk
+from valuestream.store.processor_state import CheckpointPayload
 
 
 def _source() -> model.Source:
@@ -241,6 +243,101 @@ def test_persistent_frequency_preparation_does_not_read_raw_history(
 
 
 @pytest.mark.unit
+def test_persistent_history_aggregation_scans_only_narrow_history_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history_file = tmp_path / "2024-01-01.parquet"
+    current_file = tmp_path / "2024-01-02.parquet"
+    history_file.write_bytes(b"history")
+    current_file.write_bytes(b"current")
+    history_row = _frequency_row("history", dt.datetime(2024, 1, 1, 12, tzinfo=dt.UTC))
+    history_row["CustomerID"] = "customer"
+    current_row = _frequency_row("current", dt.datetime(2024, 1, 2, 12, tzinfo=dt.UTC))
+    current_row["CustomerID"] = "customer"
+    frames = {
+        history_file: pl.DataFrame([history_row]).lazy(),
+        current_file: pl.DataFrame([current_row]).lazy(),
+    }
+    monkeypatch.setattr(runner, "read", lambda _reader, files: frames[files[0]])
+    config = _processor(frequency=True).config.model_copy(
+        update={
+            "checkpoint": model.FrequencyResponseCheckpoint(
+                mode="persistent_sharded",
+                shards=8,
+            )
+        }
+    )
+    processor = FrequencyResponseProcessor(config, computation_hash="a" * 64)
+    plan = runner._ChunkPlan(
+        Chunk("2024-01-02", (current_file,)),
+        (Chunk("2024-01-01", (history_file,)),),
+    )
+    assert (
+        runner._ensure_persistent_frequency_checkpoints(
+            tmp_path,
+            _source(),
+            [processor],
+            [plan],
+        )
+        == {}
+    )
+
+    validations: list[tuple[str, object]] = []
+    original_load = runner.load_processor_state_manifest
+
+    def track_manifest_load(*args: Any, **kwargs: Any) -> runner.CheckpointManifest | None:
+        validations.append((kwargs["chunk_id"], kwargs["validate"]))
+        return original_load(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "load_processor_state_manifest", track_manifest_load)
+    assert (
+        runner._ensure_persistent_frequency_checkpoints(
+            tmp_path,
+            _source(),
+            [processor],
+            [plan],
+        )
+        == {}
+    )
+    assert set(validations) == {
+        ("2024-01-01", "history"),
+        ("2024-01-02", "target"),
+    }
+
+    scans: list[tuple[str, str]] = []
+    original_scan = runner.scan_processor_state_shard
+
+    def track_scan(
+        manifest: runner.CheckpointManifest,
+        shard_id: int,
+        *,
+        payload: CheckpointPayload = "target",
+    ) -> pl.LazyFrame:
+        scans.append((manifest.chunk_id, payload))
+        return original_scan(manifest, shard_id, payload=payload)
+
+    monkeypatch.setattr(runner, "scan_processor_state_shard", track_scan)
+    ctx = ChunkContext(
+        pipeline_run_id="run",
+        chunk_id="2024-01-02",
+        created_at=dt.datetime(2024, 1, 2, 13, tzinfo=dt.UTC),
+    )
+
+    runner._collect_persistent_frequency_frames(
+        tmp_path,
+        _source(),
+        [processor],
+        plan,
+        ctx,
+    )
+
+    assert ("2024-01-02", "target") in scans
+    assert ("2024-01-01", "history") in scans
+    assert ("2024-01-01", "target") not in scans
+
+
+@pytest.mark.unit
 def test_persistent_checkpoint_prepass_streams_and_rejects_customer_dtype_drift(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -353,7 +450,9 @@ def test_checkpoint_integrity_failure_is_isolated_and_force_rebuilds_it(
         == {}
     )
     shard = next(
-        (tmp_path / ".valuestream" / "state" / "frequency_response").glob("**/shard=*.parquet")
+        (tmp_path / ".valuestream" / "state" / "frequency_response").glob(
+            "**/target-shard=*.parquet"
+        )
     )
     pl.read_parquet(shard).with_columns(pl.lit("TAMPERED").alias("ActionID")).write_parquet(shard)
 

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import pytest
 
+from valuestream.store import processor_state
 from valuestream.store.processor_state import (
     CHECKPOINT_SCHEMA_REVISION,
     MANIFEST_FILENAME,
@@ -47,6 +50,13 @@ def _contacts() -> pl.DataFrame:
     )
 
 
+def _history_projection(frame: pl.LazyFrame) -> pl.LazyFrame:
+    return frame.filter(pl.col("ActionName") == "A").select(
+        "CustomerID",
+        "DecisionTime",
+    )
+
+
 def _write(tmp_path: Path, frame: pl.DataFrame | None = None, *, shards: int = 8):
     return write_checkpoint(
         _contacts() if frame is None else frame,
@@ -54,6 +64,7 @@ def _write(tmp_path: Path, frame: pl.DataFrame | None = None, *, shards: int = 8
         **IDENTITY,
         customer_column="CustomerID",
         shard_count=shards,
+        history_projection=_history_projection,
     )
 
 
@@ -128,6 +139,11 @@ def test_write_load_and_scan_round_trip_manifest_and_contacts(tmp_path: Path) ->
     assert all(shard.rows > 0 for shard in manifest.shards)
     assert all(shard.size_bytes > 0 for shard in manifest.shards)
     assert all(len(shard.sha256) == 64 for shard in manifest.shards)
+    assert manifest.history_rows == 2
+    assert manifest.nonempty_history_shard_ids == tuple(sorted(manifest.nonempty_history_shard_ids))
+    assert all(shard.rows > 0 for shard in manifest.history_shards)
+    assert all(shard.size_bytes > 0 for shard in manifest.history_shards)
+    assert all(len(shard.sha256) == 64 for shard in manifest.history_shards)
 
     loaded = load_manifest(tmp_path, **IDENTITY)
     assert loaded == manifest
@@ -139,13 +155,93 @@ def test_write_load_and_scan_round_trip_manifest_and_contacts(tmp_path: Path) ->
     assert recovered.equals(expected)
     assert SHARD_COLUMN not in recovered.columns
 
+    recovered_history = pl.concat(
+        [
+            scan_shard(manifest, shard_id, payload="history").collect()
+            for shard_id in manifest.nonempty_history_shard_ids
+        ]
+    ).sort(["CustomerID", "DecisionTime"])
+    expected_history = (
+        _history_projection(_contacts().lazy()).collect().sort(["CustomerID", "DecisionTime"])
+    )
+    assert recovered_history.equals(expected_history)
+
+
+@pytest.mark.unit
+def test_new_checkpoint_reuses_inspected_digests_without_rescanning_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validations: list[Path] = []
+    original = processor_state._validate_shard_files
+
+    def track_validation(manifest: processor_state.CheckpointManifest) -> None:
+        validations.append(manifest.path)
+        original(manifest)
+
+    monkeypatch.setattr(processor_state, "_validate_shard_files", track_validation)
+
+    manifest = _write(tmp_path)
+    assert validations == []
+
+    assert load_manifest(tmp_path, **IDENTITY) == manifest
+    assert validations == [manifest.path]
+
+
+@pytest.mark.unit
+def test_manifest_must_match_metadata_inspected_during_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = processor_state._write_manifest
+
+    def write_tampered_manifest(path: Path, payload: Mapping[str, Any]) -> None:
+        original(path, payload)
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["shards"][0]["sha256"] = "0" * 64
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+    monkeypatch.setattr(processor_state, "_write_manifest", write_tampered_manifest)
+
+    with pytest.raises(CheckpointValidationError, match="does not match inspected"):
+        _write(tmp_path)
+
+    final = checkpoint_path(tmp_path, **IDENTITY)
+    assert not final.exists()
+    assert not list(final.parent.glob(f".{final.name}.*.tmp"))
+
+
+@pytest.mark.unit
+def test_manifest_request_metadata_is_checked_without_rescanning_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = processor_state._write_manifest
+
+    def write_tampered_manifest(path: Path, payload: Mapping[str, Any]) -> None:
+        original(path, payload)
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["customer_dtype"] = "Int64"
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+    monkeypatch.setattr(processor_state, "_write_manifest", write_tampered_manifest)
+
+    with pytest.raises(CheckpointValidationError, match="customer dtype"):
+        _write(tmp_path)
+
+    assert not checkpoint_path(tmp_path, **IDENTITY).exists()
+
 
 @pytest.mark.unit
 def test_valid_content_address_is_reused_without_rewriting_files(tmp_path: Path) -> None:
     first = _write(tmp_path)
     mtimes = {
         path.name: path.stat().st_mtime_ns
-        for path in [first.path, *(first.directory / item.filename for item in first.shards)]
+        for path in [
+            first.path,
+            *(first.directory / item.filename for item in first.shards),
+            *(first.directory / item.filename for item in first.history_shards),
+        ]
     }
 
     second = _write(
@@ -162,7 +258,11 @@ def test_valid_content_address_is_reused_without_rewriting_files(tmp_path: Path)
     assert second == first
     assert {
         path.name: path.stat().st_mtime_ns
-        for path in [second.path, *(second.directory / item.filename for item in second.shards)]
+        for path in [
+            second.path,
+            *(second.directory / item.filename for item in second.shards),
+            *(second.directory / item.filename for item in second.history_shards),
+        ]
     } == mtimes
 
 
@@ -176,6 +276,7 @@ def test_checkpoint_layout_identity_separates_shard_tuning(tmp_path: Path) -> No
         **tuned_identity,
         customer_column="CustomerID",
         shard_count=16,
+        history_projection=_history_projection,
     )
 
     assert first.config_hash == tuned.config_hash
@@ -201,6 +302,7 @@ def test_checkpoint_streams_lazy_input_without_eager_partitioning(
         **IDENTITY,
         customer_column="CustomerID",
         shard_count=8,
+        history_projection=_history_projection,
         engine="streaming",
     )
 
@@ -225,6 +327,7 @@ def test_force_replacement_rebuilds_same_weak_source_address(tmp_path: Path) -> 
         **IDENTITY,
         customer_column="CustomerID",
         shard_count=8,
+        history_projection=_history_projection,
         engine="streaming",
         replace_existing=True,
     )
@@ -234,6 +337,27 @@ def test_force_replacement_rebuilds_same_weak_source_address(tmp_path: Path) -> 
         [scan_shard(rebuilt, shard_id).collect() for shard_id in rebuilt.nonempty_shard_ids]
     )
     assert recovered.to_dict(as_series=False) == replacement.to_dict(as_series=False)
+
+
+@pytest.mark.unit
+def test_failed_history_projection_preserves_existing_forced_generation(tmp_path: Path) -> None:
+    first = _write(tmp_path)
+
+    def fail_history_projection(_frame: pl.LazyFrame) -> pl.LazyFrame:
+        raise RuntimeError("simulated history projection failure")
+
+    with pytest.raises(RuntimeError, match="history projection failure"):
+        write_checkpoint(
+            _contacts(),
+            tmp_path,
+            **IDENTITY,
+            customer_column="CustomerID",
+            shard_count=8,
+            history_projection=fail_history_projection,
+            replace_existing=True,
+        )
+
+    assert load_manifest(tmp_path, **IDENTITY) == first
 
 
 @pytest.mark.unit
@@ -247,6 +371,43 @@ def test_corrupt_shard_is_rejected_instead_of_reused(tmp_path: Path) -> None:
         load_manifest(tmp_path, **IDENTITY)
     with pytest.raises(CheckpointValidationError, match="size does not match"):
         _write(tmp_path)
+
+
+@pytest.mark.unit
+def test_corrupt_history_shard_invalidates_checkpoint(tmp_path: Path) -> None:
+    manifest = _write(tmp_path)
+    shard_path = manifest.directory / manifest.history_shards[0].filename
+    with shard_path.open("ab") as handle:
+        handle.write(b"corrupt")
+
+    with pytest.raises(CheckpointValidationError, match="size does not match"):
+        load_manifest(tmp_path, **IDENTITY)
+
+
+@pytest.mark.unit
+def test_role_validation_reads_only_the_requested_payload(tmp_path: Path) -> None:
+    target_corrupt = _write(tmp_path / "target-corrupt")
+    target_path = target_corrupt.directory / target_corrupt.shards[0].filename
+    with target_path.open("ab") as handle:
+        handle.write(b"corrupt")
+
+    assert (
+        load_manifest(tmp_path / "target-corrupt", **IDENTITY, validate="history") == target_corrupt
+    )
+    with pytest.raises(CheckpointValidationError, match="size does not match"):
+        load_manifest(tmp_path / "target-corrupt", **IDENTITY, validate="target")
+
+    history_corrupt = _write(tmp_path / "history-corrupt")
+    history_path = history_corrupt.directory / history_corrupt.history_shards[0].filename
+    with history_path.open("ab") as handle:
+        handle.write(b"corrupt")
+
+    assert (
+        load_manifest(tmp_path / "history-corrupt", **IDENTITY, validate="target")
+        == history_corrupt
+    )
+    with pytest.raises(CheckpointValidationError, match="size does not match"):
+        load_manifest(tmp_path / "history-corrupt", **IDENTITY, validate="history")
 
 
 @pytest.mark.unit
@@ -309,6 +470,9 @@ def test_empty_checkpoint_has_manifest_and_no_physical_shards(tmp_path: Path) ->
     assert manifest.rows == 0
     assert manifest.shards == ()
     assert manifest.nonempty_shard_ids == ()
+    assert manifest.history_rows == 0
+    assert manifest.history_shards == ()
+    assert manifest.nonempty_history_shard_ids == ()
     assert list(manifest.directory.glob("*.parquet")) == []
 
 
@@ -364,6 +528,7 @@ def test_checkpoint_write_rejects_invalid_shard_inputs(
             **IDENTITY,
             customer_column=customer_column,
             shard_count=shards,
+            history_projection=_history_projection,
         )
 
 

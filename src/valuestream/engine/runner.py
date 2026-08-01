@@ -52,6 +52,7 @@ from valuestream.store.duckdb_views import refresh_aggregate_views
 from valuestream.store.parquet import AggregateWriteReceipt, write_aggregate_with_receipts
 from valuestream.store.processor_state import (
     CheckpointManifest,
+    CheckpointPayload,
 )
 from valuestream.store.processor_state import (
     load_manifest as load_processor_state_manifest,
@@ -733,9 +734,13 @@ def _ensure_persistent_frequency_checkpoints(  # noqa: PLR0912, PLR0915
         return {}
 
     required_chunks: dict[str, Chunk] = {}
+    required_roles: dict[str, set[CheckpointPayload]] = {}
     for plan in plans:
-        for chunk in (*plan.history_chunks, plan.chunk):
+        required_chunks[plan.chunk.chunk_id] = plan.chunk
+        required_roles.setdefault(plan.chunk.chunk_id, set()).add("target")
+        for chunk in plan.history_chunks:
             required_chunks[chunk.chunk_id] = chunk
+            required_roles.setdefault(chunk.chunk_id, set()).add("history")
 
     engine: Literal["auto", "streaming"] = "streaming" if source.reader.streaming else "auto"
     manifests: dict[tuple[str, str], CheckpointManifest] = {}
@@ -753,8 +758,12 @@ def _ensure_persistent_frequency_checkpoints(  # noqa: PLR0912, PLR0915
                 try:
                     manifest = None
                     if not force:
-                        # Validate every byte once in the parent before any worker
-                        # receives an unchecked manifest for shard-at-a-time reads.
+                        roles = required_roles[chunk.chunk_id]
+                        validation: bool | CheckpointPayload = (
+                            True if len(roles) > 1 else next(iter(roles))
+                        )
+                        # Validate every payload byte that a worker can open,
+                        # without hashing target-only columns for history reads.
                         manifest = load_processor_state_manifest(
                             workspace,
                             source_id=source.id,
@@ -763,7 +772,7 @@ def _ensure_persistent_frequency_checkpoints(  # noqa: PLR0912, PLR0915
                             layout_hash=layout_hash,
                             chunk_id=chunk.chunk_id,
                             raw_fingerprint=raw_fingerprint,
-                            validate=True,
+                            validate=validation,
                         )
                     if manifest is None:
                         logger.info(
@@ -791,6 +800,7 @@ def _ensure_persistent_frequency_checkpoints(  # noqa: PLR0912, PLR0915
                             raw_fingerprint=raw_fingerprint,
                             customer_column=processor.config.columns.customer,
                             shard_count=processor.config.checkpoint.shards,
+                            history_projection=processor.checkpoint_history_contacts_lazy,
                             engine=engine,
                             replace_existing=force,
                         )
@@ -858,11 +868,11 @@ def _collect_persistent_frequency_frames(
         ]
         _validate_checkpoint_customer_dtypes(processor, [*history, current])
         shard_partials: list[pl.DataFrame] = []
-        history_shards = [set(manifest.nonempty_shard_ids) for manifest in history]
+        history_shards = [set(manifest.nonempty_history_shard_ids) for manifest in history]
         for shard_id in current.nonempty_shard_ids:
             current_scan = scan_processor_state_shard(current, shard_id)
             historical_scans = [
-                scan_processor_state_shard(manifest, shard_id)
+                scan_processor_state_shard(manifest, shard_id, payload="history")
                 for manifest, available in zip(history, history_shards, strict=True)
                 if shard_id in available
             ]

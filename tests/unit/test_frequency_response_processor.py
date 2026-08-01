@@ -479,12 +479,23 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
         pl.DataFrame([*history_rows, *current_rows]).lazy(),
         _ctx(),
     ).sort(["Day", "ExposureBucket"])
-    history_checkpoint = processor.checkpoint_contacts_lazy(
+    history_target_checkpoint = processor.checkpoint_contacts_lazy(
         pl.DataFrame(history_rows).drop(TARGET_CHUNK_COLUMN).lazy()
     )
+    history_checkpoint = processor.checkpoint_history_contacts_lazy(history_target_checkpoint)
     current_checkpoint = processor.checkpoint_contacts_lazy(
         pl.DataFrame(current_rows).drop(TARGET_CHUNK_COLUMN).lazy()
     )
+
+    history_schema = set(history_checkpoint.collect_schema().names())
+    assert history_checkpoint.collect().height == 3
+    assert {
+        "Propensity",
+        "Priority",
+        "Outcome",
+        "Rank",
+        TARGET_CHUNK_COLUMN,
+    }.isdisjoint(history_schema)
 
     actual = (
         processor.checkpoint_aggregate_lazy(
