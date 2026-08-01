@@ -25,11 +25,13 @@ from valuestream.store.processor_state import (
 )
 
 CONFIG_HASH = "a" * 64
+LAYOUT_HASH = "c" * 64
 RAW_FINGERPRINT = "b" * 64
 IDENTITY = {
     "source_id": "ih/source",
     "processor_id": "frequency response",
     "config_hash": CONFIG_HASH,
+    "layout_hash": LAYOUT_HASH,
     "chunk_id": "2026-07-31",
     "raw_fingerprint": RAW_FINGERPRINT,
 }
@@ -66,6 +68,8 @@ def test_checkpoint_path_is_versioned_and_outside_query_visible_aggregates(
     assert f"schema={CHECKPOINT_SCHEMA_REVISION}" in directory.parts
     assert f"hash={SHARD_HASH_REVISION}" in directory.parts
     assert "source=ih%2Fsource" in directory.parts
+    assert f"config={CONFIG_HASH}" in directory.parts
+    assert f"layout={LAYOUT_HASH}" in directory.parts
     assert manifest == directory / MANIFEST_FILENAME
 
     _write(tmp_path)
@@ -113,6 +117,7 @@ def test_write_load_and_scan_round_trip_manifest_and_contacts(tmp_path: Path) ->
     assert manifest.source_id == IDENTITY["source_id"]
     assert manifest.processor_id == IDENTITY["processor_id"]
     assert manifest.config_hash == CONFIG_HASH
+    assert manifest.layout_hash == LAYOUT_HASH
     assert manifest.chunk_id == IDENTITY["chunk_id"]
     assert manifest.raw_fingerprint == RAW_FINGERPRINT
     assert manifest.customer_column == "CustomerID"
@@ -159,6 +164,25 @@ def test_valid_content_address_is_reused_without_rewriting_files(tmp_path: Path)
         path.name: path.stat().st_mtime_ns
         for path in [second.path, *(second.directory / item.filename for item in second.shards)]
     } == mtimes
+
+
+@pytest.mark.unit
+def test_checkpoint_layout_identity_separates_shard_tuning(tmp_path: Path) -> None:
+    first = _write(tmp_path, shards=8)
+    tuned_identity = {**IDENTITY, "layout_hash": "d" * 64}
+    tuned = write_checkpoint(
+        _contacts(),
+        tmp_path,
+        **tuned_identity,
+        customer_column="CustomerID",
+        shard_count=16,
+    )
+
+    assert first.config_hash == tuned.config_hash
+    assert first.layout_hash != tuned.layout_hash
+    assert first.directory != tuned.directory
+    assert first.directory.is_dir()
+    assert tuned.directory.is_dir()
 
 
 @pytest.mark.unit
@@ -347,5 +371,7 @@ def test_checkpoint_write_rejects_invalid_shard_inputs(
 def test_content_hashes_must_be_full_lowercase_sha256(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="config_hash"):
         checkpoint_path(tmp_path, **{**IDENTITY, "config_hash": "short"})
+    with pytest.raises(ValueError, match="layout_hash"):
+        checkpoint_path(tmp_path, **{**IDENTITY, "layout_hash": "short"})
     with pytest.raises(ValueError, match="raw_fingerprint"):
         checkpoint_path(tmp_path, **{**IDENTITY, "raw_fingerprint": "B" * 64})

@@ -96,6 +96,10 @@ rebuildable from the authoritative source;
 they do not create a successful chunk marker and no report/query path reads
 them. Aggregate-first is therefore the serving contract even when a processor
 retains the minimal identity state required for exact bounded computation.
+Checkpoint mode, shard count, and retention remain visible in the full catalog
+identity but do not change aggregate/source computation hashes. Shard count has
+its own state-layout identity; a new layout is prepared lazily when a new or
+invalidated bounded target next needs it.
 
 ## Processor and State Model
 

@@ -312,15 +312,23 @@ For `frequency_response`, a checkpoint contains the minimal filtered,
 classified candidate rows needed to repeat exact cross-partition contact
 normalization, ordering, grouping/state calculation, and runner selection,
 split into deterministic customer-hash shards by a streaming sink. It is
-source-fingerprint-addressed by source/processor computation identity, chunk
-id, and raw-file fingerprint, with explicit state-schema, customer-dtype, and
-sharding revisions. Its daily partitions have bounded retention.
+source-fingerprint-addressed by source, processor semantic computation
+identity, independent checkpoint-layout identity, chunk id, and raw-file
+fingerprint, with explicit state-schema, customer-dtype, and sharding
+revisions. Its daily partitions have bounded retention.
 
 A Processor Checkpoint is not a Source, Aggregate, Partial, ledger commit, or
 query cache. Reports and APIs cannot read it. It is safe to delete or vacuum
 independently because authoritative IH can rebuild it; deletion affects
 ingestion cost, not results. Hash sharding is only routing and does not
 anonymize a retained customer key.
+
+`checkpoint.mode`, `checkpoint.shards`, and `checkpoint.retention_days` are
+execution/storage policy and remain outside processor/source computation
+identity. Mode selects the input path, shards select checkpoint layout, and
+retention selects lifecycle. They remain in the full catalog identity for
+audit. Changing them does not republish aggregates; any missing layout is
+rebuilt lazily for the next new or invalidated bounded target.
 
 ### Reader
 A built-in component that turns a list of file paths into a Polars LazyFrame. Built-in readers:

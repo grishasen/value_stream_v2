@@ -17,6 +17,7 @@ from valuestream.config.canonical import (
     canonicalize,
     catalog_config_hash,
     config_hash,
+    frequency_checkpoint_layout_hash,
     processor_computation_config,
     processor_computation_hash,
     processor_config_hash,
@@ -144,6 +145,88 @@ class TestCatalogHash:
         )
         assert source_computation_hash(presentation_changed, "ih") == source_before
 
+    def test_frequency_checkpoint_tuning_is_not_aggregate_computation(self) -> None:
+        catalog = load(DEMO_WS)
+
+        def frequency(
+            checkpoint: dict[str, object],
+            *,
+            window_hours: int = 168,
+        ) -> model.FrequencyResponseProcessor:
+            return model.FrequencyResponseProcessor.model_validate(
+                {
+                    "id": "frequency",
+                    "source": "ih",
+                    "kind": "frequency_response",
+                    "group_by": ["Day", "ExposureBucket"],
+                    "time": {"property": "DecisionTime", "grain": "daily"},
+                    "columns": {
+                        "customer": "CustomerID",
+                        "interaction": "InteractionID",
+                        "action": "ActionID",
+                        "placement": "Placement",
+                        "rank": "Rank",
+                        "outcome": "Outcome",
+                        "propensity": "Propensity",
+                    },
+                    "positive_values": ["Clicked"],
+                    "exposure_values": ["Impression", "Clicked"],
+                    "candidate_values": ["Pending", "Impression", "Clicked"],
+                    "window_hours": window_hours,
+                    "states": {"Contacts": {"type": "count"}},
+                    "checkpoint": checkpoint,
+                }
+            )
+
+        source_scan = frequency({"mode": "source_scan", "shards": 8})
+        persistent = frequency({"mode": "persistent_sharded", "shards": 8, "retention_days": 8})
+        tuned = frequency({"mode": "persistent_sharded", "shards": 32, "retention_days": 30})
+
+        def configured_catalog(
+            processor: model.FrequencyResponseProcessor,
+        ) -> model.Catalog:
+            configured = catalog.model_copy(deep=True)
+            configured.processors.processors.append(processor)
+            return configured
+
+        def source_hash(processor: model.FrequencyResponseProcessor) -> str:
+            return source_computation_hash(configured_catalog(processor), "ih")
+
+        semantic_hash = processor_computation_hash(catalog, source_scan)
+        assert processor_computation_hash(catalog, persistent) == semantic_hash
+        assert processor_computation_hash(catalog, tuned) == semantic_hash
+        assert (
+            processor_config_hash(source_scan)
+            == processor_config_hash(persistent)
+            == processor_config_hash(tuned)
+        )
+        assert source_hash(source_scan) == source_hash(persistent) == source_hash(tuned)
+        assert "checkpoint" not in processor_computation_config(catalog, persistent)["processor"]
+        assert (
+            len(
+                {
+                    catalog_config_hash(configured_catalog(source_scan)),
+                    catalog_config_hash(configured_catalog(persistent)),
+                    catalog_config_hash(configured_catalog(tuned)),
+                }
+            )
+            == 3
+        )
+
+        assert frequency_checkpoint_layout_hash(source_scan) == frequency_checkpoint_layout_hash(
+            persistent
+        )
+        assert frequency_checkpoint_layout_hash(tuned) != frequency_checkpoint_layout_hash(
+            persistent
+        )
+
+        semantic_change = frequency(
+            {"mode": "persistent_sharded", "shards": 32, "retention_days": 30},
+            window_hours=192,
+        )
+        assert processor_computation_hash(catalog, semantic_change) != semantic_hash
+        assert source_hash(semantic_change) != source_hash(persistent)
+
     def test_bounded_ml_order_revision_is_scoped_to_score_processors(self) -> None:
         catalog = load(DEMO_WS)
         score = next(
@@ -164,12 +247,8 @@ class TestCatalogHash:
             "bounded_ml_source_order": 1,
             "native_ml_reduction": 1,
         }
-        assert "bounded_ml_source_order" not in numeric_payload[
-            "__valuestream_algorithm_revision"
-        ]
-        assert "native_ml_reduction" not in numeric_payload[
-            "__valuestream_algorithm_revision"
-        ]
+        assert "bounded_ml_source_order" not in numeric_payload["__valuestream_algorithm_revision"]
+        assert "native_ml_reduction" not in numeric_payload["__valuestream_algorithm_revision"]
 
     def test_filtered_scalar_state_revision_invalidates_only_affected_processors(self) -> None:
         """A ``where`` on count/value_sum used to be ignored, so its rows are stale.
@@ -231,9 +310,7 @@ class TestCatalogHash:
             "filtered_scalar_states": 1,
             "float64_value_sum_inputs": 1,
         }
-        assert unfiltered_sum["__valuestream_algorithm_revision"] == {
-            "float64_value_sum_inputs": 1
-        }
+        assert unfiltered_sum["__valuestream_algorithm_revision"] == {"float64_value_sum_inputs": 1}
         assert "__valuestream_algorithm_revision" not in unfiltered
         assert "__valuestream_algorithm_revision" not in filtered_sketch
 

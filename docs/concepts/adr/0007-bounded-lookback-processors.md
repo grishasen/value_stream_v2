@@ -1,6 +1,6 @@
 # ADR 0007 — Bounded Lookback Processors and Rebuildable Checkpoints
 
-**Status:** Accepted (2026-07-31; amended 2026-07-31)
+**Status:** Accepted (2026-07-31; amended 2026-07-31 and 2026-08-01)
 
 ## Context
 
@@ -67,6 +67,14 @@ A bounded processor may choose one of two exact execution strategies:
    ordering, deduplication, exposure frequency, grouping/state calculation, and
    within-interaction runner selection.
 
+The strategy is operational rather than semantic. `checkpoint.mode`,
+`checkpoint.shards`, and `checkpoint.retention_days` remain in the full catalog
+hash for authorship and audit, but are excluded from processor and source
+computation hashes. Consequently, changing checkpoint execution or storage
+policy does not republish otherwise identical aggregates. Counts are exact
+across layouts; ordinary floating-point sums retain their normal machine-
+precision reduction tolerance.
+
 Persistent processor state is permitted only under these constraints:
 
 - Interaction History remains authoritative. A checkpoint is not a Source,
@@ -76,14 +84,17 @@ Persistent processor state is permitted only under these constraints:
   processor; unrelated source columns and outcomes are excluded. State is
   bounded by the declared dependency semantics and its retention policy,
   rather than becoming an unbounded raw-event archive.
-- Every generation is identity-addressed by source and processor computation
-  identity, chunk id, and raw-file fingerprint, and carries explicit state-
-  schema and sharding revisions plus the hashing-runtime version. Writes are
-  atomic and ordinary-run generations are immutable. A changed source file, processor contract, state
-  schema, sharding algorithm, or incompatible runtime builds a new generation
-  instead of mutating one in place. An explicit forced run rebuilds and safely
-  replaces the same address as well, so a metadata-preserving source-file
-  replacement cannot force reuse of stale acceleration state.
+- Every generation is identity-addressed by source, processor semantic
+  computation identity, independent checkpoint-layout identity, chunk id, and
+  raw-file fingerprint. The layout identity currently covers shard count;
+  explicit state-schema and sharding revisions plus the hashing-runtime version
+  cover format and routing compatibility. Writes are atomic and ordinary-run
+  generations are immutable. A changed source file, processor semantic
+  contract, checkpoint layout, state schema, sharding algorithm, or incompatible
+  runtime builds a new generation instead of mutating one in place. An explicit
+  forced run rebuilds and safely replaces the same address as well, so a
+  metadata-preserving source-file replacement cannot force reuse of stale
+  acceleration state.
 - Every existing manifest and shard is size-, row-count-, schema-, file-set-,
   and SHA-256-validated once in the parent run before workers open individual
   shards. The recorded customer identity dtype must agree across a target's
@@ -103,6 +114,13 @@ Persistent processor state is permitted only under these constraints:
   below that active closure. Retention is applied after a terminal ingestion
   run and by workspace vacuum. An older correction can rebuild an evicted
   partition from IH for that replay and discard it again afterward.
+- `checkpoint.mode` selects the execution path, `checkpoint.shards` selects the
+  checkpoint layout, and `checkpoint.retention_days` selects lifecycle policy.
+  None changes aggregate identity. A shard-layout change is built lazily for
+  the bounded closure of the next new or invalidated target; vacuum may remove
+  the previous layout immediately. A retention-only change applies at vacuum
+  without rebuilding state. `--force` remains an explicit request to rebuild
+  aggregates and state regardless of idempotent hashes.
 - Customer-hash sharding is an execution index, not anonymization. Exact
   processing can retain the original customer key inside a shard, so workspace
   access controls, encryption/retention policy, and upstream tokenization or
@@ -137,6 +155,9 @@ invalidation fan-out, never exposure membership.
   `persistent_sharded` trades governed local storage for one checkpoint-
   preparation pass per source generation and bounded one-shard-at-a-time
   processing.
+- Checkpoint tuning does not replay historical aggregates. Missing state for a
+  new layout is reconstructed lazily from only the authoritative chunks needed
+  by the next bounded target, while unchanged targets remain skipped.
 - Chunks remain independently retryable and may run in parallel because
   workers read published generations and do not share mutable per-customer
   state. Checkpoint preparation errors are mapped only to target chunks whose

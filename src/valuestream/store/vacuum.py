@@ -16,7 +16,10 @@ import polars as pl
 import polars.selectors as cs
 
 from valuestream.config import model
-from valuestream.config.canonical import processor_computation_hash
+from valuestream.config.canonical import (
+    frequency_checkpoint_layout_hash,
+    processor_computation_hash,
+)
 from valuestream.store.meta import meta_dir
 from valuestream.store.processor_state import (
     CHECKPOINT_SCHEMA_REVISION,
@@ -249,6 +252,7 @@ def _stale_processor_state_dirs(  # noqa: PLR0912, PLR0915
     current_contracts = {
         (processor.source, processor.id): (
             processor_computation_hash(catalog, processor),
+            frequency_checkpoint_layout_hash(processor),
             processor.checkpoint_retention_days,
         )
         for processor in catalog.processors.processors
@@ -257,20 +261,17 @@ def _stale_processor_state_dirs(  # noqa: PLR0912, PLR0915
         and (source_ids is None or processor.source in source_ids)
     }
     stale: set[Path] = set()
-    candidates: dict[tuple[str, str, str, dt.date], list[tuple[int, Path]]] = {}
-    latest_dates: dict[tuple[str, str, str], dt.date] = {}
+    candidates: dict[tuple[str, str, str, str, dt.date], list[tuple[int, Path]]] = {}
+    latest_dates: dict[tuple[str, str, str, str], dt.date] = {}
     expected_runtime = (
         f"schema={CHECKPOINT_SCHEMA_REVISION}",
         f"hash={SHARD_HASH_REVISION}",
         f"polars={quote(pl.__version__, safe='-._~')}",
     )
-    generation_dirs = {
-        path
-        for path in root.glob(
-            "schema=*/hash=*/polars=*/source=*/processor=*/config=*/chunk=*/raw=*"
-        )
-        if path.is_dir()
-    }
+    # Enumerate every historical layout shape under the dedicated state root.
+    # Incompatible schema revisions (including the pre-layout-hash shape) are
+    # then classified stale instead of becoming unreachable vacuum debris.
+    generation_dirs = {path for path in root.glob("**/raw=*") if path.is_dir()}
     if include_tmp:
         generation_dirs.update(path for path in root.glob("**/*.tmp") if path.is_dir())
     for directory in sorted(generation_dirs):
@@ -296,12 +297,12 @@ def _stale_processor_state_dirs(  # noqa: PLR0912, PLR0915
         if identity is None:
             stale.add(directory)
             continue
-        manifest_source, processor_id, config_hash, chunk_id = identity
+        manifest_source, processor_id, config_hash, layout_hash, chunk_id = identity
         if manifest_source != source_id:
             stale.add(directory)
             continue
         contract = current_contracts.get((source_id, processor_id))
-        if contract is None or contract[0] != config_hash:
+        if contract is None or contract[:2] != (config_hash, layout_hash):
             stale.add(directory)
             continue
         try:
@@ -317,17 +318,23 @@ def _stale_processor_state_dirs(  # noqa: PLR0912, PLR0915
         except FileNotFoundError:
             stale.add(directory)
             continue
-        candidates.setdefault((source_id, processor_id, config_hash, chunk_date), []).append(
-            (created_order_ns, directory)
-        )
-        processor_key = (source_id, processor_id, config_hash)
+        candidates.setdefault(
+            (source_id, processor_id, config_hash, layout_hash, chunk_date), []
+        ).append((created_order_ns, directory))
+        processor_key = (source_id, processor_id, config_hash, layout_hash)
         latest_dates[processor_key] = max(
             chunk_date,
             latest_dates.get(processor_key, chunk_date),
         )
-    for (source_id, processor_id, config_hash, chunk_date), group in candidates.items():
-        retention_days = current_contracts[(source_id, processor_id)][1]
-        latest_date = latest_dates[(source_id, processor_id, config_hash)]
+    for (
+        source_id,
+        processor_id,
+        config_hash,
+        layout_hash,
+        chunk_date,
+    ), group in candidates.items():
+        retention_days = current_contracts[(source_id, processor_id)][2]
+        latest_date = latest_dates[(source_id, processor_id, config_hash, layout_hash)]
         cutoff = latest_date - dt.timedelta(days=retention_days - 1)
         if chunk_date < cutoff:
             stale.update(path for _, path in group)
@@ -337,7 +344,7 @@ def _stale_processor_state_dirs(  # noqa: PLR0912, PLR0915
     return sorted(stale)
 
 
-def _processor_state_identity(path: Path) -> tuple[str, str, str, str] | None:
+def _processor_state_identity(path: Path) -> tuple[str, str, str, str, str] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
@@ -345,7 +352,8 @@ def _processor_state_identity(path: Path) -> tuple[str, str, str, str] | None:
     if not isinstance(payload, dict):
         return None
     values = tuple(
-        payload.get(name) for name in ("source_id", "processor_id", "config_hash", "chunk_id")
+        payload.get(name)
+        for name in ("source_id", "processor_id", "config_hash", "layout_hash", "chunk_id")
     )
     if any(not isinstance(value, str) or not value for value in values):
         return None

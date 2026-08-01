@@ -30,9 +30,10 @@ the resulting checkpoint as sensitive source-derived data:
   grouping/state calculation, and runner selection, but may retain an exact customer key.
 - Customer hashing is used to route records to shards. It is not encryption,
   anonymization, or a substitute for upstream tokenization/HMAC.
-- Generations are keyed by computation identity, chunk, and raw-file
-  fingerprint and version their schema, customer dtype, and sharding algorithm.
-  Partial, stale, incompatible, or integrity-invalid generations are not used.
+- Generations are keyed by processor semantic computation identity, independent
+  checkpoint-layout identity, chunk, and raw-file fingerprint and version their
+  schema, customer dtype, and sharding algorithm. Partial, stale, incompatible,
+  or integrity-invalid generations are not used.
 - The checkpoint is reconstructible from authoritative IH and has an
   independent, bounded retention lifecycle. `checkpoint.retention_days`
   defaults to the active dependency closure and is applied after ingestion and

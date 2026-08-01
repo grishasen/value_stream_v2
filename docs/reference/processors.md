@@ -1141,6 +1141,22 @@ silently undercounting exposure frequency.
   is an integer from `1` through `4096` and defaults to
   `64`; larger values lower per-shard memory while increasing file count.
 
+All fields under `checkpoint` are execution/storage settings. They remain in
+the full catalog hash for audit but are excluded from processor and source
+computation hashes:
+
+- `mode` selects the exact execution path;
+- `shards` selects a separately hashed physical checkpoint layout;
+- `retention_days` selects vacuum policy and is not part of artifact identity.
+
+Changing these fields does not schedule aggregate replay. Unchanged targets
+remain skipped. After a shard change, vacuum may remove the old layout and the
+new layout is built lazily from authoritative IH for the bounded closure of the
+next new or invalidated target. `--force` is still an explicit request to
+rebuild both aggregates and state. Window, partition lag, columns, filters,
+outcome/contact rules, groups, and states remain result semantics and therefore
+do change computation hashes.
+
 `retention_days` optionally sets the number of daily checkpoint partitions
 kept per processor. Its default is
 `ceil((window_hours + partition_lag_hours) / 24) + 1`, and an explicit value
@@ -1148,14 +1164,15 @@ cannot be smaller. Retention runs after each terminal source run and during
 workspace vacuum. Replaying an older correction rebuilds any evicted IH
 partition for that bounded replay and may evict it again afterward.
 
-Persistent generations are source-fingerprint-addressed by the source and
-processor computation identity, chunk id, and raw-file fingerprint; their
-manifests also version the checkpoint schema, customer dtype, shard-hash
-algorithm/seeds, and Polars runtime used for native hashing. Before workers
-start, the parent validates the declared files, sizes, row counts, schemas, and
-SHA-256 digests once. Customer dtype must be stable across the bounded closure;
-normalize it in source transforms if exports drift. They live in the
-processor-state namespace, outside aggregates and ledger publication.
+Persistent generations are source-fingerprint-addressed by the source,
+processor semantic computation identity, independent checkpoint-layout
+identity, chunk id, and raw-file fingerprint; their manifests also version the
+checkpoint schema, customer dtype, shard-hash algorithm/seeds, and Polars
+runtime used for native hashing. Before workers start, the parent validates the
+declared files, sizes, row counts, schemas, and SHA-256 digests once. Customer
+dtype must be stable across the bounded closure; normalize it in source
+transforms if exports drift. They live in the processor-state namespace,
+outside aggregates and ledger publication.
 Queries, reports, DuckDB views, API/MCP, and SQL export cannot read them. A
 missing, obsolete, or vacuumed generation is rebuilt from authoritative IH. A
 corrupt generation is rejected rather than used silently; a forced run safely

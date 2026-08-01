@@ -9,6 +9,9 @@ import duckdb
 import polars as pl
 import pytest
 
+from valuestream.config import model
+from valuestream.config.canonical import frequency_checkpoint_layout_hash
+from valuestream.config.loader import load
 from valuestream.engine import run_source
 from valuestream.query import query_metric_result
 from valuestream.store.parquet import scan_aggregate
@@ -304,6 +307,81 @@ def test_frequency_response_pipeline_replays_bounded_dependencies_and_hides_empt
         )
         == 8
     )
+
+
+@pytest.mark.integration
+def test_checkpoint_tuning_skips_aggregates_and_rebuilds_layout_lazily(
+    tmp_path: Path,
+) -> None:
+    _seed_workspace(tmp_path)
+    initial = run_source(tmp_path, "ih")
+    assert (initial.chunks_ok, initial.chunks_skipped) == (9, 0)
+
+    before = scan_aggregate(
+        tmp_path,
+        source_id="ih",
+        processor_id="frequency_response",
+        grain="daily",
+    ).collect()
+    original_hashes = before.get_column("config_hash").unique().to_list()
+    original_rows = _frequency_rows(tmp_path)
+
+    processors_path = tmp_path / "catalog" / "processors.yaml"
+    processors_path.write_text(
+        processors_path.read_text(encoding="utf-8").replace(
+            "checkpoint: {mode: persistent_sharded, shards: 4}",
+            "checkpoint: {mode: persistent_sharded, shards: 8, retention_days: 8}",
+        ),
+        encoding="utf-8",
+    )
+    tuned_catalog = load(tmp_path)
+    tuned_processor = next(
+        processor
+        for processor in tuned_catalog.processors.processors
+        if isinstance(processor, model.FrequencyResponseProcessor)
+    )
+    tuned_layout_hash = frequency_checkpoint_layout_hash(tuned_processor)
+
+    tuning_run = run_source(tmp_path, "ih")
+
+    assert (tuning_run.chunks_ok, tuning_run.chunks_skipped, tuning_run.chunks_failed) == (0, 9, 0)
+    unchanged = scan_aggregate(
+        tmp_path,
+        source_id="ih",
+        processor_id="frequency_response",
+        grain="daily",
+    ).collect()
+    assert unchanged.height == before.height
+    assert unchanged.get_column("config_hash").unique().to_list() == original_hashes
+    assert _frequency_rows(tmp_path) == original_rows
+    # The old layout is acceleration state only, so terminal vacuum may remove
+    # it without scheduling aggregate replay. The replacement is built only
+    # when a target actually needs processing.
+    assert not list(
+        (tmp_path / ".valuestream" / "state" / "frequency_response").glob("**/manifest.json")
+    )
+
+    next_day = (_START + dt.timedelta(days=9)).isoformat()
+    _write_day(tmp_path, next_day, focal_outcome="Impression")
+    incremental = run_source(tmp_path, "ih")
+
+    assert (incremental.chunks_ok, incremental.chunks_skipped, incremental.chunks_failed) == (
+        1,
+        9,
+        0,
+    )
+    rebuilt_manifests = list(
+        (tmp_path / ".valuestream" / "state" / "frequency_response").glob("**/manifest.json")
+    )
+    assert len(rebuilt_manifests) == 8
+    assert all(f"layout={tuned_layout_hash}" in path.parts for path in rebuilt_manifests)
+    after = scan_aggregate(
+        tmp_path,
+        source_id="ih",
+        processor_id="frequency_response",
+        grain="daily",
+    ).collect()
+    assert after.get_column("config_hash").unique().to_list() == original_hashes
 
 
 @pytest.mark.integration

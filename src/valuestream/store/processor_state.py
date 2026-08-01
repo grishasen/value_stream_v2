@@ -22,7 +22,7 @@ from uuid import uuid4
 
 import polars as pl
 
-CHECKPOINT_SCHEMA_REVISION = 2
+CHECKPOINT_SCHEMA_REVISION = 3
 SHARD_HASH_REVISION = 1
 SHARD_HASH_ALGORITHM = "polars.Expr.hash"
 SHARD_HASH_SEEDS = (
@@ -66,6 +66,7 @@ class CheckpointManifest:
     source_id: str
     processor_id: str
     config_hash: str
+    layout_hash: str
     chunk_id: str
     raw_fingerprint: str
     customer_column: str
@@ -101,6 +102,7 @@ def checkpoint_path(
     source_id: str,
     processor_id: str,
     config_hash: str,
+    layout_hash: str,
     chunk_id: str,
     raw_fingerprint: str,
 ) -> Path:
@@ -116,6 +118,7 @@ def checkpoint_path(
         source_id=source_id,
         processor_id=processor_id,
         config_hash=config_hash,
+        layout_hash=layout_hash,
         chunk_id=chunk_id,
         raw_fingerprint=raw_fingerprint,
     )
@@ -130,6 +133,7 @@ def checkpoint_path(
         / f"source={_component(source_id)}"
         / f"processor={_component(processor_id)}"
         / f"config={config_hash}"
+        / f"layout={layout_hash}"
         / f"chunk={_component(chunk_id)}"
         / f"raw={raw_fingerprint}"
     )
@@ -141,6 +145,7 @@ def checkpoint_manifest_path(
     source_id: str,
     processor_id: str,
     config_hash: str,
+    layout_hash: str,
     chunk_id: str,
     raw_fingerprint: str,
 ) -> Path:
@@ -152,6 +157,7 @@ def checkpoint_manifest_path(
             source_id=source_id,
             processor_id=processor_id,
             config_hash=config_hash,
+            layout_hash=layout_hash,
             chunk_id=chunk_id,
             raw_fingerprint=raw_fingerprint,
         )
@@ -181,6 +187,7 @@ def write_checkpoint(
     source_id: str,
     processor_id: str,
     config_hash: str,
+    layout_hash: str,
     chunk_id: str,
     raw_fingerprint: str,
     customer_column: str,
@@ -200,6 +207,7 @@ def write_checkpoint(
         source_id=source_id,
         processor_id=processor_id,
         config_hash=config_hash,
+        layout_hash=layout_hash,
         chunk_id=chunk_id,
         raw_fingerprint=raw_fingerprint,
     )
@@ -212,6 +220,7 @@ def write_checkpoint(
             source_id=source_id,
             processor_id=processor_id,
             config_hash=config_hash,
+            layout_hash=layout_hash,
             chunk_id=chunk_id,
             raw_fingerprint=raw_fingerprint,
         )
@@ -249,6 +258,7 @@ def write_checkpoint(
             source_id=source_id,
             processor_id=processor_id,
             config_hash=config_hash,
+            layout_hash=layout_hash,
             chunk_id=chunk_id,
             raw_fingerprint=raw_fingerprint,
             customer_column=customer_column,
@@ -265,6 +275,7 @@ def write_checkpoint(
                 "source_id": source_id,
                 "processor_id": processor_id,
                 "config_hash": config_hash,
+                "layout_hash": layout_hash,
                 "chunk_id": chunk_id,
                 "raw_fingerprint": raw_fingerprint,
             },
@@ -284,6 +295,7 @@ def write_checkpoint(
                         "source_id": source_id,
                         "processor_id": processor_id,
                         "config_hash": config_hash,
+                        "layout_hash": layout_hash,
                         "chunk_id": chunk_id,
                         "raw_fingerprint": raw_fingerprint,
                     },
@@ -294,6 +306,7 @@ def write_checkpoint(
                 source_id=source_id,
                 processor_id=processor_id,
                 config_hash=config_hash,
+                layout_hash=layout_hash,
                 chunk_id=chunk_id,
                 raw_fingerprint=raw_fingerprint,
             )
@@ -322,6 +335,7 @@ def write_checkpoint(
                 source_id=source_id,
                 processor_id=processor_id,
                 config_hash=config_hash,
+                layout_hash=layout_hash,
                 chunk_id=chunk_id,
                 raw_fingerprint=raw_fingerprint,
             )
@@ -343,6 +357,7 @@ def write_checkpoint(
                 "source_id": source_id,
                 "processor_id": processor_id,
                 "config_hash": config_hash,
+                "layout_hash": layout_hash,
                 "chunk_id": chunk_id,
                 "raw_fingerprint": raw_fingerprint,
             },
@@ -359,6 +374,7 @@ def load_manifest(
     source_id: str,
     processor_id: str,
     config_hash: str,
+    layout_hash: str,
     chunk_id: str,
     raw_fingerprint: str,
     validate: bool = True,
@@ -370,6 +386,7 @@ def load_manifest(
         source_id=source_id,
         processor_id=processor_id,
         config_hash=config_hash,
+        layout_hash=layout_hash,
         chunk_id=chunk_id,
         raw_fingerprint=raw_fingerprint,
     )
@@ -386,6 +403,7 @@ def load_manifest(
             "source_id": source_id,
             "processor_id": processor_id,
             "config_hash": config_hash,
+            "layout_hash": layout_hash,
             "chunk_id": chunk_id,
             "raw_fingerprint": raw_fingerprint,
         },
@@ -482,6 +500,7 @@ def _manifest_payload(
     source_id: str,
     processor_id: str,
     config_hash: str,
+    layout_hash: str,
     chunk_id: str,
     raw_fingerprint: str,
     customer_column: str,
@@ -499,6 +518,7 @@ def _manifest_payload(
         "source_id": source_id,
         "processor_id": processor_id,
         "config_hash": config_hash,
+        "layout_hash": layout_hash,
         "chunk_id": chunk_id,
         "raw_fingerprint": raw_fingerprint,
         "customer_column": customer_column,
@@ -577,6 +597,7 @@ def _parse_manifest(
         source_id=identity["source_id"],
         processor_id=identity["processor_id"],
         config_hash=identity["config_hash"],
+        layout_hash=identity["layout_hash"],
         chunk_id=identity["chunk_id"],
         raw_fingerprint=identity["raw_fingerprint"],
         customer_column=customer_column,
@@ -750,6 +771,7 @@ def _validate_identity(
     source_id: str,
     processor_id: str,
     config_hash: str,
+    layout_hash: str,
     chunk_id: str,
     raw_fingerprint: str,
 ) -> None:
@@ -762,6 +784,7 @@ def _validate_identity(
             raise ValueError(f"checkpoint {name} must be a non-empty string")
     for name, value in {
         "config_hash": config_hash,
+        "layout_hash": layout_hash,
         "raw_fingerprint": raw_fingerprint,
     }.items():
         if not isinstance(value, str) or _HASH_PATTERN.fullmatch(value) is None:

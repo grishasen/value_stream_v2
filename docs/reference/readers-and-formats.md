@@ -91,16 +91,21 @@ for chunk_id in groups:
 
 The effective idempotency key is `(source_id, chunk_id,
 source_computation_hash, file_hash)`. The source computation hash covers
-workspace defaults, source behavior, and all bound processors. `file_hash`
-covers sorted absolute paths, nanosecond mtimes, and sizes. Unchanged inputs are
-skipped; changed files or behavior are reprocessed without invalidating the
-previous successful aggregate until the new run commits.
+workspace defaults, source behavior, and the result-affecting semantics of all
+bound processors. Ingestion-only `frequency_response.checkpoint.*` settings are
+excluded; they remain in the full catalog hash and use separate state layout
+and retention identities. `file_hash` covers sorted absolute paths, nanosecond
+mtimes, and sizes. Unchanged inputs are skipped; changed files or behavior are
+reprocessed without invalidating the previous successful aggregate until the
+new run commits.
 
 For a bounded-lookback target, `file_hash` covers the complete raw dependency
 closure, not only the target files. This remains true when a processor uses a
 persistent checkpoint: the checkpoint is an acceleration artifact keyed by the
-per-chunk raw fingerprint, never the source of the idempotency decision or a
-successful ledger marker.
+processor semantic identity, independent layout identity, and per-chunk raw
+fingerprint, never the source of the idempotency decision or a successful
+ledger marker. Missing state after layout tuning is rebuilt lazily only when a
+new or invalidated target needs that bounded closure.
 
 ### 2.4 Chunk granularity
 

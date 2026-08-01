@@ -46,9 +46,15 @@ _FILTERED_DISTINCT_COUNT_REVISION = 1
 # instead of summing in the source dtype and casting afterward. This avoids
 # integer/Float32 overflow but changes existing unfiltered state semantics.
 _FLOAT64_VALUE_SUM_REVISION = 1
-# Persistent frequency checkpoints store prepared candidate rows whose schema
-# and cross-partition normalization rules are part of deterministic computation.
-_FREQUENCY_CHECKPOINT_REVISION = 1
+# Frequency-response semantics are independent of the execution strategy used
+# to obtain their bounded input. Keep one unconditional marker so a semantic
+# implementation change invalidates aggregates in both source-scan and
+# persistent modes without making the mode itself part of aggregate identity.
+_FREQUENCY_RESPONSE_SEMANTICS_REVISION = 1
+# Checkpoint layout is an ingestion-only identity. It is deliberately separate
+# from processor/source computation hashes so tuning storage cannot republish
+# otherwise identical aggregates.
+_FREQUENCY_CHECKPOINT_LAYOUT_REVISION = 1
 
 
 def canonicalize(value: Any) -> Any:
@@ -118,8 +124,29 @@ def processor_config_hash(processor: model.Processor) -> str:
 
     Direct processor construction uses this as a compatibility fallback. The
     ingestion/query paths persist :func:`processor_computation_hash` instead.
+    Frequency response additionally excludes checkpoint execution policy so
+    direct and catalog-backed runtimes stamp the same semantic boundary.
     """
+    if isinstance(processor, model.FrequencyResponseProcessor):
+        return config_hash(_processor_computation_fields(processor))
     return config_hash(processor)
+
+
+def frequency_checkpoint_layout_hash(processor: model.FrequencyResponseProcessor) -> str:
+    """Hash only fields that determine persistent checkpoint layout.
+
+    ``mode`` selects an execution path and ``retention_days`` controls vacuum;
+    neither changes an artifact's physical layout. The processor semantic hash
+    remains a separate path component and protects the stored candidate
+    contract itself.
+    """
+
+    return config_hash(
+        {
+            "checkpoint_layout_revision": _FREQUENCY_CHECKPOINT_LAYOUT_REVISION,
+            "shards": processor.checkpoint.shards,
+        }
+    )
 
 
 def processor_computation_hash(
@@ -210,6 +237,12 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
     for field in ("description",):
         payload.pop(field, None)
     revision: dict[str, int] = {}
+    if isinstance(processor, model.FrequencyResponseProcessor):
+        # Checkpoint mode, shard count, and retention are operational choices.
+        # The processor's window, dependency allowance, contact rules, states,
+        # and grouping contract remain in ``payload`` and therefore semantic.
+        payload.pop("checkpoint", None)
+        revision["frequency_response_semantics"] = _FREQUENCY_RESPONSE_SEMANTICS_REVISION
     if isinstance(processor, model.ScoreDistributionProcessor) and {
         "personalization",
         "novelty",
@@ -226,11 +259,6 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
         revision["filtered_distinct_count"] = _FILTERED_DISTINCT_COUNT_REVISION
     if _has_float64_value_sum_state(processor):
         revision["float64_value_sum_inputs"] = _FLOAT64_VALUE_SUM_REVISION
-    if (
-        isinstance(processor, model.FrequencyResponseProcessor)
-        and processor.checkpoint.mode == "persistent_sharded"
-    ):
-        revision["frequency_persistent_checkpoint"] = _FREQUENCY_CHECKPOINT_REVISION
     if revision:
         payload["__valuestream_algorithm_revision"] = revision
     return payload
@@ -244,9 +272,7 @@ def _has_filtered_scalar_state(processor: model.Processor) -> bool:
     other workspace's aggregates valid.
     """
 
-    if not isinstance(
-        processor, model.BinaryOutcomeProcessor | model.NumericDistributionProcessor
-    ):
+    if not isinstance(processor, model.BinaryOutcomeProcessor | model.NumericDistributionProcessor):
         return False
     return any(
         state.type in _FILTERED_SCALAR_STATE_TYPES and getattr(state, "where", None) is not None
@@ -257,13 +283,10 @@ def _has_filtered_scalar_state(processor: model.Processor) -> bool:
 def _has_float64_value_sum_state(processor: model.Processor) -> bool:
     """Report whether value sums use the revised pre-sum Float64 cast."""
 
-    if not isinstance(
-        processor, model.BinaryOutcomeProcessor | model.NumericDistributionProcessor
-    ):
+    if not isinstance(processor, model.BinaryOutcomeProcessor | model.NumericDistributionProcessor):
         return False
     return any(
-        state.type == "value_sum"
-        for state in model.effective_processor_states(processor).values()
+        state.type == "value_sum" for state in model.effective_processor_states(processor).values()
     )
 
 
@@ -299,6 +322,7 @@ __all__ = [
     "canonicalize",
     "catalog_config_hash",
     "config_hash",
+    "frequency_checkpoint_layout_hash",
     "processor_computation_config",
     "processor_computation_hash",
     "processor_config_hash",

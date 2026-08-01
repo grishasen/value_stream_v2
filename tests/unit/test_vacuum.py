@@ -13,6 +13,7 @@ import polars as pl
 import pytest
 
 from valuestream.config import model
+from valuestream.config.canonical import frequency_checkpoint_layout_hash
 from valuestream.engine.ledger import insert_chunk, insert_run, start_run
 from valuestream.store import vacuum
 
@@ -97,6 +98,7 @@ def test_checkpoint_vacuum_keeps_latest_current_generation_and_removes_stale_sta
     )
     catalog = SimpleNamespace(processors=SimpleNamespace(processors=[processor]))
     monkeypatch.setattr(vacuum, "processor_computation_hash", lambda *_args: "current")
+    layout_hash = frequency_checkpoint_layout_hash(processor)
     root = (
         tmp_path
         / (
@@ -107,8 +109,16 @@ def test_checkpoint_vacuum_keeps_latest_current_generation_and_removes_stale_sta
         / "source=ih/processor=frequency"
     )
 
-    def generation(config_hash: str, raw: str, *, mtime_ns: int) -> Path:
-        directory = root / f"config={config_hash}/chunk=2024-01-01/raw={raw}"
+    def generation(
+        config_hash: str,
+        raw: str,
+        *,
+        mtime_ns: int,
+        state_layout_hash: str = layout_hash,
+    ) -> Path:
+        directory = (
+            root / f"config={config_hash}/layout={state_layout_hash}/chunk=2024-01-01/raw={raw}"
+        )
         directory.mkdir(parents=True)
         manifest = directory / "manifest.json"
         manifest.write_text(
@@ -117,6 +127,7 @@ def test_checkpoint_vacuum_keeps_latest_current_generation_and_removes_stale_sta
                     "source_id": "ih",
                     "processor_id": "frequency",
                     "config_hash": config_hash,
+                    "layout_hash": state_layout_hash,
                     "chunk_id": "2024-01-01",
                 }
             ),
@@ -128,15 +139,37 @@ def test_checkpoint_vacuum_keeps_latest_current_generation_and_removes_stale_sta
     old = generation("current", "old", mtime_ns=1)
     latest = generation("current", "latest", mtime_ns=2)
     stale_config = generation("stale", "obsolete", mtime_ns=3)
-    temporary = root / "config=current/chunk=2024-01-02/.raw=work.tmp"
+    stale_layout = generation("current", "old-layout", mtime_ns=4, state_layout_hash="f" * 64)
+    temporary = root / f"config=current/layout={layout_hash}/chunk=2024-01-02/.raw=work.tmp"
     temporary.mkdir(parents=True)
     incompatible = (
         tmp_path
         / ".valuestream/state/frequency_response/schema=999/hash=1/polars=test"
-        / "source=ih/processor=frequency/config=current/chunk=2024-01-01/raw=old-schema"
+        / (
+            "source=ih/processor=frequency/config=current/"
+            f"layout={layout_hash}/chunk=2024-01-01/raw=old-schema"
+        )
     )
     incompatible.mkdir(parents=True)
     (incompatible / "manifest.json").write_text(
+        json.dumps(
+            {
+                "source_id": "ih",
+                "processor_id": "frequency",
+                "config_hash": "current",
+                "layout_hash": layout_hash,
+                "chunk_id": "2024-01-01",
+            }
+        ),
+        encoding="utf-8",
+    )
+    legacy = (
+        tmp_path
+        / (f".valuestream/state/frequency_response/schema=2/hash=1/polars={pl.__version__}")
+        / "source=ih/processor=frequency/config=current/chunk=2024-01-01/raw=legacy"
+    )
+    legacy.mkdir(parents=True)
+    (legacy / "manifest.json").write_text(
         json.dumps(
             {
                 "source_id": "ih",
@@ -156,7 +189,7 @@ def test_checkpoint_vacuum_keeps_latest_current_generation_and_removes_stale_sta
         include_tmp=True,
     )
 
-    assert stale == sorted([old, stale_config, temporary, incompatible])
+    assert stale == sorted([old, stale_config, stale_layout, temporary, incompatible, legacy])
     assert latest not in stale
 
 
@@ -194,6 +227,7 @@ def test_checkpoint_vacuum_applies_bounded_daily_retention(
     )
     catalog = SimpleNamespace(processors=SimpleNamespace(processors=[processor]))
     monkeypatch.setattr(vacuum, "processor_computation_hash", lambda *_args: "current")
+    layout_hash = frequency_checkpoint_layout_hash(processor)
     workspace = tmp_path / "source=outer" / "workspace"
     root = (
         workspace
@@ -202,7 +236,7 @@ def test_checkpoint_vacuum_applies_bounded_daily_retention(
             f"schema={vacuum.CHECKPOINT_SCHEMA_REVISION}/"
             f"hash={vacuum.SHARD_HASH_REVISION}/polars={pl.__version__}"
         )
-        / "source=ih/processor=frequency/config=current"
+        / f"source=ih/processor=frequency/config=current/layout={layout_hash}"
     )
     generations: dict[str, Path] = {}
     for day in range(1, 11):
@@ -215,6 +249,7 @@ def test_checkpoint_vacuum_applies_bounded_daily_retention(
                     "source_id": "ih",
                     "processor_id": "frequency",
                     "config_hash": "current",
+                    "layout_hash": layout_hash,
                     "chunk_id": chunk_id,
                 }
             ),

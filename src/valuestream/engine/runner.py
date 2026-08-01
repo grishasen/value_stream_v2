@@ -17,6 +17,7 @@ import polars as pl
 from valuestream.config import model
 from valuestream.config.canonical import (
     catalog_config_hash,
+    frequency_checkpoint_layout_hash,
     processor_computation_config,
     processor_computation_hash,
     serialize,
@@ -748,6 +749,7 @@ def _ensure_persistent_frequency_checkpoints(  # noqa: PLR0912, PLR0915
             for candidate in persistent:
                 processor = _as_persistent_frequency_processor(candidate)
                 key = (processor.id, chunk.chunk_id)
+                layout_hash = frequency_checkpoint_layout_hash(processor.config)
                 try:
                     manifest = None
                     if not force:
@@ -758,6 +760,7 @@ def _ensure_persistent_frequency_checkpoints(  # noqa: PLR0912, PLR0915
                             source_id=source.id,
                             processor_id=processor.id,
                             config_hash=processor.config_hash,
+                            layout_hash=layout_hash,
                             chunk_id=chunk.chunk_id,
                             raw_fingerprint=raw_fingerprint,
                             validate=True,
@@ -783,6 +786,7 @@ def _ensure_persistent_frequency_checkpoints(  # noqa: PLR0912, PLR0915
                             source_id=source.id,
                             processor_id=processor.id,
                             config_hash=processor.config_hash,
+                            layout_hash=layout_hash,
                             chunk_id=chunk.chunk_id,
                             raw_fingerprint=raw_fingerprint,
                             customer_column=processor.config.columns.customer,
@@ -883,11 +887,13 @@ def _load_checkpoint_manifest(
     chunk: Chunk,
 ) -> CheckpointManifest:
     raw_fingerprint = ledger.file_fingerprint(chunk.files)
+    layout_hash = frequency_checkpoint_layout_hash(processor.config)
     manifest = load_processor_state_manifest(
         workspace,
         source_id=source.id,
         processor_id=processor.id,
         config_hash=processor.config_hash,
+        layout_hash=layout_hash,
         chunk_id=chunk.chunk_id,
         raw_fingerprint=raw_fingerprint,
         validate=False,
@@ -907,6 +913,12 @@ def _validate_checkpoint_manifest(
 ) -> None:
     expected_customer = processor.config.columns.customer
     expected_shards = processor.config.checkpoint.shards
+    expected_layout = frequency_checkpoint_layout_hash(processor.config)
+    if manifest.layout_hash != expected_layout:
+        raise ValueError(
+            f"frequency checkpoint layout hash {manifest.layout_hash!r} does not match "
+            f"{expected_layout!r}"
+        )
     if manifest.customer_column != expected_customer:
         raise ValueError(
             f"frequency checkpoint customer column {manifest.customer_column!r} does not "

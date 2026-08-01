@@ -1176,13 +1176,15 @@ current-target rows even when they share the source.
 The bounded processor then uses its declared execution mode. `source_scan`
 builds a marked, ephemeral dependency frame. `persistent_sharded` filters,
 classifies, and projects a raw chunk through a partitioned streaming sink into
-customer-hash shards addressed by source and processor computation identity,
-chunk id, and raw fingerprint, then processes one corresponding target/history
-shard set at a time. Contact collapse happens after those shards are combined
-so both modes retain identical cross-partition duplicate precedence. Neither
-mode changes the raw dependency fingerprint or aggregate publication barrier.
-Checkpoint manifests and files are not ledger `ok` rows and are never
-query-visible.
+customer-hash shards addressed by source, processor semantic computation
+identity, independent checkpoint-layout identity, chunk id, and raw
+fingerprint, then processes one corresponding target/history shard set at a
+time. Contact collapse happens after those shards are combined so both modes
+retain identical cross-partition duplicate precedence. Neither mode changes the
+raw dependency fingerprint or aggregate publication barrier. Checkpoint mode,
+shard count, and retention remain in the full catalog hash but not in processor
+or source computation hashes. Checkpoint manifests and files are not ledger
+`ok` rows and are never query-visible.
 
 Re-processing a chunk:
 
@@ -1209,7 +1211,10 @@ partitions beyond `checkpoint.retention_days`. The default keeps exactly the
 active history closure plus the current partition. A target never relies on a
 checkpoint as authoritative data: if the required generation is absent after
 cleanup, ingestion rebuilds it from the discovered source chunk before
-calculating the aggregate.
+calculating the aggregate. Changing mode, shard count, or retention does not
+schedule aggregate replay. A new shard layout is prepared lazily for the
+bounded closure of the next new or invalidated target; a retention-only change
+applies during vacuum.
 
 ### 10.3 Transform materialization and streaming
 
