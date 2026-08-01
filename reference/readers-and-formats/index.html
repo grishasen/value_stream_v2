@@ -3487,15 +3487,20 @@ for chunk_id in groups:
 </code></pre></div>
 <p>The effective idempotency key is <code>(source_id, chunk_id,
 source_computation_hash, file_hash)</code>. The source computation hash covers
-workspace defaults, source behavior, and all bound processors. <code>file_hash</code>
-covers sorted absolute paths, nanosecond mtimes, and sizes. Unchanged inputs are
-skipped; changed files or behavior are reprocessed without invalidating the
-previous successful aggregate until the new run commits.</p>
+workspace defaults, source behavior, and the result-affecting semantics of all
+bound processors. Ingestion-only <code>frequency_response.checkpoint.*</code> settings are
+excluded; they remain in the full catalog hash and use separate state layout
+and retention identities. <code>file_hash</code> covers sorted absolute paths, nanosecond
+mtimes, and sizes. Unchanged inputs are skipped; changed files or behavior are
+reprocessed without invalidating the previous successful aggregate until the
+new run commits.</p>
 <p>For a bounded-lookback target, <code>file_hash</code> covers the complete raw dependency
 closure, not only the target files. This remains true when a processor uses a
 persistent checkpoint: the checkpoint is an acceleration artifact keyed by the
-per-chunk raw fingerprint, never the source of the idempotency decision or a
-successful ledger marker.</p>
+processor semantic identity, independent layout identity, and per-chunk raw
+fingerprint, never the source of the idempotency decision or a successful
+ledger marker. Missing state after layout tuning is rebuilt lazily only when a
+new or invalidated target needs that bounded closure.</p>
 <h3 id="24-chunk-granularity">2.4 Chunk granularity<a class="headerlink" href="#24-chunk-granularity" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Daily file groups</strong> are the recommended default for IH-shaped sources. The regex <code>\d{8}(?=\d{6}_)</code> captures <code>YYYYMMDD</code> from filenames like <code>interaction-XYZ-20240821000000_001.json.zip</code>.</li>

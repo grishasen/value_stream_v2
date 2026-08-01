@@ -3219,9 +3219,10 @@ persisting the index.</p>
 <p>The processor-state namespace is deliberately outside <code>aggregates/</code> and
 <code>meta/</code>: DuckDB views, metric planning, lineage publication, and chunk <code>ok</code>
 markers never expose it. A persistent frequency checkpoint is addressed by the
-source/processor computation identity, chunk id, and raw fingerprint and also
-records its state-schema, customer dtype, and sharding revisions. Existing
-shards are integrity-validated in the parent before workers run. Stale
+source, processor semantic computation identity, independent checkpoint-layout
+identity, chunk id, and raw fingerprint. It also records its state-schema,
+customer dtype, and sharding revisions. Existing shards are integrity-validated
+in the parent before workers run. Stale
 generations and partitions beyond <code>checkpoint.retention_days</code> are removed
 automatically after ingestion or by vacuum. Missing state is rebuilt from
 source IH; corrupt state is rejected, while an explicit forced run replaces it
@@ -3256,17 +3257,31 @@ with a deterministic rebuild.</p>
 </tbody>
 </table>
 <p>The full DSL is specified in design/replacement-design.md §7 and concepts/domain-model.md §3. Expression semantics are in reference/expression-dsl.md.</p>
-<p>Three related hashes serve different boundaries:</p>
+<p>Three catalog identities plus one internal state identity serve different
+boundaries:</p>
 <ul>
-<li>the <strong>catalog hash</strong> identifies the complete authored catalog for audit;</li>
+<li>the <strong>catalog hash</strong> identifies the complete authored catalog for audit,
+  including execution/storage settings such as <code>checkpoint.*</code>;</li>
 <li>the <strong>source computation hash</strong> covers workspace defaults, the source
-  reader/schema/transforms/defaults, and all processors bound to that source,
-  and controls chunk skip/reprocess decisions;</li>
+  reader/schema/transforms/defaults, and the result-affecting semantics of all
+  processors bound to that source, and controls chunk skip/reprocess decisions;</li>
 <li>the <strong>processor computation hash</strong> covers workspace defaults, source
-  behavior, and one processor, and is persisted as aggregate <code>config_hash</code>.</li>
+  behavior, and one processor's result-affecting semantics, and is persisted as
+  aggregate <code>config_hash</code>;</li>
+<li>the <strong>checkpoint layout hash</strong> covers ingestion-only physical choices that
+  distinguish compatible processor-state layouts, currently the frequency
+  checkpoint shard count. It is stored in the checkpoint manifest/path, not in
+  aggregate provenance or the chunk ledger.</li>
 </ul>
+<p>For <code>frequency_response</code>, checkpoint mode, shard count, and retention are
+excluded from processor and source computation hashes. Mode selects execution,
+shards select state layout, and retention selects vacuum policy. Changing them
+therefore leaves unchanged aggregate chunks skipped; missing state for a new
+layout is rebuilt lazily for the next bounded target. Window, partition-lag,
+contact, filter, grouping, and state changes remain semantic and invalidate the
+appropriate aggregates.</p>
 <p>Presentation-only descriptions, dashboards, and metric prose do not invalidate
-ingestion. Canonical payloads for all three identities are inserted into
+ingestion. Canonical payloads for the three catalog/computation identities are inserted into
 <code>meta/config_versions.duckdb</code>; each emitted aggregate file is recorded in
 <code>meta/lineage.duckdb</code> with its run, chunk, processor, grain, period, hash, row
 count, and path.</p>

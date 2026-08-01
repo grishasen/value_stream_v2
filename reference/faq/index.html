@@ -2591,16 +2591,21 @@ The planner classifies the change against the existing store (concepts/domain-mo
 <ul>
 <li><em>Compatible widening</em> (add a derived metric or new processor) → no invalidation.</li>
 <li><em>Compatible narrowing</em> (drop a group-by column, coarsen a grain) → re-compact directly from existing aggregates.</li>
+<li><em>Execution/storage tuning</em> (<code>frequency_response.checkpoint.mode</code>, <code>shards</code>,
+  or <code>retention_days</code>) → no aggregate invalidation. A new shard layout is
+  created lazily when a later target needs it; retention applies at vacuum.</li>
 <li><em>Incompatible</em> (add a group-by column that was not materialized, change a filter, change positive/negative outcomes, change CPC/HLL <code>lg_k</code>, switch sketch type) → re-run from chunks.</li>
 </ul>
 <p>Aggregate <code>config_hash</code> is the processor computation hash: workspace defaults,
-source reader/schema/transforms/defaults, and processor semantics. A source
-computation hash additionally covers every processor bound to the source and
-controls ingestion skip decisions. Presentation-only descriptions, metrics,
-and dashboards do not trigger reprocessing. Old and new aggregate hashes
-coexist until <code>valuestream vacuum</code>, or until a confirmed Data Load clean
-rebuild completes successfully for that source scope. Clean rebuild retains
-the audit databases under <code>meta/</code>.</p>
+source reader/schema/transforms/defaults, and result-affecting processor
+semantics. A source computation hash additionally covers the semantics of every
+processor bound to the source and controls ingestion skip decisions. The full
+catalog hash still records checkpoint execution/storage settings for audit,
+while a separate checkpoint-layout hash distinguishes shard layouts.
+Presentation-only descriptions, metrics, and dashboards do not trigger
+reprocessing. Old and new aggregate hashes coexist until <code>valuestream vacuum</code>,
+or until a confirmed Data Load clean rebuild completes successfully for that
+source scope. Clean rebuild retains the audit databases under <code>meta/</code>.</p>
 <p><strong>A6. How big does the aggregate store get compared to raw input?</strong>
 For Pega-shaped IH at typical cardinality, expect the daily aggregate to be ~0.1–1% of the raw row volume; with CPC/t-digest blobs included, plan for a low-single-digit percentage. Actual size depends on cardinality, grouping density, and sketch parameters, so measure it on representative data.</p>
 <hr />
@@ -2866,6 +2871,9 @@ shards bound target lookback work to one shard at a time; tune
 <code>checkpoint.shards</code> against file-count overhead. <code>checkpoint.retention_days</code>
 defaults to the active lookback plus the current partition; increase it only
 when reduced correction-replay I/O justifies retaining more identity state.
+Neither setting changes aggregate computation hashes: shard changes take
+effect lazily for the next processed target and retention changes take effect
+during vacuum.
 Apply the same data policy to the checkpoint as to the source-derived identity
 fields it retains.</p>
 <p><strong>G3. What's the largest aggregate store Value Stream can serve?</strong>
