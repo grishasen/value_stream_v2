@@ -26,8 +26,9 @@ views, SQL allowlist, API, MCP, Chat, SDK, or Reports.
 the resulting checkpoint as sensitive source-derived data:
 
 - It contains only filtered candidate rows and fields required to repeat exact
-  cross-partition normalization, bounded frequency, deduplication,
-  grouping/state calculation, and runner selection, but may retain an exact customer key.
+  cross-partition normalization, bounded number-of-impressions bucketing,
+  deduplication, grouping/state calculation, and configured alternative-group
+  selected rank-2 action resolution, but may retain an exact customer key.
 - Customer hashing is used to route records to shards. It is not encryption,
   anonymization, or a substitute for upstream tokenization/HMAC.
 - Generations are keyed by processor semantic computation identity, independent

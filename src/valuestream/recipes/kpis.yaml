@@ -747,26 +747,26 @@ recipes:
 
   - id: contact_policy.frequency_marginal_ctr
     version: 1
-    title: Frequency marginal CTR
+    title: Selected rank-1 action CTR by number of impressions
     domain: Contact policy
-    summary: Observed focal click rate by an upstream fixed-window exposure bucket.
+    summary: Observed click rate of the selected rank-1 action by an upstream fixed-window number-of-impressions bucket.
     business_questions:
-      - How does focal response change as repeated-contact frequency increases?
-    tags: [ contact-policy, frequency, ctr, exposure, approximation ]
+      - How does the selected rank-1 action response change as the number of impressions increases?
+    tags: [ contact-policy, number-of-impressions, ctr, approximation ]
     maturity: reviewed
     processor_kinds: [ frequency_response ]
     inputs:
       - role: clicks
-        label: Focal click count
-        description: Exact frequency-response state containing focal clicks.
+        label: Selected rank-1 action click count
+        description: Exact frequency-response state containing clicks for the selected rank-1 action.
         source: state
         state_types: [ count ]
         preferred_names: [ Clicks ]
         selection: automatic
         require_preferred: true
       - role: contacts
-        label: Focal contact count
-        description: Exact frequency-response state containing all focal contact proxies.
+        label: Selected rank-1 action contact count
+        description: Exact frequency-response state containing all contact proxies for the selected rank-1 action.
         source: state
         state_types: [ count ]
         preferred_names: [ Contacts ]
@@ -777,9 +777,9 @@ recipes:
     metric:
       processor: ${processor_id}
       kind: formula
-      description: Focal clicks divided by focal Impression-proxy contacts.
+      description: Clicks for the selected rank-1 action divided by its Impression-proxy contacts.
       display:
-        label: Frequency marginal CTR
+        label: Selected rank-1 action CTR by number of impressions
         unit: percent
         value_format: percent
         direction: higher_is_better
@@ -791,31 +791,31 @@ recipes:
       calculation: Clicks / Contacts
       accuracy: approximate
       algorithm: Safe division over mergeable fixed-window frequency-response counts.
-      caveat: This all-contact rate is not directly comparable with a runner expectation unless their populations match. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: This all-contact rate is not directly comparable with a selected rank-2 action expectation unless their populations match. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: line, placement: content, x: ExposureBucket }
 
   - id: contact_policy.frequency_comparable_ctr
     version: 1
-    title: Comparable focal CTR
+    title: Comparable selected rank-1 action CTR
     domain: Contact policy
-    summary: Observed focal click rate on contacts that have a comparable recorded runner-up.
+    summary: Observed click rate of the selected rank-1 action on contacts that have a comparable selected rank-2 action.
     business_questions:
-      - What is the focal response rate on the same eligible population used for runner comparison?
-    tags: [ contact-policy, frequency, ctr, comparable-population, approximation ]
+      - What is the selected rank-1 action response rate on the same eligible population used for the selected rank-2 action comparison?
+    tags: [ contact-policy, number-of-impressions, ctr, comparable-population, approximation ]
     maturity: reviewed
     processor_kinds: [ frequency_response ]
     inputs:
       - role: comparable_clicks
-        label: Comparable focal click count
-        description: Exact focal-click count restricted to the runner-comparable population.
+        label: Comparable selected rank-1 action click count
+        description: Exact selected rank-1 action click count restricted to contacts with a comparable selected rank-2 action.
         source: state
         state_types: [ count ]
         preferred_names: [ ComparableClicks ]
         selection: automatic
         require_preferred: true
       - role: comparable_contacts
-        label: Comparable focal contact count
-        description: Exact focal-contact count with a recorded comparable runner propensity.
+        label: Comparable selected rank-1 action contact count
+        description: Exact selected rank-1 action contact count with a recorded comparable selected rank-2 action Propensity.
         source: state
         state_types: [ count ]
         preferred_names: [ ComparableContacts ]
@@ -826,9 +826,9 @@ recipes:
     metric:
       processor: ${processor_id}
       kind: formula
-      description: Comparable focal clicks divided by the same comparable contact population.
+      description: Comparable selected rank-1 action clicks divided by the same comparable contact population.
       display:
-        label: Comparable focal CTR
+        label: Comparable selected rank-1 action CTR
         unit: percent
         value_format: percent
         direction: higher_is_better
@@ -840,31 +840,31 @@ recipes:
       calculation: ComparableClicks / ComparableContacts
       accuracy: approximate
       algorithm: Safe division over matched, mergeable frequency-response counts.
-      caveat: ComparableClicks and every runner comparison must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: ComparableClicks and every selected rank-2 action comparison must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: line, placement: content, x: ExposureBucket }
 
   - id: contact_policy.runner_up_expected_ctr
     version: 1
-    title: Runner-up expected CTR
+    title: Selected rank-2 action expected CTR
     domain: Contact policy
-    summary: Mean raw response Propensity of the selected runner-up on comparable contacts.
+    summary: Mean raw response Propensity of the selected rank-2 action on comparable contacts.
     business_questions:
-      - What response probability did the recorded runner-up carry at each exposure bucket?
-    tags: [ contact-policy, frequency, runner-up, propensity, approximation ]
+      - What response probability did the selected rank-2 action carry at each number-of-impressions bucket?
+    tags: [ contact-policy, number-of-impressions, propensity, approximation ]
     maturity: reviewed
     processor_kinds: [ frequency_response ]
     inputs:
       - role: runner_propensity_sum
-        label: Runner raw-Propensity sum
-        description: Exact sum of selected runner raw Propensity over comparable contacts.
+        label: Selected rank-2 action raw-Propensity sum
+        description: Exact sum of selected rank-2 action raw Propensity over comparable contacts.
         source: state
         state_types: [ value_sum ]
         preferred_names: [ RunnerPropensitySum ]
         selection: automatic
         require_preferred: true
       - role: comparable_contacts
-        label: Comparable focal contact count
-        description: Exact denominator shared with the comparable focal response rate.
+        label: Comparable selected rank-1 action contact count
+        description: Exact denominator shared with the comparable selected rank-1 action response rate.
         source: state
         state_types: [ count ]
         preferred_names: [ ComparableContacts ]
@@ -874,9 +874,9 @@ recipes:
     metric:
       processor: ${processor_id}
       kind: formula
-      description: Runner raw-Propensity sum divided by comparable focal contacts.
+      description: Selected rank-2 action raw-Propensity sum divided by comparable selected rank-1 action contacts.
       display:
-        label: Runner-up expected CTR
+        label: Selected rank-2 action expected CTR
         unit: percent
         value_format: percent
         direction: neutral
@@ -888,31 +888,31 @@ recipes:
       calculation: RunnerPropensitySum / ComparableContacts
       accuracy: approximate
       algorithm: Safe division over a mergeable raw-Propensity sum and its matched count.
-      caveat: RunnerPropensitySum and the comparable focal rate must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: RunnerPropensitySum and the comparable selected rank-1 action rate must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: line, placement: content, x: ExposureBucket }
 
   - id: contact_policy.runner_up_coverage
     version: 1
-    title: Runner-up coverage
+    title: Selected rank-2 action coverage
     domain: Contact policy
-    summary: Share of focal contacts with a comparable recorded runner-up propensity.
+    summary: Share of selected rank-1 action contacts with a comparable selected rank-2 action Propensity.
     business_questions:
-      - How much of the focal contact population supports a runner comparison?
-    tags: [ contact-policy, frequency, runner-up, coverage, approximation ]
+      - How much of the selected rank-1 action contact population supports a selected rank-2 action comparison?
+    tags: [ contact-policy, number-of-impressions, coverage, approximation ]
     maturity: reviewed
     processor_kinds: [ frequency_response ]
     inputs:
       - role: comparable_contacts
-        label: Comparable focal contact count
-        description: Exact count of focal contacts with a comparable runner propensity.
+        label: Comparable selected rank-1 action contact count
+        description: Exact count of selected rank-1 action contacts with a comparable selected rank-2 action Propensity.
         source: state
         state_types: [ count ]
         preferred_names: [ ComparableContacts ]
         selection: automatic
         require_preferred: true
       - role: contacts
-        label: Focal contact count
-        description: Exact count of all focal Impression-proxy contacts.
+        label: Selected rank-1 action contact count
+        description: Exact count of all selected rank-1 action Impression-proxy contacts.
         source: state
         state_types: [ count ]
         preferred_names: [ Contacts ]
@@ -923,9 +923,9 @@ recipes:
     metric:
       processor: ${processor_id}
       kind: formula
-      description: Comparable focal contacts divided by all focal contact proxies.
+      description: Comparable selected rank-1 action contacts divided by all selected rank-1 action contact proxies.
       display:
-        label: Runner-up coverage
+        label: Selected rank-2 action coverage
         unit: percent
         value_format: percent
         direction: higher_is_better
@@ -937,38 +937,38 @@ recipes:
       calculation: ComparableContacts / Contacts
       accuracy: approximate
       algorithm: Safe division over mergeable comparable and all-contact counts.
-      caveat: ComparableContacts must be a subset of Contacts, and comparable focal and runner response metrics must retain that same eligible denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: ComparableContacts must be a subset of Contacts, and comparable selected rank-1 action and selected rank-2 action response metrics must retain that same eligible denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: kpi_card, placement: kpi_strip }
 
   - id: contact_policy.response_opportunity_margin
     version: 1
     title: Response opportunity margin
     domain: Contact policy
-    summary: Comparable focal click contribution minus runner raw response expectation.
+    summary: Comparable selected rank-1 action click contribution minus selected rank-2 action raw response expectation.
     business_questions:
-      - At which exposure bucket does the repeated focal action trail the recorded alternative?
-    tags: [ contact-policy, frequency, opportunity-cost, propensity, approximation ]
+      - At which number-of-impressions bucket does the repeated selected rank-1 action trail the selected rank-2 action?
+    tags: [ contact-policy, number-of-impressions, opportunity-cost, propensity, approximation ]
     maturity: reviewed
     processor_kinds: [ frequency_response ]
     inputs:
       - role: comparable_clicks
-        label: Comparable focal click count
-        description: Exact focal-click count restricted to runner-comparable contacts.
+        label: Comparable selected rank-1 action click count
+        description: Exact selected rank-1 action click count restricted to contacts with a comparable selected rank-2 action.
         source: state
         state_types: [ count ]
         preferred_names: [ ComparableClicks ]
         selection: automatic
         require_preferred: true
       - role: runner_propensity_sum
-        label: Runner raw-Propensity sum
-        description: Exact sum of selected runner raw Propensity on the same contacts.
+        label: Selected rank-2 action raw-Propensity sum
+        description: Exact sum of selected rank-2 action raw Propensity on the same contacts.
         source: state
         state_types: [ value_sum ]
         preferred_names: [ RunnerPropensitySum ]
         selection: automatic
         require_preferred: true
       - role: comparable_contacts
-        label: Comparable focal contact count
+        label: Comparable selected rank-1 action contact count
         description: Exact denominator shared by both response contributions.
         source: state
         state_types: [ count ]
@@ -980,7 +980,7 @@ recipes:
     metric:
       processor: ${processor_id}
       kind: formula
-      description: Comparable focal clicks minus runner raw-Propensity sum, divided by comparable contacts.
+      description: Comparable selected rank-1 action clicks minus selected rank-2 action raw-Propensity sum, divided by comparable contacts.
       display:
         label: Response opportunity margin
         unit: percent
@@ -998,31 +998,31 @@ recipes:
       calculation: (ComparableClicks - RunnerPropensitySum) / ComparableContacts
       accuracy: approximate
       algorithm: Difference of matched response contributions over one mergeable denominator.
-      caveat: ComparableClicks and RunnerPropensitySum must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: ComparableClicks and RunnerPropensitySum must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: bar, placement: content, x: ExposureBucket }
 
   - id: contact_policy.priority_opportunity_gap
     version: 1
     title: Priority opportunity gap
     domain: Contact policy
-    summary: Mean focal-minus-runner arbitration Priority contribution on comparable contacts.
+    summary: Mean selected rank-1 action minus selected rank-2 action arbitration Priority contribution on comparable contacts.
     business_questions:
-      - Does the focal action retain an arbitration advantage after repeated contact?
-    tags: [ contact-policy, frequency, priority, arbitration, approximation ]
+      - Does the selected rank-1 action retain an arbitration advantage as the number of impressions increases?
+    tags: [ contact-policy, number-of-impressions, priority, arbitration, approximation ]
     maturity: reviewed
     processor_kinds: [ frequency_response ]
     inputs:
       - role: focal_priority_comparable_sum
-        label: Comparable focal Priority sum
-        description: Exact focal Priority contribution on the priority-comparable population.
+        label: Comparable selected rank-1 action Priority sum
+        description: Exact selected rank-1 action Priority contribution on the priority-comparable population.
         source: state
         state_types: [ value_sum ]
         preferred_names: [ FocalPriorityComparableSum ]
         selection: automatic
         require_preferred: true
       - role: runner_priority_comparable_sum
-        label: Comparable runner Priority sum
-        description: Exact selected-runner Priority sum on the same population.
+        label: Comparable selected rank-2 action Priority sum
+        description: Exact selected rank-2 action Priority sum on the same population.
         source: state
         state_types: [ value_sum ]
         preferred_names: [ RunnerPriorityComparableSum ]
@@ -1041,7 +1041,7 @@ recipes:
     metric:
       processor: ${processor_id}
       kind: formula
-      description: Comparable focal Priority minus runner Priority, averaged per comparable contact.
+      description: Comparable selected rank-1 action Priority minus selected rank-2 action Priority, averaged per comparable contact.
       display:
         label: Priority opportunity gap
         unit: index
@@ -1059,5 +1059,5 @@ recipes:
       calculation: (FocalPriorityComparableSum - RunnerPriorityComparableSum) / PriorityComparableContacts
       accuracy: approximate
       algorithm: Difference of matched arbitration sums over one mergeable denominator.
-      caveat: FocalPriorityComparableSum and RunnerPriorityComparableSum must use the same PriorityComparableContacts denominator. ExposureBucket is an upstream fixed-window approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Runner-up means rank 2, otherwise the next recorded rank; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: FocalPriorityComparableSum and RunnerPriorityComparableSum must use the same PriorityComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: bar, placement: content, x: ExposureBucket }

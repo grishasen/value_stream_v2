@@ -411,6 +411,238 @@ def test_combo_chart_can_render_two_lines_on_one_shared_axis() -> None:
 
 
 @pytest.mark.unit
+def test_combo_chart_separates_facet_columns_without_cross_facet_lines() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "ExposureFrequency": [1, 1, 2, 2, 3, 3],
+                "CustomerType": ["Known", "Anonymous"] * 3,
+                "ComparableCTR": [0.021, 0.012, 0.014, 0.011, 0.009, 0.008],
+                "RunnerExpectedCTR": [0.006, 0.005, 0.0062, 0.0052, 0.0065, 0.0055],
+            }
+        ),
+        {
+            "id": "frequency_response",
+            "metric": "ComparableCTR",
+            "metric_output": "ComparableCTR",
+            "chart": "combo",
+            "x": "ExposureFrequency",
+            "secondary_metric": "RunnerExpectedCTR",
+            "primary_mark": "line",
+            "shared_y_axis": True,
+            "facet_col": "CustomerType",
+            "y_axis_title": "Response probability",
+        },
+        theme={"colorway": ["#0072B2", "#D55E00"]},
+    )
+
+    assert len(figure.data) == 4
+    assert len({trace.xaxis for trace in figure.data}) == 2
+    assert all(list(trace.x) == [1, 2, 3] for trace in figure.data)
+    assert [trace.showlegend for trace in figure.data] == [True, True, False, False]
+    assert [trace.legendgroup for trace in figure.data] == [
+        "ComparableCTR",
+        "RunnerExpectedCTR",
+        "ComparableCTR",
+        "RunnerExpectedCTR",
+    ]
+    assert [trace.line.color for trace in figure.data] == [
+        "#0072B2",
+        "#D55E00",
+        "#0072B2",
+        "#D55E00",
+    ]
+    assert {annotation.text for annotation in figure.layout.annotations} == {
+        "Known",
+        "Anonymous",
+    }
+    assert [
+        getattr(figure.layout, name).title.text
+        for name in figure.layout
+        if name.startswith("yaxis")
+    ].count("Response probability") == 1
+
+
+@pytest.mark.unit
+def test_combo_chart_facets_preserve_primary_and_secondary_axis_semantics() -> None:
+    rows: list[dict[str, object]] = []
+    for channel in ("Web", "Mobile"):
+        for customer_type in ("Known", "Anonymous"):
+            for exposure in (1, 2):
+                rows.append(
+                    {
+                        "ExposureFrequency": exposure,
+                        "Channel": channel,
+                        "CustomerType": customer_type,
+                        "Clicks": exposure + (1 if channel == "Web" else 2),
+                        "Impressions": 100 * exposure,
+                    }
+                )
+
+    figure = render_chart(
+        pl.DataFrame(rows),
+        {
+            "id": "clicks_and_impressions",
+            "metric": "Clicks",
+            "metric_output": "Clicks",
+            "chart": "combo",
+            "x": "ExposureFrequency",
+            "secondary_metric": "Impressions",
+            "facet_row": "Channel",
+            "facet_col": "CustomerType",
+            "y_axis_title": "Clicks",
+            "y2_axis_title": "Impressions",
+        },
+    )
+
+    assert len(figure.data) == 8
+    assert len({trace.xaxis for trace in figure.data}) == 4
+    assert len({trace.yaxis for trace in figure.data}) == 8
+    for index in range(0, len(figure.data), 2):
+        primary = figure.data[index]
+        secondary = figure.data[index + 1]
+        assert list(primary.x) == [1, 2]
+        assert primary.xaxis == secondary.xaxis
+        assert primary.yaxis != secondary.yaxis
+    assert {"Web", "Mobile", "Known", "Anonymous"} <= {
+        annotation.text for annotation in figure.layout.annotations
+    }
+    titled_y_axes = [
+        axis
+        for name in figure.layout
+        if name.startswith("yaxis")
+        and (axis := getattr(figure.layout, name)).title.text is not None
+    ]
+    assert [axis.title.text for axis in titled_y_axes].count("Clicks") == 1
+    assert [axis.title.text for axis in titled_y_axes].count("Impressions") == 1
+    assert next(axis for axis in titled_y_axes if axis.title.text == "Clicks").overlaying is None
+    assert next(axis for axis in titled_y_axes if axis.title.text == "Impressions").side == "right"
+
+
+@pytest.mark.unit
+def test_combo_chart_deduplicates_color_series_across_facets() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "ExposureFrequency": [1, 1, 1, 1, 2, 2, 2, 2],
+                "CustomerType": ["Known", "Known", "Anonymous", "Anonymous"] * 2,
+                "Channel": ["Web", "Mobile"] * 4,
+                "CTR": [0.1, 0.2, 0.3, 0.4, 0.15, 0.25, 0.35, 0.45],
+                "ExpectedCTR": [0.05, 0.06, 0.07, 0.08, 0.055, 0.065, 0.075, 0.085],
+            }
+        ),
+        {
+            "id": "colored_frequency_response",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "chart": "combo",
+            "x": "ExposureFrequency",
+            "secondary_metric": "ExpectedCTR",
+            "primary_mark": "line",
+            "shared_y_axis": True,
+            "color": "Channel",
+            "facet_col": "CustomerType",
+        },
+        theme={"colorway": ["#111111", "#222222", "#333333", "#444444"]},
+    )
+
+    visible = [trace for trace in figure.data if trace.showlegend]
+    assert len(figure.data) == 8
+    assert [trace.name for trace in visible] == [
+        "CTR · Web",
+        "ExpectedCTR · Web",
+        "CTR · Mobile",
+        "ExpectedCTR · Mobile",
+    ]
+    colors_by_group: dict[str, set[str]] = {}
+    for trace in figure.data:
+        colors_by_group.setdefault(str(trace.legendgroup), set()).add(str(trace.line.color))
+    assert all(len(colors) == 1 for colors in colors_by_group.values())
+
+
+@pytest.mark.unit
+def test_combo_chart_uses_the_effective_template_palette_across_facets() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "ExposureFrequency": [1, 1, 2, 2],
+                "CustomerType": ["Known", "Anonymous"] * 2,
+                "CTR": [0.1, 0.2, 0.15, 0.25],
+                "ExpectedCTR": [0.05, 0.06, 0.055, 0.065],
+            }
+        ),
+        {
+            "id": "frequency_response",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "chart": "combo",
+            "x": "ExposureFrequency",
+            "secondary_metric": "ExpectedCTR",
+            "primary_mark": "line",
+            "shared_y_axis": True,
+            "facet_col": "CustomerType",
+        },
+        theme={"template": "seaborn"},
+    )
+
+    expected = list(pio.templates["seaborn"].layout.colorway)[:2]
+    assert [trace.line.color for trace in figure.data] == [*expected, *expected]
+
+
+@pytest.mark.unit
+def test_combo_chart_keeps_null_and_literal_none_facets_separate() -> None:
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "ExposureFrequency": [1, 1, 2, 2],
+                "CustomerType": [None, "None", None, "None"],
+                "CTR": [0.1, 0.2, 0.15, 0.25],
+                "ExpectedCTR": [0.05, 0.06, 0.055, 0.065],
+            }
+        ),
+        {
+            "id": "frequency_response",
+            "metric": "CTR",
+            "metric_output": "CTR",
+            "chart": "combo",
+            "x": "ExposureFrequency",
+            "secondary_metric": "ExpectedCTR",
+            "primary_mark": "line",
+            "shared_y_axis": True,
+            "facet_col": "CustomerType",
+        },
+    )
+
+    assert len(figure.data) == 4
+    assert len({trace.xaxis for trace in figure.data}) == 2
+    assert all(list(trace.x) == [1, 2] for trace in figure.data)
+    assert {annotation.text for annotation in figure.layout.annotations} == {"(null)", "None"}
+
+
+@pytest.mark.unit
+def test_combo_chart_rejects_a_missing_configured_facet_column() -> None:
+    with pytest.raises(ValueError, match="facet column 'CustomerType' is not available"):
+        render_chart(
+            pl.DataFrame(
+                {
+                    "ExposureFrequency": [1, 2],
+                    "CTR": [0.1, 0.2],
+                    "ExpectedCTR": [0.05, 0.06],
+                }
+            ),
+            {
+                "id": "frequency_response",
+                "metric": "CTR",
+                "metric_output": "CTR",
+                "chart": "combo",
+                "x": "ExposureFrequency",
+                "secondary_metric": "ExpectedCTR",
+                "facet_col": "CustomerType",
+            },
+        )
+
+
+@pytest.mark.unit
 def test_table_chart_expands_topk_items_into_ranked_rows() -> None:
     rows = pl.DataFrame(
         {

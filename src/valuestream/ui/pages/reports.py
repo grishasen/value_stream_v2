@@ -1987,6 +1987,8 @@ def _advanced_field_controls(
                     options,
                     prefix,
                     chart_kind=str(chart_kind),
+                    catalog=ctx.catalog,
+                    metric_name=metric_name,
                 )
     if "path" in controls:
         path_options = field_options[1:]
@@ -2187,6 +2189,8 @@ def _advanced_field_widget(
     prefix: str,
     *,
     chart_kind: str,
+    catalog: model.Catalog,
+    metric_name: str,
 ) -> str:
     if field_name == "secondary_metric":
         label = "Secondary Metric"
@@ -2209,7 +2213,12 @@ def _advanced_field_widget(
         label,
         field_options,
         index=index,
-        format_func=lambda item: "None" if item == "" else item,
+        format_func=lambda item: builder.chart_field_option_label(
+            catalog,
+            metric_name,
+            field_name,
+            item,
+        ),
         key=key,
         help=(
             config_help.field_help("report.line_dash")

@@ -6,7 +6,7 @@
 
 Most Value Stream processors reduce one source chunk independently. That is
 the cheapest and simplest aggregate-first contract, but it cannot assign an
-event to an immutable rolling-frequency bucket: the bucket for a contact today
+event to an immutable rolling number-of-impressions bucket: the bucket for a contact today
 depends on earlier contacts for the same customer, action, and placement.
 Daily counts cannot reconstruct that identity-level order after ingestion.
 
@@ -24,7 +24,7 @@ minimal, versioned, immutable, and completely rebuildable from the authoritative
 source files. Reports never read it.
 
 The chunk ledger also needs more information than the target day's own file
-fingerprint. If day D contributes to a seven-day frequency calculation for day
+fingerprint. If day D contributes to a seven-day number-of-impressions calculation for day
 D+1 through D+7, correcting D must invalidate those dependent targets.
 
 ## Decision
@@ -64,8 +64,9 @@ A bounded processor may choose one of two exact execution strategies:
    retained before cross-partition contact collapse so duplicate/outcome
    precedence remains exactly equivalent to `source_scan`.
    The checkpoint may retain identity-level keys and values needed for exact
-   ordering, deduplication, exposure frequency, grouping/state calculation, and
-   within-interaction runner selection.
+   ordering, deduplication, number-of-impressions bucketing, grouping/state
+   calculation, and the configured alternative-group selected rank-2 action
+   resolution.
 
 The strategy is operational rather than semantic. `checkpoint.mode`,
 `checkpoint.shards`, and `checkpoint.retention_days` remain in the full catalog
@@ -129,12 +130,24 @@ Persistent processor state is permitted only under these constraints:
 Sketches or customer sampling may be used only when a KPI explicitly declares
 approximate semantics. They are not substituted silently for the exact
 frequency-response contract: sketches cannot recover per-customer event order
-or join a focal action to the available runner within the same interaction.
+or join a selected rank-1 action to the selected rank-2 action available in its
+configured comparison group.
 
-For `frequency_response`, the exposure window is `(decision_time - W,
-decision_time]`, with `W=168h` by default. Frequencies are capped into the
-configured terminal bucket. This precise boundary is part of the processor
-computation hash.
+`frequency_response.alternative_group_by` makes that comparison group an
+explicit semantic part of the processor. Customer and interaction are implicit
+mandatory base keys: customer preserves source-scan/checkpoint equivalence and
+shard isolation, while interaction keeps ranked candidates inside one decision.
+The configured value is a zero-or-more list of physical transformed source
+columns appended to them. The default `[Placement]` therefore means customer +
+interaction + placement. Multiple additional fields are allowed, and null
+values match null values within a configured group. Because this field changes
+computed populations, it remains in processor/source computation hashes; it is
+not checkpoint-layout tuning.
+
+For `frequency_response`, the impression-count window is `(decision_time - W,
+decision_time]`, with `W=168h` by default. The number of impressions is capped
+into the configured terminal bucket. This precise boundary is part of the
+processor computation hash.
 
 `partition_lag_hours` is a separate dependency-planning parameter, defaulting
 to zero. It covers sources partitioned by a timestamp that can trail decision
@@ -142,11 +155,11 @@ time: the runner reads `ceil((W + partition_lag_hours) / 24)` prior calendar
 partitions, but the processor still applies exactly `(decision_time - W,
 decision_time]`. Correctness therefore requires the partition-date displacement
 to stay within the configured allowance. Over-padding changes I/O and
-invalidation fan-out, never exposure membership.
+invalidation fan-out, never impression-count membership.
 
 ## Consequences
 
-- Frequency-response curves can be produced directly from the existing
+- Response-by-number-of-impressions curves can be produced directly from the existing
   Interaction History source without a loader, secondary source, or
   pre-enriched business table.
 - Source corrections invalidate the dependent daily aggregates automatically;

@@ -62,6 +62,7 @@ def test_registry_constructs_frequency_response_processor() -> None:
                 "outcome": "Outcome",
                 "propensity": "Propensity",
             },
+            "alternative_group_by": ["Placement"],
             "positive_values": ["Clicked"],
             "exposure_values": ["Impression"],
             "candidate_values": ["Pending"],

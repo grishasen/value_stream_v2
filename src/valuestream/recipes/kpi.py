@@ -400,7 +400,9 @@ def instantiate_metric(
     if not isinstance(metric_def, dict):  # pragma: no cover - schema guards this shape
         raise TypeError("recipe metric template must materialize to a mapping")
     display = dict(metric_def.get("display") or {})
-    display["label"] = _metric_label_from_id(metric_id)
+    authored_label = str(display.get("label") or "").strip()
+    if metric_id != recipe.default_metric_id or not authored_label:
+        display["label"] = _metric_label_from_id(metric_id)
     metric_def["display"] = display
     metric_def["recipe"] = {
         "id": recipe.id,

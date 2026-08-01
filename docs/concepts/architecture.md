@@ -408,8 +408,8 @@ excluded from processor and source computation hashes. Mode selects execution,
 shards select state layout, and retention selects vacuum policy. Changing them
 therefore leaves unchanged aggregate chunks skipped; missing state for a new
 layout is rebuilt lazily for the next bounded target. Window, partition-lag,
-contact, filter, grouping, and state changes remain semantic and invalidate the
-appropriate aggregates.
+contact, alternative grouping, filter, published grouping, and state changes
+remain semantic and invalidate the appropriate aggregates.
 
 Presentation-only descriptions, dashboards, and metric prose do not invalidate
 ingestion. Canonical payloads for the three catalog/computation identities are inserted into

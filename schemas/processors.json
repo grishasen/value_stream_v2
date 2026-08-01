@@ -1638,6 +1638,13 @@
       "additionalProperties": false,
       "description": "Frequency-window response states over a marked current chunk plus lookback.",
       "properties": {
+        "alternative_group_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Alternative Group By",
+          "type": "array"
+        },
         "candidate_values": {
           "items": {},
           "minItems": 1,
@@ -1887,6 +1894,7 @@
         "time",
         "states",
         "columns",
+        "alternative_group_by",
         "positive_values",
         "exposure_values",
         "candidate_values"

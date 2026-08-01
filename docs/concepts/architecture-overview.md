@@ -115,7 +115,7 @@ processor families include:
 | `entity_set` | Approximate set operations and cohort comparisons |
 | `funnel` | Stage counts and dropoff calculations |
 | `snapshot` | Periodic aggregate state |
-| `frequency_response` | Exact response/opportunity curves by bounded exposure frequency |
+| `frequency_response` | Exact response/opportunity curves by bounded number of impressions |
 
 See [Processor Specs](../reference/processors.md) and [Algorithms](../reference/algorithms.md)
 for implementation details.

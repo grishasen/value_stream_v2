@@ -36,6 +36,7 @@ def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
             "propensity": "Propensity",
             "priority": "Priority",
         },
+        "alternative_group_by": ["Placement"],
         "positive_values": ["Clicked"],
         "exposure_values": ["Impression"],
         "candidate_values": ["Pending"],
@@ -96,6 +97,7 @@ def _row(
     outcome: str = "Impression",
     propensity: float | None = 0.5,
     priority: float | None = 1.0,
+    comparison_group: str | None = "default",
 ) -> dict[str, Any]:
     return {
         "CustomerID": customer,
@@ -106,6 +108,7 @@ def _row(
         "Outcome": outcome,
         "Propensity": propensity,
         "Priority": priority,
+        "ComparisonGroup": comparison_group,
         "DecisionTime": decision_time,
         TARGET_CHUNK_COLUMN: target,
     }
@@ -129,6 +132,8 @@ def test_model_requires_daily_bucketed_mergeable_states() -> None:
     assert config.checkpoint.shards == 64
     assert config.checkpoint.retention_days is None
     assert config.checkpoint_retention_days == 8
+    assert config.alternative_group_by == ["Placement"]
+    assert config.alternative_group_columns == ["CustomerID", "InteractionID", "Placement"]
     assert set(config.positive_values).isdisjoint(config.exposure_values)
     assert set(config.candidate_values).isdisjoint(
         [*config.positive_values, *config.exposure_values]
@@ -149,6 +154,31 @@ def test_model_requires_daily_bucketed_mergeable_states() -> None:
         _config(states={"ExposureBucket": {"type": "count"}})
     with pytest.raises(ValidationError, match="partition_lag_hours"):
         _config(partition_lag_hours=-1)
+    payload = config.model_dump(mode="python")
+    payload.pop("alternative_group_by")
+    with pytest.raises(ValidationError, match=r"(?s)alternative_group_by.*Field required"):
+        model.FrequencyResponseProcessor.model_validate(payload)
+    interaction_wide = _config(alternative_group_by=[])
+    assert interaction_wide.alternative_group_columns == ["CustomerID", "InteractionID"]
+    multi_field = _config(alternative_group_by=["Placement", "ComparisonGroup"])
+    assert multi_field.alternative_group_columns == [
+        "CustomerID",
+        "InteractionID",
+        "Placement",
+        "ComparisonGroup",
+    ]
+    with pytest.raises(ValidationError, match="columns must be unique"):
+        _config(alternative_group_by=["Placement", "Placement"])
+    for mandatory_column in ("CustomerID", "InteractionID"):
+        with pytest.raises(ValidationError, match="must not repeat mandatory"):
+            _config(alternative_group_by=[mandatory_column])
+    for invalid_column in ("", " Day", "Day", "ExposureBucket", "ClickedContact", "config_hash"):
+        with pytest.raises(ValidationError, match="must contain raw source columns"):
+            _config(alternative_group_by=[invalid_column])
+    duplicate_columns = config.columns.model_dump()
+    duplicate_columns["interaction"] = duplicate_columns["customer"]
+    with pytest.raises(ValidationError, match="customer and interaction bindings must be distinct"):
+        _config(columns=duplicate_columns)
     with pytest.raises(ValidationError, match="shards"):
         _config(checkpoint={"mode": "persistent_sharded", "shards": 0})
     with pytest.raises(ValidationError, match=r"retention_days must be at least 8"):
@@ -201,6 +231,7 @@ def test_processor_filter_cannot_reference_post_filter_derived_columns(
 def test_required_inputs_exclude_derived_bucket_and_virtual_state_fields() -> None:
     config = _config(
         group_by=["Day", "Channel", "ExposureBucket"],
+        alternative_group_by=["Placement", "ComparisonSegment"],
         filter={"op": "eq", "column": "Market", "value": "DE"},
     )
     required = required_input_columns(config)
@@ -210,6 +241,7 @@ def test_required_inputs_exclude_derived_bucket_and_virtual_state_fields() -> No
     assert {
         "DecisionTime",
         "Channel",
+        "ComparisonSegment",
         "Market",
         "Priority",
         TARGET_CHUNK_COLUMN,
@@ -217,7 +249,7 @@ def test_required_inputs_exclude_derived_bucket_and_virtual_state_fields() -> No
     assert "Day" not in required
     assert "ExposureBucket" not in required
     assert not model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS.intersection(required)
-    assert {"DecisionTime", "Channel", "Priority"} <= catalog_source_columns
+    assert {"DecisionTime", "Channel", "ComparisonSegment", "Priority"} <= (catalog_source_columns)
     assert "ExposureBucket" not in catalog_source_columns
     assert not model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS.intersection(catalog_source_columns)
     assert history_required == {
@@ -353,9 +385,21 @@ def test_clicked_wins_contact_normalization_and_history_overlap_is_not_targeted(
 
 
 @pytest.mark.unit
-def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_late_time() -> None:
+@pytest.mark.parametrize(
+    "alternative_group_by",
+    [
+        [],
+        ["Placement"],
+    ],
+)
+def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_late_time(
+    alternative_group_by: list[str],
+) -> None:
     processor = FrequencyResponseProcessor(
-        _config(checkpoint={"mode": "persistent_sharded", "shards": 8}),
+        _config(
+            alternative_group_by=alternative_group_by,
+            checkpoint={"mode": "persistent_sharded", "shards": 8},
+        ),
         computation_hash="hash",
     )
     target_time = dt.datetime(2024, 1, 8, 8, tzinfo=dt.UTC)
@@ -389,6 +433,18 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
             decision_time=target_time,
             target=True,
             outcome="Clicked",
+        ),
+        _row(
+            customer="c1",
+            interaction="target",
+            decision_time=target_time,
+            target=True,
+            action="global-runner",
+            placement="DifferentPlacement",
+            rank=2,
+            outcome="Pending",
+            propensity=0.15,
+            priority=0.4,
         ),
         _row(
             customer="c1",
@@ -444,7 +500,18 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
 
 
 @pytest.mark.unit
-def test_runner_is_rank_two_then_minimum_above_one_across_the_interaction() -> None:
+@pytest.mark.parametrize(
+    ("alternative_group_by", "expected_propensity", "expected_priority"),
+    [
+        ([], 0.5, 1.0),
+        (["Placement"], 1.2, 1.5),
+    ],
+)
+def test_selected_rank_two_uses_configured_group_and_fallback(
+    alternative_group_by: list[str],
+    expected_propensity: float,
+    expected_priority: float,
+) -> None:
     when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
     rows = [
         _row(customer="c1", interaction="exact", decision_time=when, target=True),
@@ -498,7 +565,7 @@ def test_runner_is_rank_two_then_minimum_above_one_across_the_interaction() -> N
     ]
 
     row = (
-        _aggregate(rows)
+        _aggregate(rows, _config(alternative_group_by=alternative_group_by))
         .select(
             pl.col("Contacts").sum(),
             pl.col("RunnerAvailableContacts").sum(),
@@ -510,8 +577,190 @@ def test_runner_is_rank_two_then_minimum_above_one_across_the_interaction() -> N
     )
 
     assert row[:3] == (3, 2, 2)
-    assert row[3] == pytest.approx(0.5)
-    assert row[4] == pytest.approx(1.0)
+    assert row[3] == pytest.approx(expected_propensity)
+    assert row[4] == pytest.approx(expected_priority)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "alternative_group_by",
+    [
+        [],
+        ["Placement"],
+    ],
+)
+def test_alternative_group_never_crosses_interactions(
+    alternative_group_by: list[str],
+) -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        _row(customer="c1", interaction="focal", decision_time=when, target=True),
+        _row(
+            customer="c1",
+            interaction="runner",
+            decision_time=when,
+            target=True,
+            action="B",
+            rank=2,
+            outcome="Pending",
+            propensity=0.4,
+        ),
+    ]
+
+    result = _aggregate(rows, _config(alternative_group_by=alternative_group_by)).select(
+        pl.col("ComparableContacts").sum(),
+        pl.col("RunnerPropensitySum").sum(),
+    )
+
+    assert result.row(0) == (0, 0.0)
+
+
+@pytest.mark.unit
+def test_multiple_alternative_group_fields_constrain_runner_selection() -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        _row(
+            customer="c1",
+            interaction="decision",
+            decision_time=when,
+            target=True,
+            comparison_group="A",
+        ),
+        _row(
+            customer="c1",
+            interaction="decision",
+            decision_time=when,
+            target=True,
+            action="B",
+            rank=2,
+            outcome="Pending",
+            propensity=0.2,
+            comparison_group="B",
+        ),
+        _row(
+            customer="c1",
+            interaction="decision",
+            decision_time=when,
+            target=True,
+            action="C",
+            rank=3,
+            outcome="Pending",
+            propensity=0.7,
+            comparison_group="A",
+        ),
+    ]
+
+    result = _aggregate(
+        rows,
+        _config(alternative_group_by=["Placement", "ComparisonGroup"]),
+    ).select(
+        pl.col("ComparableContacts").sum(),
+        pl.col("RunnerPropensitySum").sum(),
+    )
+
+    assert result.row(0) == (1, 0.7)
+
+
+@pytest.mark.unit
+def test_null_alternative_group_values_compare_as_one_group() -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows: list[dict[str, Any]] = []
+    for customer, comparison_group in (("c1", None), ("c2", "known")):
+        rows.extend(
+            [
+                _row(
+                    customer=customer,
+                    interaction=f"{customer}-decision",
+                    decision_time=when,
+                    target=True,
+                    comparison_group=comparison_group,
+                ),
+                _row(
+                    customer=customer,
+                    interaction=f"{customer}-decision",
+                    decision_time=when,
+                    target=True,
+                    action="B",
+                    rank=2,
+                    outcome="Pending",
+                    propensity=0.3,
+                    comparison_group=comparison_group,
+                ),
+            ]
+        )
+
+    result = _aggregate(
+        rows,
+        _config(alternative_group_by=["Placement", "ComparisonGroup"]),
+    ).select(pl.col("ComparableContacts").sum())
+
+    assert result.item() == 2
+
+
+@pytest.mark.unit
+def test_missing_alternative_group_input_fails_before_processing() -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    row = _row(customer="c1", interaction="i1", decision_time=when, target=True)
+    row.pop("ComparisonGroup")
+
+    with pytest.raises(ValueError, match=r"missing input column\(s\): ComparisonGroup"):
+        _aggregate([row], _config(alternative_group_by=["ComparisonGroup"]))
+
+
+@pytest.mark.unit
+def test_placement_scoped_alternative_does_not_cross_placements() -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        _row(customer="c1", interaction="decision", decision_time=when, target=True),
+        _row(
+            customer="c1",
+            interaction="decision",
+            decision_time=when,
+            target=True,
+            action="B",
+            placement="DifferentPlacement",
+            rank=2,
+            outcome="Pending",
+            propensity=0.2,
+        ),
+    ]
+
+    result = _aggregate(rows).select(
+        pl.col("Contacts").sum(),
+        pl.col("RunnerAvailableContacts").sum(),
+        pl.col("ComparableContacts").sum(),
+        pl.col("RunnerPropensitySum").sum(),
+    )
+
+    assert result.row(0) == (1, 0, 0, 0.0)
+
+
+@pytest.mark.unit
+def test_alternative_group_never_crosses_customers() -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        _row(customer="c1", interaction="shared", decision_time=when, target=True),
+        _row(customer="c2", interaction="shared", decision_time=when, target=True),
+        _row(
+            customer="c2",
+            interaction="shared",
+            decision_time=when,
+            target=True,
+            action="B",
+            rank=2,
+            outcome="Pending",
+            propensity=0.4,
+        ),
+    ]
+
+    result = _aggregate(rows).select(
+        pl.col("Contacts").sum(),
+        pl.col("RunnerAvailableContacts").sum(),
+        pl.col("ComparableContacts").sum(),
+        pl.col("RunnerPropensitySum").sum(),
+    )
+
+    assert result.row(0) == (2, 1, 1, 0.4)
 
 
 @pytest.mark.unit

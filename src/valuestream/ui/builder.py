@@ -51,6 +51,7 @@ from valuestream.config.report_fields import (
 from valuestream.config.validate import validate_catalog
 from valuestream.expr import parser as expr_parser
 from valuestream.expr import translator as expr_translator
+from valuestream.ui.presentation import chart_field_label
 
 FILTER_OPERATORS = [
     "==",
@@ -2076,6 +2077,23 @@ def processor_for_metric(catalog: model.Catalog, metric_name: str) -> model.Proc
     return next(
         (processor for processor in catalog.processors.processors if processor.id == metric.processor),
         None,
+    )
+
+
+def chart_field_option_label(
+    catalog: model.Catalog,
+    metric_name: str,
+    field_name: str,
+    option: str,
+) -> str:
+    """Return a presentation label without changing the stored chart-field value."""
+
+    return chart_field_label(
+        catalog,
+        metric_name,
+        field_name,
+        option,
+        humanize=False,
     )
 
 
@@ -4344,6 +4362,7 @@ __all__ = [
     "chart_axis_options",
     "chart_choices_for_metric",
     "chart_field_controls",
+    "chart_field_option_label",
     "chart_field_options",
     "chart_kind_label",
     "chart_kind_purpose",

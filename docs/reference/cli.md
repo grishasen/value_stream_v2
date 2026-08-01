@@ -11,6 +11,15 @@ Global options:
 | `-V`, `--version` | Print version and exit |
 | `--logging-config PATH` | Logging config YAML file; uses the bundled config when omitted |
 
+The bundled console logger writes to stderr and colors only the timestamp,
+severity, and module when stderr is an interactive terminal. Its light/dark
+palettes mirror the application chrome and Plotly qualitative colors. Redirected
+output, `TERM=dumb`, and environments containing `NO_COLOR` remain plain text;
+`FORCE_COLOR=1` forces ANSI color, and `VALUESTREAM_LOG_THEME=light|dark`
+overrides terminal-background detection. A custom `--logging-config` remains
+authoritative and is not recolored unless it selects the Value Stream color
+handler itself.
+
 Conventions: `WORKSPACE` is a workspace directory containing `catalog/`.
 Commands exit 0 on success and non-zero on failure, so they are safe to gate
 scripts and cron jobs on.

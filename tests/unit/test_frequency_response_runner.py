@@ -65,6 +65,7 @@ def _processor(
                         "outcome": "Outcome",
                         "propensity": "Propensity",
                     },
+                    "alternative_group_by": ["Placement"],
                     "positive_values": ["Clicked"],
                     "exposure_values": ["Impression"],
                     "candidate_values": ["Impression", "Clicked"],

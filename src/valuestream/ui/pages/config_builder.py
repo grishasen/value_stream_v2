@@ -4489,7 +4489,7 @@ def _remap_processor_def_fields(
     for key in ("variant_column",):
         if out.get(key):
             out[key] = field_remap.remap_field_name(str(out[key]), field_mapping)
-    for key in ("properties",):
+    for key in ("properties", "alternative_group_by"):
         values = out.get(key)
         if isinstance(values, list):
             out[key] = field_remap.remap_field_list([str(item) for item in values], field_mapping)
@@ -6783,6 +6783,20 @@ def _field_controls_for_keys(
                 ),
                 options,
                 index=builder.option_index(options, _tile_field_default(defaults, key)),
+                format_func=(
+                    lambda option, field_name=key: (
+                        builder.chart_field_option_label(
+                            catalog,
+                            metric_name,
+                            field_name,
+                            option,
+                        )
+                        if catalog is not None and metric_name
+                        else "None"
+                        if option == ""
+                        else option
+                    )
+                ),
                 key=f"builder_tile_{key}_{key_suffix}",
                 help=config_help.field_help(
                     {

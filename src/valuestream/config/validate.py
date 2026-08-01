@@ -941,6 +941,7 @@ def _processor_source_columns(processor: model.Processor) -> set[str]:
         columns.add(processor.time.column)
     if isinstance(processor, model.FrequencyResponseProcessor):
         columns.update(processor.columns.model_dump(exclude_none=True).values())
+        columns.update(processor.alternative_group_by)
     if isinstance(processor, model.BinaryOutcomeProcessor | model.ScoreDistributionProcessor):
         columns.add(processor.outcome.column)
         columns.update(processor.dedup_keys)

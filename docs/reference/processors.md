@@ -957,11 +957,11 @@ preserves atomic publication and history; vacuum removes superseded files.
 
 ### 10.1 Purpose
 
-`frequency_response` measures how response changes across repeated exposures to
-the same action in a fixed trailing time window. It also records the raw
-propensity of the best available alternative from the same interaction, so a
-frequency curve can be compared with the opportunity cost of occupying the
-placement.
+`frequency_response` measures how response changes with the number of impressions
+of the same action in a fixed trailing time window. It also records the raw
+propensity of the selected rank-2 action from an explicitly configured
+comparison group, so the selected rank-1 action curve can be compared with the
+opportunity cost of occupying the placement.
 
 This is a sequence-aware processor. Its published contract remains
 aggregate-first: only daily count and sum states are queryable. Ingestion can
@@ -989,6 +989,7 @@ processors:
       outcome: Outcome
       propensity: Propensity
       priority: Priority               # optional diagnostic
+    alternative_group_by: [Placement]
     positive_values: [Clicked]
     exposure_values: [Impression, Clicked]
     candidate_values: [Pending, Impression, Clicked]
@@ -1019,9 +1020,10 @@ processors:
 ```
 
 The processor accepts only `count` and `value_sum` states. `Day` and the
-configured frequency column are derived by the processor; the other group-by
+configured number-of-impressions column (`frequency_column` in YAML) are
+derived by the processor; the other group-by
 columns must be present after source transforms. The transformed source must
-not already contain the configured frequency column because the processor owns
+not already contain the configured number-of-impressions column because the processor owns
 that derived name. Raw bindings and state inputs may not use the reserved
 `__valuestream_` prefix. `rank` must have an integer dtype, while `propensity`
 and an optional `priority` must be numeric; configure strict source casts when
@@ -1029,14 +1031,37 @@ the raw export uses text fields. These checks run on the target schema before
 it is combined with history, so relaxed union coercion cannot mask a bad target
 day.
 
+`alternative_group_by` is a list of zero or more **physical transformed source
+columns** appended to the processor's implicit customer + interaction key. It
+is evaluated before aggregation and is separate from the published `group_by`.
+The default is `[Placement]`, so the default comparison group is `CustomerID +
+InteractionID + Placement` for the bindings above. Multiple fields are allowed,
+for example `[Placement, Channel, Issue]`.
+
+The customer and interaction bindings are always present and must not be
+repeated in `alternative_group_by`. Customer preserves customer/checkpoint-shard
+isolation; interaction keeps ranked candidates inside one decision. Canonical
+examples are:
+
+- `[]` selects across placements within the same customer and interaction.
+- `[Placement]` selects within the same customer, interaction, and placement
+  (the default).
+- `[Placement, Channel]` further requires the same channel.
+- `[Placement, Channel, Issue]` requires every listed field to match.
+
+The processor never crosses `InteractionID` when selecting a ranked candidate.
+Null values in an additional comparison field form one group: a null value on
+the selected rank-1 row matches a null value on a candidate row.
+
 A processor-level `filter` runs on transformed source rows before contacts,
-frequency buckets, or virtual state columns are derived. It may reference only
-raw/transformed source fields—not `Day`, the frequency column,
+number-of-impressions buckets, or virtual state columns are derived. It may
+reference only raw/transformed source fields—not `Day`, the configured
+number-of-impressions column,
 `ClickedContact`, `RunnerPropensity`, or another processor-created field.
 State-level `where` expressions run after enrichment and may use the documented
 virtual fields.
 
-### 10.3 Contact and frequency semantics
+### 10.3 Contact and number-of-impressions semantics
 
 For one target day, the engine plans the target chunk plus the bounded set of
 preceding calendar-day chunks needed to cover
@@ -1056,46 +1081,57 @@ The two modes implement the same following rules:
 1. A contact is identified by customer, interaction, action, placement, and
    rank. Repeated outcome rows for that contact are collapsed; a positive
    outcome wins over a non-positive exposure.
-2. A focal contact is rank 1, has an exposure outcome, and belongs to the target
-   chunk. Historical rows influence frequency but are never emitted again.
-3. Exposure frequency is counted for the same customer, action, and placement
+2. A selected rank-1 action contact is rank 1, has an exposure outcome, and belongs
+   to the target chunk. Historical rows influence the number of impressions but are
+   never emitted again.
+3. The number of impressions is counted for the same customer, action, and placement
    in the strict interval `(decision_time - window_hours, decision_time]`.
-   `max_frequency` is a terminal bucket: with a value of 7, every seventh or
-   later exposure is stored as `7` and may be labelled `7+` by a report.
+   `max_frequency` is a terminal bucket: with a value of 7, the seventh and
+   every later impression proxy are stored as `7` and may be labelled `7+` by
+   a report.
 4. The response flag comes from `positive_values`. `Clicked` may therefore win
    over an `Impression` row for the same contact.
 
 The fixed window makes the x-axis reproducible. It is not a calendar-week
 bucket and it does not reset at midnight or on Monday.
 
-### 10.4 Runner-up semantics
+### 10.4 Selected rank-2 action semantics
 
-The opportunity comparison is resolved **within customer and InteractionID**.
-The processor selects exact rank 2 when it exists; otherwise it selects the
-smallest recorded rank greater than 1. If no such row exists, the focal contact
-remains in the marginal response curve but is excluded from comparable curves.
+The opportunity comparison is resolved within the implicit customer +
+interaction keys plus the physical fields configured in
+`alternative_group_by`. The processor selects exact rank 2 in that group when
+it exists; otherwise it selects the smallest recorded rank greater than 1 in
+the same group. “Selected rank-2
+action” is therefore the business role: the underlying recorded rank can be
+greater than 2 when rank 2 is absent. If no such row exists, the selected
+rank-1 action contact remains in the all-contact response curve but is excluded
+from comparable curves.
 
-`RunnerPropensity` is the alternative's raw `Propensity`, interpreted as its
-expected response probability. `Priority` must not be substituted for this
+`RunnerPropensity` is the selected rank-2 action's raw `Propensity`, interpreted
+as its expected response probability. `Priority` must not be substituted for this
 field: priority drives arbitration ranking, but it can also include context,
 business value, levers, and other multipliers, so it is neither a probability
-nor a CTR. When configured, focal and runner priority sums are retained as a
-separate arbitration diagnostic over rows where both values exist.
+nor a CTR. When configured, selected rank-1 action and selected rank-2 action
+priority sums are retained as a separate arbitration diagnostic over rows where
+both values exist.
 
-Runner selection deliberately does not require the alternative to share the
-focal placement. Rank describes the interaction-wide arbitration result, and
-some interactions do not contain rank 2; requiring placement equality would
-discard valid fallback alternatives.
+Comparison scope is declarative and always decision-local. Keeping the default
+physical `Placement` field answers the same-placement opportunity question and
+may reduce comparable coverage. Removing `Placement` allows cross-placement
+selection within the same interaction. In every case the fallback chooses the
+smallest available rank
+greater than 1 inside the complete configured group rather than silently
+crossing one of its boundaries.
 
 ### 10.5 Merge and derived KPIs
 
 All stored states merge by addition. Canonical formulas include:
 
 ```text
-marginal CTR            = Clicks / Contacts
-comparable focal CTR    = ComparableClicks / ComparableContacts
-runner expected CTR     = RunnerPropensitySum / ComparableContacts
-runner coverage         = ComparableContacts / Contacts
+selected rank-1 action CTR = Clicks / Contacts
+comparable selected rank-1 action CTR = ComparableClicks / ComparableContacts
+selected rank-2 action expected CTR = RunnerPropensitySum / ComparableContacts
+selected rank-2 action coverage = ComparableContacts / Contacts
 response opportunity    = (ComparableClicks - RunnerPropensitySum)
                           / ComparableContacts
 priority opportunity gap = (FocalPriorityComparableSum
@@ -1103,10 +1139,10 @@ priority opportunity gap = (FocalPriorityComparableSum
                            / PriorityComparableContacts
 ```
 
-The comparable focal and runner curves use the same denominator and therefore
-belong on the same response-rate axis. Marginal CTR should remain visible as a
-separate all-contact curve or diagnostic because missing alternatives change
-its population.
+The comparable selected rank-1 action and selected rank-2 action curves use the
+same denominator and therefore belong on the same response-rate axis. Selected
+rank-1 action CTR over all contacts should remain visible as a separate curve or
+diagnostic because missing selected rank-2 actions change its population.
 
 ### 10.6 Dependency, idempotency, and limitations
 
@@ -1129,15 +1165,16 @@ Every transformed history chunk is validated independently for the decision
 time, customer, interaction, action, placement, rank, outcome, and any
 processor-filter fields before it is combined or checkpointed. This prevents a
 relaxed multi-day schema union from turning a missing history key into null and
-silently undercounting exposure frequency.
+silently undercounting the number of impressions.
 
 `checkpoint.mode` has these exact meanings:
 
 - `source_scan` (the compatibility default) retains no processor state and
   rereads the bounded source closure for each target.
 - `persistent_sharded` persists only filtered candidate rows and fields required
-  to repeat exact cross-partition normalization, frequency, deduplication,
-  grouping/state calculation, and within-interaction runner selection. `shards`
+  to repeat exact cross-partition normalization, number-of-impressions bucketing,
+  deduplication, grouping/state calculation, and configured alternative-group
+  selected rank-2 action resolution. `shards`
   is an integer from `1` through `4096` and defaults to
   `64`; larger values lower per-shard memory while increasing file count.
 
@@ -1185,7 +1222,7 @@ the original customer key retained for exact comparison. Treat the checkpoint
 as sensitive source-derived data, apply workspace access/encryption and
 retention controls, and tokenize or HMAC identifiers upstream where required.
 Sampling or sketches are not a transparent replacement because they cannot
-preserve exact event order and runner joins.
+preserve exact event order and selected rank-2 action joins.
 
 A late positive outcome that arrives in a later chunk is not allowed to rewrite
 an already materialized earlier-day contact; recompute the affected source

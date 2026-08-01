@@ -1390,6 +1390,143 @@ forms.processor_kind_fields(
 
 
 @pytest.mark.unit
+def test_frequency_response_editor_defaults_to_placement_and_keeps_identity_implicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_multiselect(label: str, options: list[str], **kwargs: object) -> list[str]:
+        captured.update(label=label, options=options, **kwargs)
+        return list(kwargs["default"])  # type: ignore[arg-type]
+
+    monkeypatch.setattr(forms.st, "write", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        forms.st,
+        "caption",
+        lambda value, *_args, **_kwargs: captured.update(caption=value),
+    )
+    monkeypatch.setattr(forms.st, "multiselect", fake_multiselect)
+
+    fields = forms.processor_kind_fields(
+        {
+            "columns": {
+                "customer": "CustomerKey",
+                "interaction": "InteractionKey",
+                "placement": "PlacementName",
+            }
+        },
+        "frequency_response",
+        field_options=[
+            "CustomerKey",
+            "InteractionKey",
+            "PlacementName",
+            "Channel",
+            "Day",
+            "ExposureBucket",
+        ],
+        key_prefix="frequency",
+    )
+
+    assert fields == {"alternative_group_by": ["PlacementName"]}
+    assert captured["label"] == "Selected rank-2 action Group By"
+    assert captured["caption"] == (
+        "CustomerKey and InteractionKey are always included. "
+        "Select zero or more additional comparison fields."
+    )
+    assert captured["default"] == ["PlacementName"]
+    assert captured["options"] == ["PlacementName", "Channel"]
+    assert captured["accept_new_options"] is True
+    assert "alternative_group_by" in forms.PROCESSOR_KIND_MANAGED_FIELDS
+
+
+@pytest.mark.unit
+def test_frequency_response_editor_preserves_explicit_empty_alternative_group_by(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_multiselect(_label: str, _options: list[str], **kwargs: object) -> list[str]:
+        captured.update(kwargs)
+        return list(kwargs["default"])  # type: ignore[arg-type]
+
+    monkeypatch.setattr(forms.st, "write", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(forms.st, "caption", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(forms.st, "multiselect", fake_multiselect)
+
+    fields = forms.processor_kind_fields(
+        {
+            "columns": {"customer": "CustomerID", "placement": "Placement"},
+            "alternative_group_by": [],
+        },
+        "frequency_response",
+        field_options=["CustomerID", "InteractionID", "Placement"],
+        key_prefix="frequency",
+    )
+
+    assert captured["default"] == []
+    assert fields == {"alternative_group_by": []}
+
+
+@pytest.mark.unit
+def test_frequency_response_editor_retains_multiple_and_custom_physical_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    configured = ["Placement", "Channel", "AudienceClass"]
+
+    def fake_multiselect(_label: str, options: list[str], **kwargs: object) -> list[str]:
+        captured.update(options=options, **kwargs)
+        return list(kwargs["default"])  # type: ignore[arg-type]
+
+    monkeypatch.setattr(forms.st, "write", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(forms.st, "caption", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(forms.st, "multiselect", fake_multiselect)
+
+    fields = forms.processor_kind_fields(
+        {
+            "columns": {
+                "customer": "CustomerID",
+                "interaction": "InteractionID",
+                "placement": "Placement",
+            },
+            "alternative_group_by": configured,
+        },
+        "frequency_response",
+        field_options=["CustomerID", "InteractionID", "Placement", "Channel"],
+        key_prefix="frequency",
+    )
+
+    assert captured["default"] == configured
+    assert captured["options"] == ["Placement", "Channel", "AudienceClass"]
+    assert fields == {"alternative_group_by": configured}
+
+
+@pytest.mark.unit
+def test_processor_field_remap_updates_frequency_alternative_group_by() -> None:
+    processor = {
+        "id": "frequency_response",
+        "alternative_group_by": ["Placement", "AudienceClass"],
+    }
+
+    remapped = config_builder._remap_processor_def_fields(
+        processor,
+        {
+            "Placement": "Placement",
+            "AudienceClass": "Audienceclass",
+        },
+    )
+
+    assert remapped["alternative_group_by"] == [
+        "Placement",
+        "Audienceclass",
+    ]
+    assert processor["alternative_group_by"] == [
+        "Placement",
+        "AudienceClass",
+    ]
+
+
+@pytest.mark.unit
 def test_build_formula_metric_uses_safe_div_when_denominator_selected() -> None:
     metric = builder.build_formula_metric("engagement", "Positives", "Count")
 
@@ -2475,6 +2612,107 @@ def test_combo_uses_primary_metric_and_filters_y2_to_compatible_metrics() -> Non
         "metric_output": "FunnelClicks",
         "secondary_metric": "FunnelImpressions",
     }
+
+
+@pytest.mark.unit
+def test_chart_field_options_use_display_labels_without_renaming_stored_values() -> None:
+    catalog = _combo_catalog()
+    catalog.metrics.metrics["FunnelImpressions"] = catalog.metrics.metrics[
+        "FunnelImpressions"
+    ].model_copy(
+        update={"display": model.MetricDisplaySpec(label="Selected rank-2 action expected CTR")}
+    )
+    catalog.processors.processors.append(
+        model.FrequencyResponseProcessor.model_validate(
+            {
+                "id": "frequency_response",
+                "source": "ih",
+                "kind": "frequency_response",
+                "time": {"property": "DecisionTime", "grain": "daily"},
+                "columns": {
+                    "customer": "CustomerID",
+                    "interaction": "InteractionID",
+                    "action": "ActionID",
+                    "placement": "Placement",
+                    "rank": "Rank",
+                    "outcome": "Outcome",
+                    "propensity": "Propensity",
+                },
+                "alternative_group_by": ["Placement"],
+                "positive_values": ["Clicked"],
+                "exposure_values": ["Impression", "Clicked"],
+                "candidate_values": ["Pending", "Impression", "Clicked"],
+                "frequency_column": "ExposureBucket",
+                "group_by": ["ExposureBucket"],
+                "states": {"Contacts": {"type": "count"}},
+            }
+        )
+    )
+    catalog.metrics.metrics["FrequencyComparableCTR"] = model.FormulaMetric.model_validate(
+        {
+            "processor": "frequency_response",
+            "kind": "formula",
+            "expression": {"col": "Contacts"},
+            "display": {"label": "Comparable selected rank-1 action CTR"},
+        }
+    )
+
+    assert (
+        builder.chart_field_option_label(
+            catalog,
+            "FunnelClicks",
+            "secondary_metric",
+            "FunnelImpressions",
+        )
+        == "Selected rank-2 action expected CTR"
+    )
+    assert (
+        builder.chart_field_option_label(
+            catalog,
+            "FrequencyComparableCTR",
+            "metric_output",
+            "FrequencyComparableCTR",
+        )
+        == "Comparable selected rank-1 action CTR"
+    )
+    assert (
+        builder.chart_field_option_label(
+            catalog,
+            "FrequencyComparableCTR",
+            "x",
+            "ExposureBucket",
+        )
+        == "Number of impressions"
+    )
+    assert builder.chart_field_option_label(catalog, "FunnelClicks", "x", "Channel") == "Channel"
+    assert builder.chart_field_option_label(catalog, "FunnelClicks", "color", "") == "None"
+
+    catalog.metrics.metrics["DefaultBannerLift"] = model.VariantCompareMetric.model_validate(
+        {
+            "processor": "engagement",
+            "kind": "variant_compare",
+            "variant_column": "DefaultBannerControlGroup",
+            "test_role": "Test",
+            "control_role": "Control",
+        }
+    )
+    catalog.metrics.metrics["Lift"] = model.FormulaMetric.model_validate(
+        {
+            "processor": "engagement",
+            "kind": "formula",
+            "expression": {"col": "Clicked_Count"},
+            "display": {"label": "Unrelated configured metric"},
+        }
+    )
+    assert (
+        builder.chart_field_option_label(
+            catalog,
+            "DefaultBannerLift",
+            "metric_output",
+            "Lift",
+        )
+        == "Lift"
+    )
 
 
 @pytest.mark.unit

@@ -50,7 +50,7 @@ _FLOAT64_VALUE_SUM_REVISION = 1
 # to obtain their bounded input. Keep one unconditional marker so a semantic
 # implementation change invalidates aggregates in both source-scan and
 # persistent modes without making the mode itself part of aggregate identity.
-_FREQUENCY_RESPONSE_SEMANTICS_REVISION = 1
+_FREQUENCY_RESPONSE_SEMANTICS_REVISION = 2
 # Checkpoint layout is an ingestion-only identity. It is deliberately separate
 # from processor/source computation hashes so tuning storage cannot republish
 # otherwise identical aggregates.

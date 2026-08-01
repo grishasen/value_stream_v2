@@ -302,7 +302,7 @@ The most important concept in Value Stream. A Processor is a typed function `(So
 - `entity_set` — CPC/HLL/Theta distinct-count sketches, with Theta also supporting set algebra
 - `funnel` — per-stage counts for funnel KPIs
 - `snapshot` — periodic / accumulating snapshots for state KPIs
-- `frequency_response` — response and opportunity curves by exact bounded exposure frequency
+- `frequency_response` — response and opportunity curves by exact bounded number of impressions
 
 Processors implement the interface in reference/processors.md §1.
 
@@ -310,7 +310,8 @@ Processors implement the interface in reference/processors.md §1.
 An optional, ingestion-only acceleration artifact owned by a bounded Processor.
 For `frequency_response`, a checkpoint contains the minimal filtered,
 classified candidate rows needed to repeat exact cross-partition contact
-normalization, ordering, grouping/state calculation, and runner selection,
+normalization, ordering, grouping/state calculation, and the processor's
+configured alternative-group selected rank-2 action resolution,
 split into deterministic customer-hash shards by a streaming sink. It is
 source-fingerprint-addressed by source, processor semantic computation
 identity, independent checkpoint-layout identity, chunk id, and raw-file

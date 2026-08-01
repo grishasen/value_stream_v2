@@ -175,7 +175,7 @@ def render_chart(  # noqa: PLR0912, PLR0915
     elif kind == "scatter":
         fig = _scatter(rows, tile, max_points=max_points)
     elif kind == "combo":
-        fig = _combo(rows, tile)
+        fig = _combo(rows, tile, theme or {})
     elif kind == "interval":
         fig = _interval(rows, tile)
     elif kind == "donut":
@@ -643,7 +643,11 @@ def _scatter_size_column(
     return out, marker_size
 
 
-def _combo(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
+def _combo(
+    rows: pl.DataFrame,
+    tile: Mapping[str, Any],
+    theme: Mapping[str, Any],
+) -> go.Figure:
     x = _field(tile, "x")
     y = _field(tile, "y")
     y2 = str(tile.get("secondary_metric") or "")
@@ -651,39 +655,157 @@ def _combo(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
         raise ValueError(f"combo chart secondary metric output {y2!r} is not available")
     plotted = rows.sort(x) if x in rows.columns else rows
     shared_y_axis = bool(tile.get("shared_y_axis", False))
-    fig = make_subplots(specs=[[{"secondary_y": not shared_y_axis}]])
+    facet_row = _combo_facet_column(plotted, _facet_row(tile))
+    facet_col = _combo_facet_column(plotted, _facet_col(tile))
+    row_values = _combo_dimension_values(plotted, facet_row) if facet_row else [None]
+    col_values = _combo_dimension_values(plotted, facet_col) if facet_col else [None]
+    row_titles = (
+        [f"{facet_row}={_combo_value_label(value)}" for value in row_values]
+        if facet_row and row_values
+        else None
+    )
+    column_titles = (
+        [f"{facet_col}={_combo_value_label(value)}" for value in col_values]
+        if facet_col and col_values
+        else None
+    )
+    row_values = row_values or [None]
+    col_values = col_values or [None]
+    row_count = max(1, len(row_values))
+    col_count = max(1, len(col_values))
+    fig = make_subplots(
+        rows=row_count,
+        cols=col_count,
+        specs=[
+            [{"secondary_y": not shared_y_axis} for _column in range(col_count)]
+            for _row in range(row_count)
+        ],
+        shared_xaxes="all",
+        shared_yaxes="all",
+        vertical_spacing=_subplot_spacing(row_count, 0.05),
+        horizontal_spacing=_subplot_spacing(col_count, 0.06),
+        row_titles=row_titles,
+        column_titles=column_titles,
+    )
     color = _optional_column(plotted, tile.get("color"))
-    groups = plotted.partition_by(color, as_dict=True) if color else {None: plotted}
-    for group, sub in groups.items():
-        suffix = f" · {group}" if group is not None else ""
-        if tile.get("primary_mark", "bar") == "line":
-            primary_trace = go.Scatter(
-                x=sub[x].to_list(),
-                y=sub[y].to_list(),
-                mode="lines+markers",
-                name=f"{y}{suffix}",
+    legend_shown: set[str] = set()
+    series_colors: dict[str, str] = {}
+    colorway = _effective_qualitative_colorway(theme, tile)
+    for row_index, row_value in enumerate(row_values, start=1):
+        for col_index, col_value in enumerate(col_values, start=1):
+            facet_rows = _filter_combo_group(
+                plotted,
+                ((facet_row, row_value), (facet_col, col_value)),
             )
-        else:
-            primary_trace = go.Bar(
-                x=sub[x].to_list(),
-                y=sub[y].to_list(),
-                name=f"{y}{suffix}",
-            )
-        fig.add_trace(primary_trace, secondary_y=False)
-        fig.add_trace(
-            go.Scatter(
-                x=sub[x].to_list(),
-                y=sub[y2].to_list(),
-                mode="lines+markers",
-                name=f"{y2}{suffix}",
-            ),
-            secondary_y=not shared_y_axis,
-        )
-    fig.update_layout(title=str(tile.get("title", "")), barmode=str(tile.get("barmode", "group")))
+            if facet_rows.is_empty():
+                continue
+            color_values = _combo_dimension_values(facet_rows, color) if color else [None]
+            for color_value in color_values:
+                sub = _filter_combo_group(facet_rows, ((color, color_value),))
+                suffix = f" · {_combo_value_label(color_value)}" if color else ""
+                primary_name = f"{y}{suffix}"
+                secondary_name = f"{y2}{suffix}"
+                for name in (primary_name, secondary_name):
+                    if name not in series_colors:
+                        series_colors[name] = colorway[len(series_colors) % len(colorway)]
+                if tile.get("primary_mark", "bar") == "line":
+                    primary_trace = go.Scatter(
+                        x=sub[x].to_list(),
+                        y=sub[y].to_list(),
+                        mode="lines+markers",
+                        name=primary_name,
+                        legendgroup=primary_name,
+                        showlegend=primary_name not in legend_shown,
+                        line_color=series_colors[primary_name],
+                        marker_color=series_colors[primary_name],
+                    )
+                else:
+                    primary_trace = go.Bar(
+                        x=sub[x].to_list(),
+                        y=sub[y].to_list(),
+                        name=primary_name,
+                        legendgroup=primary_name,
+                        showlegend=primary_name not in legend_shown,
+                        marker_color=series_colors[primary_name],
+                    )
+                fig.add_trace(
+                    primary_trace,
+                    row=row_index,
+                    col=col_index,
+                    secondary_y=False,
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=sub[x].to_list(),
+                        y=sub[y2].to_list(),
+                        mode="lines+markers",
+                        name=secondary_name,
+                        legendgroup=secondary_name,
+                        showlegend=secondary_name not in legend_shown,
+                        line_color=series_colors[secondary_name],
+                        marker_color=series_colors[secondary_name],
+                    ),
+                    row=row_index,
+                    col=col_index,
+                    secondary_y=not shared_y_axis,
+                )
+                legend_shown.update((primary_name, secondary_name))
+    fig.update_layout(
+        title=str(tile.get("title", "")),
+        barmode=str(tile.get("barmode", "group")),
+        height=_facet_height(plotted, facet_row, per_row=400),
+        showlegend=bool(tile.get("showlegend", True)),
+    )
     fig.update_yaxes(title_text=str(tile.get("y_axis_title") or y), secondary_y=False)
     if not shared_y_axis:
         fig.update_yaxes(title_text=str(tile.get("y2_axis_title") or y2), secondary_y=True)
     return fig
+
+
+def _filter_combo_group(
+    rows: pl.DataFrame,
+    dimensions: Iterable[tuple[str | None, Any]],
+) -> pl.DataFrame:
+    """Return one combo trace group without mixing rows from adjacent facets."""
+
+    predicates = [
+        pl.col(column).is_null() if value is None else pl.col(column) == pl.lit(value)
+        for column, value in dimensions
+        if column is not None
+    ]
+    return rows.filter(*predicates) if predicates else rows
+
+
+def _combo_facet_column(rows: pl.DataFrame, value: str | None) -> str | None:
+    if value is None:
+        return None
+    if value not in rows.columns:
+        raise ValueError(f"combo chart facet column {value!r} is not available")
+    return value
+
+
+def _combo_dimension_values(rows: pl.DataFrame, column: str) -> list[Any]:
+    """Keep typed facet identities distinct, including null versus the text 'None'."""
+
+    values: list[Any] = []
+    for value in rows.get_column(column).to_list():
+        if not any(_same_combo_dimension_value(value, existing) for existing in values):
+            values.append(value)
+    return values
+
+
+def _same_combo_dimension_value(left: Any, right: Any) -> bool:
+    if left is None or right is None:
+        return left is right
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, float) and math.isnan(left) and math.isnan(right):
+        return True
+    return bool(left == right)
+
+
+def _combo_value_label(value: Any) -> str:
+    return "(null)" if value is None else str(value)
 
 
 def _interval(rows: pl.DataFrame, tile: Mapping[str, Any]) -> go.Figure:
@@ -1310,6 +1432,20 @@ def _template_colorway(theme: Mapping[str, Any] | None = None) -> list[str]:
     except (KeyError, TypeError, ValueError):
         colorway = None
     return list(colorway or px.colors.qualitative.Plotly)
+
+
+def _effective_qualitative_colorway(
+    theme: Mapping[str, Any],
+    tile: Mapping[str, Any],
+) -> list[str]:
+    raw_tile_theme = tile.get("theme")
+    tile_theme: Mapping[str, Any] = raw_tile_theme if isinstance(raw_tile_theme, Mapping) else {}
+    raw_colorway = tile_theme.get("colorway", theme.get("colorway"))
+    if isinstance(raw_colorway, list | tuple):
+        colorway = [str(color) for color in raw_colorway if str(color)]
+        if colorway:
+            return colorway
+    return _template_colorway({**theme, **dict(tile_theme)})
 
 
 def _gauge_title(row: Mapping[str, Any], dimension_fields: list[str]) -> str:
@@ -2363,7 +2499,15 @@ def _apply_label_overrides(fig: go.Figure, tile: Mapping[str, Any]) -> None:
     fig.update_xaxes(**axis_layout)
     _apply_y_axis_labels(fig, tile, y_title=y_title, standoff=standoff)
     if _has_facets(tile):
-        _apply_outer_facet_axis_titles(fig, x_title=x_title, y_title=y_title)
+        secondary_y_title: str | None = None
+        if str(tile.get("chart", "")) == "combo" and not bool(tile.get("shared_y_axis", False)):
+            secondary_y_title = str(tile.get("y2_axis_title") or tile.get("secondary_metric") or "")
+        _apply_outer_facet_axis_titles(
+            fig,
+            x_title=x_title,
+            y_title=y_title,
+            secondary_y_title=secondary_y_title,
+        )
     if legend_title:
         fig.update_layout(legend_title_text=legend_title)
 
@@ -2486,8 +2630,14 @@ def _apply_qualitative_colorway(
         return
 
     color_index = 0
+    legendgroup_colors: dict[str, str] = {}
     for trace in fig.data:
-        color = colorway[color_index % len(colorway)]
+        color = _qualitative_trace_color(
+            trace,
+            colorway=colorway,
+            color_index=color_index,
+            legendgroup_colors=legendgroup_colors,
+        )
         trace_type = str(getattr(trace, "type", ""))
         if trace_type == "pie":
             raw_labels = getattr(trace, "labels", None)
@@ -2540,8 +2690,45 @@ def _apply_qualitative_colorway(
         if line is not None and (line_color is None or isinstance(line_color, str)):
             trace.update(line_color=color)
             updated = True
-        if updated:
-            color_index += 1
+        color_index = _remember_qualitative_trace_color(
+            trace,
+            color=color,
+            updated=updated,
+            color_index=color_index,
+            legendgroup_colors=legendgroup_colors,
+        )
+
+
+def _qualitative_trace_color(
+    trace: Any,
+    *,
+    colorway: list[str],
+    color_index: int,
+    legendgroup_colors: Mapping[str, str],
+) -> str:
+    legendgroup = str(getattr(trace, "legendgroup", "") or "")
+    if legendgroup and legendgroup in legendgroup_colors:
+        return legendgroup_colors[legendgroup]
+    return colorway[color_index % len(colorway)]
+
+
+def _remember_qualitative_trace_color(
+    trace: Any,
+    *,
+    color: str,
+    updated: bool,
+    color_index: int,
+    legendgroup_colors: dict[str, str],
+) -> int:
+    if not updated:
+        return color_index
+    legendgroup = str(getattr(trace, "legendgroup", "") or "")
+    if not legendgroup:
+        return color_index + 1
+    if legendgroup in legendgroup_colors:
+        return color_index
+    legendgroup_colors[legendgroup] = color
+    return color_index + 1
 
 
 def _apply_semantic_category_colors(
@@ -3080,6 +3267,7 @@ def _apply_outer_facet_axis_titles(
     *,
     x_title: str | None,
     y_title: str | None,
+    secondary_y_title: str | None = None,
 ) -> None:
     x_axes = _layout_axes(fig, "x")
     y_axes = _layout_axes(fig, "y")
@@ -3095,21 +3283,53 @@ def _apply_outer_facet_axis_titles(
             if bottom is not None and domain is not None and math.isclose(domain[0], bottom)
         ]
         _set_title_on_centered_axis(outer, x_title)
-    if y_title and y_axes:
+    primary_y_axes = [
+        (name, axis)
+        for name, axis in y_axes
+        if not isinstance(getattr(axis, "overlaying", None), str)
+    ]
+    secondary_y_axes = [
+        (name, axis) for name, axis in y_axes if isinstance(getattr(axis, "overlaying", None), str)
+    ]
+    if (y_title and primary_y_axes) or (secondary_y_title and secondary_y_axes):
         fig.update_yaxes(title_text=None)
+    if y_title and primary_y_axes:
         x_domains = [
-            _axis_domain(_axis_from_anchor(fig, axis.anchor, "x")) for _name, axis in y_axes
+            _axis_domain(_axis_from_anchor(fig, axis.anchor, "x")) for _name, axis in primary_y_axes
         ]
         left = min((domain[0] for domain in x_domains if domain is not None), default=None)
         outer = [
             axis
-            for (_name, axis), domain in zip(y_axes, x_domains, strict=True)
+            for (_name, axis), domain in zip(primary_y_axes, x_domains, strict=True)
             if left is not None and domain is not None and math.isclose(domain[0], left)
         ]
         _set_title_on_centered_axis(outer, y_title)
+    if secondary_y_title and secondary_y_axes:
+        x_domains = [
+            _axis_domain(_axis_from_anchor(fig, axis.anchor, "x"))
+            for _name, axis in secondary_y_axes
+        ]
+        right = max((domain[1] for domain in x_domains if domain is not None), default=None)
+        outer = [
+            axis
+            for (_name, axis), domain in zip(secondary_y_axes, x_domains, strict=True)
+            if right is not None and domain is not None and math.isclose(domain[1], right)
+        ]
+        _set_title_on_centered_axis(
+            outer,
+            secondary_y_title,
+            fig=fig,
+            overlay_prefix="y",
+        )
 
 
-def _set_title_on_centered_axis(axes: list[Any], title: str) -> None:
+def _set_title_on_centered_axis(
+    axes: list[Any],
+    title: str,
+    *,
+    fig: go.Figure | None = None,
+    overlay_prefix: str | None = None,
+) -> None:
     """Title one axis per orientation: repeating it on every facet row/column
     stacks copies into overlapping, unreadable text."""
     if not axes:
@@ -3117,6 +3337,14 @@ def _set_title_on_centered_axis(axes: list[Any], title: str) -> None:
 
     def distance_from_center(axis: Any) -> float:
         domain = _axis_domain(axis)
+        if domain is None and fig is not None and overlay_prefix is not None:
+            domain = _axis_domain(
+                _axis_from_anchor(
+                    fig,
+                    getattr(axis, "overlaying", None),
+                    overlay_prefix,
+                )
+            )
         if domain is None:
             return 0.0
         return abs(((domain[0] + domain[1]) / 2) - 0.5)

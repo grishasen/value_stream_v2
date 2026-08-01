@@ -50,7 +50,10 @@ The planner classifies the change against the existing store (concepts/domain-mo
 - *Execution/storage tuning* (`frequency_response.checkpoint.mode`, `shards`,
   or `retention_days`) → no aggregate invalidation. A new shard layout is
   created lazily when a later target needs it; retention applies at vacuum.
-- *Incompatible* (add a group-by column that was not materialized, change a filter, change positive/negative outcomes, change CPC/HLL `lg_k`, switch sketch type) → re-run from chunks.
+- *Incompatible* (add a group-by column that was not materialized, change a
+  filter or `frequency_response.alternative_group_by`, change
+  positive/negative outcomes, change CPC/HLL `lg_k`, switch sketch type) →
+  re-run from chunks.
 
 Aggregate `config_hash` is the processor computation hash: workspace defaults,
 source reader/schema/transforms/defaults, and result-affecting processor
@@ -316,7 +319,10 @@ tar -C /data/valuestream -czf /backup/bdt-$(date +%F).tar.gz bdt/
 ```
 
 **E3. How do I monitor?**
-The Streamlit *Ops* page shows freshness and recent runs, and logs are structured JSON. Prometheus `/metrics` is reserved for the deferred service surface.
+The Streamlit *Ops* page shows freshness and recent runs. Application logs are
+structured plaintext messages on stderr; interactive terminals color their
+timestamp, severity, and module, while redirected output remains plain.
+Prometheus `/metrics` is reserved for the deferred service surface.
 
 **E4. How big a machine do I need?**
 Indicative numbers (Polars + DuckDB on a single 8-core / 32 GB host):

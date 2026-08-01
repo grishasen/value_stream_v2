@@ -849,15 +849,19 @@ This is the same recipe the current app uses, but parameterized by config rather
 
 #### frequency_response
 
-Daily count and sum states indexed by a fixed trailing exposure-frequency
-bucket. The target day is evaluated from either an ephemeral bounded history
-frame or an exact persistent customer-sharded checkpoint;
-frequency keys are customer + action + placement, while the recorded
-alternative is selected within customer + interaction (rank 2, otherwise the
-smallest rank greater than 1). The runner's raw propensity is retained as an
-expected-response sum. Priority, when configured, remains a separate
-arbitration diagnostic and is never treated as a probability. See the complete
-contract in [Processor Specifications §10](../reference/processors.md#10-frequency_response-processor).
+Daily count and sum states indexed by a fixed trailing
+number-of-impressions bucket. The target day is evaluated from either an
+ephemeral bounded history frame or an exact persistent customer-sharded
+checkpoint; counting keys are customer + action + placement, while the
+selected rank-2 action is resolved by implicit customer + interaction keys plus
+the physical source fields in processor-level `alternative_group_by`. The
+default `[Placement]` therefore compares within customer + interaction +
+placement, and zero or multiple additional scope fields are supported. Exact
+rank 2 is selected when present, otherwise the smallest rank greater than 1 in
+that complete group. Its raw propensity is
+retained as an expected-response sum. Priority, when configured, remains a
+separate arbitration diagnostic and is never treated as a probability. See
+the complete contract in [Processor Specifications §10](../reference/processors.md#10-frequency_response-processor).
 
 #### numeric_distribution
 

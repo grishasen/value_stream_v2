@@ -521,7 +521,7 @@ def _remap_processor_fields(  # noqa: PLR0912
     processor: dict[str, Any], mapping: Mapping[str, str]
 ) -> dict[str, Any]:
     updated = copy.deepcopy(processor)
-    for key in ("group_by", "dedup_keys", "properties"):
+    for key in ("group_by", "dedup_keys", "properties", "alternative_group_by"):
         if key in updated:
             updated[key] = _remap_field_sequence(updated[key], mapping)
     for key in (

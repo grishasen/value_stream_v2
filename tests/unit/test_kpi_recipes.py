@@ -159,8 +159,9 @@ def test_contact_policy_recipes_require_exact_frequency_response_states() -> Non
             readiness.resolved_inputs,
         )
         assert metric["expression"] == expression
+        assert metric["display"]["label"] == recipe.metric.display.label
         caveat = recipe.method.caveat.casefold()
-        assert "fixed-window approximation" in caveat
+        assert "fixed-window number-of-impressions approximation" in caveat
         assert "exposurebucket" in caveat
         assert "configured impression proxies" in caveat
         assert "not measured viewability" in caveat
@@ -180,6 +181,37 @@ def test_contact_policy_recipes_require_exact_frequency_response_states() -> Non
         _recipe(recipe_id).metric.display.unit == "percent"
         for recipe_id in set(expected) - {priority.id}
     )
+
+    presentation = {
+        "contact_policy.frequency_marginal_ctr": (
+            "Selected rank-1 action CTR by number of impressions",
+            "Selected rank-1 action CTR by number of impressions",
+        ),
+        "contact_policy.frequency_comparable_ctr": (
+            "Comparable selected rank-1 action CTR",
+            "Comparable selected rank-1 action CTR",
+        ),
+        "contact_policy.runner_up_expected_ctr": (
+            "Selected rank-2 action expected CTR",
+            "Selected rank-2 action expected CTR",
+        ),
+        "contact_policy.runner_up_coverage": (
+            "Selected rank-2 action coverage",
+            "Selected rank-2 action coverage",
+        ),
+        "contact_policy.response_opportunity_margin": (
+            "Response opportunity margin",
+            "Response opportunity margin",
+        ),
+        "contact_policy.priority_opportunity_gap": (
+            "Priority opportunity gap",
+            "Priority opportunity gap",
+        ),
+    }
+    for recipe_id, (title, display_label) in presentation.items():
+        recipe = _recipe(recipe_id)
+        assert recipe.title == title
+        assert recipe.metric.display.label == display_label
 
 
 @pytest.mark.unit
@@ -803,6 +835,7 @@ def test_recipe_instantiation_materializes_valid_metric_and_tile_with_provenance
     tile = instantiate_tile(recipe, processor, "Test_Engagement", "test_engagement_tile")
 
     assert metric["expression"]["den"]["op"] == "add"
+    assert metric["display"]["label"] == "Test Engagement"
     assert metric["recipe"] == {"id": recipe.id, "version": recipe.version}
     assert "depends_on" not in metric
     assert tile["metric"] == "Test_Engagement"

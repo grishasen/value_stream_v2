@@ -152,6 +152,7 @@ class TestCatalogHash:
             checkpoint: dict[str, object],
             *,
             window_hours: int = 168,
+            alternative_group_by: list[str] | None = None,
         ) -> model.FrequencyResponseProcessor:
             return model.FrequencyResponseProcessor.model_validate(
                 {
@@ -169,6 +170,9 @@ class TestCatalogHash:
                         "outcome": "Outcome",
                         "propensity": "Propensity",
                     },
+                    "alternative_group_by": (
+                        ["Placement"] if alternative_group_by is None else alternative_group_by
+                    ),
                     "positive_values": ["Clicked"],
                     "exposure_values": ["Impression", "Clicked"],
                     "candidate_values": ["Pending", "Impression", "Clicked"],
@@ -226,6 +230,16 @@ class TestCatalogHash:
         )
         assert processor_computation_hash(catalog, semantic_change) != semantic_hash
         assert source_hash(semantic_change) != source_hash(persistent)
+
+        cross_placement = frequency(
+            {"mode": "persistent_sharded", "shards": 32, "retention_days": 30},
+            alternative_group_by=[],
+        )
+        assert processor_computation_hash(catalog, cross_placement) != semantic_hash
+        assert source_hash(cross_placement) != source_hash(persistent)
+        assert frequency_checkpoint_layout_hash(cross_placement) == (
+            frequency_checkpoint_layout_hash(tuned)
+        )
 
     def test_bounded_ml_order_revision_is_scoped_to_score_processors(self) -> None:
         catalog = load(DEMO_WS)

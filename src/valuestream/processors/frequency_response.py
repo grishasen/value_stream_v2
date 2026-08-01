@@ -44,7 +44,7 @@ _CHECKPOINT_LOCAL_ORDER_COLUMN = "__valuestream_frequency_checkpoint_local_order
 def required_input_columns(config: model.FrequencyResponseProcessor) -> frozenset[str]:
     """Return raw transformed-frame inputs required by ``config``.
 
-    Processor-created contact markers, the exposure-frequency bucket, and the
+    Processor-created contact markers, the number-of-impressions bucket, and the
     daily calendar key are intentionally excluded.
     """
 
@@ -53,6 +53,7 @@ def required_input_columns(config: model.FrequencyResponseProcessor) -> frozense
         config.time.property,
         TARGET_CHUNK_COLUMN,
         *config.columns.model_dump(exclude_none=True).values(),
+        *config.alternative_group_by,
         *(column for column in config.group_by if column not in virtual),
     }
     required.update(column_references(config.filter))
@@ -135,7 +136,7 @@ def validate_current_input_schema(
 
 
 class FrequencyResponseProcessor:
-    """Build mergeable response/opportunity states by fixed exposure frequency."""
+    """Build mergeable response/opportunity states by number of impressions."""
 
     def __init__(self, config: model.Processor, *, computation_hash: str | None = None) -> None:
         if not isinstance(config, model.FrequencyResponseProcessor):
@@ -201,9 +202,9 @@ class FrequencyResponseProcessor:
         prepared: list[pl.LazyFrame] = []
         for partition_order, historical in enumerate(history):
             prepared.append(
-                historical
-                .filter(pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1))
-                .with_columns(
+                historical.filter(
+                    pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)
+                ).with_columns(
                     pl.lit(False).alias(TARGET_CHUNK_COLUMN),
                     pl.lit(partition_order).alias(_CHECKPOINT_PARTITION_ORDER_COLUMN),
                 )
@@ -229,6 +230,7 @@ class FrequencyResponseProcessor:
                 columns.action,
                 columns.placement,
                 columns.propensity,
+                *self.config.alternative_group_by,
                 self.config.time.property,
                 TARGET_CHUNK_COLUMN,
                 _RANK_COLUMN,
@@ -336,7 +338,6 @@ class FrequencyResponseProcessor:
     ) -> pl.LazyFrame:
         """Build daily additive states from normalized current/history contacts."""
 
-        columns = self.config.columns
         contact_schema = contacts.collect_schema()
         exposures = self._with_exposure_frequency(contacts)
         runners = self._runner_candidates(contacts)
@@ -348,8 +349,9 @@ class FrequencyResponseProcessor:
             & (pl.col(_RANK_COLUMN) == 1)
         ).join(
             runners,
-            on=[columns.customer, columns.interaction],
+            on=self.config.alternative_group_columns,
             how="left",
+            nulls_equal=True,
         )
         focal = self._with_virtual_columns(focal)
         focal = focal.with_columns(
@@ -537,16 +539,9 @@ class FrequencyResponseProcessor:
 
     def _runner_candidates(self, contacts: pl.LazyFrame) -> pl.LazyFrame:
         columns = self.config.columns
-        runner_keys = [columns.customer, columns.interaction]
-        runner = (
-            contacts.filter(pl.col(_SEEN_CURRENT_COLUMN) & (pl.col(_RANK_COLUMN) > 1))
-            .with_columns(
-                pl.when(pl.col(_RANK_COLUMN) == 2)
-                .then(0)
-                .otherwise(1)
-                .alias("__valuestream_runner_rank_class")
-            )
-            .sort(
+        runner_keys = self.config.alternative_group_columns
+        sort_columns = list(
+            dict.fromkeys(
                 [
                     *runner_keys,
                     "__valuestream_runner_rank_class",
@@ -557,6 +552,16 @@ class FrequencyResponseProcessor:
                     _CONTACT_ORDER_COLUMN,
                 ]
             )
+        )
+        runner = (
+            contacts.filter(pl.col(_SEEN_CURRENT_COLUMN) & (pl.col(_RANK_COLUMN) > 1))
+            .with_columns(
+                pl.when(pl.col(_RANK_COLUMN) == 2)
+                .then(0)
+                .otherwise(1)
+                .alias("__valuestream_runner_rank_class")
+            )
+            .sort(sort_columns)
             .group_by(runner_keys, maintain_order=True)
             .agg(
                 pl.col(columns.propensity)

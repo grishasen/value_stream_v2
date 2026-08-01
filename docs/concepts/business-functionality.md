@@ -68,20 +68,23 @@ processing.
 ### Frequency-response interpretation
 
 The `frequency_response` processor supports a contact-policy diagnostic from
-Interaction History without retaining contact rows. It assigns each rank-1
-exposure to a fixed trailing-window bucket for the same customer, action, and
-placement, then persists daily counts and sums by that bucket. The focal curve
-is observed click-through rate. The comparison curve uses the raw
-`Propensity` of rank 2, or the smallest recorded rank above 1 when rank 2 is
-absent, over exactly the contacts for which that propensity exists.
+Interaction History without retaining contact rows. It assigns each selected
+rank-1 action contact to a fixed trailing-window number-of-impressions bucket
+for the same customer, action, and placement, then persists daily counts and
+sums by that bucket. The selected rank-1 action curve is observed
+click-through rate. The selected rank-2 action comparison curve uses the raw
+`Propensity` of exact rank 2 when present, or the smallest recorded rank above
+1 when rank 2 is absent, within the processor's explicitly configured
+customer/interaction comparison group and over exactly the contacts for which
+that propensity exists. The group can additionally require equal placement.
 
 `Priority` remains useful, but for a different question: it explains the
-arbitration score gap between the selected and alternative actions. It is not
-a probability and must not be plotted as expected CTR. Likewise, Interaction
-History cannot supply a dismiss/irritation curve or true viewability unless
-those events exist in the source. A configured Impression is therefore an
-exposure proxy, and the missing concepts stay visibly missing rather than
-being inferred.
+arbitration score gap between the selected rank-1 and selected rank-2 actions.
+It is not a probability and must not be plotted as expected CTR. Likewise,
+Interaction History cannot supply a dismiss/irritation curve or true
+viewability unless those events exist in the source. A configured Impression
+is therefore a contact proxy, and the missing concepts stay visibly missing
+rather than being inferred.
 
 ## Configuration Workflow
 

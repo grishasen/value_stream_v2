@@ -546,6 +546,7 @@ class FrequencyResponseProcessor(_ProcessorBase):
 
     kind: Literal["frequency_response"]
     columns: FrequencyResponseColumns
+    alternative_group_by: list[str]
     positive_values: list[Any] = Field(min_length=1)
     exposure_values: list[Any] = Field(min_length=1)
     candidate_values: list[Any] = Field(min_length=1)
@@ -563,6 +564,35 @@ class FrequencyResponseProcessor(_ProcessorBase):
             raise ValueError("frequency_response requires time.grain 'daily'")
         if self.frequency_column not in self.group_by:
             raise ValueError("frequency_response frequency_column must be present in group_by")
+        if len(self.alternative_group_by) != len(set(self.alternative_group_by)):
+            raise ValueError("frequency_response alternative_group_by columns must be unique")
+        invalid_alternative_columns = sorted(
+            column
+            for column in self.alternative_group_by
+            if not column.strip()
+            or column != column.strip()
+            or column in _FREQUENCY_RESPONSE_RESERVED_COLUMNS
+            or column == self.frequency_column
+            or column.startswith("__valuestream_")
+        )
+        if invalid_alternative_columns:
+            raise ValueError(
+                "frequency_response alternative_group_by must contain raw source columns: "
+                + ", ".join(repr(column) for column in invalid_alternative_columns)
+            )
+        mandatory_alternative_columns = {self.columns.customer, self.columns.interaction}
+        redundant_alternative_columns = sorted(
+            mandatory_alternative_columns.intersection(self.alternative_group_by)
+        )
+        if redundant_alternative_columns:
+            raise ValueError(
+                "frequency_response alternative_group_by must not repeat mandatory "
+                "customer/interaction columns: " + ", ".join(redundant_alternative_columns)
+            )
+        if self.columns.customer == self.columns.interaction:
+            raise ValueError(
+                "frequency_response customer and interaction bindings must be distinct"
+            )
         minimum_retention_days = (self.window_hours + self.partition_lag_hours + 23) // 24 + 1
         if (
             self.checkpoint.mode == "persistent_sharded"
@@ -669,6 +699,20 @@ class FrequencyResponseProcessor(_ProcessorBase):
         if self.checkpoint.retention_days is not None:
             return self.checkpoint.retention_days
         return (self.window_hours + self.partition_lag_hours + 23) // 24 + 1
+
+    @property
+    def alternative_group_columns(self) -> list[str]:
+        """Return source columns that define one selected-action comparison."""
+
+        return list(
+            dict.fromkeys(
+                [
+                    self.columns.customer,
+                    self.columns.interaction,
+                    *self.alternative_group_by,
+                ]
+            )
+        )
 
 
 class NumericDistributionProcessor(_ProcessorBase):

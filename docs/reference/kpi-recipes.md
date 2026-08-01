@@ -90,6 +90,11 @@ Both authoring surfaces provide the same steps:
 10. Apply explicitly. If materialization is required, follow the named source
    handoff to Data Load and start the run there.
 
+When the recipe's default metric ID is retained, installation also retains the
+recipe-authored display label. Choosing a custom metric ID derives the initial
+display label from that ID; the label can then be edited independently without
+renaming the metric.
+
 Configuration Builder writes any proposed processor state first, followed by
 the materialized metric and optional tile. All writes and post-write catalog
 validation run inside one rollback boundary: a write or validation failure
@@ -185,12 +190,12 @@ internal state-ID choice.
 | `funnel.dropoff_rate` | Funnel stage loss | Ordered funnel stages | Exact | KPI card |
 | `lifecycle.summary` | Entity lifecycle measures | Entity lifecycle processor | Exact | Table |
 | `category.top_items` | Frequent categories | Frequent-items/Top-K state | Approximate | Table |
-| `contact_policy.frequency_marginal_ctr` | Focal marginal CTR by exposure bucket | Exact `Clicks` and `Contacts` states | Approximate fixed-window interpretation | Line |
-| `contact_policy.frequency_comparable_ctr` | Focal CTR on runner-comparable contacts | Exact `ComparableClicks` and `ComparableContacts` states | Approximate fixed-window interpretation | Line |
-| `contact_policy.runner_up_expected_ctr` | Mean selected-runner raw Propensity | Exact `RunnerPropensitySum` and `ComparableContacts` states | Approximate fixed-window interpretation | Line |
-| `contact_policy.runner_up_coverage` | Runner-comparable share of focal contacts | Exact `ComparableContacts` and `Contacts` states | Approximate fixed-window interpretation | KPI card |
-| `contact_policy.response_opportunity_margin` | Comparable focal response minus runner expectation | Exact `ComparableClicks`, `RunnerPropensitySum`, and shared `ComparableContacts` states | Approximate fixed-window interpretation | Bar |
-| `contact_policy.priority_opportunity_gap` | Comparable focal-minus-runner Priority index | Exact focal/runner comparable Priority sums and `PriorityComparableContacts` | Approximate arbitration diagnostic | Bar |
+| `contact_policy.frequency_marginal_ctr` | Selected rank-1 action CTR by number of impressions | Exact `Clicks` and `Contacts` states | Approximate fixed-window interpretation | Line |
+| `contact_policy.frequency_comparable_ctr` | Selected rank-1 action CTR on contacts with a selected rank-2 action | Exact `ComparableClicks` and `ComparableContacts` states | Approximate fixed-window interpretation | Line |
+| `contact_policy.runner_up_expected_ctr` | Mean selected rank-2 action raw Propensity | Exact `RunnerPropensitySum` and `ComparableContacts` states | Approximate fixed-window interpretation | Line |
+| `contact_policy.runner_up_coverage` | Selected rank-2 action coverage of selected rank-1 action contacts | Exact `ComparableContacts` and `Contacts` states | Approximate fixed-window interpretation | KPI card |
+| `contact_policy.response_opportunity_margin` | Selected rank-1 action response minus selected rank-2 action expectation | Exact `ComparableClicks`, `RunnerPropensitySum`, and shared `ComparableContacts` states | Approximate fixed-window interpretation | Bar |
+| `contact_policy.priority_opportunity_gap` | Selected rank-1 action minus selected rank-2 action Priority index | Exact comparable Priority sums and `PriorityComparableContacts` | Approximate arbitration diagnostic | Bar |
 
 The six **Contact policy** recipes target only the `frequency_response`
 processor and require the exact state names shown above. They never propose a
@@ -199,15 +204,18 @@ line and bar recommendations use `ExposureBucket`, whose value is an upstream
 fixed-window approximation; changing a report date filter does not recompute
 customer contact history.
 
-`Contacts` are derived from the processor's configured exposure outcomes.
-When that outcome is `Impression`, it is an impression proxy rather than
-measured viewability; dismiss telemetry is never inferred when the source does
-not provide it. Runner selection means exact rank 2 when present, otherwise the
-next recorded rank, and runner response uses raw `Propensity` as the
-probability. Comparable focal CTR, runner expected CTR, and response opportunity
-margin use the same `ComparableContacts` denominator. `Priority` is retained
-only for the separate, neutral arbitration index; it is never treated as CTR
-or probability.
+`Contacts` are derived from the processor's configured exposure outcomes. The
+user-facing number of impressions is therefore based on Impression proxies rather
+than measured viewability; dismiss telemetry is never inferred when the source does
+not provide it. Within the processor's implicit customer + interaction keys
+plus the physical fields configured in `alternative_group_by`, “selected rank-2 action” means
+exact rank 2 when present, otherwise the next recorded rank greater than 1;
+its response uses raw `Propensity` as the probability. `Placement` is the
+default additional field, so comparison stays inside one decision and
+placement. Comparable selected rank-1 action CTR, selected
+rank-2 action expected CTR, and response opportunity margin use the same
+`ComparableContacts` denominator. `Priority` is retained only for the separate,
+neutral arbitration index; it is never treated as CTR or probability.
 
 The unique-entity recipe prefers CPC states created by current processor
 defaults while accepting HLL and Theta states. Theta is useful when the same

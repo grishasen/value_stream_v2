@@ -3,15 +3,15 @@ disable_existing_loggers: false
 
 formatters:
   detailed:
-    format: "%(asctime)s.%(msecs)03d:%(levelname)s:%(name_last)s:%(message)s"
+    format: "%(ansi_timestamp)s%(asctime)s.%(msecs)03d%(ansi_reset)s:%(ansi_level)s%(levelname)s%(ansi_reset)s:%(ansi_logger)s%(name_last)s%(ansi_reset)s:%(message)s"
     datefmt: "%Y-%m-%d %H:%M:%S"
 
 handlers:
   console:
-    class: logging.StreamHandler
+    class: valuestream.utils.logger.ThemeColorStreamHandler
     level: DEBUG
     formatter: detailed
-    stream: ext://sys.stdout
+    stream: ext://sys.stderr
 
 root:
   level: INFO

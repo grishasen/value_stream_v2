@@ -206,6 +206,13 @@ FIELD_HELP: dict[str, str] = {
         "Dimensions persisted in aggregate rows and available to filters and report grouping.",
         "Channel, Direction, Issue",
     ),
+    "processor.alternative_group_by": _tip(
+        "Additional source fields used to match the selected rank-2 action. Customer and "
+        "InteractionID are always included; the default Placement therefore keeps "
+        "comparison inside one decision and placement. This matching key is separate "
+        "from the published aggregate Group By.",
+        "Placement",
+    ),
     "processor.time_column": _tip(
         "Timestamp column used to assign each input row to the configured grains.",
         "OutcomeTime",

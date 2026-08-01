@@ -457,9 +457,12 @@ def processor_field_references(processor: model.Processor) -> list[str]:
     outcome = getattr(processor, "outcome", None)
     if outcome:
         fields.append(outcome.column)
+    if isinstance(processor, model.FrequencyResponseProcessor):
+        fields.extend(processor.columns.model_dump(exclude_none=True).values())
     for spec in model.effective_processor_states(processor).values():
         fields.append(str(getattr(spec, "source_column", "") or ""))
     fields.extend(getattr(processor, "properties", []))
+    fields.extend(getattr(processor, "alternative_group_by", []))
     fields.extend(item.column for item in getattr(processor, "score_properties", []))
     fields.extend(getattr(processor, "dedup_keys", []))
     fields.extend(

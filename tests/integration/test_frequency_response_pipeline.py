@@ -65,6 +65,7 @@ processors:
       outcome: Outcome
       propensity: Propensity
       priority: Priority
+    alternative_group_by: [Placement]
     positive_values: [Clicked]
     exposure_values: [Impression]
     candidate_values: [Pending, Impression, Clicked]
@@ -126,9 +127,7 @@ def _write_day(workspace: Path, day: str, *, focal_outcome: str) -> Path:
             "CustomerID": "customer-1",
             "InteractionID": interaction,
             "ActionID": "runner-action",
-            # Runner selection is interaction-wide, so it need not share the
-            # focal placement.
-            "RawPlacement": "Tile",
+            "RawPlacement": "Hero",
             "Rank": 2,
             "Outcome": "Pending",
             "Propensity": 0.25,

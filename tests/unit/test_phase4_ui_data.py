@@ -15,6 +15,7 @@ from plotly.graph_objects import Figure  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
 import valuestream.ui.freshness as freshness_module
+from valuestream.charts import render_chart
 from valuestream.config import model
 from valuestream.config.canonical import processor_computation_hash
 from valuestream.config.validate import CatalogValidationResult
@@ -304,7 +305,7 @@ def test_query_tile_requests_state_columns_for_descriptive_charts(
 def test_query_tile_joins_combo_secondary_metric_on_shared_dimensions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    catalog = _catalog(["Channel"])
+    catalog = _catalog(["Channel", "CustomerType"])
     catalog.metrics.metrics["Impressions"] = model.FormulaMetric.model_validate(
         {
             "processor": "engagement",
@@ -321,18 +322,22 @@ def test_query_tile_joins_combo_secondary_metric_on_shared_dimensions(
             "x": "Day",
             "secondary_metric": "Impressions",
             "color": "Channel",
+            "facet_col": "CustomerType",
         }
     )
     calls: list[str] = []
+    group_bys: list[list[str]] = []
 
     def fake_query_metric(*args: object, **kwargs: object) -> pl.DataFrame:
         metric_name = str(args[1])
         calls.append(metric_name)
+        group_bys.append(list(kwargs["group_by"]))
         values = [0.2, 0.3] if metric_name == "CTR" else [100, 150]
         return pl.DataFrame(
             {
                 "Day": [dt.date(2026, 1, 1), dt.date(2026, 1, 2)],
                 "Channel": ["Web", "Web"],
+                "CustomerType": ["Known", "Anonymous"],
                 metric_name: values,
             }
         )
@@ -342,7 +347,9 @@ def test_query_tile_joins_combo_secondary_metric_on_shared_dimensions(
     rows = query_tile("workspace", catalog, tile)
 
     assert calls == ["CTR", "Impressions"]
-    assert rows.columns == ["Day", "Channel", "CTR", "Impressions"]
+    assert group_bys == [["CustomerType", "Channel"], ["CustomerType", "Channel"]]
+    assert rows.columns == ["Day", "Channel", "CustomerType", "CTR", "Impressions"]
+    assert rows.get_column("CustomerType").to_list() == ["Known", "Anonymous"]
     assert rows.get_column("Impressions").to_list() == [100, 150]
     assert ADVANCED_FIELD_CONTROLS["combo"] == (
         "metric_output",
@@ -458,6 +465,101 @@ def test_presentation_resolver_applies_metric_display_defaults() -> None:
     assert resolved["labels"]["CTR"] == "Engagement rate"
     assert resolved["value_format"] == "percent"
     assert resolved["direction"] == "higher_is_better"
+
+
+@pytest.mark.unit
+def test_frequency_combo_resolves_business_labels_through_chart_rendering() -> None:
+    catalog = _catalog(["ExposureBucket"])
+    catalog.processors.processors[0] = model.FrequencyResponseProcessor.model_validate(
+        {
+            "id": "frequency_response",
+            "source": "ih",
+            "kind": "frequency_response",
+            "time": {"property": "DecisionTime", "grain": "daily"},
+            "columns": {
+                "customer": "CustomerID",
+                "interaction": "InteractionID",
+                "action": "ActionID",
+                "placement": "Placement",
+                "rank": "Rank",
+                "outcome": "Outcome",
+                "propensity": "Propensity",
+            },
+            "alternative_group_by": ["Placement"],
+            "positive_values": ["Clicked"],
+            "exposure_values": ["Impression", "Clicked"],
+            "candidate_values": ["Pending", "Impression", "Clicked"],
+            "frequency_column": "ExposureBucket",
+            "group_by": ["ExposureBucket"],
+            "states": {
+                "ComparableClicks": {"type": "count"},
+                "ComparableContacts": {"type": "count"},
+                "RunnerPropensitySum": {
+                    "type": "value_sum",
+                    "source_column": "RunnerPropensity",
+                },
+            },
+        }
+    )
+    catalog.metrics.metrics = {
+        "FrequencyComparableCTR": model.FormulaMetric.model_validate(
+            {
+                "processor": "frequency_response",
+                "kind": "formula",
+                "expression": {
+                    "op": "safe_div",
+                    "num": {"col": "ComparableClicks"},
+                    "den": {"col": "ComparableContacts"},
+                },
+                "display": {"label": "Comparable selected rank-1 action CTR"},
+            }
+        ),
+        "RunnerExpectedCTR": model.FormulaMetric.model_validate(
+            {
+                "processor": "frequency_response",
+                "kind": "formula",
+                "expression": {
+                    "op": "safe_div",
+                    "num": {"col": "RunnerPropensitySum"},
+                    "den": {"col": "ComparableContacts"},
+                },
+                "display": {"label": "Selected rank-2 action expected CTR"},
+            }
+        ),
+    }
+    resolved = resolve_tile_presentation(
+        catalog,
+        {
+            "id": "frequency_combo",
+            "metric": "FrequencyComparableCTR",
+            "metric_output": "FrequencyComparableCTR",
+            "chart": "combo",
+            "x": "ExposureBucket",
+            "secondary_metric": "RunnerExpectedCTR",
+            "primary_mark": "line",
+            "shared_y_axis": True,
+        },
+    )
+
+    assert resolved["labels"]["FrequencyComparableCTR"] == ("Comparable selected rank-1 action CTR")
+    assert resolved["labels"]["RunnerExpectedCTR"] == ("Selected rank-2 action expected CTR")
+    assert resolved["labels"]["ExposureBucket"] == "Number of impressions"
+    assert resolved["x_axis_title"] == "Number of impressions"
+
+    figure = render_chart(
+        pl.DataFrame(
+            {
+                "ExposureBucket": [1, 2],
+                "FrequencyComparableCTR": [0.02, 0.01],
+                "RunnerExpectedCTR": [0.03, 0.015],
+            }
+        ),
+        resolved,
+    )
+    assert [trace.name for trace in figure.data] == [
+        "Comparable selected rank-1 action CTR",
+        "Selected rank-2 action expected CTR",
+    ]
 
 
 @pytest.mark.unit
@@ -954,10 +1056,10 @@ def test_report_status_banner_is_silent_when_page_is_fresh(monkeypatch: pytest.M
                 {
                     "id": "coverage",
                     "title": "Coverage",
-                        "metric": "CTR",
-                        "chart": "bar",
-                        "x": "Channel",
-                    }
+                    "metric": "CTR",
+                    "chart": "bar",
+                    "x": "Channel",
+                }
             ],
         }
     )
@@ -1276,13 +1378,13 @@ def test_descriptive_report_pages_default_to_advanced_mode() -> None:
             "id": "descriptive",
             "title": "Descriptive",
             "tiles": [
-                    {
-                        "id": "quartiles",
-                        "title": "Quartiles",
-                        "metric": "ResponseP50",
-                        "chart": "boxplot",
-                        "x": "Month",
-                    }
+                {
+                    "id": "quartiles",
+                    "title": "Quartiles",
+                    "metric": "ResponseP50",
+                    "chart": "boxplot",
+                    "x": "Month",
+                }
             ],
         }
     )
@@ -1294,10 +1396,10 @@ def test_descriptive_report_pages_default_to_advanced_mode() -> None:
                 {
                     "id": "daily_ctr",
                     "title": "Daily CTR",
-                        "metric": "CTR",
-                        "chart": "line",
-                        "x": "Day",
-                    }
+                    "metric": "CTR",
+                    "chart": "line",
+                    "x": "Day",
+                }
             ],
         }
     )
@@ -1525,9 +1627,9 @@ def test_kpi_bundle_uses_complete_latest_period_and_equal_previous_period(
         {
             "id": "ctr_kpi",
             "title": "CTR",
-                "metric": "CTR",
-                "chart": "kpi_card",
-                "placement": "kpi_strip",
+            "metric": "CTR",
+            "chart": "kpi_card",
+            "placement": "kpi_strip",
             "kpi": {
                 "comparison": "previous_period",
                 "comparison_period": "month",
@@ -1955,11 +2057,11 @@ def test_query_tile_resolves_selected_histogram_property_metric(
         {
             "id": "priority_histogram",
             "title": "Priority distribution",
-                "metric": "PropensityDistribution",
-                "chart": "histogram",
-                "property": "Priority",
-            }
-        )
+            "metric": "PropensityDistribution",
+            "chart": "histogram",
+            "property": "Priority",
+        }
+    )
     captured: dict[str, object] = {}
 
     def fake_query_metric(*args: object, **kwargs: object) -> pl.DataFrame:
@@ -2131,7 +2233,7 @@ def _catalog(group_by: list[str]) -> model.Catalog:
                             "negative_values": ["Impression"],
                         },
                     }
-                ]
+                ],
             },
             "metrics": {
                 "catalog_version": 2,
@@ -2145,7 +2247,7 @@ def _catalog(group_by: list[str]) -> model.Catalog:
                             "den": {"col": "Count"},
                         },
                     }
-                }
+                },
             },
             "dashboards": {
                 "catalog_version": 2,
@@ -2170,7 +2272,7 @@ def _catalog(group_by: list[str]) -> model.Catalog:
                             }
                         ],
                     }
-                ]
+                ],
             },
         }
     )
@@ -2214,7 +2316,7 @@ def _distribution_catalog() -> model.Catalog:
                             },
                         },
                     }
-                ]
+                ],
             },
             "metrics": {
                 "catalog_version": 2,
@@ -2240,7 +2342,7 @@ def _distribution_catalog() -> model.Catalog:
                         "kind": "formula",
                         "expression": {"col": "Propensity_Count"},
                     },
-                }
+                },
             },
             "dashboards": {"catalog_version": 2, "dashboards": []},
         }
@@ -2307,7 +2409,7 @@ def _daily_only_catalog() -> model.Catalog:
                             "Positives": {"type": "count", "outcome": "positive"},
                         },
                     }
-                ]
+                ],
             },
             "metrics": {
                 "catalog_version": 2,
@@ -2321,7 +2423,7 @@ def _daily_only_catalog() -> model.Catalog:
                             "den": {"col": "Count"},
                         },
                     }
-                }
+                },
             },
             "dashboards": {"catalog_version": 2, "dashboards": []},
         }
@@ -2371,7 +2473,7 @@ def _curve_catalog() -> model.Catalog:
                             "negative_values": ["Impression"],
                         },
                     }
-                ]
+                ],
             },
             "metrics": {
                 "catalog_version": 2,
@@ -2383,7 +2485,7 @@ def _curve_catalog() -> model.Catalog:
                         "negative_state": "Propensity_tdigest_negatives",
                         "output": "roc_auc",
                     }
-                }
+                },
             },
             "dashboards": {
                 "catalog_version": 2,
@@ -2407,7 +2509,7 @@ def _curve_catalog() -> model.Catalog:
                             }
                         ],
                     }
-                ]
+                ],
             },
         }
     )
@@ -2452,7 +2554,7 @@ def _catalog_with_processor_extras() -> model.Catalog:
                             "negative_values": [0],
                         },
                     }
-                ]
+                ],
             },
             "metrics": {"catalog_version": 2, "metrics": {}},
             "dashboards": {"catalog_version": 2, "dashboards": []},

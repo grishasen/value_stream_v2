@@ -49,13 +49,22 @@ def resolve_tile_presentation(  # noqa: PLR0912
     for field in _PRESENTATION_FIELDS:
         value = out.get(field)
         if isinstance(value, str) and value:
-            labels.setdefault(value, _field_label(value, metric_name, display))
+            labels.setdefault(
+                value,
+                chart_field_label(catalog, metric_name, field, value),
+            )
         elif isinstance(value, list):
             for item in value:
                 if isinstance(item, str) and item:
-                    labels.setdefault(item, _field_label(item, metric_name, display))
+                    labels.setdefault(
+                        item,
+                        chart_field_label(catalog, metric_name, field, item),
+                    )
     if metric_name:
-        labels.setdefault(metric_name, _field_label(metric_name, metric_name, display))
+        labels.setdefault(
+            metric_name,
+            chart_field_label(catalog, metric_name, "metric_output", metric_name),
+        )
     out["labels"] = labels
 
     x = out.get("x")
@@ -143,14 +152,50 @@ def humanize_identifier(value: str) -> str:
     return text[:1].upper() + text[1:] if text else ""
 
 
-def _field_label(
-    field: str,
+def chart_field_label(
+    catalog: model.Catalog,
     metric_name: str,
-    display: model.MetricDisplaySpec | None,
+    field_name: str,
+    option: str,
+    *,
+    humanize: bool = True,
 ) -> str:
-    if field == metric_name and display is not None and display.label:
-        return display.label
-    return humanize_identifier(field)
+    """Resolve one chart field's display label without renaming its stored value."""
+
+    if not option:
+        return "None"
+
+    primary_metric = catalog.metrics.metrics.get(metric_name)
+    if field_name == "secondary_metric":
+        secondary_metric = catalog.metrics.metrics.get(option)
+        if (
+            secondary_metric is not None
+            and secondary_metric.display is not None
+            and secondary_metric.display.label
+        ):
+            return secondary_metric.display.label
+    if (
+        option == metric_name
+        and primary_metric is not None
+        and primary_metric.display is not None
+        and primary_metric.display.label
+    ):
+        return primary_metric.display.label
+
+    processor = next(
+        (
+            candidate
+            for candidate in catalog.processors.processors
+            if primary_metric is not None and candidate.id == primary_metric.processor
+        ),
+        None,
+    )
+    if (
+        isinstance(processor, model.FrequencyResponseProcessor)
+        and option == processor.frequency_column
+    ):
+        return "Number of impressions"
+    return humanize_identifier(option) if humanize else option
 
 
 def _label_with_unit(label: str, unit: str) -> str:
@@ -182,6 +227,7 @@ _PRESENTATION_FIELDS = (
 
 __all__ = [
     "MetricQuality",
+    "chart_field_label",
     "humanize_identifier",
     "metric_quality",
     "resolve_tile_presentation",

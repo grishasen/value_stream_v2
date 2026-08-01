@@ -17,6 +17,7 @@ from typing import Any
 import streamlit as st
 import yaml
 
+from valuestream.config import model
 from valuestream.ui import builder, components, config_help
 
 PROCESSOR_KIND_OPTIONS = (
@@ -62,18 +63,18 @@ PROCESSOR_KIND_GUIDE: dict[str, ProcessorKindGuide] = {
     ),
     "frequency_response": ProcessorKindGuide(
         summary=(
-            "Builds daily response and runner-opportunity states by repeated exposure "
-            "number in a fixed trailing time window."
+            "Builds daily selected-action response and opportunity states by number of "
+            "impressions in a fixed trailing time window."
         ),
         purposes=(
             "Use for contact-policy saturation curves when source interactions carry "
             "ranked alternatives and raw response propensity."
         ),
         example_kpis=(
-            "Marginal CTR by Frequency",
-            "Comparable Focal CTR",
-            "Runner Expected CTR",
-            "Runner Coverage",
+            "Selected Rank-1 Action CTR by Number of Impressions",
+            "Comparable Selected Rank-1 Action CTR",
+            "Selected Rank-2 Action Expected CTR",
+            "Selected Rank-2 Action Coverage",
             "Response Opportunity Margin",
         ),
     ),
@@ -203,6 +204,7 @@ PROCESSOR_KIND_MANAGED_FIELDS = frozenset(
         "stages",
         "snapshot_kind",
         "cadence",
+        "alternative_group_by",
     }
 )
 
@@ -315,6 +317,8 @@ def processor_kind_fields(  # noqa: PLR0911 — dispatch table over the processo
     numeric_options = numeric_field_options or field_options
     if kind == "binary_outcome":
         return _binary_outcome_fields(processor_def, field_options, key_prefix)
+    if kind == "frequency_response":
+        return _frequency_response_fields(processor_def, field_options, key_prefix)
     if kind == "score_distribution":
         return _score_distribution_fields(processor_def, field_options, numeric_options, key_prefix)
     if kind == "numeric_distribution":
@@ -328,6 +332,58 @@ def processor_kind_fields(  # noqa: PLR0911 — dispatch table over the processo
     if kind == "snapshot":
         return _snapshot_fields(processor_def, key_prefix)
     return {}
+
+
+def _frequency_response_fields(
+    processor_def: dict[str, Any],
+    field_options: list[str],
+    key_prefix: str,
+) -> dict[str, Any]:
+    """Render the candidate-matching dimensions for frequency response."""
+
+    st.write("### Selected Action Comparison")
+    raw_columns = processor_def.get("columns")
+    columns: dict[str, Any] = raw_columns if isinstance(raw_columns, dict) else {}
+    customer_column = str(columns.get("customer") or "CustomerID")
+    interaction_column = str(columns.get("interaction") or "InteractionID")
+    placement_column = str(columns.get("placement") or "Placement")
+    configured = builder.string_list(processor_def.get("alternative_group_by"))
+    current = (
+        configured if processor_def.get("alternative_group_by") is not None else [placement_column]
+    )
+    frequency_column = str(processor_def.get("frequency_column") or "ExposureBucket")
+    reserved = {
+        "Day",
+        "pipeline_run_id",
+        "chunk_id",
+        "period",
+        "created_at",
+        "config_hash",
+        frequency_column,
+        *model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
+    }
+    options = builder.dedupe([*field_options, *current, placement_column])
+    options = [
+        field_name
+        for field_name in options
+        if field_name not in {customer_column, interaction_column}
+        and field_name not in reserved
+        and not field_name.startswith("__valuestream_")
+    ]
+    default = [field_name for field_name in current if field_name in options]
+    st.caption(
+        f"{customer_column} and {interaction_column} are always included. "
+        "Select zero or more additional comparison fields."
+    )
+    selected = st.multiselect(
+        "Selected rank-2 action Group By",
+        options,
+        default=default,
+        accept_new_options=True,
+        key=f"{key_prefix}_alternative_group_by",
+        help=config_help.field_help("processor.alternative_group_by"),
+    )
+    return {"alternative_group_by": builder.dedupe([str(value).strip() for value in selected])}
 
 
 def _subject_field(
