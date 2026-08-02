@@ -11,7 +11,7 @@
       
       
       
-        <link rel="prev" href="../../concepts/adr/0007-bounded-lookback-processors/">
+        <link rel="prev" href="../../concepts/adr/0008-bounded-rolling-duckdb-state/">
       
       
         <link rel="next" href="../expression-dsl/">
@@ -1686,6 +1686,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0008-bounded-rolling-duckdb-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0008 Bounded rolling DuckDB state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2580,6 +2608,14 @@ CLI ever disagree, the CLI is right and this page has a doc bug.</p>
 </tr>
 </tbody>
 </table>
+<p>The bundled console logger writes to stderr and colors only the timestamp,
+severity, and module when stderr is an interactive terminal. Its light/dark
+palettes mirror the application chrome and Plotly qualitative colors. Redirected
+output, <code>TERM=dumb</code>, and environments containing <code>NO_COLOR</code> remain plain text;
+<code>FORCE_COLOR=1</code> forces ANSI color, and <code>VALUESTREAM_LOG_THEME=light|dark</code>
+overrides terminal-background detection. A custom <code>--logging-config</code> remains
+authoritative and is not recolored unless it selects the Value Stream color
+handler itself.</p>
 <p>Conventions: <code>WORKSPACE</code> is a workspace directory containing <code>catalog/</code>.
 Commands exit 0 on success and non-zero on failure, so they are safe to gate
 scripts and cron jobs on.</p>

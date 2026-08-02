@@ -1686,6 +1686,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0008-bounded-rolling-duckdb-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0008 Bounded rolling DuckDB state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3489,18 +3517,18 @@ for chunk_id in groups:
 source_computation_hash, file_hash)</code>. The source computation hash covers
 workspace defaults, source behavior, and the result-affecting semantics of all
 bound processors. Ingestion-only <code>frequency_response.checkpoint.*</code> settings are
-excluded; they remain in the full catalog hash and use separate state layout
-and retention identities. <code>file_hash</code> covers sorted absolute paths, nanosecond
+excluded; they remain in the full catalog hash and are recorded as checkpoint
+metadata/lifecycle policy. <code>file_hash</code> covers sorted absolute paths, nanosecond
 mtimes, and sizes. Unchanged inputs are skipped; changed files or behavior are
 reprocessed without invalidating the previous successful aggregate until the
 new run commits.</p>
 <p>For a bounded-lookback target, <code>file_hash</code> covers the complete raw dependency
 closure, not only the target files. This remains true when a processor uses a
 persistent checkpoint: the checkpoint is an acceleration artifact keyed by the
-processor semantic identity, independent layout identity, and per-chunk raw
-fingerprint, never the source of the idempotency decision or a successful
-ledger marker. Missing state after layout tuning is rebuilt lazily only when a
-new or invalidated target needs that bounded closure.</p>
+stable source/processor path, metadata compatibility contract, and per-chunk
+raw fingerprint, never the source of the idempotency decision or a successful
+ledger marker. Missing or valid-but-incompatible state is rebuilt lazily at the
+same path only when a new or invalidated target needs that bounded closure.</p>
 <h3 id="24-chunk-granularity">2.4 Chunk granularity<a class="headerlink" href="#24-chunk-granularity" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Daily file groups</strong> are the recommended default for IH-shaped sources. The regex <code>\d{8}(?=\d{6}_)</code> captures <code>YYYYMMDD</code> from filenames like <code>interaction-XYZ-20240821000000_001.json.zip</code>.</li>
@@ -3793,12 +3821,22 @@ chunks, so process RSS need not fall immediately.</p>
 <p>A bounded processor adds one of two memory profiles. <code>source_scan</code> owns the
 target plus its declared dependency closure for that calculation. A
 <code>persistent_sharded</code> frequency processor transforms a source chunk once to
-build a checkpoint through a partitioned streaming sink, then reads only one
-customer shard across the target and bounded history at a time. Increasing
-<code>checkpoint.shards</code> reduces per-shard working data at the cost of more files.
-The checkpoint is processor state rather than a reader cache: it is
-source-fingerprint-addressed, has bounded daily retention, and is always
-rebuildable from the source files.</p>
+pass its complete prepared current payload to a temporary relation in one
+long-lived <code>rolling.duckdb</code> writer for that processor through the Arrow C
+Stream interface. It neither collects the complete prepared day nor stages
+temporary Parquet. Only
+exposed rank-1 history, source chunk id, and logical customer shard persist.
+Native SQL reads one logical shard across temporary current plus bounded
+history at a time and reduces the result before Arrow streams the configured-
+state tail back to Polars. Increasing <code>checkpoint.shards</code> reduces per-shard
+working data without increasing file count. Increasing chunk-process
+parallelism does not apply to this source: persistent frequency targets execute
+oldest-to-newest in one process through the same writer and open connection.
+Expired history is pruned after every chronological source-day commit; every 30
+committed days run DuckDB <code>CHECKPOINT</code> on that connection. It closes once at the
+source-run boundary. The state is a bounded, transactionally journaled
+acceleration structure rather than a reader cache and is always rebuildable
+from the source files.</p>
 <p>There is currently no automatic RSS threshold, processing pause, or spill of a
 materialized chunk to temporary Parquet. If a transformed chunk does not fit,
 reduce the chunk grouping interval and run with lower chunk-process parallelism.

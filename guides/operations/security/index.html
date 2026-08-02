@@ -1839,6 +1839,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adr/0008-bounded-rolling-duckdb-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0008 Bounded rolling DuckDB state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2548,18 +2576,38 @@ views, SQL allowlist, API, MCP, Chat, SDK, or Reports.</p>
 the resulting checkpoint as sensitive source-derived data:</p>
 <ul>
 <li>It contains only filtered candidate rows and fields required to repeat exact
-  cross-partition normalization, bounded frequency, deduplication,
-  grouping/state calculation, and runner selection, but may retain an exact customer key.</li>
-<li>Customer hashing is used to route records to shards. It is not encryption,
+  bounded history: exposed rank-1 contact identity, time, classification,
+  deterministic order, chunk id, and logical shard. The complete current
+  candidate payload is temporary, but the rolling history may retain an exact
+  customer key.</li>
+<li>Customer hashing routes records to logical shards. It is not encryption,
   anonymization, or a substitute for upstream tokenization/HMAC.</li>
-<li>Generations are keyed by processor semantic computation identity, independent
-  checkpoint-layout identity, chunk, and raw-file fingerprint and version their
-  schema, customer dtype, and sharding algorithm. Partial, stale, incompatible,
-  or integrity-invalid generations are not used.</li>
+<li>One schema-revision-8 <code>rolling.duckdb</code> uses the stable path
+  <code>.valuestream/state/frequency_response/source=&lt;source&gt;/processor=&lt;processor&gt;/rolling.duckdb</code>;
+  revision 8 is the default and only supported checkpoint schema. Schema,
+  hashing, Polars-version, processor-config, and layout values do not add path
+  levels. Compatibility/audit metadata remains inside the database. Because
+  logical sharding uses <code>pl.Expr.hash</code>, a Polars-version change rebuilds the
+  same stable database; DuckDB version is audit-only. Its journal records chunk
+  fingerprints and is reconciled before every pending target.
+  Exact-prefix gaps are filled from IH; only one state-ahead retry tail may be
+  trimmed after aggregate publication failure. Changed/non-prefix,
+  valid-but-incompatible, or forced state is rebuilt from authoritative IH
+  rather than arbitrarily rewound. Corrupt, identity-invalid, or customer-dtype-
+  drifted state fails closed unless explicitly forced. A DuckDB WAL is expected
+  while the writer is active or recovering and must not be removed
+  independently.</li>
 <li>The checkpoint is reconstructible from authoritative IH and has an
   independent, bounded retention lifecycle. <code>checkpoint.retention_days</code>
-  defaults to the active dependency closure and is applied after ingestion and
-  by vacuum; backing it up is optional when source replay is acceptable.</li>
+  defaults to <code>ceil((window_hours + partition_lag_hours) / 24)</code>; 168 hours with
+  zero lag retains only the last seven calendar source days, with fewer stored
+  chunk entries when dates are missing. The rolling writer prunes old history
+  and journal rows after every chronological source-day commit. Every
+  30 committed days, DuckDB <code>CHECKPOINT</code> runs on the same open connection to
+  fold the WAL and partially reclaim or reuse deleted-row space; it does not
+  guarantee complete compaction or immediate file shrinkage. The connection
+  closes once at the source-run boundary. Backing the state up is optional when
+  source replay is acceptable.</li>
 <li>Apply the same filesystem isolation, encryption-at-rest, deletion, and access
   controls as for other sensitive workspace-local data. Deleting checkpoint
   state changes ingestion time only; it never changes which data reports read.</li>

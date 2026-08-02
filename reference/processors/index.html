@@ -1686,6 +1686,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0008-bounded-rolling-duckdb-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0008 Bounded rolling DuckDB state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2540,10 +2568,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#103-contact-and-frequency-semantics" class="md-nav__link">
+  <a href="#103-contact-and-number-of-impressions-semantics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.3 Contact and frequency semantics
+        10.3 Contact and number-of-impressions semantics
       
     </span>
   </a>
@@ -2551,10 +2579,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#104-runner-up-semantics" class="md-nav__link">
+  <a href="#104-selected-rank-2-action-semantics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.4 Runner-up semantics
+        10.4 Selected rank-2 action semantics
       
     </span>
   </a>
@@ -3710,10 +3738,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#103-contact-and-frequency-semantics" class="md-nav__link">
+  <a href="#103-contact-and-number-of-impressions-semantics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.3 Contact and frequency semantics
+        10.3 Contact and number-of-impressions semantics
       
     </span>
   </a>
@@ -3721,10 +3749,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#104-runner-up-semantics" class="md-nav__link">
+  <a href="#104-selected-rank-2-action-semantics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.4 Runner-up semantics
+        10.4 Selected rank-2 action semantics
       
     </span>
   </a>
@@ -4853,11 +4881,11 @@ preserves atomic publication and history; vacuum removes superseded files.</p>
 <hr />
 <h2 id="10-frequency_response-processor">10. frequency_response processor<a class="headerlink" href="#10-frequency_response-processor" title="Permanent link">&para;</a></h2>
 <h3 id="101-purpose">10.1 Purpose<a class="headerlink" href="#101-purpose" title="Permanent link">&para;</a></h3>
-<p><code>frequency_response</code> measures how response changes across repeated exposures to
-the same action in a fixed trailing time window. It also records the raw
-propensity of the best available alternative from the same interaction, so a
-frequency curve can be compared with the opportunity cost of occupying the
-placement.</p>
+<p><code>frequency_response</code> measures how response changes with the number of impressions
+of the same action in a fixed trailing time window. It also records the raw
+propensity of the selected rank-2 action from an explicitly configured
+comparison group, so the selected rank-1 action curve can be compared with the
+opportunity cost of occupying the placement.</p>
 <p>This is a sequence-aware processor. Its published contract remains
 aggregate-first: only daily count and sum states are queryable. Ingestion can
 either rescan bounded source history or retain a minimal, rebuildable sharded
@@ -4881,6 +4909,7 @@ checkpoint that is never exposed to reports.</p>
 <span class="w">      </span><span class="nt">outcome</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Outcome</span>
 <span class="w">      </span><span class="nt">propensity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Propensity</span>
 <span class="w">      </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Priority</span><span class="w">               </span><span class="c1"># optional diagnostic</span>
+<span class="w">    </span><span class="nt">alternative_group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Placement</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">positive_values</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Clicked</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">exposure_values</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Impression</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Clicked</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">candidate_values</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Pending</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Impression</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Clicked</span><span class="p p-Indicator">]</span>
@@ -4888,10 +4917,15 @@ checkpoint that is never exposed to reports.</p>
 <span class="w">    </span><span class="nt">partition_lag_hours</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">24</span><span class="w">          </span><span class="c1"># default 0; dependency padding only</span>
 <span class="w">    </span><span class="nt">max_frequency</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">7</span>
 <span class="w">    </span><span class="nt">frequency_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ExposureBucket</span>
+<span class="w">    </span><span class="nt">window_granularity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">exact</span><span class="w">        </span><span class="c1"># default; `daily` counts calendar days</span>
+<span class="w">    </span><span class="c1"># customer_sample:               # optional deterministic customer subsample</span>
+<span class="w">    </span><span class="c1">#   fraction: 0.125</span>
 <span class="w">    </span><span class="nt">checkpoint</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">persistent_sharded</span><span class="w">       </span><span class="c1"># default: source_scan</span>
 <span class="w">      </span><span class="nt">shards</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">64</span><span class="w">                     </span><span class="c1"># default 64; routing, not anonymization</span>
-<span class="w">      </span><span class="nt">retention_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">9</span><span class="w">              </span><span class="c1"># optional; &gt;= active history + current</span>
+<span class="w">      </span><span class="nt">retention_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span><span class="w">              </span><span class="c1"># optional; default/min ceil((168+24)/24)</span>
+<span class="w">      </span><span class="nt">threads</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span><span class="w">                     </span><span class="c1"># optional; rolling DuckDB connection only</span>
+<span class="w">      </span><span class="nt">memory_limit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4GB</span><span class="w">              </span><span class="c1"># optional; rolling DuckDB connection only</span>
 <span class="w">    </span><span class="nt">group_by</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Day</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Channel</span>
@@ -4910,22 +4944,44 @@ checkpoint that is never exposed to reports.</p>
 <span class="w">      </span><span class="nt">RunnerPriorityComparableSum</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">RunnerPriorityComparable</span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p>The processor accepts only <code>count</code> and <code>value_sum</code> states. <code>Day</code> and the
-configured frequency column are derived by the processor; the other group-by
+configured number-of-impressions column (<code>frequency_column</code> in YAML) are
+derived by the processor; the other group-by
 columns must be present after source transforms. The transformed source must
-not already contain the configured frequency column because the processor owns
+not already contain the configured number-of-impressions column because the processor owns
 that derived name. Raw bindings and state inputs may not use the reserved
 <code>__valuestream_</code> prefix. <code>rank</code> must have an integer dtype, while <code>propensity</code>
 and an optional <code>priority</code> must be numeric; configure strict source casts when
 the raw export uses text fields. These checks run on the target schema before
 it is combined with history, so relaxed union coercion cannot mask a bad target
 day.</p>
+<p><code>alternative_group_by</code> is a list of zero or more <strong>physical transformed source
+columns</strong> appended to the processor's implicit customer + interaction key. It
+is evaluated before aggregation and is separate from the published <code>group_by</code>.
+The default is <code>[Placement]</code>, so the default comparison group is <code>CustomerID +
+InteractionID + Placement</code> for the bindings above. Multiple fields are allowed,
+for example <code>[Placement, Channel, Issue]</code>.</p>
+<p>The customer and interaction bindings are always present and must not be
+repeated in <code>alternative_group_by</code>. Customer preserves customer/checkpoint-shard
+isolation; interaction keeps ranked candidates inside one decision. Canonical
+examples are:</p>
+<ul>
+<li><code>[]</code> selects across placements within the same customer and interaction.</li>
+<li><code>[Placement]</code> selects within the same customer, interaction, and placement
+  (the default).</li>
+<li><code>[Placement, Channel]</code> further requires the same channel.</li>
+<li><code>[Placement, Channel, Issue]</code> requires every listed field to match.</li>
+</ul>
+<p>The processor never crosses <code>InteractionID</code> when selecting a ranked candidate.
+Null values in an additional comparison field form one group: a null value on
+the selected rank-1 row matches a null value on a candidate row.</p>
 <p>A processor-level <code>filter</code> runs on transformed source rows before contacts,
-frequency buckets, or virtual state columns are derived. It may reference only
-raw/transformed source fields—not <code>Day</code>, the frequency column,
+number-of-impressions buckets, or virtual state columns are derived. It may
+reference only raw/transformed source fields—not <code>Day</code>, the configured
+number-of-impressions column,
 <code>ClickedContact</code>, <code>RunnerPropensity</code>, or another processor-created field.
 State-level <code>where</code> expressions run after enrichment and may use the documented
 virtual fields.</p>
-<h3 id="103-contact-and-frequency-semantics">10.3 Contact and frequency semantics<a class="headerlink" href="#103-contact-and-frequency-semantics" title="Permanent link">&para;</a></h3>
+<h3 id="103-contact-and-number-of-impressions-semantics">10.3 Contact and number-of-impressions semantics<a class="headerlink" href="#103-contact-and-number-of-impressions-semantics" title="Permanent link">&para;</a></h3>
 <p>For one target day, the engine plans the target chunk plus the bounded set of
 preceding calendar-day chunks needed to cover
 <code>window_hours + partition_lag_hours</code>. The latter field is an input-planning
@@ -4933,58 +4989,97 @@ allowance for sources whose partition timestamp can trail the configured
 decision timestamp; it does not change the semantic exposure window.</p>
 <p>With <code>checkpoint.mode: source_scan</code>, the processor receives the transformed
 target/history rows in an ephemeral frame. With <code>persistent_sharded</code>, each raw
-chunk is transformed, filtered, classified, and projected through a partitioned
-streaming sink into customer-hash shards without collecting the complete
-prepared day. Candidate rows remain uncollapsed until current and history
-shards are combined, preserving cross-partition duplicate precedence. Target
-processing reads the corresponding shard from the current and history days.
-The two modes implement the same following rules:</p>
+target is transformed, filtered, classified, projected, and assigned a
+deterministic logical customer shard. Polars passes the complete prepared
+current payload as an Arrow C Stream to a temporary relation in one long-lived
+<code>rolling.duckdb</code> writer; it is not persisted. The database persists only
+exposed rank-1 history required by later targets, tagged with its source chunk
+id and logical shard, plus a transactional fingerprint journal.</p>
+<p>Both modes canonicalize the configured decision-time field to timezone-naive
+UTC <code>Datetime(us)</code> truncated to whole seconds before contact normalization.
+<code>Day</code> then attaches UTC and converts to the configured calendar timezone. A raw
+decision-time field used in <code>group_by</code> or a state predicate therefore has the
+same type and value in both modes; the strict <code>(t − window, t]</code> boundary is
+evaluated at second precision, which both engines compute identically.
+Dictionary-backed projected fields are likewise represented as strings in the
+source-scan relational tail, matching DuckDB <code>VARCHAR</code>; customer sharding still
+hashes the original logical <code>Categorical</code>/<code>Enum</code> value first.</p>
+<p>Frequency targets run in ascending ISO-date order in one process. For each
+logical shard, one native SQL plan combines temporary current candidates with
+rolling history, performs cross-partition contact normalization, the exact
+timestamp window, and selected rank-2 action resolution, then streams only
+enriched target rank-1 rows to Polars. Polars applies virtual state columns,
+state-level <code>where</code>, configured count/value-sum aggregation, grouping, and
+provenance. Appending the target's narrow history, recording its fingerprint,
+and pruning expired state is one DuckDB transaction. Candidate rows remain
+uncollapsed until current and history are combined, preserving cross-partition
+duplicate precedence. The connection remains open across the complete source
+run and closes once at the source-run boundary.</p>
+<p>The DuckDB connection is used only by its owning ingestion thread. A single
+queried shard keeps the batched lazy Arrow-to-Polars path. With multiple shards,
+the owner materializes the next shard as a detached Arrow table while one
+worker aggregates the preceding detached table; at most two complete focal
+shard results are live. DuckDB's <code>memory_limit</code> governs DuckDB, not those
+detached Arrow/Polars allocations, so shard count remains the operator's bound
+on this pipeline working set.</p>
+<p>The two modes implement the same following rules:</p>
 <ol>
 <li>A contact is identified by customer, interaction, action, placement, and
    rank. Repeated outcome rows for that contact are collapsed; a positive
    outcome wins over a non-positive exposure.</li>
-<li>A focal contact is rank 1, has an exposure outcome, and belongs to the target
-   chunk. Historical rows influence frequency but are never emitted again.</li>
-<li>Exposure frequency is counted for the same customer, action, and placement
+<li>A selected rank-1 action contact is rank 1, has an exposure outcome, and belongs
+   to the target chunk. Historical rows influence the number of impressions but are
+   never emitted again.</li>
+<li>The number of impressions is counted for the same customer, action, and placement
    in the strict interval <code>(decision_time - window_hours, decision_time]</code>.
-   <code>max_frequency</code> is a terminal bucket: with a value of 7, every seventh or
-   later exposure is stored as <code>7</code> and may be labelled <code>7+</code> by a report.</li>
+   <code>max_frequency</code> is a terminal bucket: with a value of 7, the seventh and
+   every later impression proxy are stored as <code>7</code> and may be labelled <code>7+</code> by
+   a report.</li>
 <li>The response flag comes from <code>positive_values</code>. <code>Clicked</code> may therefore win
    over an <code>Impression</code> row for the same contact.</li>
 </ol>
 <p>The fixed window makes the x-axis reproducible. It is not a calendar-week
 bucket and it does not reset at midnight or on Monday.</p>
-<h3 id="104-runner-up-semantics">10.4 Runner-up semantics<a class="headerlink" href="#104-runner-up-semantics" title="Permanent link">&para;</a></h3>
-<p>The opportunity comparison is resolved <strong>within customer and InteractionID</strong>.
-The processor selects exact rank 2 when it exists; otherwise it selects the
-smallest recorded rank greater than 1. If no such row exists, the focal contact
-remains in the marginal response curve but is excluded from comparable curves.</p>
-<p><code>RunnerPropensity</code> is the alternative's raw <code>Propensity</code>, interpreted as its
-expected response probability. <code>Priority</code> must not be substituted for this
+<h3 id="104-selected-rank-2-action-semantics">10.4 Selected rank-2 action semantics<a class="headerlink" href="#104-selected-rank-2-action-semantics" title="Permanent link">&para;</a></h3>
+<p>The opportunity comparison is resolved within the implicit customer +
+interaction keys plus the physical fields configured in
+<code>alternative_group_by</code>. The processor selects exact rank 2 in that group when
+it exists; otherwise it selects the smallest recorded rank greater than 1 in
+the same group. “Selected rank-2
+action” is therefore the business role: the underlying recorded rank can be
+greater than 2 when rank 2 is absent. If no such row exists, the selected
+rank-1 action contact remains in the all-contact response curve but is excluded
+from comparable curves.</p>
+<p><code>RunnerPropensity</code> is the selected rank-2 action's raw <code>Propensity</code>, interpreted
+as its expected response probability. <code>Priority</code> must not be substituted for this
 field: priority drives arbitration ranking, but it can also include context,
 business value, levers, and other multipliers, so it is neither a probability
-nor a CTR. When configured, focal and runner priority sums are retained as a
-separate arbitration diagnostic over rows where both values exist.</p>
-<p>Runner selection deliberately does not require the alternative to share the
-focal placement. Rank describes the interaction-wide arbitration result, and
-some interactions do not contain rank 2; requiring placement equality would
-discard valid fallback alternatives.</p>
+nor a CTR. When configured, selected rank-1 action and selected rank-2 action
+priority sums are retained as a separate arbitration diagnostic over rows where
+both values exist.</p>
+<p>Comparison scope is declarative and always decision-local. Keeping the default
+physical <code>Placement</code> field answers the same-placement opportunity question and
+may reduce comparable coverage. Removing <code>Placement</code> allows cross-placement
+selection within the same interaction. In every case the fallback chooses the
+smallest available rank
+greater than 1 inside the complete configured group rather than silently
+crossing one of its boundaries.</p>
 <h3 id="105-merge-and-derived-kpis">10.5 Merge and derived KPIs<a class="headerlink" href="#105-merge-and-derived-kpis" title="Permanent link">&para;</a></h3>
 <p>All stored states merge by addition. Canonical formulas include:</p>
-<div class="highlight"><pre><span></span><code>marginal CTR            = Clicks / Contacts
-comparable focal CTR    = ComparableClicks / ComparableContacts
-runner expected CTR     = RunnerPropensitySum / ComparableContacts
-runner coverage         = ComparableContacts / Contacts
+<div class="highlight"><pre><span></span><code>selected rank-1 action CTR = Clicks / Contacts
+comparable selected rank-1 action CTR = ComparableClicks / ComparableContacts
+selected rank-2 action expected CTR = RunnerPropensitySum / ComparableContacts
+selected rank-2 action coverage = ComparableContacts / Contacts
 response opportunity    = (ComparableClicks - RunnerPropensitySum)
                           / ComparableContacts
 priority opportunity gap = (FocalPriorityComparableSum
                             - RunnerPriorityComparableSum)
                            / PriorityComparableContacts
 </code></pre></div>
-<p>The comparable focal and runner curves use the same denominator and therefore
-belong on the same response-rate axis. Marginal CTR should remain visible as a
-separate all-contact curve or diagnostic because missing alternatives change
-its population.</p>
+<p>The comparable selected rank-1 action and selected rank-2 action curves use the
+same denominator and therefore belong on the same response-rate axis. Selected
+rank-1 action CTR over all contacts should remain visible as a separate curve or
+diagnostic because missing selected rank-2 actions change its population.</p>
 <h3 id="106-dependency-idempotency-and-limitations">10.6 Dependency, idempotency, and limitations<a class="headerlink" href="#106-dependency-idempotency-and-limitations" title="Permanent link">&para;</a></h3>
 <p>Sources bound to this processor must discover ISO <code>YYYY-MM-DD</code> chunk IDs. The
 target chunk remains the output and idempotency unit, while its input
@@ -4999,68 +5094,177 @@ the processor still enforces <code>(decision_time - window_hours, decision_time]
 by timestamp. Exactness requires UTC-aligned daily chunk IDs, or an equivalent
 partition convention whose displacement from decision time stays within the
 configured allowance. Extra dependency days only increase source I/O.</p>
+<p>For <code>window_granularity: daily</code>, that allowance is fixed at zero. The daily
+algorithm still resets an intra-chunk counter at each UTC decision-day boundary
+and deduplicates repeated historical contact identities across chunks in the
+planned closure, but it cannot reconstruct a decision omitted from that
+closure; zero lag is a source-partition contract, not proof inferred from the
+chunk id.</p>
 <p>Every transformed history chunk is validated independently for the decision
 time, customer, interaction, action, placement, rank, outcome, and any
 processor-filter fields before it is combined or checkpointed. This prevents a
 relaxed multi-day schema union from turning a missing history key into null and
-silently undercounting exposure frequency.</p>
+silently undercounting the number of impressions.</p>
 <p><code>checkpoint.mode</code> has these exact meanings:</p>
 <ul>
 <li><code>source_scan</code> (the compatibility default) retains no processor state and
   rereads the bounded source closure for each target.</li>
-<li><code>persistent_sharded</code> persists only filtered candidate rows and fields required
-  to repeat exact cross-partition normalization, frequency, deduplication,
-  grouping/state calculation, and within-interaction runner selection. <code>shards</code>
-  is an integer from <code>1</code> through <code>4096</code> and defaults to
-  <code>64</code>; larger values lower per-shard memory while increasing file count.</li>
+<li><code>persistent_sharded</code> is the compatibility name for schema-revision-8 bounded
+  rolling DuckDB state. Revision 8 is the default and only supported checkpoint
+  schema. One <code>rolling.duckdb</code> has the stable path
+  <code>.valuestream/state/frequency_response/source=&lt;source&gt;/processor=&lt;processor&gt;/rolling.duckdb</code>.
+  Schema, hashing, Polars-version, processor-config, and layout values do not
+  create directory levels. Schema and hashing revisions, Polars version,
+  processor computation hash, shard count, history projection, and customer
+  dtype are stored inside the database as compatibility metadata; DuckDB
+  version is audit-only. The complete current candidates remain
+  temporary; persisted exact history is filtered to exposed rank-1 rows,
+  normalized to one row per contact and source chunk (earliest decision time
+  and source order, or-combined outcome flags), and projected to customer,
+  interaction, action, placement, decision time, contact classification,
+  deterministic local order, source chunk id, and logical shard. Daily history
+  instead keeps one row per contact, canonical UTC decision day, and source
+  chunk. Propensity, priority, report/alternative groups, outcome, and every
+  rank&gt;1 candidate are omitted from history. <code>shards</code> is an integer from <code>1</code>
+  through <code>4096</code> and defaults to <code>64</code>; it controls a logical partition, not a
+  physical file count.</li>
 </ul>
+<p>Choosing <code>shards</code> trades fixed per-query cost against SQL working-set size:
+  each target day runs one normalization/window plan per staged shard, so many
+  shards on a small daily volume spend most of their time on per-plan
+  overhead, while few shards on a large volume materialize large per-shard
+  intermediates. As a starting point, keep the default <code>64</code> for daily volumes
+  in the tens of millions of candidate rows, and reduce toward <code>8</code>–<code>16</code> when a
+  day stays below roughly a million rows. Changing <code>shards</code> never republishes
+  aggregates; the rolling state is rebuilt automatically at the same path on
+  the next run.</p>
 <p>All fields under <code>checkpoint</code> are execution/storage settings. They remain in
 the full catalog hash for audit but are excluded from processor and source
 computation hashes:</p>
 <ul>
 <li><code>mode</code> selects the exact execution path;</li>
-<li><code>shards</code> selects a separately hashed physical checkpoint layout;</li>
-<li><code>retention_days</code> selects vacuum policy and is not part of artifact identity.</li>
+<li><code>shards</code> selects logical SQL partitioning within the same stable rolling
+  database;</li>
+<li><code>retention_days</code> selects bounded live-state policy and is not part of
+  artifact identity;</li>
+<li><code>threads</code> and <code>memory_limit</code> tune only the rolling DuckDB connection
+  (<code>SET threads</code> / <code>SET memory_limit</code>); when unset, DuckDB defaults apply.
+  They never trigger a state rebuild. <code>memory_limit</code> accepts a positive
+  absolute DuckDB size such as <code>512MiB</code>, <code>4GB</code>, or <code>1TB</code>; percentages and zero
+  limits are rejected before the writer opens.</li>
 </ul>
 <p>Changing these fields does not schedule aggregate replay. Unchanged targets
-remain skipped. After a shard change, vacuum may remove the old layout and the
-new layout is built lazily from authoritative IH for the bounded closure of the
-next new or invalidated target. <code>--force</code> is still an explicit request to
-rebuild both aggregates and state. Window, partition lag, columns, filters,
-outcome/contact rules, groups, and states remain result semantics and therefore
-do change computation hashes.</p>
-<p><code>retention_days</code> optionally sets the number of daily checkpoint partitions
-kept per processor. Its default is
-<code>ceil((window_hours + partition_lag_hours) / 24) + 1</code>, and an explicit value
-cannot be smaller. Retention runs after each terminal source run and during
-workspace vacuum. Replaying an older correction rebuilds any evicted IH
-partition for that bounded replay and may evict it again afterward.</p>
-<p>Persistent generations are source-fingerprint-addressed by the source,
-processor semantic computation identity, independent checkpoint-layout
-identity, chunk id, and raw-file fingerprint; their manifests also version the
-checkpoint schema, customer dtype, shard-hash algorithm/seeds, and Polars
-runtime used for native hashing. Before workers start, the parent validates the
-declared files, sizes, row counts, schemas, and SHA-256 digests once. Customer
-dtype must be stable across the bounded closure; normalize it in source
-transforms if exports drift. They live in the processor-state namespace,
-outside aggregates and ledger publication.
-Queries, reports, DuckDB views, API/MCP, and SQL export cannot read them. A
-missing, obsolete, or vacuumed generation is rebuilt from authoritative IH. A
-corrupt generation is rejected rather than used silently; a forced run safely
-replaces it from IH. A preparation failure fails only target chunks whose
-closures require that generation. Checkpoint retention therefore changes
-storage/rebuild cost rather than results.</p>
-<p>Customer hashing determines which exact shard to open; it does not anonymize
+remain skipped. After a shard change, valid incompatible state is replaced at
+the same path and initialized from authoritative IH when next opened. The new
+database is validated in a sibling temporary file before an atomic swap.
+<code>--force</code> explicitly rebuilds both aggregates and rolling state. Window,
+partition lag, columns, filters, outcome/contact rules, groups, and states
+remain result semantics and therefore do change computation hashes.</p>
+<p><code>window_granularity</code> selects how the exposure window is evaluated and is
+<strong>result semantics</strong> (part of the computation hash):</p>
+<ul>
+<li><code>exact</code> (default): the strict <code>(decision_time − window_hours, decision_time]</code>
+  timestamp interval at second precision.</li>
+<li><code>daily</code>: the exposure count for a focal contact is the number of exposed
+  rank-1 contacts of the same customer/action/placement over the last
+  <code>window_hours / 24</code> calendar days — the previous <code>window_hours / 24 − 1</code>
+  full days come from day-level history, and the focal day itself is
+  sequenced exactly. Days use the canonical UTC calendar date of the decision
+  time. <code>window_hours</code> must be divisible by 24 and <code>partition_lag_hours</code> must
+  be <code>0</code>. Current-day sequencing is partitioned by the canonical decision day,
+  so a physical source chunk that contains adjacent UTC decision days does not
+  carry a same-day counter across midnight. Rolling state persists contact
+  identity per calendar day (no time-of-day, source order, or outcome flags),
+  and the per-target SQL globally deduplicates that identity across retained
+  source chunks before replacing timestamp windowing with a per-day counter
+  join.
+  The approximation error is bounded by one day at the old edge of the
+  window; the <code>max_frequency</code> terminal bucket absorbs most of it.</li>
+</ul>
+<p><code>customer_sample</code> optionally evaluates the processor over a deterministic
+customer-hash subsample with otherwise exact semantics. Every row of a sampled
+customer is kept in both execution modes and in history. CTR by bucket remains
+an approximate ratio estimated from the sample; numerator and denominator
+totals can each be estimated by scaling by <code>1 / fraction</code>, but their finite-
+sample ratio is not generally unbiased. Sampling is result
+semantics: changing the effective <code>fraction</code> republishes the processor's
+aggregates. The fraction must be an exact multiple of <code>0.000001</code>, from that
+minimum through <code>1.0</code>, so the configured fraction, hash threshold, and
+<code>1 / fraction</code> scale always describe the same cohort. Membership hashes the
+customer key after conversion to Polars <code>String</code>, under fixed seeds and a fixed
+modulus. Text, integer, and dictionary-backed IDs share membership when they
+render to the same string. Distinct renderings such as integer <code>2</code> and float
+<code>2.0</code> remain distinct IDs; normalize such source drift explicitly in
+<code>pipelines.yaml</code>. The Polars version is pinned into the computation contract,
+so a Polars upgrade recomputes sampled processors rather than silently changing
+membership. <code>fraction: 1.0</code> retains the explicit author setting in the catalog
+but is computation-equivalent to omitting <code>customer_sample</code>. Small segments
+become noisy under sampling; prefer it for high-volume decision-support
+analytics.</p>
+<p><code>retention_days</code> optionally sets the number of source-day journal entries
+kept in each processor's rolling state. Its default is
+<code>ceil((window_hours + partition_lag_hours) / 24)</code>, and an explicit value cannot
+be smaller. The default 168-hour window with zero lag therefore retains only
+the last seven calendar source days; missing dates can leave fewer stored chunk
+entries. Retention pruning occurs in the rolling writer transaction after each
+committed target. The writer retains at most this many calendar source days of
+history and journal entries. Replaying an older correction
+rebuilds the required state from IH and may evict it again after the bounded
+replay.
+Opening an existing store applies the current retention even when every target
+is skipped. A forced run replaces configured rolling state even when discovery
+returns no chunks.</p>
+<p>The rolling journal records each retained/processed ISO-date chunk and its
+authoritative raw fingerprint. Before each pending target, it is reconciled
+with that target's expected ordered history closure. If the journal is an exact
+prefix, missing intermediate chunks—including chunks skipped by aggregate-
+ledger reuse—are prepared from IH in date order without publishing aggregates.
+Expired-prefix and state-ahead-suffix rows outside the target closure are
+removed first. A fingerprint or order/non-prefix mismatch resets the required
+closure. Valid but incompatible schema, hashing, processor, shard, or
+projection metadata reinitializes the stable database and rebuilds it from IH;
+checkpoint schemas are not migrated. Corrupt, identity-invalid, or customer-
+dtype-drifted state fails closed; <code>--force</code> replaces it and rebuilds from IH
+oldest-to-newest. Normalize customer dtype in source transforms if exports
+drift.</p>
+<p>Adding history, journal fingerprint, and retention deletes is one transaction.
+That acceleration-state commit may precede aggregate publication, but it never
+creates a chunk-ledger <code>ok</code> row or authorizes query visibility. DuckDB deletion
+is logical. Every 30 committed source days, <code>CHECKPOINT</code> runs on the same open
+connection to fold the expected WAL and partially reclaim or reuse deleted-row
+space. It does not close the writer, guarantee complete compaction, or guarantee
+an immediate file-size reduction. The WAL is expected while the writer is
+active or recovering from a crash and must not be removed independently.</p>
+<p>Queries, reports, DuckDB views, API/MCP, and SQL export cannot read
+<code>rolling.duckdb</code>. Missing state is initialized from authoritative IH. Corrupt
+state fails closed and can be replaced with a forced rebuild.
+Earlier per-day checkpoints are incompatible acceleration state and are
+rebuilt, not migrated, into schema-revision-8 state. Legacy nested identity
+layouts are likewise obsolete and may be vacuumed. A
+persistent frequency source processes target chunks oldest-to-newest in one
+process; a requested <code>--parallel</code> value is capped at one for that source while
+other source/processor semantics remain unchanged.</p>
+<p>Customer hashing determines which logical shard to query; it does not anonymize
 the original customer key retained for exact comparison. Treat the checkpoint
 as sensitive source-derived data, apply workspace access/encryption and
 retention controls, and tokenize or HMAC identifiers upstream where required.
 Sampling or sketches are not a transparent replacement because they cannot
-preserve exact event order and runner joins.</p>
+preserve exact event order and selected rank-2 action joins.
+The source's exact logical customer dtype governs hashing and drift checks;
+DuckDB's learned physical storage dtype is validated separately. Consequently,
+Polars <code>Categorical</code> and <code>Enum</code> keys may persist physically as <code>VARCHAR</code> without
+silently becoming compatible with a later <code>String</code> or differently ordered
+<code>Enum</code> source.</p>
+<p>The SQL is internal ingestion implementation, not governed workspace SQL. It
+is parameterized by the processor's typed semantic contract and cannot be
+called by reports, API/MCP, DuckDB aggregate views, or SQL export. The complete
+physical decision is recorded in
+<a href="../../concepts/adr/0008-bounded-rolling-duckdb-state/">ADR 0008</a>.</p>
 <p>A late positive outcome that arrives in a later chunk is not allowed to rewrite
 an already materialized earlier-day contact; recompute the affected source
 history when corrected source files replace the original export. Its changed raw
-fingerprint creates a new checkpoint generation in persistent mode and
-invalidates the same bounded target set in both modes.</p>
+fingerprint invalidates the same bounded target set in both modes and forces
+rolling-state reconciliation/rebuild in persistent mode.</p>
 <p>An impression is only an exposure proxy unless the source explicitly guarantees
 viewability. The processor does not infer dismisses, irritation, or a dismiss
 rate from ordinary IH outcomes. Such a curve requires an explicit dismiss

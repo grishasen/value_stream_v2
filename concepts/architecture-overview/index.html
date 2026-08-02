@@ -1851,6 +1851,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0008-bounded-rolling-duckdb-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0008 Bounded rolling DuckDB state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2590,6 +2618,8 @@ The Streamlit app entry point is <code>src/valuestream/ui/app.py</code>.</p>
     ...
   .valuestream/
     state/                 # optional, non-queryable processor checkpoints
+      frequency_response/
+        source=&lt;source_id&gt;/processor=&lt;processor_id&gt;/rolling.duckdb
   meta/
     chunks.duckdb
     pipeline_runs.duckdb
@@ -2660,15 +2690,23 @@ holds the same source lock, verifies committed chunk fingerprints, lineage,
 files, and computation hashes, finalizes the interrupted run, and reuses only
 the verified chunks.</p>
 <p>Processor checkpoints are ingestion-only acceleration state. They are
-versioned, source-fingerprint-addressed, bounded by configured retention, and
-rebuildable from the authoritative source;
+versioned internally, bounded by configured retention, and rebuildable from the
+authoritative source. Persistent frequency state uses checkpoint schema
+revision 8—the default and only supported revision—and one stable database path
+per source and processor. Schema, hash, config, shard, projection, and version
+metadata stay inside that database rather than creating path levels. Polars
+version participates in shard compatibility; DuckDB version is audit-only.
+The raw fingerprint journal is likewise inside the database;
 they do not create a successful chunk marker and no report/query path reads
 them. Aggregate-first is therefore the serving contract even when a processor
 retains the minimal identity state required for exact bounded computation.
 Checkpoint mode, shard count, and retention remain visible in the full catalog
-identity but do not change aggregate/source computation hashes. Shard count has
-its own state-layout identity; a new layout is prepared lazily when a new or
-invalidated bounded target next needs it.</p>
+identity but do not change aggregate/source computation hashes. A valid
+incompatible state contract reinitializes the same stable database lazily when
+a bounded target next needs it; corrupt state still fails closed. Chronological
+commits prune old rows each day, and every 30 committed days run DuckDB
+<code>CHECKPOINT</code> without closing the source-run connection. The writer closes once
+at the source-run boundary.</p>
 <h2 id="processor-and-state-model">Processor and State Model<a class="headerlink" href="#processor-and-state-model" title="Permanent link">&para;</a></h2>
 <p>Processors define the durable aggregate state that metrics can query. Current
 processor families include:</p>
@@ -2710,7 +2748,7 @@ processor families include:</p>
 </tr>
 <tr>
 <td><code>frequency_response</code></td>
-<td>Exact response/opportunity curves by bounded exposure frequency</td>
+<td>Exact response/opportunity curves by bounded number of impressions</td>
 </tr>
 </tbody>
 </table>

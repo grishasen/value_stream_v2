@@ -1686,6 +1686,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0008-bounded-rolling-duckdb-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0008 Bounded rolling DuckDB state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2613,6 +2641,10 @@ substituted value is a declared, bounded parameter.</p>
 <li>Apply explicitly. If materialization is required, follow the named source
    handoff to Data Load and start the run there.</li>
 </ol>
+<p>When the recipe's default metric ID is retained, installation also retains the
+recipe-authored display label. Choosing a custom metric ID derives the initial
+display label from that ID; the label can then be edited independently without
+renaming the metric.</p>
 <p>Configuration Builder writes any proposed processor state first, followed by
 the materialized metric and optional tile. All writes and post-write catalog
 validation run inside one rollback boundary: a write or validation failure
@@ -2802,43 +2834,43 @@ internal state-ID choice.</p>
 </tr>
 <tr>
 <td><code>contact_policy.frequency_marginal_ctr</code></td>
-<td>Focal marginal CTR by exposure bucket</td>
+<td>Selected rank-1 action CTR by number of impressions</td>
 <td>Exact <code>Clicks</code> and <code>Contacts</code> states</td>
 <td>Approximate fixed-window interpretation</td>
 <td>Line</td>
 </tr>
 <tr>
 <td><code>contact_policy.frequency_comparable_ctr</code></td>
-<td>Focal CTR on runner-comparable contacts</td>
+<td>Selected rank-1 action CTR on contacts with a selected rank-2 action</td>
 <td>Exact <code>ComparableClicks</code> and <code>ComparableContacts</code> states</td>
 <td>Approximate fixed-window interpretation</td>
 <td>Line</td>
 </tr>
 <tr>
 <td><code>contact_policy.runner_up_expected_ctr</code></td>
-<td>Mean selected-runner raw Propensity</td>
+<td>Mean selected rank-2 action raw Propensity</td>
 <td>Exact <code>RunnerPropensitySum</code> and <code>ComparableContacts</code> states</td>
 <td>Approximate fixed-window interpretation</td>
 <td>Line</td>
 </tr>
 <tr>
 <td><code>contact_policy.runner_up_coverage</code></td>
-<td>Runner-comparable share of focal contacts</td>
+<td>Selected rank-2 action coverage of selected rank-1 action contacts</td>
 <td>Exact <code>ComparableContacts</code> and <code>Contacts</code> states</td>
 <td>Approximate fixed-window interpretation</td>
 <td>KPI card</td>
 </tr>
 <tr>
 <td><code>contact_policy.response_opportunity_margin</code></td>
-<td>Comparable focal response minus runner expectation</td>
+<td>Selected rank-1 action response minus selected rank-2 action expectation</td>
 <td>Exact <code>ComparableClicks</code>, <code>RunnerPropensitySum</code>, and shared <code>ComparableContacts</code> states</td>
 <td>Approximate fixed-window interpretation</td>
 <td>Bar</td>
 </tr>
 <tr>
 <td><code>contact_policy.priority_opportunity_gap</code></td>
-<td>Comparable focal-minus-runner Priority index</td>
-<td>Exact focal/runner comparable Priority sums and <code>PriorityComparableContacts</code></td>
+<td>Selected rank-1 action minus selected rank-2 action Priority index</td>
+<td>Exact comparable Priority sums and <code>PriorityComparableContacts</code></td>
 <td>Approximate arbitration diagnostic</td>
 <td>Bar</td>
 </tr>
@@ -2850,15 +2882,18 @@ generic count or sum as a substitute for those population contracts. Their
 line and bar recommendations use <code>ExposureBucket</code>, whose value is an upstream
 fixed-window approximation; changing a report date filter does not recompute
 customer contact history.</p>
-<p><code>Contacts</code> are derived from the processor's configured exposure outcomes.
-When that outcome is <code>Impression</code>, it is an impression proxy rather than
-measured viewability; dismiss telemetry is never inferred when the source does
-not provide it. Runner selection means exact rank 2 when present, otherwise the
-next recorded rank, and runner response uses raw <code>Propensity</code> as the
-probability. Comparable focal CTR, runner expected CTR, and response opportunity
-margin use the same <code>ComparableContacts</code> denominator. <code>Priority</code> is retained
-only for the separate, neutral arbitration index; it is never treated as CTR
-or probability.</p>
+<p><code>Contacts</code> are derived from the processor's configured exposure outcomes. The
+user-facing number of impressions is therefore based on Impression proxies rather
+than measured viewability; dismiss telemetry is never inferred when the source does
+not provide it. Within the processor's implicit customer + interaction keys
+plus the physical fields configured in <code>alternative_group_by</code>, “selected rank-2 action” means
+exact rank 2 when present, otherwise the next recorded rank greater than 1;
+its response uses raw <code>Propensity</code> as the probability. <code>Placement</code> is the
+default additional field, so comparison stays inside one decision and
+placement. Comparable selected rank-1 action CTR, selected
+rank-2 action expected CTR, and response opportunity margin use the same
+<code>ComparableContacts</code> denominator. <code>Priority</code> is retained only for the separate,
+neutral arbitration index; it is never treated as CTR or probability.</p>
 <p>The unique-entity recipe prefers CPC states created by current processor
 defaults while accepting HLL and Theta states. Theta is useful when the same
 persisted set also supports intersections or differences. The recipe does not

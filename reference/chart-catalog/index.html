@@ -1686,6 +1686,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0008-bounded-rolling-duckdb-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0008 Bounded rolling DuckDB state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3681,7 +3709,7 @@ primitives except for the native Streamlit table on the Reports surface:</p>
 <tr>
 <td><code>combo</code></td>
 <td><code>x, secondary_metric</code>; Y comes from <code>metric</code></td>
-<td>Bar + line dual-axis comparison by default. Set <code>primary_mark: line</code> and <code>shared_y_axis: true</code> for two directly comparable curves such as observed and expected response probability; use <code>y2_axis_title</code> only in dual-axis mode.</td>
+<td>Bar + line dual-axis comparison by default. Set <code>primary_mark: line</code> and <code>shared_y_axis: true</code> for two directly comparable curves such as observed and expected response probability; use <code>y2_axis_title</code> only in dual-axis mode. <code>facet_row</code> and <code>facet_col</code> create a subplot grid: both metrics and every color group remain inside each facet, while colors and legend entries stay consistent across the grid.</td>
 </tr>
 <tr>
 <td><code>interval</code></td>
