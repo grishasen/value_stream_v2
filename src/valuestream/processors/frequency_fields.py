@@ -19,6 +19,8 @@ RUNNER_AVAILABLE_COLUMN = "__valuestream_runner_available"
 CHECKPOINT_PARTITION_ORDER_COLUMN = "__valuestream_frequency_checkpoint_partition_order"
 CHECKPOINT_LOCAL_ORDER_COLUMN = "__valuestream_frequency_checkpoint_local_order"
 CHECKPOINT_SHARD_COLUMN = "__valuestream_checkpoint_shard"
+DECISION_DAY_COLUMN = "__valuestream_frequency_decision_day"
+PRIOR_EXPOSURES_COLUMN = "__valuestream_frequency_prior_exposures"
 
 
 __all__ = [
@@ -28,9 +30,11 @@ __all__ = [
     "CHECKPOINT_PARTITION_ORDER_COLUMN",
     "CHECKPOINT_SHARD_COLUMN",
     "CONTACT_ORDER_COLUMN",
+    "DECISION_DAY_COLUMN",
     "EXPOSED_COLUMN",
     "EXPOSURE_SEQUENCE_COLUMN",
     "POSITIVE_COLUMN",
+    "PRIOR_EXPOSURES_COLUMN",
     "RANK_COLUMN",
     "ROW_ORDER_COLUMN",
     "RUNNER_AVAILABLE_COLUMN",

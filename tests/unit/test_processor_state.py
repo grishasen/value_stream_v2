@@ -250,6 +250,96 @@ def test_commit_promotes_only_rank1_exposed_history_and_journals(tmp_path: Path)
 
 
 @pytest.mark.unit
+def test_duckdb_settings_apply_to_the_rolling_connection(tmp_path: Path) -> None:
+    checkpoint = RollingCheckpoint(
+        tmp_path,
+        **PATH_IDENTITY,
+        config_hash=CONFIG_HASH,
+        customer_column="CustomerID",
+        customer_dtype="String",
+        shard_count=8,
+        retention_days=7,
+        history_projection=HISTORY_SPEC,
+        duckdb_threads=2,
+        duckdb_memory_limit="512MiB",
+    )
+    with checkpoint:
+        threads = checkpoint.connection.execute("SELECT current_setting('threads')").fetchone()
+        memory = checkpoint.connection.execute(
+            "SELECT current_setting('memory_limit')"
+        ).fetchone()
+    assert threads == (2,)
+    assert memory is not None
+    assert memory[0] == "512.0 MiB"
+
+    with pytest.raises(ValueError, match="duckdb_threads"):
+        RollingCheckpoint(
+            tmp_path,
+            **PATH_IDENTITY,
+            config_hash=CONFIG_HASH,
+            customer_column="CustomerID",
+            customer_dtype="String",
+            shard_count=8,
+            retention_days=7,
+            history_projection=HISTORY_SPEC,
+            duckdb_threads=0,
+        )
+    with pytest.raises(ValueError, match="duckdb_memory_limit"):
+        RollingCheckpoint(
+            tmp_path,
+            **PATH_IDENTITY,
+            config_hash=CONFIG_HASH,
+            customer_column="CustomerID",
+            customer_dtype="String",
+            shard_count=8,
+            retention_days=7,
+            history_projection=HISTORY_SPEC,
+            duckdb_memory_limit="lots",
+        )
+
+
+@pytest.mark.unit
+def test_commit_normalizes_history_to_one_row_per_key_with_min_and_bool_or(
+    tmp_path: Path,
+) -> None:
+    normalized_spec = HistoryProjectionSpec(
+        columns=("CustomerID", "DecisionTime", "LocalOrder", "Rank", "Exposed", "Positive"),
+        rank_column="Rank",
+        exposed_column="Exposed",
+        min_columns=("DecisionTime", "LocalOrder"),
+        bool_or_columns=("Exposed", "Positive"),
+    )
+    assert normalized_spec.key_columns == ("CustomerID", "Rank")
+    duplicated = pl.DataFrame(
+        {
+            # customer-a appears as an impression row and a later click row of
+            # the same contact; the committed history keeps one merged row.
+            "CustomerID": ["customer-a", "customer-a", "customer-b"],
+            "DecisionTime": [5, 3, 9],
+            "LocalOrder": [0, 1, 2],
+            "Rank": [1, 1, 1],
+            "Exposed": [True, True, True],
+            "Positive": [False, True, False],
+        }
+    )
+    with _rolling(tmp_path, history_projection=normalized_spec) as checkpoint:
+        checkpoint.stage_current(
+            duplicated,
+            chunk_id="2026-07-31",
+            raw_fingerprint=_fingerprint(3),
+        )
+        checkpoint.commit_staged()
+        rows = checkpoint.connection.execute(
+            f'SELECT "CustomerID", "DecisionTime", "LocalOrder", "Positive", "Exposed" '
+            f'FROM "{HISTORY_TABLE}" ORDER BY "CustomerID"'
+        ).fetchall()
+    assert rows == [
+        ("customer-a", 3, 0, True, True),
+        ("customer-b", 9, 2, False, True),
+    ]
+
+
+@pytest.mark.unit
 def test_abort_discards_temp_current_without_mutating_history(tmp_path: Path) -> None:
     with _rolling(tmp_path) as checkpoint:
         _stage_and_commit(checkpoint, "2026-07-29", _fingerprint(1))
@@ -740,7 +830,7 @@ def test_shard_count_change_reinitializes_same_stable_database(tmp_path: Path) -
 
 @pytest.mark.unit
 def test_unsupported_schema_revision_reinitializes_to_current_only(tmp_path: Path) -> None:
-    assert CHECKPOINT_SCHEMA_REVISION == 7
+    assert CHECKPOINT_SCHEMA_REVISION == 8
     with _rolling(tmp_path) as checkpoint:
         _stage_and_commit(checkpoint, "2026-07-30", _fingerprint(1))
         path = checkpoint.path

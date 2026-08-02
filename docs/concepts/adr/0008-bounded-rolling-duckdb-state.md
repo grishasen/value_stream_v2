@@ -28,7 +28,7 @@ unambiguous rebuild path from authoritative Interaction History.
 
 `frequency_response.checkpoint.mode: persistent_sharded` remains the catalog
 spelling for compatibility. The current and only supported checkpoint schema
-is revision 7. It selects **bounded rolling DuckDB state**, not immutable
+is revision 8. It selects **bounded rolling DuckDB state**, not immutable
 per-day shard files.
 
 There is one stable database path for each source and processor:
@@ -47,8 +47,14 @@ audit metadata; DuckDB itself validates whether it can open the storage file.
 Raw-file fingerprints and chunk ids live in the transactional journal rather
 than in the path. The state contains:
 
-- bounded exposed rank-1 history, including its source `chunk_id` and persisted
-  logical customer shard; and
+- bounded exposed rank-1 history normalized to one row per contact and source
+  day (earliest decision time and source order, or-combined outcome flags —
+  MIN/BOOL_OR are associative, so per-day rows merge across days exactly like
+  the raw rows they replace), including its source `chunk_id` and persisted
+  logical customer shard. Under `window_granularity: daily` the projection
+  narrows further to contact identity plus the canonical UTC calendar day,
+  and the per-target SQL reduces it to per-day exposure counters instead of
+  joining history into the contact union; and
 - a transactional journal mapping every retained/processed ISO-date chunk to
   the authoritative raw fingerprint, alongside database-level state-schema
   metadata needed for validation.
@@ -73,10 +79,14 @@ reference; both paths must produce equivalent aggregate states, subject only to
 ordinary floating-point reduction tolerance.
 
 Before either execution path performs contact normalization, decision time is
-canonicalized to timezone-naive UTC at nanosecond precision. Calendar-day
-derivation interprets that representation as UTC before converting to the
-configured reporting timezone. This also makes grouping or state predicates on
-the raw decision-time field identical between `source_scan` and rolling SQL.
+canonicalized to timezone-naive UTC truncated to whole seconds. Sub-second
+precision is deliberately not semantic for frequency windows: whole-second
+instants are exact in both engines, so DuckDB interval arithmetic and ASOF
+comparisons match Polars bit-for-bit instead of relying on sub-microsecond
+timestamp behavior. Calendar-day derivation interprets that representation as
+UTC before converting to the configured reporting timezone. This also makes
+grouping or state predicates on the raw decision-time field identical between
+`source_scan` and rolling SQL.
 Other dictionary-backed projected fields are canonicalized to strings in the
 source-scan relational tail to match DuckDB's Arrow `VARCHAR` representation.
 The customer key is still hashed in its original logical dtype before crossing
@@ -151,7 +161,7 @@ into `rolling.duckdb`; operators and vacuum must not delete a live WAL
 independently.
 
 Earlier per-day checkpoints, nested identity layouts, and checkpoint schema
-revisions before 7 are unsupported acceleration artifacts. They are not
+revisions before 8 are unsupported acceleration artifacts. They are not
 migrated; the rolling database is reconstructed from authoritative IH and
 obsolete layouts may be vacuumed. `checkpoint.mode`, `checkpoint.shards`, and
 `checkpoint.retention_days` remain execution/storage policy outside processor

@@ -250,7 +250,7 @@ processors still consume only the target chunk.
 
 With `checkpoint.mode: source_scan`, the runner transforms that closure into an
 ephemeral current/history frame for the frequency processor. With
-`checkpoint.mode: persistent_sharded`, schema revision 7 opens the one stable
+`checkpoint.mode: persistent_sharded`, schema revision 8 opens the one stable
 `rolling.duckdb` addressed by source and processor and keeps its connection
 alive for the complete source run. Revision 7 is the default and only supported
 checkpoint schema. Targets execute in ascending ISO-date order. Polars streams the
@@ -279,9 +279,9 @@ pruned after every chronological source-day commit. Every 30 commits,
 `CHECKPOINT` runs on the same open connection; the writer closes once at the
 source-run boundary. Both execution modes publish the same mergeable grouped
 states, and reports cannot address the state namespace.
-Both paths canonicalize decision time to timezone-naive UTC nanoseconds before
-normalization; reporting-day derivation reattaches UTC before calendar-timezone
-conversion.
+Both paths canonicalize decision time to timezone-naive UTC whole seconds
+before normalization; reporting-day derivation reattaches UTC before
+calendar-timezone conversion.
 This is specified by [ADR 0007](adr/0007-bounded-lookback-processors.md) and
 [ADR 0008](adr/0008-bounded-rolling-duckdb-state.md).
 

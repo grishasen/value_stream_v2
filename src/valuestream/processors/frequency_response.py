@@ -18,6 +18,7 @@ from valuestream.processors.context import (
     ChunkContext,
 )
 from valuestream.processors.outcomes import compatible_values, is_in_values
+from valuestream.store.processor_state import HistoryProjectionSpec
 from valuestream.utils.timer import timed
 
 VIRTUAL_COLUMNS = model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS
@@ -25,6 +26,8 @@ DERIVED_GROUP_COLUMNS = frozenset({"Day"})
 
 _RANK_COLUMN = frequency_fields.RANK_COLUMN
 _ROW_ORDER_COLUMN = frequency_fields.ROW_ORDER_COLUMN
+_DECISION_DAY_COLUMN = frequency_fields.DECISION_DAY_COLUMN
+_PRIOR_EXPOSURES_COLUMN = frequency_fields.PRIOR_EXPOSURES_COLUMN
 _POSITIVE_COLUMN = frequency_fields.POSITIVE_COLUMN
 _EXPOSED_COLUMN = frequency_fields.EXPOSED_COLUMN
 _SEEN_CURRENT_COLUMN = frequency_fields.SEEN_CURRENT_COLUMN
@@ -172,8 +175,37 @@ class FrequencyResponseProcessor:
 
         source_schema = frame.collect_schema()
         self._validate_input_schema(source_schema)
+        if self.config.window_granularity == "daily":
+            return self._chunk_aggregate_daily_lazy(frame, source_schema, ctx)
         contacts = self._prepare_contacts(frame, source_schema)
         return self._aggregate_contacts_lazy(contacts, ctx)
+
+    def _chunk_aggregate_daily_lazy(
+        self,
+        frame: pl.LazyFrame,
+        source_schema: pl.Schema,
+        ctx: ChunkContext,
+    ) -> pl.LazyFrame:
+        """Aggregate one marked chunk with day-granular exposure history.
+
+        Unlike the exact path, history rows never merge with current contacts:
+        they only contribute per-day exposure counters. The current day itself
+        is still normalized and sequenced exactly.
+        """
+
+        time_column = self.config.time.property
+        prepared = self._prepare_checkpoint_rows(frame, source_schema)
+        canonical = self._canonicalize_dictionary_columns(
+            self._canonicalize_decision_time(prepared, source_schema[time_column])
+        )
+        dated = canonical.with_columns(
+            pl.col(time_column).dt.date().alias(_DECISION_DAY_COLUMN)
+        )
+        current = dated.filter(pl.col(TARGET_CHUNK_COLUMN)).drop(_DECISION_DAY_COLUMN)
+        history = dated.filter(~pl.col(TARGET_CHUNK_COLUMN))
+        counters = self._daily_history_counters(history)
+        contacts = self._normalize_contacts(current)
+        return self._aggregate_daily_contacts_lazy(contacts, counters, ctx)
 
     def checkpoint_contacts_lazy(self, frame: pl.LazyFrame) -> pl.LazyFrame:
         """Prepare one current source chunk for rolling checkpoint staging.
@@ -189,31 +221,79 @@ class FrequencyResponseProcessor:
         marked = frame.with_columns(pl.lit(True).alias(TARGET_CHUNK_COLUMN))
         marked_schema = marked.collect_schema()
         prepared = self._prepare_checkpoint_rows(marked, marked_schema)
-        return self._canonicalize_decision_time(
+        canonical = self._canonicalize_decision_time(
             prepared,
             source_schema[self.config.time.property],
         )
+        if self.config.window_granularity == "daily":
+            # Day-granular history is keyed by the canonical UTC calendar day,
+            # so it must be a physical staged column for the commit projection.
+            canonical = canonical.with_columns(
+                pl.col(self.config.time.property).dt.date().alias(_DECISION_DAY_COLUMN)
+            )
+        return canonical
 
     def checkpoint_history_contacts_lazy(self, frame: pl.LazyFrame) -> pl.LazyFrame:
-        """Project staged target candidates to the exact bounded-history payload."""
+        """Project staged target candidates to the exact bounded-history payload.
 
-        history_projection, rank_column, exposed_column = self.checkpoint_history_projection()
-        history_columns = list(history_projection)
+        Mirrors the SQL commit projection: exposed rank-1 rows collapse to one
+        row per contact with the earliest decision time and source order and
+        or-combined outcome flags. MIN/BOOL_OR are associative, so per-day
+        normalized rows merge across days exactly like the raw rows they
+        replace.
+        """
+
+        projection = self.checkpoint_history_projection()
         schema = frame.collect_schema()
-        missing = sorted(set(history_columns) - set(schema.names()))
+        missing = sorted(set(projection.columns) - set(schema.names()))
         if missing:
             raise ValueError(
                 f"frequency_response processor {self.id!r} target checkpoint is missing "
                 f"history column(s): {', '.join(missing)}"
             )
-        return frame.filter(pl.col(exposed_column) & (pl.col(rank_column) == 1)).select(
-            history_columns
+        filtered = frame.filter(
+            pl.col(projection.exposed_column) & (pl.col(projection.rank_column) == 1)
+        )
+        aggregations: list[pl.Expr] = []
+        for column in projection.columns:
+            if column in projection.min_columns:
+                aggregations.append(pl.col(column).min().alias(column))
+            elif column in projection.bool_or_columns:
+                aggregations.append(pl.col(column).any().alias(column))
+        return (
+            filtered.group_by(list(projection.key_columns), maintain_order=True)
+            .agg(aggregations)
+            .select(projection.columns)
         )
 
-    def checkpoint_history_projection(self) -> tuple[tuple[str, ...], str, str]:
-        """Return the persisted history fields and its rank/exposure selectors."""
+    def checkpoint_history_projection(self) -> HistoryProjectionSpec:
+        """Return the persisted normalized history contract."""
 
         columns = self.config.columns
+        if self.config.window_granularity == "daily":
+            # Day-granular history needs only contact identity per calendar
+            # day: the SQL plan reduces it to per-day exposure counters, and
+            # exact time-of-day, source order, and outcome flags never affect
+            # a later target.
+            daily_columns = tuple(
+                dict.fromkeys(
+                    [
+                        columns.customer,
+                        columns.interaction,
+                        columns.action,
+                        columns.placement,
+                        _DECISION_DAY_COLUMN,
+                        _RANK_COLUMN,
+                        _EXPOSED_COLUMN,
+                    ]
+                )
+            )
+            return HistoryProjectionSpec(
+                columns=daily_columns,
+                rank_column=_RANK_COLUMN,
+                exposed_column=_EXPOSED_COLUMN,
+                bool_or_columns=(_EXPOSED_COLUMN,),
+            )
         history_columns = tuple(
             dict.fromkeys(
                 [
@@ -229,7 +309,13 @@ class FrequencyResponseProcessor:
                 ]
             )
         )
-        return history_columns, _RANK_COLUMN, _EXPOSED_COLUMN
+        return HistoryProjectionSpec(
+            columns=history_columns,
+            rank_column=_RANK_COLUMN,
+            exposed_column=_EXPOSED_COLUMN,
+            min_columns=(self.config.time.property, _ROW_ORDER_COLUMN),
+            bool_or_columns=(_POSITIVE_COLUMN, _EXPOSED_COLUMN),
+        )
 
     @timed
     def checkpoint_aggregate_lazy(
@@ -240,6 +326,8 @@ class FrequencyResponseProcessor:
     ) -> pl.LazyFrame:
         """Reference aggregation over prepared current and history chunks."""
 
+        if self.config.window_granularity == "daily":
+            return self._checkpoint_aggregate_daily_lazy(current, history, ctx)
         columns = self.config.columns
         prepared: list[pl.LazyFrame] = []
         for partition_order, historical in enumerate(history):
@@ -291,6 +379,141 @@ class FrequencyResponseProcessor:
         normalized = self._normalize_contacts(contacts)
         return self._aggregate_contacts_lazy(normalized, ctx)
 
+    def _checkpoint_aggregate_daily_lazy(
+        self,
+        current: pl.LazyFrame,
+        history: list[pl.LazyFrame],
+        ctx: ChunkContext,
+    ) -> pl.LazyFrame:
+        """Reference daily aggregation over a staged current chunk and history.
+
+        ``history`` frames must carry the day-granular projection columns
+        (contact identity plus canonical decision day).
+        """
+
+        marked = current.with_columns(pl.lit(True).alias(TARGET_CHUNK_COLUMN))
+        schema = marked.collect_schema()
+        if _DECISION_DAY_COLUMN in schema.names():
+            marked = marked.drop(_DECISION_DAY_COLUMN)
+        contacts = self._normalize_contacts(self._canonicalize_dictionary_columns(marked))
+        counters: pl.LazyFrame | None = None
+        if history:
+            history_rows = pl.concat(history, how="diagonal_relaxed").filter(
+                pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)
+            )
+            counters = self._daily_history_counters(
+                self._canonicalize_dictionary_columns(history_rows)
+            )
+        return self._aggregate_daily_contacts_lazy(contacts, counters, ctx)
+
+    def _daily_history_counters(self, history: pl.LazyFrame) -> pl.LazyFrame:
+        """Reduce exposed rank-1 history rows to per-day exposure counters."""
+
+        columns = self.config.columns
+        contact_identity = [
+            columns.customer,
+            columns.interaction,
+            columns.action,
+            columns.placement,
+            _DECISION_DAY_COLUMN,
+        ]
+        counter_keys = [
+            columns.customer,
+            columns.action,
+            columns.placement,
+            _DECISION_DAY_COLUMN,
+        ]
+        return (
+            history.select(contact_identity)
+            .unique()
+            .group_by(counter_keys)
+            .agg(pl.len().cast(pl.Int64).alias(_PRIOR_EXPOSURES_COLUMN))
+        )
+
+    def _aggregate_daily_contacts_lazy(
+        self,
+        contacts: pl.LazyFrame,
+        counters: pl.LazyFrame | None,
+        ctx: ChunkContext,
+    ) -> pl.LazyFrame:
+        """Build daily additive states from current contacts and day counters."""
+
+        exposures = self._with_daily_exposure_frequency(contacts, counters)
+        runners = self._runner_candidates(contacts)
+        focal = exposures.filter(
+            pl.col(_SEEN_CURRENT_COLUMN)
+            & ~pl.col(_SEEN_HISTORY_COLUMN)
+            & pl.col(_EXPOSED_COLUMN)
+            & (pl.col(_RANK_COLUMN) == 1)
+        ).join(
+            runners,
+            on=self.config.alternative_group_columns,
+            how="left",
+            nulls_equal=True,
+        )
+        return self.aggregate_focal_lazy(focal, ctx)
+
+    def _with_daily_exposure_frequency(
+        self,
+        contacts: pl.LazyFrame,
+        counters: pl.LazyFrame | None,
+    ) -> pl.LazyFrame:
+        """Bucket = prior full-day exposures plus the exact intra-day sequence."""
+
+        columns = self.config.columns
+        time_column = self.config.time.property
+        exposure_keys = [columns.customer, columns.action, columns.placement]
+        window_days = self.config.window_days
+        ordered = contacts.filter(pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)).sort(
+            [*exposure_keys, time_column, columns.interaction, _CONTACT_ORDER_COLUMN]
+        )
+        ordered = ordered.with_columns(
+            pl.col(time_column)
+            .cum_count()
+            .over(exposure_keys)
+            .cast(pl.Int64)
+            .alias(_EXPOSURE_SEQUENCE_COLUMN),
+            pl.col(time_column).dt.date().alias(_DECISION_DAY_COLUMN),
+        )
+        sequence = pl.col(_EXPOSURE_SEQUENCE_COLUMN)
+        if counters is None:
+            return ordered.with_columns(
+                sequence.clip(upper_bound=self.config.max_frequency)
+                .cast(pl.Int64)
+                .alias(self.config.frequency_column)
+            ).drop(_DECISION_DAY_COLUMN)
+        counter_day = "__valuestream_frequency_counter_day"
+        # Date columns compare as days-since-epoch integers, mirroring the SQL
+        # ``counter_day > focal_day - window AND counter_day < focal_day``.
+        prior = (
+            ordered.select([*exposure_keys, _DECISION_DAY_COLUMN])
+            .unique()
+            .join(
+                counters.rename({_DECISION_DAY_COLUMN: counter_day}),
+                on=exposure_keys,
+                how="inner",
+            )
+            .filter(
+                (
+                    pl.col(counter_day).cast(pl.Int32)
+                    > pl.col(_DECISION_DAY_COLUMN).cast(pl.Int32) - window_days
+                )
+                & (pl.col(counter_day) < pl.col(_DECISION_DAY_COLUMN))
+            )
+            .group_by([*exposure_keys, _DECISION_DAY_COLUMN])
+            .agg(pl.col(_PRIOR_EXPOSURES_COLUMN).sum())
+        )
+        return (
+            ordered.join(prior, on=[*exposure_keys, _DECISION_DAY_COLUMN], how="left")
+            .with_columns(
+                (sequence + pl.col(_PRIOR_EXPOSURES_COLUMN).fill_null(0))
+                .clip(upper_bound=self.config.max_frequency)
+                .cast(pl.Int64)
+                .alias(self.config.frequency_column)
+            )
+            .drop(_DECISION_DAY_COLUMN, _PRIOR_EXPOSURES_COLUMN)
+        )
+
     def _prepare_contacts(self, frame: pl.LazyFrame, source_schema: pl.Schema) -> pl.LazyFrame:
         """Filter, classify, project, and normalize transformed source contacts."""
 
@@ -311,12 +534,16 @@ class FrequencyResponseProcessor:
         time_column = self.config.time.property
         timestamp = pl.col(time_column)
         if isinstance(dtype, pl.Datetime) and dtype.time_zone is not None:
-            # DuckDB stores TIMESTAMPTZ at microsecond precision. Convert aware
-            # instants to naive UTC before Arrow streaming so TIMESTAMP_NS keeps
-            # strict sub-microsecond window boundaries. The aggregation tail
-            # interprets this canonical naive representation as UTC.
+            # Convert aware instants to naive UTC before Arrow streaming; the
+            # aggregation tail interprets this canonical representation as UTC.
             timestamp = timestamp.dt.convert_time_zone("UTC").dt.replace_time_zone(None)
-        return frame.with_columns(timestamp.cast(pl.Datetime("ns")).alias(time_column))
+        # Sub-second precision is not semantic for frequency windows. Whole
+        # seconds are exact in both engines, so `time - INTERVAL` arithmetic and
+        # ASOF comparisons in DuckDB match Polars bit-for-bit, while raw inputs
+        # of any datetime unit canonicalize to one identical representation.
+        return frame.with_columns(
+            timestamp.dt.truncate("1s").cast(pl.Datetime("us")).alias(time_column)
+        )
 
     @staticmethod
     def _canonicalize_dictionary_columns(frame: pl.LazyFrame) -> pl.LazyFrame:
@@ -384,7 +611,21 @@ class FrequencyResponseProcessor:
                     )
                 )
             )
-            .filter(
+        )
+        if self.config.customer_sample is not None:
+            # Deterministic customer subsample, applied identically in
+            # source-scan and rolling modes and to current and history rows
+            # alike, so a sampled customer's contact set stays complete.
+            source = source.filter(
+                pl.col(columns.customer).hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
+                % pl.lit(model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS, dtype=pl.UInt64)
+                < pl.lit(
+                    self.config.customer_sample.sample_threshold,
+                    dtype=pl.UInt64,
+                )
+            )
+        source = (
+            source.filter(
                 pl.col(TARGET_CHUNK_COLUMN)
                 | ((pl.col(_RANK_COLUMN) == 1) & pl.col(_EXPOSED_COLUMN))
             )

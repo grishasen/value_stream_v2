@@ -95,7 +95,7 @@ the verified chunks.
 Processor checkpoints are ingestion-only acceleration state. They are
 versioned internally, bounded by configured retention, and rebuildable from the
 authoritative source. Persistent frequency state uses checkpoint schema
-revision 7—the default and only supported revision—and one stable database path
+revision 8—the default and only supported revision—and one stable database path
 per source and processor. Schema, hash, config, shard, projection, and version
 metadata stay inside that database rather than creating path levels. Polars
 version participates in shard compatibility; DuckDB version is audit-only.

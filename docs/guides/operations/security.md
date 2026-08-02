@@ -34,7 +34,7 @@ the resulting checkpoint as sensitive source-derived data:
   anonymization, or a substitute for upstream tokenization/HMAC.
 - One schema-revision-7 `rolling.duckdb` uses the stable path
   `.valuestream/state/frequency_response/source=<source>/processor=<processor>/rolling.duckdb`;
-  revision 7 is the default and only supported checkpoint schema. Schema,
+  revision 8 is the default and only supported checkpoint schema. Schema,
   hashing, Polars-version, processor-config, and layout values do not add path
   levels. Compatibility/audit metadata remains inside the database. Because
   logical sharding uses `pl.Expr.hash`, a Polars-version change rebuilds the

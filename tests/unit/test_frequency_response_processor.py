@@ -444,7 +444,7 @@ def test_raw_decision_time_grouping_is_canonical_and_matches_checkpoint_mode() -
         .sort(["Day", "DecisionTime", "ExposureBucket"])
     )
 
-    assert expected.schema["DecisionTime"] == pl.Datetime("ns")
+    assert expected.schema["DecisionTime"] == pl.Datetime("us")
     assert actual.equals(expected)
 
 
@@ -1031,3 +1031,147 @@ def test_chunk_partials_merge_to_the_combined_result() -> None:
     )
 
     assert merged.select(combined.columns).equals(combined)
+
+
+@pytest.mark.unit
+def test_daily_granularity_validates_whole_days_and_zero_lag() -> None:
+    with pytest.raises(ValidationError, match="divisible by 24"):
+        _config(window_granularity="daily", window_hours=100)
+    with pytest.raises(ValidationError, match="partition_lag_hours 0"):
+        _config(window_granularity="daily", partition_lag_hours=24)
+    config = _config(window_granularity="daily")
+    assert config.window_days == 7
+
+
+@pytest.mark.unit
+def test_customer_sample_fraction_must_be_representable() -> None:
+    with pytest.raises(ValidationError, match="representable"):
+        _config(customer_sample={"fraction": 1e-9})
+    with pytest.raises(ValidationError):
+        _config(customer_sample={"fraction": 0.0})
+    with pytest.raises(ValidationError):
+        _config(customer_sample={"fraction": 1.5})
+    config = _config(customer_sample={"fraction": 0.25})
+    assert config.customer_sample is not None
+    assert config.customer_sample.sample_threshold == 250_000
+
+
+@pytest.mark.unit
+def test_customer_sampling_is_deterministic_and_keeps_whole_customers() -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = []
+    for index in range(40):
+        customer = f"customer-{index:02d}"
+        rows.append(
+            _row(customer=customer, interaction=f"i{index}a", decision_time=when, target=True)
+        )
+        rows.append(
+            _row(
+                customer=customer,
+                interaction=f"i{index}a",
+                decision_time=when,
+                target=True,
+                outcome="Clicked",
+            )
+        )
+    frame = pl.DataFrame(rows)
+    config = _config(customer_sample={"fraction": 0.5})
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+
+    assert config.customer_sample is not None
+    membership = (
+        frame.select(pl.col("CustomerID").unique().sort())
+        .with_columns(
+            (
+                pl.col("CustomerID").hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
+                % pl.lit(model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS, dtype=pl.UInt64)
+                < pl.lit(config.customer_sample.sample_threshold, dtype=pl.UInt64)
+            ).alias("sampled")
+        )
+    )
+    expected = set(membership.filter(pl.col("sampled"))["CustomerID"].to_list())
+    assert 0 < len(expected) < 40
+
+    prepared = processor.checkpoint_contacts_lazy(
+        frame.drop(TARGET_CHUNK_COLUMN).lazy()
+    ).collect()
+    assert set(prepared["CustomerID"].to_list()) == expected
+    # Every row of a sampled customer survives; repeated runs are identical.
+    assert prepared.height == 2 * len(expected)
+    again = processor.checkpoint_contacts_lazy(frame.drop(TARGET_CHUNK_COLUMN).lazy()).collect()
+    assert again.equals(prepared)
+
+    aggregated = processor.chunk_aggregate(frame.lazy(), _ctx())
+    assert aggregated["Contacts"].sum() == len(expected)
+
+
+@pytest.mark.unit
+def test_daily_bucket_adds_prior_full_day_counters_to_exact_intraday_sequence() -> None:
+    target_day = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        # Two distinct prior-day exposures (one is a duplicated contact whose
+        # rows must count once) inside the 7-day window.
+        _row(
+            customer="c",
+            interaction="d7-a",
+            decision_time=dt.datetime(2024, 1, 2, 9, tzinfo=dt.UTC),
+            target=False,
+        ),
+        _row(
+            customer="c",
+            interaction="d7-a",
+            decision_time=dt.datetime(2024, 1, 2, 9, tzinfo=dt.UTC),
+            target=False,
+            outcome="Clicked",
+        ),
+        _row(
+            customer="c",
+            interaction="d6-b",
+            decision_time=dt.datetime(2024, 1, 3, 23, tzinfo=dt.UTC),
+            target=False,
+        ),
+        # A day outside the last 7 calendar days contributes nothing.
+        _row(
+            customer="c",
+            interaction="old",
+            decision_time=dt.datetime(2024, 1, 1, 23, 59, tzinfo=dt.UTC),
+            target=False,
+        ),
+        _row(customer="c", interaction="target", decision_time=target_day, target=True),
+    ]
+    config = _config(window_granularity="daily")
+    aggregated = _aggregate(rows, config)
+
+    # Prior counters: 2024-01-02 and 2024-01-03 => 2; intra-day sequence adds 1.
+    assert aggregated["ExposureBucket"].to_list() == [3]
+    assert aggregated["Contacts"].sum() == 1
+
+
+@pytest.mark.unit
+def test_daily_and_exact_agree_on_midnight_aligned_exposures() -> None:
+    def midnight(day: int) -> dt.datetime:
+        return dt.datetime(2024, 1, day, tzinfo=dt.UTC)
+
+    rows = [
+        # Exactly 7 days before the target: excluded by both modes.
+        _row(customer="c", interaction="boundary", decision_time=midnight(1), target=False),
+        _row(customer="c", interaction="inside", decision_time=midnight(2), target=False),
+        _row(customer="c", interaction="later", decision_time=midnight(5), target=False),
+        _row(customer="c", interaction="target", decision_time=midnight(8), target=True),
+        _row(
+            customer="c",
+            interaction="target",
+            decision_time=midnight(8),
+            target=True,
+            action="runner",
+            rank=2,
+            outcome="Pending",
+            propensity=0.4,
+        ),
+        _row(customer="other", interaction="solo", decision_time=midnight(8), target=True),
+    ]
+    exact = _aggregate(rows, _config())
+    daily = _aggregate(rows, _config(window_granularity="daily"))
+
+    assert exact.equals(daily)
+    assert exact.filter(pl.col("Contacts") > 0)["ExposureBucket"].sort().to_list() == [1, 3]

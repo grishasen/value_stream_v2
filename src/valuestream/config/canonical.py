@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import polars as pl
 from pydantic import BaseModel
 
 from valuestream.config import model
@@ -50,7 +51,9 @@ _FLOAT64_VALUE_SUM_REVISION = 1
 # to obtain their bounded input. Keep one unconditional marker so a semantic
 # implementation change invalidates aggregates in both source-scan and
 # persistent modes without making the mode itself part of aggregate identity.
-_FREQUENCY_RESPONSE_SEMANTICS_REVISION = 2
+# Revision 3: decision time is canonical at whole-second precision, so window
+# membership at sub-second boundaries changed and both execution paths agree.
+_FREQUENCY_RESPONSE_SEMANTICS_REVISION = 3
 
 
 def canonicalize(value: Any) -> Any:
@@ -221,6 +224,23 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
         # The processor's window, dependency allowance, contact rules, states,
         # and grouping contract remain in ``payload`` and therefore semantic.
         payload.pop("checkpoint", None)
+        # The default exact granularity spelled explicitly is the same
+        # contract as the field omitted; keep those hashes identical.
+        if payload.get("window_granularity") == "exact":
+            payload.pop("window_granularity", None)
+        if processor.customer_sample is not None:
+            # Sample membership is computed with polars.Expr.hash, which is
+            # not guaranteed stable across Polars versions. Pinning the
+            # version (with the fixed seeds and modulus) into the semantic
+            # contract keeps published numbers deterministic: a Polars
+            # upgrade recomputes sampled processors instead of silently
+            # changing which customers are sampled.
+            payload["customer_sample_contract"] = {
+                "algorithm": "polars.Expr.hash",
+                "modulus": model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS,
+                "polars_version": pl.__version__,
+                "seeds": list(model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS),
+            }
         revision["frequency_response_semantics"] = _FREQUENCY_RESPONSE_SEMANTICS_REVISION
     if isinstance(processor, model.ScoreDistributionProcessor) and {
         "personalization",

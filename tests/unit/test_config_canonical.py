@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import polars as pl
 import pytest
 import yaml
 
@@ -229,6 +230,60 @@ class TestCatalogHash:
         )
         assert processor_computation_hash(catalog, cross_placement) != semantic_hash
         assert source_hash(cross_placement) != source_hash(persistent)
+
+    def test_frequency_sampling_and_granularity_are_semantic(self) -> None:
+        catalog = load(DEMO_WS)
+
+        def frequency(**overrides: object) -> model.FrequencyResponseProcessor:
+            payload: dict[str, object] = {
+                "id": "frequency",
+                "source": "ih",
+                "kind": "frequency_response",
+                "group_by": ["Day", "ExposureBucket"],
+                "time": {"property": "DecisionTime", "grain": "daily"},
+                "columns": {
+                    "customer": "CustomerID",
+                    "interaction": "InteractionID",
+                    "action": "ActionID",
+                    "placement": "Placement",
+                    "rank": "Rank",
+                    "outcome": "Outcome",
+                    "propensity": "Propensity",
+                },
+                "alternative_group_by": ["Placement"],
+                "positive_values": ["Clicked"],
+                "exposure_values": ["Impression", "Clicked"],
+                "candidate_values": ["Pending", "Impression", "Clicked"],
+                "states": {"Contacts": {"type": "count"}},
+            }
+            payload.update(overrides)
+            return model.FrequencyResponseProcessor.model_validate(payload)
+
+        base = frequency()
+        explicit_exact = frequency(window_granularity="exact")
+        daily = frequency(window_granularity="daily")
+        sampled = frequency(customer_sample={"fraction": 0.25})
+        resampled = frequency(customer_sample={"fraction": 0.5})
+
+        base_hash = processor_computation_hash(catalog, base)
+        # Spelling the default granularity explicitly is not a semantic edit.
+        assert processor_computation_hash(catalog, explicit_exact) == base_hash
+        assert processor_computation_hash(catalog, daily) != base_hash
+        sampled_hash = processor_computation_hash(catalog, sampled)
+        assert sampled_hash != base_hash
+        assert sampled_hash != processor_computation_hash(catalog, resampled)
+
+        fields = _processor_computation_fields(sampled)
+        contract = fields["customer_sample_contract"]
+        assert contract == {
+            "algorithm": "polars.Expr.hash",
+            "modulus": model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS,
+            "polars_version": pl.__version__,
+            "seeds": list(model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS),
+        }
+        assert "customer_sample_contract" not in _processor_computation_fields(base)
+        assert "window_granularity" not in _processor_computation_fields(explicit_exact)
+        assert _processor_computation_fields(daily)["window_granularity"] == "daily"
 
     def test_bounded_ml_order_revision_is_scoped_to_score_processors(self) -> None:
         catalog = load(DEMO_WS)

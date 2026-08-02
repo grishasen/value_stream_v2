@@ -208,7 +208,7 @@ The aggregate store is rooted at a configurable workspace path:
 
 The processor-state namespace is deliberately separate from aggregate and
 metadata publication. It is never scanned by query planning or DuckDB views.
-Persistent frequency response uses checkpoint schema revision 7, the default
+Persistent frequency response uses checkpoint schema revision 8, the default
 and only supported revision, at one stable source/processor path. Schema,
 hashing, Polars-version, processor-config, and layout values do not create path
 levels. Schema and hashing revisions, Polars version, processor computation

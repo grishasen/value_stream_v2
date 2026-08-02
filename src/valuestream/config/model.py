@@ -534,11 +534,21 @@ class BinaryOutcomeProcessor(_ProcessorBase):
 
 
 class FrequencyResponseCheckpoint(_StrictModel):
-    """Execution strategy for bounded frequency-response contact state."""
+    """Execution strategy for bounded frequency-response contact state.
+
+    ``threads`` and ``memory_limit`` tune the rolling DuckDB connection only.
+    Like every checkpoint field they are operational settings outside processor
+    and source computation hashes.
+    """
 
     mode: Literal["source_scan", "persistent_sharded"] = "source_scan"
     shards: int = Field(default=64, ge=1, le=4096)
     retention_days: int | None = Field(default=None, ge=1, le=3650)
+    threads: int | None = Field(default=None, ge=1, le=256)
+    memory_limit: str | None = Field(
+        default=None,
+        pattern=r"^[0-9]+(\.[0-9]+)?\s*(%|[KMGTkmgt][iI]?[bB])$",
+    )
 
 
 def _minimum_frequency_checkpoint_retention_days(
@@ -548,6 +558,48 @@ def _minimum_frequency_checkpoint_retention_days(
     """Return source days needed by the exact window plus partition lag."""
 
     return (window_hours + partition_lag_hours + 23) // 24
+
+
+# Customer sampling is result semantics: membership must be reproducible for
+# one published aggregate generation. The modulus quantizes the configured
+# fraction; the seeds keep sample membership independent of internal shard
+# routing. The hash function itself is polars.Expr.hash, so the Polars version
+# joins these constants in the computation-hash contract (see canonical.py) —
+# upgrading Polars deliberately recomputes sampled processors.
+FREQUENCY_CUSTOMER_SAMPLE_MODULUS = 1_000_000
+FREQUENCY_CUSTOMER_SAMPLE_SEEDS = (
+    0x452821E638D01377,
+    0xBE5466CF34E90C6C,
+    0xC0AC29B7C97C50DD,
+    0x3F84D5B5B5470917,
+)
+
+
+class FrequencyResponseCustomerSample(_StrictModel):
+    """Deterministic customer-hash subsample evaluated with exact semantics.
+
+    Sampling keeps every row of a sampled customer and drops every row of an
+    unsampled customer, in both ``source_scan`` and ``persistent_sharded``
+    modes. Ratio metrics stay unbiased; absolute counts represent the sample
+    and scale by ``1 / fraction``.
+    """
+
+    fraction: float = Field(gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _fraction_is_representable(self) -> FrequencyResponseCustomerSample:
+        if self.sample_threshold < 1:
+            raise ValueError(
+                "frequency_response customer_sample.fraction is below the smallest "
+                f"representable sample of 1/{FREQUENCY_CUSTOMER_SAMPLE_MODULUS}"
+            )
+        return self
+
+    @property
+    def sample_threshold(self) -> int:
+        """Number of hash residues (of the fixed modulus) inside the sample."""
+
+        return round(self.fraction * FREQUENCY_CUSTOMER_SAMPLE_MODULUS)
 
 
 class FrequencyResponseProcessor(_ProcessorBase):
@@ -563,6 +615,8 @@ class FrequencyResponseProcessor(_ProcessorBase):
     partition_lag_hours: int = Field(default=0, ge=0)
     max_frequency: int = Field(default=7, gt=0)
     frequency_column: str = Field(default="ExposureBucket", min_length=1)
+    window_granularity: Literal["exact", "daily"] = "exact"
+    customer_sample: FrequencyResponseCustomerSample | None = None
     checkpoint: FrequencyResponseCheckpoint = Field(default_factory=FrequencyResponseCheckpoint)
 
     @model_validator(mode="after")
@@ -602,6 +656,18 @@ class FrequencyResponseProcessor(_ProcessorBase):
             raise ValueError(
                 "frequency_response customer and interaction bindings must be distinct"
             )
+        if self.window_granularity == "daily":
+            if self.window_hours % 24 != 0:
+                raise ValueError(
+                    "frequency_response daily window granularity requires window_hours "
+                    "divisible by 24"
+                )
+            if self.partition_lag_hours != 0:
+                raise ValueError(
+                    "frequency_response daily window granularity requires "
+                    "partition_lag_hours 0: cross-day contact rows cannot be "
+                    "deduplicated against day-level exposure history"
+                )
         minimum_retention_days = _minimum_frequency_checkpoint_retention_days(
             self.window_hours,
             self.partition_lag_hours,
@@ -728,6 +794,14 @@ class FrequencyResponseProcessor(_ProcessorBase):
                 ]
             )
         )
+
+    @property
+    def window_days(self) -> int:
+        """Calendar days covered by a ``daily``-granularity window."""
+
+        if self.window_granularity != "daily":  # pragma: no cover - caller contract
+            raise ValueError("window_days is defined only for daily window granularity")
+        return self.window_hours // 24
 
 
 class NumericDistributionProcessor(_ProcessorBase):

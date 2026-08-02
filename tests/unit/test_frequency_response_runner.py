@@ -20,7 +20,6 @@ from valuestream.readers.discovery import Chunk
 from valuestream.store.processor_state import (
     CHUNK_ID_COLUMN,
     CheckpointValidationError,
-    HistoryProjectionSpec,
     RollingCheckpoint,
 )
 
@@ -107,6 +106,7 @@ def _persistent_processor(
     window_hours: int = 168,
     partition_lag_hours: int = 0,
     retention_days: int | None = None,
+    window_granularity: str = "exact",
 ) -> FrequencyResponseProcessor:
     config = _processor(
         frequency=True,
@@ -114,11 +114,12 @@ def _persistent_processor(
         partition_lag_hours=partition_lag_hours,
     ).config.model_copy(
         update={
+            "window_granularity": window_granularity,
             "checkpoint": model.FrequencyResponseCheckpoint(
                 mode="persistent_sharded",
                 shards=shards,
                 retention_days=retention_days,
-            )
+            ),
         }
     )
     return FrequencyResponseProcessor(config, computation_hash="a" * 64)
@@ -130,7 +131,6 @@ def _seed_rolling_checkpoint(
     *,
     retention_days: int,
 ) -> Path:
-    history_columns, rank_column, exposed_column = processor.checkpoint_history_projection()
     frame = pl.DataFrame(
         [_frequency_row("customer", dt.datetime(2024, 1, 1, 12, tzinfo=dt.UTC))]
     ).lazy()
@@ -144,11 +144,7 @@ def _seed_rolling_checkpoint(
         customer_dtype=str(prepared.collect_schema()[processor.config.columns.customer]),
         shard_count=processor.config.checkpoint.shards,
         retention_days=retention_days,
-        history_projection=HistoryProjectionSpec(
-            columns=history_columns,
-            rank_column=rank_column,
-            exposed_column=exposed_column,
-        ),
+        history_projection=processor.checkpoint_history_projection(),
     ) as checkpoint:
         for index, chunk_id in enumerate(
             ("2024-01-01", "2024-01-02", "2024-01-03"),
@@ -383,6 +379,138 @@ def test_rolling_frequency_state_reads_missing_history_once_and_persists_narrow_
     assert journal == [("2024-01-01",), ("2024-01-02",)]
     assert "Propensity" not in history_columns
     assert "current" not in tables
+
+
+@pytest.mark.unit
+def test_materialized_transforms_feed_rolling_staging_without_source_rescan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    current_file = data_dir / "2024-01-02.parquet"
+    row = _frequency_row("customer", dt.datetime(2024, 1, 2, 12, tzinfo=dt.UTC))
+    pl.DataFrame([row]).write_parquet(current_file)
+    source = model.Source.model_validate(
+        {
+            "id": "events",
+            "reader": {"kind": "parquet", "file_pattern": "data/*.parquet"},
+            "materialize_transforms": True,
+        }
+    )
+    processor = _persistent_processor()
+    plan = runner._ChunkPlan(Chunk("2024-01-02", (current_file,)))
+
+    staged_plans: list[str] = []
+    original = runner._collect_rolling_frequency_frames
+
+    def capture(
+        processors: object,
+        coordinator: object,
+        current: pl.LazyFrame,
+        chunk_plan: object,
+        ctx: object,
+        *,
+        engine: str,
+    ) -> list[tuple[Any, pl.DataFrame]]:
+        staged_plans.append(current.explain())
+        return original(processors, coordinator, current, chunk_plan, ctx, engine=engine)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(runner, "_collect_rolling_frequency_frames", capture)
+    with runner._PersistentFrequencyCoordinator(
+        tmp_path,
+        source,
+        [processor],
+        force=False,
+    ) as coordinator:
+        outcome = runner._process_chunk(
+            tmp_path,
+            source,
+            [processor],
+            plan,
+            "run",
+            frequency_coordinator=coordinator,
+        )
+
+    assert outcome.result.error is None
+    assert outcome.result.status == "ok"
+    # The rolling staging input must be the already-materialized frame, not a
+    # second scan of the source files.
+    assert len(staged_plans) == 1
+    assert "parquet" not in staged_plans[0].lower()
+    database = (
+        tmp_path
+        / ".valuestream"
+        / "state"
+        / "frequency_response"
+        / "source=events"
+        / "processor=frequency"
+        / "rolling.duckdb"
+    )
+    with duckdb.connect(str(database), read_only=True) as connection:
+        journal = connection.execute(
+            "SELECT chunk_id FROM chunk_journal ORDER BY sequence"
+        ).fetchall()
+    assert journal == [("2024-01-02",)]
+
+
+@pytest.mark.unit
+def test_daily_rolling_state_persists_day_projection_and_advances(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history_file = tmp_path / "2024-01-01.parquet"
+    current_file = tmp_path / "2024-01-02.parquet"
+    history_file.write_bytes(b"history")
+    current_file.write_bytes(b"current")
+    history_row = _frequency_row("customer", dt.datetime(2024, 1, 1, 12, tzinfo=dt.UTC))
+    current_row = _frequency_row("customer", dt.datetime(2024, 1, 2, 12, tzinfo=dt.UTC))
+    current_row["InteractionID"] = "current"
+    frames = {
+        history_file: pl.DataFrame([history_row]).lazy(),
+        current_file: pl.DataFrame([current_row]).lazy(),
+    }
+    monkeypatch.setattr(runner, "read", lambda _reader, files: frames[files[0]])
+    monkeypatch.setattr(runner, "cleanup_temporaries", lambda: None)
+    processor = _persistent_processor(window_granularity="daily")
+    source = _source()
+    plan = runner._ChunkPlan(
+        Chunk("2024-01-02", (current_file,)),
+        (Chunk("2024-01-01", (history_file,)),),
+    )
+    _raw, current, bounded = runner._prepare_chunk_frames(source, [processor], plan)
+    assert bounded is None
+
+    with runner._PersistentFrequencyCoordinator(
+        tmp_path,
+        source,
+        [processor],
+        force=False,
+    ) as coordinator:
+        rows = coordinator.collect(
+            current,
+            plan,
+            _frequency_context(plan.chunk_id),
+            engine="auto",
+        )
+
+    assert len(rows) == 1
+    _, daily = rows[0]
+    # One prior-day exposure plus the current exposure => bucket 2.
+    assert daily["ExposureBucket"].to_list() == [2]
+    databases = list(
+        (tmp_path / ".valuestream" / "state" / "frequency_response").glob("**/rolling.duckdb")
+    )
+    assert len(databases) == 1
+    with duckdb.connect(str(databases[0]), read_only=True) as connection:
+        journal = connection.execute(
+            "SELECT chunk_id FROM chunk_journal ORDER BY sequence"
+        ).fetchall()
+        history_columns = [row[0] for row in connection.execute("DESCRIBE history").fetchall()]
+    assert journal == [("2024-01-01",), ("2024-01-02",)]
+    assert "__valuestream_frequency_decision_day" in history_columns
+    assert "DecisionTime" not in history_columns
+    assert "__valuestream_frequency_row_order" not in history_columns
 
 
 @pytest.mark.unit

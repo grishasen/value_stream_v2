@@ -997,10 +997,15 @@ processors:
     partition_lag_hours: 24          # default 0; dependency padding only
     max_frequency: 7
     frequency_column: ExposureBucket
+    window_granularity: exact        # default; `daily` counts calendar days
+    # customer_sample:               # optional deterministic customer subsample
+    #   fraction: 0.125
     checkpoint:
       mode: persistent_sharded       # default: source_scan
       shards: 64                     # default 64; routing, not anonymization
       retention_days: 8              # optional; default/min ceil((168+24)/24)
+      threads: 4                     # optional; rolling DuckDB connection only
+      memory_limit: 4GB              # optional; rolling DuckDB connection only
     group_by:
       - Day
       - Channel
@@ -1079,10 +1084,11 @@ exposed rank-1 history required by later targets, tagged with its source chunk
 id and logical shard, plus a transactional fingerprint journal.
 
 Both modes canonicalize the configured decision-time field to timezone-naive
-UTC `Datetime(ns)` before contact normalization. `Day` then attaches UTC and
-converts to the configured calendar timezone. A raw decision-time field used in
-`group_by` or a state predicate therefore has the same type and value in both
-modes, including sub-microsecond strict-window boundaries.
+UTC `Datetime(us)` truncated to whole seconds before contact normalization.
+`Day` then attaches UTC and converts to the configured calendar timezone. A raw
+decision-time field used in `group_by` or a state predicate therefore has the
+same type and value in both modes; the strict `(t − window, t]` boundary is
+evaluated at second precision, which both engines compute identically.
 Dictionary-backed projected fields are likewise represented as strings in the
 source-scan relational tail, matching DuckDB `VARCHAR`; customer sharding still
 hashes the original logical `Categorical`/`Enum` value first.
@@ -1193,8 +1199,8 @@ silently undercounting the number of impressions.
 
 - `source_scan` (the compatibility default) retains no processor state and
   rereads the bounded source closure for each target.
-- `persistent_sharded` is the compatibility name for schema-revision-7 bounded
-  rolling DuckDB state. Revision 7 is the default and only supported checkpoint
+- `persistent_sharded` is the compatibility name for schema-revision-8 bounded
+  rolling DuckDB state. Revision 8 is the default and only supported checkpoint
   schema. One `rolling.duckdb` has the stable path
   `.valuestream/state/frequency_response/source=<source>/processor=<processor>/rolling.duckdb`.
   Schema, hashing, Polars-version, processor-config, and layout values do not
@@ -1202,13 +1208,24 @@ silently undercounting the number of impressions.
   processor computation hash, shard count, history projection, and customer
   dtype are stored inside the database as compatibility metadata; DuckDB
   version is audit-only. The complete current candidates remain
-  temporary; persisted history is filtered to exposed rank-1 rows and projected
-  to customer, interaction, action, placement, decision time, contact
-  classification, deterministic local order, source chunk id, and logical
-  shard. Propensity, priority, report/alternative groups, outcome, and every
-  rank>1 candidate are omitted from history. `shards` is an integer from `1`
-  through `4096` and defaults to `64`; larger values lower per-shard SQL working
-  data. It controls a logical partition, not a physical file count.
+  temporary; persisted history is filtered to exposed rank-1 rows, normalized
+  to one row per contact and source day (earliest decision time and source
+  order, or-combined outcome flags), and projected to customer, interaction,
+  action, placement, decision time, contact classification, deterministic
+  local order, source chunk id, and logical shard. Propensity, priority,
+  report/alternative groups, outcome, and every rank>1 candidate are omitted
+  from history. `shards` is an integer from `1` through `4096` and defaults to
+  `64`; it controls a logical partition, not a physical file count.
+
+  Choosing `shards` trades fixed per-query cost against SQL working-set size:
+  each target day runs one normalization/window plan per staged shard, so many
+  shards on a small daily volume spend most of their time on per-plan
+  overhead, while few shards on a large volume materialize large per-shard
+  intermediates. As a starting point, keep the default `64` for daily volumes
+  in the tens of millions of candidate rows, and reduce toward `8`–`16` when a
+  day stays below roughly a million rows. Changing `shards` never republishes
+  aggregates; the rolling state is rebuilt automatically at the same path on
+  the next run.
 
 All fields under `checkpoint` are execution/storage settings. They remain in
 the full catalog hash for audit but are excluded from processor and source
@@ -1218,7 +1235,10 @@ computation hashes:
 - `shards` selects logical SQL partitioning within the same stable rolling
   database;
 - `retention_days` selects bounded live-state policy and is not part of
-  artifact identity.
+  artifact identity;
+- `threads` and `memory_limit` tune only the rolling DuckDB connection
+  (`SET threads` / `SET memory_limit`); when unset, DuckDB defaults apply.
+  They never trigger a state rebuild.
 
 Changing these fields does not schedule aggregate replay. Unchanged targets
 remain skipped. After a shard change, valid incompatible state is replaced at
@@ -1227,6 +1247,37 @@ database is validated in a sibling temporary file before an atomic swap.
 `--force` explicitly rebuilds both aggregates and rolling state. Window,
 partition lag, columns, filters, outcome/contact rules, groups, and states
 remain result semantics and therefore do change computation hashes.
+
+`window_granularity` selects how the exposure window is evaluated and is
+**result semantics** (part of the computation hash):
+
+- `exact` (default): the strict `(decision_time − window_hours, decision_time]`
+  timestamp interval at second precision.
+- `daily`: the exposure count for a focal contact is the number of exposed
+  rank-1 contacts of the same customer/action/placement over the last
+  `window_hours / 24` calendar days — the previous `window_hours / 24 − 1`
+  full days come from day-level history, and the focal day itself is
+  sequenced exactly. Days use the canonical UTC calendar date of the decision
+  time. `window_hours` must be divisible by 24 and `partition_lag_hours` must
+  be `0`: without a lag allowance, one interaction's rows cannot straddle
+  source days, which is what lets day-level history drop contact-level
+  cross-day deduplication. Rolling state then persists only contact identity
+  per calendar day (no time-of-day, source order, or outcome flags), and the
+  per-target SQL replaces timestamp windowing with a per-day counter join.
+  The approximation error is bounded by one day at the old edge of the
+  window; the `max_frequency` terminal bucket absorbs most of it.
+
+`customer_sample` optionally evaluates the processor over a deterministic
+customer-hash subsample with otherwise exact semantics. Every row of a sampled
+customer is kept in both execution modes and in history, so ratio metrics
+(CTR by bucket) remain unbiased; absolute counts describe the sample and can
+be scaled by `1 / fraction` with a formula metric. Sampling is result
+semantics: changing `fraction` republishes the processor's aggregates. Sample
+membership is computed with `polars.Expr.hash` under fixed seeds and a fixed
+modulus, and the Polars version is pinned into the computation contract — a
+Polars upgrade therefore recomputes sampled processors rather than silently
+changing which customers are sampled. Small segments become noisy under
+sampling; prefer it for high-volume decision-support analytics.
 
 `retention_days` optionally sets the number of source-day journal entries
 kept in each processor's rolling state. Its default is

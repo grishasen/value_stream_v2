@@ -25,9 +25,8 @@ _CHUNK_ID_COLUMN = "__valuestream_checkpoint_chunk_id"
 _SEGMENT_COLUMN = 'Comparison "Group'
 
 
-def _config() -> model.FrequencyResponseProcessor:
-    return model.FrequencyResponseProcessor.model_validate(
-        {
+def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
+    payload: dict[str, Any] = {
             "id": "frequency",
             "source": "interaction_history",
             "kind": "frequency_response",
@@ -69,8 +68,9 @@ def _config() -> model.FrequencyResponseProcessor:
                     "source_column": "RunnerPriorityComparable",
                 },
             },
-        }
-    )
+    }
+    payload.update(overrides)
+    return model.FrequencyResponseProcessor.model_validate(payload)
 
 
 def _row(
@@ -343,7 +343,7 @@ def test_rolling_frequency_sql_matches_polars_for_exact_window_and_runner_semant
             batch_size=2,
         ) as session:
             focal = session.focal_lazy(0)
-            assert focal.collect_schema()["DecisionTime"] == pl.Datetime("ns")
+            assert focal.collect_schema()["DecisionTime"] == pl.Datetime("us")
             actual = (
                 processor.aggregate_focal_lazy(focal, _ctx())
                 .collect()
@@ -371,12 +371,16 @@ def test_rolling_frequency_sql_matches_polars_for_exact_window_and_runner_semant
 
 
 @pytest.mark.unit
-def test_rolling_frequency_sql_preserves_aware_nanoseconds_at_strict_boundary() -> None:
+def test_rolling_frequency_sql_matches_second_canonical_strict_boundary() -> None:
+    """Sub-second inputs canonicalize to whole seconds identically in both engines."""
+
     config = _config()
     processor = FrequencyResponseProcessor(config, computation_hash="hash")
     target_chunk = "2024-01-08"
     target_ns = int(dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC).timestamp()) * 1_000_000_000
+    target_us = target_ns // 1_000
     window_ns = 168 * 60 * 60 * 1_000_000_000
+    second_ns = 1_000_000_000
 
     history_rows = [
         _row("customer", "boundary", dt.datetime(2024, 1, 1, tzinfo=dt.UTC)),
@@ -385,7 +389,9 @@ def test_rolling_frequency_sql_preserves_aware_nanoseconds_at_strict_boundary() 
     history_source = pl.DataFrame(history_rows).with_columns(
         pl.Series(
             "DecisionTime",
-            [target_ns - window_ns, target_ns - window_ns + 100],
+            # Sub-second parts truncate: one contact lands exactly on the strict
+            # boundary second (excluded), the other one second inside (counted).
+            [target_ns - window_ns + 100, target_ns - window_ns + second_ns + 100],
             dtype=pl.Datetime("ns", "UTC"),
         )
     )
@@ -394,15 +400,15 @@ def test_rolling_frequency_sql_preserves_aware_nanoseconds_at_strict_boundary() 
     ).with_columns(
         pl.Series(
             "DecisionTime",
-            [target_ns],
+            [target_ns + 987_654_321],
             dtype=pl.Datetime("ns", "UTC"),
         )
     )
     prepared_history_target = processor.checkpoint_contacts_lazy(history_source.lazy()).collect()
     history = processor.checkpoint_history_contacts_lazy(prepared_history_target.lazy()).collect()
     current = processor.checkpoint_contacts_lazy(current_source.lazy()).collect()
-    assert current.schema["DecisionTime"] == pl.Datetime("ns")
-    assert current.get_column("DecisionTime").cast(pl.Int64).item() == target_ns
+    assert current.schema["DecisionTime"] == pl.Datetime("us")
+    assert current.get_column("DecisionTime").cast(pl.Int64).item() == target_us
     expected = _old_checkpoint_result(processor, current, [history])
 
     with duckdb.connect(":memory:") as connection:
@@ -418,11 +424,56 @@ def test_rolling_frequency_sql_preserves_aware_nanoseconds_at_strict_boundary() 
             current_chunk_id=target_chunk,
         ) as session:
             focal = session.focal_lazy(0)
-            assert focal.collect_schema()["DecisionTime"] == pl.Datetime("ns")
+            assert focal.collect_schema()["DecisionTime"] == pl.Datetime("us")
             actual = processor.aggregate_focal_lazy(focal, _ctx()).collect()
 
     assert_frame_equal(actual, expected, check_row_order=False)
     assert actual.select(pl.col("ExposureBucket").max()).item() == 2
+
+
+@pytest.mark.unit
+def test_rolling_frequency_sql_agrees_on_previously_divergent_sub_second_target() -> None:
+    """Regression: sub-microsecond target times made DuckDB count one extra exposure."""
+
+    config = _config()
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+    target_chunk = "2024-01-08"
+    target_ns = int(dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC).timestamp()) * 1_000_000_000
+    window_ns = 168 * 60 * 60 * 1_000_000_000
+
+    history_source = pl.DataFrame(
+        [_row("customer", "boundary", dt.datetime(2024, 1, 1, tzinfo=dt.UTC))]
+    ).with_columns(
+        pl.Series("DecisionTime", [target_ns - window_ns], dtype=pl.Datetime("ns", "UTC"))
+    )
+    current_source = pl.DataFrame(
+        [_row("customer", "target", dt.datetime(2024, 1, 8, tzinfo=dt.UTC))]
+    ).with_columns(
+        # +500ns used to truncate the SQL window start to the previous
+        # microsecond, admitting the boundary exposure that Polars excluded.
+        pl.Series("DecisionTime", [target_ns + 500], dtype=pl.Datetime("ns", "UTC"))
+    )
+    prepared_history_target = processor.checkpoint_contacts_lazy(history_source.lazy()).collect()
+    history = processor.checkpoint_history_contacts_lazy(prepared_history_target.lazy()).collect()
+    current = processor.checkpoint_contacts_lazy(current_source.lazy()).collect()
+    expected = _old_checkpoint_result(processor, current, [history])
+
+    with duckdb.connect(":memory:") as connection:
+        _create_rolling_tables(
+            connection,
+            history=[("2024-01-01", history)],
+            current=[(target_chunk, current)],
+            empty_history=history.head(0),
+        )
+        with DuckDBFrequencySession(
+            config=config,
+            connection=connection,
+            current_chunk_id=target_chunk,
+        ) as session:
+            actual = processor.aggregate_focal_lazy(session.focal_lazy(0), _ctx()).collect()
+
+    assert_frame_equal(actual, expected, check_row_order=False)
+    assert actual.select(pl.col("ExposureBucket").max()).item() == 1
 
 
 @pytest.mark.unit
@@ -510,22 +561,113 @@ def test_rolling_frequency_session_bootstraps_empty_history_and_filters_staged_c
             actual = processor.aggregate_focal_lazy(session.focal_lazy(0), _ctx()).collect()
             with pytest.raises(ValueError, match="non-negative"):
                 session.focal_lazy(-1)
+            # A shard without focal rows still materializes with its schema.
+            empty_focal = pl.from_arrow(session.focal_table(1))
+            assert isinstance(empty_focal, pl.DataFrame)
+            assert empty_focal.is_empty()
+            assert "DecisionTime" in empty_focal.columns
         assert connection.execute("SELECT count(*) FROM history").fetchone() == (0,)
 
     assert_frame_equal(actual, expected, check_row_order=False)
 
 
 @pytest.mark.unit
+def test_rolling_frequency_sql_matches_polars_for_daily_granularity() -> None:
+    config = _config(window_granularity="daily")
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+    target_chunk = "2024-01-08"
+    target_time = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    outside_rows = [
+        # The whole calendar day 2024-01-01 is outside the last 7 days.
+        _row("strict", "outside", dt.datetime(2024, 1, 1, 23, 59, tzinfo=dt.UTC)),
+    ]
+    inside_rows = [
+        # A duplicated contact (impression + click rows) must count once.
+        _row("strict", "inside-a", dt.datetime(2024, 1, 2, 9, tzinfo=dt.UTC)),
+        _row(
+            "strict",
+            "inside-a",
+            dt.datetime(2024, 1, 2, 9, tzinfo=dt.UTC),
+            outcome="Clicked",
+        ),
+        _row("strict", "inside-b", dt.datetime(2024, 1, 2, 15, tzinfo=dt.UTC)),
+        _row("other-shard", "foreign", dt.datetime(2024, 1, 2, 10, tzinfo=dt.UTC)),
+    ]
+    current_rows = [
+        _row("strict", "target", target_time, outcome="Clicked"),
+        _row(
+            "strict",
+            "target",
+            target_time,
+            action="runner",
+            rank=2,
+            outcome="Pending",
+            propensity=0.4,
+            priority=0.5,
+        ),
+        # Two same-day exposures: intra-day sequence stays exact.
+        _row("fresh", "first", target_time),
+        _row("fresh", "second", target_time + dt.timedelta(hours=1)),
+    ]
+    oldest = _prepared_history(processor, outside_rows)
+    newest = _prepared_history(processor, inside_rows)
+    current = _prepared_current(processor, current_rows)
+    expected = _old_checkpoint_result(processor, current, [oldest, newest])
+
+    with duckdb.connect(":memory:") as connection:
+        _create_rolling_tables(
+            connection,
+            history=[
+                ("2024-01-02", newest),
+                ("2024-01-01", oldest),
+            ],
+            current=[(target_chunk, current)],
+            empty_history=oldest.head(0),
+        )
+        with DuckDBFrequencySession(
+            config=config,
+            connection=connection,
+            current_chunk_id=target_chunk,
+        ) as session:
+            actual = (
+                processor.aggregate_focal_lazy(session.focal_lazy(0), _ctx())
+                .collect()
+                .sort(
+                    ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"],
+                    nulls_last=False,
+                )
+            )
+
+    assert_frame_equal(actual, expected)
+    # strict: 2 prior-day contacts + 1 today = bucket 3; fresh: buckets 1 and 2.
+    assert actual.select(pl.col("ExposureBucket").sum()).item() == 6
+    assert actual.select(pl.col("Contacts").sum()).item() == 3
+    assert actual.select(pl.col("RunnerAvailableContacts").sum()).item() == 1
+
+
+@pytest.mark.unit
 def test_processor_exposes_exact_history_projection_contract() -> None:
     processor = FrequencyResponseProcessor(_config(), computation_hash="hash")
 
-    columns, rank_column, exposed_column = processor.checkpoint_history_projection()
+    projection = processor.checkpoint_history_projection()
 
-    assert rank_column == RANK_COLUMN
-    assert exposed_column == EXPOSED_COLUMN
-    assert columns[-4:] == (
+    assert projection.rank_column == RANK_COLUMN
+    assert projection.exposed_column == EXPOSED_COLUMN
+    assert projection.columns[-4:] == (
         "__valuestream_frequency_row_order",
         RANK_COLUMN,
         "__valuestream_frequency_positive",
         EXPOSED_COLUMN,
     )
+    # Contact keys group; decision time/source order take MIN and outcome
+    # flags OR together, so each committed day stores one row per contact.
+    assert projection.key_columns == (
+        "CustomerID",
+        "InteractionID",
+        "ActionID",
+        "Placement",
+        RANK_COLUMN,
+    )
+    assert projection.min_columns == ("DecisionTime", "__valuestream_frequency_row_order")
+    assert projection.bool_or_columns == ("__valuestream_frequency_positive", EXPOSED_COLUMN)
+    assert projection.normalizes

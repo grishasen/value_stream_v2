@@ -7,6 +7,7 @@ from types import TracebackType
 
 import duckdb
 import polars as pl
+import pyarrow as pa
 
 from valuestream.config import model
 from valuestream.processors.context import TARGET_CHUNK_COLUMN
@@ -16,9 +17,11 @@ from valuestream.processors.frequency_fields import (
     CHECKPOINT_LOCAL_ORDER_COLUMN,
     CHECKPOINT_SHARD_COLUMN,
     CONTACT_ORDER_COLUMN,
+    DECISION_DAY_COLUMN,
     EXPOSED_COLUMN,
     EXPOSURE_SEQUENCE_COLUMN,
     POSITIVE_COLUMN,
+    PRIOR_EXPOSURES_COLUMN,
     RANK_COLUMN,
     ROW_ORDER_COLUMN,
     RUNNER_AVAILABLE_COLUMN,
@@ -102,11 +105,27 @@ class DuckDBFrequencySession:
     def focal_lazy(self, shard_id: int) -> pl.LazyFrame:
         """Return exact focal rows for one persisted customer-hash shard."""
 
+        relation = self.connection.sql(self._focal_shard_sql(shard_id))
+        return relation.pl(lazy=True, batch_size=self.batch_size)
+
+    def focal_table(self, shard_id: int) -> pa.Table:
+        """Materialize one shard's exact focal rows as an Arrow table.
+
+        Unlike :meth:`focal_lazy`, the result does not borrow a DuckDB stream:
+        once returned, the connection is free for the next query, so a caller
+        can fetch the next shard while a previous shard's Polars tail runs.
+        ``to_arrow_table`` (not ``.arrow()``) keeps the schema when a shard
+        yields zero focal rows.
+        """
+
+        return self.connection.sql(self._focal_shard_sql(shard_id)).to_arrow_table()
+
+    def _focal_shard_sql(self, shard_id: int) -> str:
         if not self._entered:
             raise RuntimeError("DuckDB frequency session must be entered before querying")
         if isinstance(shard_id, bool) or not isinstance(shard_id, int) or shard_id < 0:
             raise ValueError("frequency checkpoint shard_id must be a non-negative integer")
-        sql = _focal_sql(
+        return _focal_sql(
             self.config,
             current_columns=self._current_columns,
             history_columns=self._history_columns,
@@ -117,8 +136,6 @@ class DuckDBFrequencySession:
             current_chunk_id=self.current_chunk_id,
             shard_id=shard_id,
         )
-        relation = self.connection.sql(sql)
-        return relation.pl(lazy=True, batch_size=self.batch_size)
 
     def _relation_columns(
         self,
@@ -155,7 +172,21 @@ class DuckDBFrequencySession:
                 f"frequency_response processor {self.config.id!r} target checkpoint is "
                 f"missing column(s): {', '.join(missing_current)}"
             )
-        missing_history = sorted(common - set(self._history_columns))
+        if self.config.window_granularity == "daily":
+            history_required = {
+                self.shard_column,
+                self.chunk_id_column,
+                columns.customer,
+                columns.interaction,
+                columns.action,
+                columns.placement,
+                DECISION_DAY_COLUMN,
+                RANK_COLUMN,
+                EXPOSED_COLUMN,
+            }
+        else:
+            history_required = common
+        missing_history = sorted(history_required - set(self._history_columns))
         if missing_history:
             raise ValueError(
                 f"frequency_response processor {self.config.id!r} rolling history is "
@@ -177,6 +208,17 @@ def _focal_sql(
 ) -> str:
     """Build the exact contact-normalization, window, and runner SQL plan."""
 
+    if config.window_granularity == "daily":
+        return _daily_focal_sql(
+            config,
+            current_columns=current_columns,
+            history_table=history_table,
+            current_table=current_table,
+            shard_column=shard_column,
+            chunk_id_column=chunk_id_column,
+            current_chunk_id=current_chunk_id,
+            shard_id=shard_id,
+        )
     relation_specs = [
         (history_table, tuple(history_columns), False),
         (current_table, tuple(current_columns), True),
@@ -245,36 +287,7 @@ def _focal_sql(
         for key in exposure_keys
     )
 
-    runner_keys = config.alternative_group_columns
-    runner_partition = _identifier_csv(runner_keys)
-    runner_sort_columns = _ordered_unique(
-        [
-            *runner_keys,
-            RANK_COLUMN,
-            columns.action,
-            columns.placement,
-            time_column,
-            CONTACT_ORDER_COLUMN,
-        ]
-    )
-    runner_order_parts = [
-        f"CASE WHEN {_quote_identifier(RANK_COLUMN)} = 2 THEN 0 ELSE 1 END ASC",
-        *(
-            f"{_quote_identifier(column)} ASC NULLS FIRST"
-            for column in runner_sort_columns
-            if column not in runner_keys
-        ),
-    ]
-    runner_priority = (
-        f"CAST({_quote_identifier(columns.priority)} AS DOUBLE)"
-        if columns.priority is not None
-        else "NULL::DOUBLE"
-    )
-    runner_join = "\n        AND ".join(
-        f"{_qualified_identifier('exposure', key)} IS NOT DISTINCT FROM "
-        f"{_qualified_identifier('runner', key)}"
-        for key in runner_keys
-    )
+    runner_join = _runner_join_condition(config)
     non_null_contacts = "\n          AND ".join(
         f"{_quote_identifier(column)} IS NOT NULL" for column in [*contact_keys, time_column]
     )
@@ -357,19 +370,196 @@ exposures AS (
             >= {_qualified_identifier("boundary", BOUNDARY_TIME_COLUMN)}
 ),
 runners AS (
+{_indent(_runners_cte_body(config), 4)}
+)
+SELECT
+    exposure.*,
+    runner.{_quote_identifier(RUNNER_PROPENSITY_COLUMN)},
+    runner.{_quote_identifier(RUNNER_PRIORITY_COLUMN)},
+    runner.{_quote_identifier(RUNNER_AVAILABLE_COLUMN)}
+FROM exposures AS exposure
+LEFT JOIN runners AS runner
+    ON {runner_join}
+WHERE exposure.{_quote_identifier(SEEN_CURRENT_COLUMN)}
+  AND NOT exposure.{_quote_identifier(SEEN_HISTORY_COLUMN)}
+  AND exposure.{_quote_identifier(EXPOSED_COLUMN)}
+  AND exposure.{_quote_identifier(RANK_COLUMN)} = 1
+""".strip()
+
+
+def _daily_focal_sql(
+    config: model.FrequencyResponseProcessor,
+    *,
+    current_columns: Sequence[str],
+    history_table: str,
+    current_table: str,
+    shard_column: str,
+    chunk_id_column: str,
+    current_chunk_id: str,
+    shard_id: int,
+) -> str:
+    """Build the day-granular frequency SQL plan.
+
+    History never joins the contact union: it is reduced to per-day exposure
+    counters, and each focal contact adds its exact intra-day sequence to the
+    counters of the previous ``window_days - 1`` calendar days.
+    """
+
+    current_member = _checkpoint_member_sql(
+        current_table,
+        tuple(current_columns),
+        is_current=True,
+        shard_column=shard_column,
+        chunk_id_column=chunk_id_column,
+        current_chunk_id=current_chunk_id,
+        shard_id=shard_id,
+    )
+    union_columns = _ordered_unique(
+        column
+        for column in current_columns
+        if column
+        not in {
+            shard_column,
+            chunk_id_column,
+            TARGET_CHUNK_COLUMN,
+            ROW_ORDER_COLUMN,
+        }
+    )
+    union_columns.extend([TARGET_CHUNK_COLUMN, ROW_ORDER_COLUMN])
+
+    columns = config.columns
+    time_column = config.time.property
+    contact_keys = [
+        columns.customer,
+        columns.interaction,
+        columns.action,
+        columns.placement,
+        RANK_COLUMN,
+    ]
+    excluded_passthrough = {
+        *contact_keys,
+        TARGET_CHUNK_COLUMN,
+        ROW_ORDER_COLUMN,
+        POSITIVE_COLUMN,
+        EXPOSED_COLUMN,
+        time_column,
+        columns.propensity,
+        DECISION_DAY_COLUMN,
+        *(set() if columns.priority is None else {columns.priority}),
+    }
+    passthrough = [column for column in union_columns if column not in excluded_passthrough]
+    normalized_select = _normalized_select_sql(config, contact_keys, passthrough)
+
+    exposure_keys = [columns.customer, columns.action, columns.placement]
+    exposure_partition = _identifier_csv(exposure_keys)
+    exposure_order = _qualified_order(
+        "contact",
+        [time_column, columns.interaction, CONTACT_ORDER_COLUMN],
+    )
+    runner_join = _runner_join_condition(config)
+    non_null_contacts = "\n          AND ".join(
+        f"{_quote_identifier(column)} IS NOT NULL" for column in [*contact_keys, time_column]
+    )
+
+    day = _quote_identifier(DECISION_DAY_COLUMN)
+    prior = _quote_identifier(PRIOR_EXPOSURES_COLUMN)
+    counter_keys_csv = _identifier_csv([*exposure_keys, DECISION_DAY_COLUMN])
+    focal_day_keys = _qualified_identifier_csv("focal", exposure_keys)
+    prior_join = "\n            AND ".join(
+        f"{_qualified_identifier('focal', key)} = {_qualified_identifier('counter', key)}"
+        for key in exposure_keys
+    )
+    exposure_prior_join = "\n        AND ".join(
+        f"{_qualified_identifier('ordered_contact', key)} = "
+        f"{_qualified_identifier('prior', key)}"
+        for key in exposure_keys
+    )
+
+    return f"""
+WITH checkpoint_union AS (
+{_indent(f"({current_member})", 4)}
+),
+sequenced_contacts AS (
     SELECT
-        {_identifier_csv(runner_keys)},
-        CAST({_quote_identifier(columns.propensity)} AS DOUBLE)
-            AS {_quote_identifier(RUNNER_PROPENSITY_COLUMN)},
-        {runner_priority} AS {_quote_identifier(RUNNER_PRIORITY_COLUMN)},
-        TRUE AS {_quote_identifier(RUNNER_AVAILABLE_COLUMN)}
-    FROM normalized_contacts
-    WHERE {_quote_identifier(SEEN_CURRENT_COLUMN)}
-      AND {_quote_identifier(RANK_COLUMN)} > 1
-    QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY {runner_partition}
-        ORDER BY {", ".join(runner_order_parts)}
-    ) = 1
+        * EXCLUDE (
+            {_quote_identifier(chunk_id_column)},
+            {_quote_identifier(CHECKPOINT_LOCAL_ORDER_COLUMN)}
+        ),
+        CAST(
+            ROW_NUMBER() OVER (
+                ORDER BY
+                    {_quote_identifier(chunk_id_column)},
+                    {_quote_identifier(CHECKPOINT_LOCAL_ORDER_COLUMN)}
+            ) - 1
+            AS BIGINT
+        ) AS {_quote_identifier(ROW_ORDER_COLUMN)}
+    FROM checkpoint_union
+),
+normalized_contacts AS MATERIALIZED (
+    SELECT
+{_indent(normalized_select, 8)}
+    FROM sequenced_contacts
+    WHERE {non_null_contacts}
+    GROUP BY {_identifier_csv(contact_keys)}
+),
+ordered_exposures AS MATERIALIZED (
+    SELECT
+        contact.*,
+        CAST(
+            ROW_NUMBER() OVER (
+                PARTITION BY {exposure_partition}
+                ORDER BY {exposure_order}
+            ) AS BIGINT
+        ) AS {_quote_identifier(EXPOSURE_SEQUENCE_COLUMN)}
+    FROM normalized_contacts AS contact
+    WHERE {_qualified_identifier("contact", EXPOSED_COLUMN)}
+      AND {_qualified_identifier("contact", RANK_COLUMN)} = 1
+),
+prior_exposures AS (
+    SELECT
+        {counter_keys_csv},
+        CAST(count(*) AS BIGINT) AS {prior}
+    FROM {_quote_identifier(history_table)}
+    WHERE {_quote_identifier(shard_column)} = {shard_id}
+      AND {_quote_identifier(chunk_id_column)} < {_quote_literal(current_chunk_id)}
+    GROUP BY {counter_keys_csv}
+),
+focal_days AS (
+    SELECT DISTINCT
+        {_qualified_identifier_csv("ordered_contact", exposure_keys)},
+        CAST({_qualified_identifier("ordered_contact", time_column)} AS DATE) AS {day}
+    FROM ordered_exposures AS ordered_contact
+),
+window_prior AS (
+    SELECT
+        {focal_day_keys},
+        focal.{day},
+        CAST(SUM(counter.{prior}) AS BIGINT) AS {prior}
+    FROM focal_days AS focal
+    JOIN prior_exposures AS counter
+        ON {prior_join}
+            AND counter.{day} > focal.{day} - {config.window_days}
+            AND counter.{day} < focal.{day}
+    GROUP BY {focal_day_keys}, focal.{day}
+),
+exposures AS (
+    SELECT
+        ordered_contact.*,
+        CAST(
+            LEAST(
+                {_qualified_identifier("ordered_contact", EXPOSURE_SEQUENCE_COLUMN)}
+                    + COALESCE(prior.{prior}, 0),
+                {config.max_frequency}
+            ) AS BIGINT
+        ) AS {_quote_identifier(config.frequency_column)}
+    FROM ordered_exposures AS ordered_contact
+    LEFT JOIN window_prior AS prior
+        ON {exposure_prior_join}
+        AND CAST({_qualified_identifier("ordered_contact", time_column)} AS DATE)
+            = prior.{day}
+),
+runners AS (
+{_indent(_runners_cte_body(config), 4)}
 )
 SELECT
     exposure.*,
@@ -463,6 +653,59 @@ def _normalized_select_sql(
             f"AS {_quote_identifier(columns.priority)}"
         )
     return ",\n".join(expressions)
+
+
+def _runners_cte_body(config: model.FrequencyResponseProcessor) -> str:
+    """Shared selected rank>1 candidate resolution over ``normalized_contacts``."""
+
+    columns = config.columns
+    runner_keys = config.alternative_group_columns
+    runner_sort_columns = _ordered_unique(
+        [
+            *runner_keys,
+            RANK_COLUMN,
+            columns.action,
+            columns.placement,
+            config.time.property,
+            CONTACT_ORDER_COLUMN,
+        ]
+    )
+    runner_order_parts = [
+        f"CASE WHEN {_quote_identifier(RANK_COLUMN)} = 2 THEN 0 ELSE 1 END ASC",
+        *(
+            f"{_quote_identifier(column)} ASC NULLS FIRST"
+            for column in runner_sort_columns
+            if column not in runner_keys
+        ),
+    ]
+    runner_priority = (
+        f"CAST({_quote_identifier(columns.priority)} AS DOUBLE)"
+        if columns.priority is not None
+        else "NULL::DOUBLE"
+    )
+    return f"""
+SELECT
+    {_identifier_csv(runner_keys)},
+    CAST({_quote_identifier(columns.propensity)} AS DOUBLE)
+        AS {_quote_identifier(RUNNER_PROPENSITY_COLUMN)},
+    {runner_priority} AS {_quote_identifier(RUNNER_PRIORITY_COLUMN)},
+    TRUE AS {_quote_identifier(RUNNER_AVAILABLE_COLUMN)}
+FROM normalized_contacts
+WHERE {_quote_identifier(SEEN_CURRENT_COLUMN)}
+  AND {_quote_identifier(RANK_COLUMN)} > 1
+QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY {_identifier_csv(runner_keys)}
+    ORDER BY {", ".join(runner_order_parts)}
+) = 1
+""".strip()
+
+
+def _runner_join_condition(config: model.FrequencyResponseProcessor) -> str:
+    return "\n        AND ".join(
+        f"{_qualified_identifier('exposure', key)} IS NOT DISTINCT FROM "
+        f"{_qualified_identifier('runner', key)}"
+        for key in config.alternative_group_columns
+    )
 
 
 def _qualified_identifier(alias: str, column: str) -> str:

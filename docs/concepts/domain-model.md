@@ -309,7 +309,7 @@ Processors implement the interface in reference/processors.md §1.
 ### Processor Checkpoint
 An optional, ingestion-only acceleration artifact owned by a bounded Processor.
 For `frequency_response`, the current and only supported checkpoint schema is
-revision 7. It uses one bounded database at the stable path
+revision 8. It uses one bounded database at the stable path
 `.valuestream/state/frequency_response/source=<source>/processor=<processor>/rolling.duckdb`.
 There are no schema, hashing, Polars-version, processor-config, or layout path
 levels. Schema and hashing revisions, Polars version, processor computation

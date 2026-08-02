@@ -5827,8 +5827,21 @@
     },
     "FrequencyResponseCheckpoint": {
       "additionalProperties": false,
-      "description": "Execution strategy for bounded frequency-response contact state.",
+      "description": "Execution strategy for bounded frequency-response contact state.\n\n``threads`` and ``memory_limit`` tune the rolling DuckDB connection only.\nLike every checkpoint field they are operational settings outside processor\nand source computation hashes.",
       "properties": {
+        "memory_limit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9]+(\\.[0-9]+)?\\s*(%|[KMGTkmgt][iI]?[bB])$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Limit"
+        },
         "mode": {
           "default": "source_scan",
           "enum": [
@@ -5858,6 +5871,20 @@
           "minimum": 1,
           "title": "Shards",
           "type": "integer"
+        },
+        "threads": {
+          "anyOf": [
+            {
+              "maximum": 256,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threads"
         }
       },
       "title": "FrequencyResponseCheckpoint",
@@ -5928,6 +5955,23 @@
       "title": "FrequencyResponseColumns",
       "type": "object"
     },
+    "FrequencyResponseCustomerSample": {
+      "additionalProperties": false,
+      "description": "Deterministic customer-hash subsample evaluated with exact semantics.\n\nSampling keeps every row of a sampled customer and drops every row of an\nunsampled customer, in both ``source_scan`` and ``persistent_sharded``\nmodes. Ratio metrics stay unbiased; absolute counts represent the sample\nand scale by ``1 / fraction``.",
+      "properties": {
+        "fraction": {
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.0,
+          "title": "Fraction",
+          "type": "number"
+        }
+      },
+      "required": [
+        "fraction"
+      ],
+      "title": "FrequencyResponseCustomerSample",
+      "type": "object"
+    },
     "FrequencyResponseProcessor": {
       "additionalProperties": false,
       "description": "Frequency-window response states over a marked current chunk plus lookback.",
@@ -5950,6 +5994,17 @@
         },
         "columns": {
           "$ref": "#/$defs/FrequencyResponseColumns"
+        },
+        "customer_sample": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrequencyResponseCustomerSample"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "description": {
           "default": "",
@@ -6173,6 +6228,15 @@
         },
         "time": {
           "$ref": "#/$defs/ProcessorTime"
+        },
+        "window_granularity": {
+          "default": "exact",
+          "enum": [
+            "exact",
+            "daily"
+          ],
+          "title": "Window Granularity",
+          "type": "string"
         },
         "window_hours": {
           "default": 168,

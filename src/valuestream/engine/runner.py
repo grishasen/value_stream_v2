@@ -7,14 +7,21 @@ import math
 import time
 from collections import deque
 from collections.abc import Callable, Sequence
-from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    Future,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    wait,
+)
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, cast
 
 import polars as pl
+import pyarrow as pa
 
 from valuestream.config import model
 from valuestream.config.canonical import (
@@ -53,7 +60,6 @@ from valuestream.readers.discovery import Chunk
 from valuestream.store.duckdb_views import refresh_aggregate_views
 from valuestream.store.parquet import AggregateWriteReceipt, write_aggregate_with_receipts
 from valuestream.store.processor_state import (
-    HistoryProjectionSpec,
     RollingCheckpoint,
     rolling_checkpoint_path,
 )
@@ -563,28 +569,40 @@ def _process_chunk(
             if frequency_transformed is not None:
                 _log_chunk_schema(source, chunk, "frequency_transformed", frequency_transformed)
 
-        persistent_processor_frames = _collect_rolling_frequency_frames(
-            frequency_processors,
-            frequency_coordinator,
-            transformed,
-            plan,
-            ctx,
-            engine=source_engine,
-        )
         if source.materialize_transforms:
-            rows_in, rows_kept, processor_frames, written = _collect_chunk_materialized(
+            # The materialized transform frame doubles as the rolling staging
+            # input, so persistent frequency state is fed without a second
+            # source scan; `_collect_chunk_materialized` runs the rolling
+            # collection itself once the frame exists.
+            (
+                rows_in,
+                rows_kept,
+                processor_frames,
+                written,
+                persistent_processor_frames,
+            ) = _collect_chunk_materialized(
                 workspace,
                 source,
                 directly_collected_processors,
-                chunk,
+                plan,
                 run_id,
                 ctx,
                 source_engine,
                 raw,
                 transformed,
                 frequency_transformed,
+                frequency_processors=frequency_processors,
+                frequency_coordinator=frequency_coordinator,
             )
         else:
+            persistent_processor_frames = _collect_rolling_frequency_frames(
+                frequency_processors,
+                frequency_coordinator,
+                transformed,
+                plan,
+                ctx,
+                engine=source_engine,
+            )
             rows_in, rows_kept, processor_frames, written = _collect_chunk_lazy(
                 workspace,
                 source,
@@ -826,19 +844,12 @@ class _PersistentFrequencyCoordinator:
                 engine=engine,
             )
             try:
-                shard_partials: list[pl.DataFrame] = []
                 with DuckDBFrequencySession(
                     config=processor.config,
                     connection=checkpoint.connection,
                     current_chunk_id=plan.chunk_id,
                 ) as session:
-                    for shard_id in shards:
-                        partial = processor.aggregate_focal_lazy(
-                            session.focal_lazy(shard_id),
-                            ctx,
-                        ).collect()
-                        if not partial.is_empty():
-                            shard_partials.append(partial)
+                    shard_partials = _collect_shard_partials(session, processor, shards, ctx)
                 daily = (
                     pl.concat(shard_partials, how="diagonal_relaxed")
                     if shard_partials
@@ -879,7 +890,6 @@ class _PersistentFrequencyCoordinator:
         existing = self._checkpoints.get(processor.id)
         if existing is not None:
             return existing
-        history_columns, history_rank, history_exposed = processor.checkpoint_history_projection()
         checkpoint = self._stack.enter_context(
             RollingCheckpoint(
                 self.workspace,
@@ -890,12 +900,10 @@ class _PersistentFrequencyCoordinator:
                 customer_dtype=customer_dtype,
                 shard_count=processor.config.checkpoint.shards,
                 retention_days=processor.config.checkpoint_retention_days,
-                history_projection=HistoryProjectionSpec(
-                    columns=history_columns,
-                    rank_column=history_rank,
-                    exposed_column=history_exposed,
-                ),
+                history_projection=processor.checkpoint_history_projection(),
                 force=self.force,
+                duckdb_threads=processor.config.checkpoint.threads,
+                duckdb_memory_limit=processor.config.checkpoint.memory_limit,
             )
         )
         self._checkpoints[processor.id] = checkpoint
@@ -965,6 +973,38 @@ class _PersistentFrequencyCoordinator:
         )
 
 
+def _collect_shard_partials(
+    session: DuckDBFrequencySession,
+    processor: FrequencyResponseRuntime,
+    shards: Sequence[int],
+    ctx: ChunkContext,
+) -> list[pl.DataFrame]:
+    """Aggregate each shard while prefetching the next shard's SQL result.
+
+    One worker thread materializes shard ``k + 1`` through the shared DuckDB
+    connection while the main thread runs shard ``k``'s Polars tail over an
+    already-fetched Arrow table, so the connection is never used concurrently.
+    At most two shards of focal rows are in flight, which the logical shard
+    count already bounds.
+    """
+
+    partials: list[pl.DataFrame] = []
+    if not shards:
+        return partials
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        prefetched: Future[pa.Table] = pool.submit(session.focal_table, shards[0])
+        for index in range(len(shards)):
+            focal_table = prefetched.result()
+            if index + 1 < len(shards):
+                prefetched = pool.submit(session.focal_table, shards[index + 1])
+            focal = cast(pl.DataFrame, pl.from_arrow(focal_table)).lazy()
+            del focal_table
+            partial = processor.aggregate_focal_lazy(focal, ctx).collect()
+            if not partial.is_empty():
+                partials.append(partial)
+    return partials
+
+
 def _processor_history_chunks(
     processor: FrequencyResponseRuntime,
     plan: _ChunkPlan,
@@ -1006,20 +1046,37 @@ _ChunkFrames = tuple[
     list[AggregateWriteReceipt],
 ]
 
+_MaterializedChunkFrames = tuple[
+    int,
+    int,
+    list[tuple["_Processor", pl.DataFrame]],
+    list[AggregateWriteReceipt],
+    list[tuple["_Processor", pl.DataFrame]],
+]
+
 
 def _collect_chunk_materialized(  # noqa: PLR0917
     workspace: Path,
     source: model.Source,
     processors: list[_Processor],
-    chunk: Chunk,
+    plan: _ChunkPlan,
     run_id: str,
     ctx: ChunkContext,
     source_engine: _CollectEngine,
     raw: pl.LazyFrame,
     transformed: pl.LazyFrame,
     frequency_transformed: pl.LazyFrame | None,
-) -> _ChunkFrames:
-    """Collect transforms once, then fan processors out over the materialized frame."""
+    *,
+    frequency_processors: list[_Processor],
+    frequency_coordinator: _PersistentFrequencyCoordinator | None,
+) -> _MaterializedChunkFrames:
+    """Collect transforms once, then fan processors out over the materialized frame.
+
+    Rolling frequency staging consumes the materialized frame directly, so
+    persistent state is advanced without re-reading and re-transforming the
+    source files for the same chunk.
+    """
+    chunk = plan.chunk
     transform_plans = [
         raw.select(pl.len().alias("rows_in")),
         transformed,
@@ -1032,6 +1089,14 @@ def _collect_chunk_materialized(  # noqa: PLR0917
     frequency_frame = counts_and_transformed[2] if frequency_transformed is not None else None
     del counts_and_transformed
     rows_kept = transformed_frame.height
+    persistent_processor_frames = _collect_rolling_frequency_frames(
+        frequency_processors,
+        frequency_coordinator,
+        transformed_frame.lazy(),
+        plan,
+        ctx,
+        engine="auto",
+    )
     processor_inputs = _processor_input_frames(
         processors,
         transformed_frame.lazy(),
@@ -1063,7 +1128,7 @@ def _collect_chunk_materialized(  # noqa: PLR0917
         if frequency_frame is not None:
             del frequency_frame
         del transformed_frame
-    return rows_in, rows_kept, processor_frames, written
+    return rows_in, rows_kept, processor_frames, written, persistent_processor_frames
 
 
 def _collect_chunk_lazy(  # noqa: PLR0917

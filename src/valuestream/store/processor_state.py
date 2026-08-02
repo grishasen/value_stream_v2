@@ -27,7 +27,7 @@ import polars as pl
 
 from valuestream.utils.logger import get_logger
 
-CHECKPOINT_SCHEMA_REVISION = 7
+CHECKPOINT_SCHEMA_REVISION = 8
 SHARD_HASH_REVISION = 1
 SHARD_HASH_ALGORITHM = "polars.Expr.hash"
 SHARD_HASH_SEEDS = (
@@ -46,6 +46,7 @@ CURRENT_TABLE = "current"
 CHECKPOINT_MAINTENANCE_INTERVAL_DAYS = 30
 
 _HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
+_MEMORY_LIMIT_PATTERN = re.compile(r"[0-9]+(\.[0-9]+)?\s*(%|[KMGT]i?B)", re.IGNORECASE)
 _FrameT = TypeVar("_FrameT", pl.DataFrame, pl.LazyFrame)
 _CollectEngine = Literal["auto", "streaming"]
 _RESERVED_COLUMNS = frozenset({SHARD_COLUMN, CHUNK_ID_COLUMN})
@@ -62,11 +63,19 @@ class _CheckpointCompatibilityError(CheckpointValidationError):
 
 @dataclass(frozen=True, slots=True)
 class HistoryProjectionSpec:
-    """SQL-compatible narrow history projection and inclusion predicate."""
+    """SQL-compatible narrow history projection and inclusion predicate.
+
+    ``min_columns`` and ``bool_or_columns`` optionally normalize the committed
+    projection to one row per remaining key tuple: listed columns aggregate
+    with ``MIN``/``BOOL_OR`` while every other column groups. Empty roles keep
+    the plain row projection.
+    """
 
     columns: tuple[str, ...]
     rank_column: str
     exposed_column: str
+    min_columns: tuple[str, ...] = ()
+    bool_or_columns: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.columns, tuple):
@@ -88,6 +97,37 @@ class HistoryProjectionSpec:
                 raise ValueError(f"checkpoint history {label} must be a non-empty string")
             if name not in self.columns:
                 raise ValueError(f"checkpoint history {label} {name!r} must appear in columns")
+        for label, names in {
+            "min_columns": self.min_columns,
+            "bool_or_columns": self.bool_or_columns,
+        }.items():
+            if not isinstance(names, tuple):
+                raise TypeError(f"checkpoint history {label} must be a tuple")
+            unknown = sorted(set(names) - set(self.columns))
+            if unknown:
+                raise ValueError(
+                    f"checkpoint history {label} must appear in columns: " + ", ".join(unknown)
+                )
+        overlap = sorted(set(self.min_columns) & set(self.bool_or_columns))
+        if overlap:
+            raise ValueError(
+                "checkpoint history min/bool_or roles must be disjoint: " + ", ".join(overlap)
+            )
+        if self.rank_column in {*self.min_columns, *self.bool_or_columns}:
+            raise ValueError("checkpoint history rank_column must stay a grouping key")
+
+    @property
+    def key_columns(self) -> tuple[str, ...]:
+        """Grouping keys: every projected column without an aggregate role."""
+
+        aggregated = {*self.min_columns, *self.bool_or_columns}
+        return tuple(column for column in self.columns if column not in aggregated)
+
+    @property
+    def normalizes(self) -> bool:
+        """Whether commits collapse the projection to one row per key tuple."""
+
+        return bool(self.min_columns or self.bool_or_columns)
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +196,8 @@ class RollingCheckpoint:
         retention_days: int,
         history_projection: HistoryProjectionSpec,
         force: bool = False,
+        duckdb_threads: int | None = None,
+        duckdb_memory_limit: str | None = None,
     ) -> None:
         _validate_identity(
             source_id=source_id,
@@ -181,6 +223,19 @@ class RollingCheckpoint:
             )
         if not isinstance(force, bool):
             raise TypeError("checkpoint force must be a boolean")
+        if duckdb_threads is not None and (
+            isinstance(duckdb_threads, bool)
+            or not isinstance(duckdb_threads, int)
+            or duckdb_threads < 1
+        ):
+            raise ValueError("checkpoint duckdb_threads must be a positive integer")
+        if duckdb_memory_limit is not None and (
+            not isinstance(duckdb_memory_limit, str)
+            or _MEMORY_LIMIT_PATTERN.fullmatch(duckdb_memory_limit) is None
+        ):
+            raise ValueError(
+                "checkpoint duckdb_memory_limit must be a DuckDB size such as '4GB' or '80%'"
+            )
 
         self.path = rolling_checkpoint_path(
             workspace_path,
@@ -196,6 +251,8 @@ class RollingCheckpoint:
         self.retention_days = retention_days
         self.history_projection = history_projection
         self.force = force
+        self.duckdb_threads = duckdb_threads
+        self.duckdb_memory_limit = duckdb_memory_limit
         self._connection: duckdb.DuckDBPyConnection | None = None
         self._effective_customer_dtype = customer_dtype
         self._effective_customer_storage_dtype = "Null"
@@ -236,7 +293,7 @@ class RollingCheckpoint:
         is_new = not self.path.exists()
         connection = duckdb.connect(str(self.path))
         try:
-            _configure_connection(connection)
+            self._configure_connection(connection)
             if is_new:
                 self._initialize(connection)
             else:
@@ -278,11 +335,18 @@ class RollingCheckpoint:
     def _initialize_database_file(self, path: Path) -> None:
         connection = duckdb.connect(str(path))
         try:
-            _configure_connection(connection)
+            self._configure_connection(connection)
             self._initialize(connection)
             self._validate_existing(connection)
         finally:
             connection.close()
+
+    def _configure_connection(self, connection: duckdb.DuckDBPyConnection) -> None:
+        connection.execute("SET TimeZone = 'UTC'")
+        if self.duckdb_threads is not None:
+            connection.execute(f"SET threads TO {self.duckdb_threads}")
+        if self.duckdb_memory_limit is not None:
+            connection.execute(f"SET memory_limit = {_quote_literal(self.duckdb_memory_limit)}")
 
     def __exit__(
         self,
@@ -432,18 +496,7 @@ class RollingCheckpoint:
                     "rolling checkpoint chunks must commit in increasing calendar order; "
                     f"got {chunk_id!r} after {existing[-1].chunk_id!r}"
                 )
-            selected = [
-                *self.history_projection.columns,
-                CHUNK_ID_COLUMN,
-                SHARD_COLUMN,
-            ]
-            connection.execute(
-                f"INSERT INTO {_quote_identifier(HISTORY_TABLE)} "
-                f"SELECT {_identifier_csv(selected)} "
-                f"FROM {_quote_identifier(CURRENT_TABLE)} "
-                f"WHERE {_quote_identifier(self.history_projection.rank_column)} = 1 "
-                f"AND {_quote_identifier(self.history_projection.exposed_column)} IS TRUE"
-            )
+            connection.execute(_history_insert_sql(self.history_projection))
             sequence = existing[-1].sequence + 1 if existing else 0
             connection.execute(
                 f"INSERT INTO {_quote_identifier(JOURNAL_TABLE)} "
@@ -1011,9 +1064,48 @@ def _projection_json(spec: HistoryProjectionSpec) -> str:
             "columns": list(spec.columns),
             "rank_column": spec.rank_column,
             "exposed_column": spec.exposed_column,
+            "min_columns": list(spec.min_columns),
+            "bool_or_columns": list(spec.bool_or_columns),
         },
         sort_keys=True,
         separators=(",", ":"),
+    )
+
+
+def _history_insert_sql(projection: HistoryProjectionSpec) -> str:
+    """Project (and optionally normalize) staged rank-1 exposed rows into history."""
+
+    filter_sql = (
+        f"WHERE {_quote_identifier(projection.rank_column)} = 1 "
+        f"AND {_quote_identifier(projection.exposed_column)} IS TRUE"
+    )
+    if not projection.normalizes:
+        selected = [*projection.columns, CHUNK_ID_COLUMN, SHARD_COLUMN]
+        return (
+            f"INSERT INTO {_quote_identifier(HISTORY_TABLE)} "
+            f"SELECT {_identifier_csv(selected)} "
+            f"FROM {_quote_identifier(CURRENT_TABLE)} "
+            f"{filter_sql}"
+        )
+    expressions: list[str] = []
+    for column in projection.columns:
+        quoted = _quote_identifier(column)
+        if column in projection.min_columns:
+            expressions.append(f"MIN({quoted}) AS {quoted}")
+        elif column in projection.bool_or_columns:
+            expressions.append(f"BOOL_OR({quoted}) AS {quoted}")
+        else:
+            expressions.append(quoted)
+    expressions.extend([_quote_identifier(CHUNK_ID_COLUMN), _quote_identifier(SHARD_COLUMN)])
+    # The shard is functionally dependent on the customer key, and the staged
+    # chunk id is constant, so grouping by both never splits a contact.
+    group_columns = [*projection.key_columns, CHUNK_ID_COLUMN, SHARD_COLUMN]
+    return (
+        f"INSERT INTO {_quote_identifier(HISTORY_TABLE)} "
+        f"SELECT {', '.join(expressions)} "
+        f"FROM {_quote_identifier(CURRENT_TABLE)} "
+        f"{filter_sql} "
+        f"GROUP BY {_identifier_csv(group_columns)}"
     )
 
 
@@ -1292,10 +1384,6 @@ def _chunk_date(chunk_id: str) -> dt.date:
 
 def _customer_dtypes_compatible(left: str, right: str) -> bool:
     return left in {right, "Null"} or right == "Null"
-
-
-def _configure_connection(connection: duckdb.DuckDBPyConnection) -> None:
-    connection.execute("SET TimeZone = 'UTC'")
 
 
 def _checkpoint_connection(connection: duckdb.DuckDBPyConnection) -> None:
