@@ -32,7 +32,7 @@ the resulting checkpoint as sensitive source-derived data:
   customer key.
 - Customer hashing routes records to logical shards. It is not encryption,
   anonymization, or a substitute for upstream tokenization/HMAC.
-- One schema-revision-7 `rolling.duckdb` uses the stable path
+- One schema-revision-8 `rolling.duckdb` uses the stable path
   `.valuestream/state/frequency_response/source=<source>/processor=<processor>/rolling.duckdb`;
   revision 8 is the default and only supported checkpoint schema. Schema,
   hashing, Polars-version, processor-config, and layout values do not add path

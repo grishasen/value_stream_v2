@@ -366,8 +366,8 @@ partitioning, and retention selects lifecycle. They remain in the full catalog
 identity for audit. Changing them does not republish aggregates; incompatible
 state at the stable path is rebuilt from IH when the next persistent run opens
 it. Earlier per-day checkpoints, nested identity layouts, and schema revisions
-before 7 are obsolete acceleration artifacts and are rebuilt, not migrated,
-into schema-revision-7 state. See
+before 8 are obsolete acceleration artifacts and are rebuilt, not migrated,
+into schema-revision-8 state. See
 [ADR 0007](adr/0007-bounded-lookback-processors.md) and
 [ADR 0008](adr/0008-bounded-rolling-duckdb-state.md).
 

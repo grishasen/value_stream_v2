@@ -252,7 +252,7 @@ With `checkpoint.mode: source_scan`, the runner transforms that closure into an
 ephemeral current/history frame for the frequency processor. With
 `checkpoint.mode: persistent_sharded`, schema revision 8 opens the one stable
 `rolling.duckdb` addressed by source and processor and keeps its connection
-alive for the complete source run. Revision 7 is the default and only supported
+alive for the complete source run. Revision 8 is the default and only supported
 checkpoint schema. Targets execute in ascending ISO-date order. Polars streams the
 complete prepared current target through the Arrow C Stream interface into a
 temporary DuckDB relation; it is never persisted. The database retains only
@@ -279,6 +279,10 @@ pruned after every chronological source-day commit. Every 30 commits,
 `CHECKPOINT` runs on the same open connection; the writer closes once at the
 source-run boundary. Both execution modes publish the same mergeable grouped
 states, and reports cannot address the state namespace.
+The DuckDB connection remains on the owning thread: one shard uses a batched
+lazy stream, while multi-shard execution overlaps a main-thread fetch with one
+worker's Polars aggregation over a detached Arrow table and keeps at most two
+complete shard results live.
 Both paths canonicalize decision time to timezone-naive UTC whole seconds
 before normalization; reporting-day derivation reattaches UTC before
 calendar-timezone conversion.
@@ -613,7 +617,7 @@ them cannot change report semantics.
 | Reader can't open a file | I/O exception inside chunk loop | That chunk fails; run continues with next chunk | Operator fixes file; re-run the source; only failed chunks process |
 | Processor exception | Exception inside `chunk_aggregate` | The chunk fails and none of that run's partials become query-visible; the previous successful chunk version remains visible | Operator fixes config or code; re-run the source |
 | Partial Parquet write incomplete | Write done atomically (write-then-rename) | Incomplete file never visible to readers | None needed |
-| Rolling processor state missing or valid-but-incompatible | Metadata and transactional-journal reconciliation against the current schema-7 contract and expected raw fingerprints | No aggregate is authorized by state alone; the stable database is reinitialized | Rebuild bounded rolling state automatically from authoritative source files oldest-to-newest |
+| Rolling processor state missing or valid-but-incompatible | Metadata and transactional-journal reconciliation against the current schema-8 contract and expected raw fingerprints | No aggregate is authorized by state alone; the stable database is reinitialized | Rebuild bounded rolling state automatically from authoritative source files oldest-to-newest |
 | Rolling processor state corrupt | DuckDB open/recovery, schema, journal, or exact-SQL failure | The affected persistent frequency source fails closed; previous successful aggregates remain visible | Run with `--force` to rebuild state from authoritative source files, or remove `rolling.duckdb` and retry |
 | Grain materialization fails | Exception while deriving a configured grain | The chunk remains unpublished at every grain; previous successful data remains visible | Fix the cause and re-run the source |
 | Process is terminated before run finalization | A prior `running` row exists after the next caller acquires the source lock | The interrupted run remains invisible until its committed chunks are verified | The next normal source run verifies fingerprint, lineage, files, and computation hashes; valid chunks are published under a recovered `partial` run and reused, invalid chunks are reprocessed |

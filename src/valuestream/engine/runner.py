@@ -979,29 +979,42 @@ def _collect_shard_partials(
     shards: Sequence[int],
     ctx: ChunkContext,
 ) -> list[pl.DataFrame]:
-    """Aggregate each shard while prefetching the next shard's SQL result.
+    """Aggregate focal shards without moving the DuckDB connection across threads.
 
-    One worker thread materializes shard ``k + 1`` through the shared DuckDB
-    connection while the main thread runs shard ``k``'s Polars tail over an
-    already-fetched Arrow table, so the connection is never used concurrently.
-    At most two shards of focal rows are in flight, which the logical shard
-    count already bounds.
+    A single shard keeps DuckDB's batched Polars stream. With multiple shards,
+    the owning thread fetches each detached Arrow table while one worker runs
+    only its Polars tail over the preceding table. This overlaps the two engines
+    while bounding detached focal data to at most two whole shards.
     """
 
     partials: list[pl.DataFrame] = []
     if not shards:
         return partials
+
+    if len(shards) == 1:
+        partial = processor.aggregate_focal_lazy(session.focal_lazy(shards[0]), ctx).collect()
+        if not partial.is_empty():
+            partials.append(partial)
+        return partials
+
+    def aggregate_detached(focal_table: pa.Table) -> pl.DataFrame:
+        focal = cast(pl.DataFrame, pl.from_arrow(focal_table)).lazy()
+        return processor.aggregate_focal_lazy(focal, ctx).collect()
+
     with ThreadPoolExecutor(max_workers=1) as pool:
-        prefetched: Future[pa.Table] = pool.submit(session.focal_table, shards[0])
-        for index in range(len(shards)):
-            focal_table = prefetched.result()
-            if index + 1 < len(shards):
-                prefetched = pool.submit(session.focal_table, shards[index + 1])
-            focal = cast(pl.DataFrame, pl.from_arrow(focal_table)).lazy()
-            del focal_table
-            partial = processor.aggregate_focal_lazy(focal, ctx).collect()
+        first_table = session.focal_table(shards[0])
+        pending: Future[pl.DataFrame] = pool.submit(aggregate_detached, first_table)
+        del first_table
+        for shard_id in shards[1:]:
+            next_table = session.focal_table(shard_id)
+            partial = pending.result()
             if not partial.is_empty():
                 partials.append(partial)
+            pending = pool.submit(aggregate_detached, next_table)
+            del next_table
+        partial = pending.result()
+        if not partial.is_empty():
+            partials.append(partial)
     return partials
 
 

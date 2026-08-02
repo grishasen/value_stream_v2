@@ -53,7 +53,13 @@ _FLOAT64_VALUE_SUM_REVISION = 1
 # persistent modes without making the mode itself part of aggregate identity.
 # Revision 3: decision time is canonical at whole-second precision, so window
 # membership at sub-second boundaries changed and both execution paths agree.
-_FREQUENCY_RESPONSE_SEMANTICS_REVISION = 3
+# Revision 4: daily current-day counters are partitioned by canonical UTC day,
+# and retained daily contact identity is deduplicated across source chunks.
+_FREQUENCY_RESPONSE_SEMANTICS_REVISION = 4
+# Revision 2 hashes the UTF-8 string representation of the customer key, so
+# text, integer, and dictionary-backed IDs that render identically do not
+# change sample membership solely due to those source representations.
+_FREQUENCY_CUSTOMER_SAMPLE_REVISION = 2
 
 
 def canonicalize(value: Any) -> Any:
@@ -228,7 +234,16 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
         # contract as the field omitted; keep those hashes identical.
         if payload.get("window_granularity") == "exact":
             payload.pop("window_granularity", None)
-        if processor.customer_sample is not None:
+        customer_sample = processor.customer_sample
+        if (
+            customer_sample is not None
+            and customer_sample.sample_threshold == model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS
+        ):
+            # A full sample is result-equivalent to sampling being absent. Keep
+            # it in the catalog hash for audit, but normalize it out of the
+            # processor/source computation contract.
+            payload.pop("customer_sample", None)
+        elif customer_sample is not None:
             # Sample membership is computed with polars.Expr.hash, which is
             # not guaranteed stable across Polars versions. Pinning the
             # version (with the fixed seeds and modulus) into the semantic
@@ -236,9 +251,10 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
             # upgrade recomputes sampled processors instead of silently
             # changing which customers are sampled.
             payload["customer_sample_contract"] = {
-                "algorithm": "polars.Expr.hash",
+                "algorithm": "polars.Expr.cast(String).hash",
                 "modulus": model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS,
                 "polars_version": pl.__version__,
+                "revision": _FREQUENCY_CUSTOMER_SAMPLE_REVISION,
                 "seeds": list(model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS),
             }
         revision["frequency_response_semantics"] = _FREQUENCY_RESPONSE_SEMANTICS_REVISION

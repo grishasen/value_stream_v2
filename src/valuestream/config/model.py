@@ -26,6 +26,7 @@ the public contract and unknown or retired fields fail validation.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -536,7 +537,8 @@ class BinaryOutcomeProcessor(_ProcessorBase):
 class FrequencyResponseCheckpoint(_StrictModel):
     """Execution strategy for bounded frequency-response contact state.
 
-    ``threads`` and ``memory_limit`` tune the rolling DuckDB connection only.
+    ``threads`` and ``memory_limit`` tune the rolling DuckDB connection only;
+    the latter is a positive absolute size from K through TiB, never a percent.
     Like every checkpoint field they are operational settings outside processor
     and source computation hashes.
     """
@@ -547,8 +549,23 @@ class FrequencyResponseCheckpoint(_StrictModel):
     threads: int | None = Field(default=None, ge=1, le=256)
     memory_limit: str | None = Field(
         default=None,
-        pattern=r"^[0-9]+(\.[0-9]+)?\s*(%|[KMGTkmgt][iI]?[bB])$",
+        pattern=(
+            r"^(?:[0-9]*[1-9][0-9]*(?:\.[0-9]+)?|"
+            r"[0-9]+\.[0-9]*[1-9][0-9]*)\s*[KMGTkmgt](?:[iI]?[bB])?$"
+        ),
     )
+
+    @model_validator(mode="after")
+    def _memory_limit_is_positive(self) -> FrequencyResponseCheckpoint:
+        if self.memory_limit is None:
+            return self
+        unit_start = next(
+            index for index, character in enumerate(self.memory_limit) if character.isalpha()
+        )
+        amount = Decimal(self.memory_limit[:unit_start].strip())
+        if amount <= 0:
+            raise ValueError("frequency_response checkpoint.memory_limit must be positive")
+        return self
 
 
 def _minimum_frequency_checkpoint_retention_days(
@@ -561,11 +578,12 @@ def _minimum_frequency_checkpoint_retention_days(
 
 
 # Customer sampling is result semantics: membership must be reproducible for
-# one published aggregate generation. The modulus quantizes the configured
-# fraction; the seeds keep sample membership independent of internal shard
-# routing. The hash function itself is polars.Expr.hash, so the Polars version
-# joins these constants in the computation-hash contract (see canonical.py) —
-# upgrading Polars deliberately recomputes sampled processors.
+# one published aggregate generation. The configured fraction must map exactly
+# to an integer number of modulus residues; the seeds keep sample membership
+# independent of internal shard routing. The hash function itself is
+# polars.Expr.hash, so the Polars version joins these constants in the
+# computation-hash contract (see canonical.py) — upgrading Polars deliberately
+# recomputes sampled processors.
 FREQUENCY_CUSTOMER_SAMPLE_MODULUS = 1_000_000
 FREQUENCY_CUSTOMER_SAMPLE_SEEDS = (
     0x452821E638D01377,
@@ -580,18 +598,26 @@ class FrequencyResponseCustomerSample(_StrictModel):
 
     Sampling keeps every row of a sampled customer and drops every row of an
     unsampled customer, in both ``source_scan`` and ``persistent_sharded``
-    modes. Ratio metrics stay unbiased; absolute counts represent the sample
-    and scale by ``1 / fraction``.
+    modes. Membership hashes the customer's Polars string representation, so
+    text, integer, and dictionary-backed IDs that render identically share a
+    cohort. Ratio metrics are sample estimates; absolute totals represent the
+    sample and may be estimated by scaling by ``1 / fraction``. The fraction is
+    an exact multiple of one residue in the fixed modulus, so the configured
+    fraction and effective cohort cannot drift.
     """
 
-    fraction: float = Field(gt=0.0, le=1.0)
+    fraction: float = Field(
+        ge=1 / FREQUENCY_CUSTOMER_SAMPLE_MODULUS,
+        le=1.0,
+    )
 
     @model_validator(mode="after")
     def _fraction_is_representable(self) -> FrequencyResponseCustomerSample:
-        if self.sample_threshold < 1:
+        residues = Decimal(str(self.fraction)) * FREQUENCY_CUSTOMER_SAMPLE_MODULUS
+        if residues != residues.to_integral_value():
             raise ValueError(
-                "frequency_response customer_sample.fraction is below the smallest "
-                f"representable sample of 1/{FREQUENCY_CUSTOMER_SAMPLE_MODULUS}"
+                "frequency_response customer_sample.fraction must be an exact multiple "
+                f"of 1/{FREQUENCY_CUSTOMER_SAMPLE_MODULUS}"
             )
         return self
 
@@ -599,7 +625,7 @@ class FrequencyResponseCustomerSample(_StrictModel):
     def sample_threshold(self) -> int:
         """Number of hash residues (of the fixed modulus) inside the sample."""
 
-        return round(self.fraction * FREQUENCY_CUSTOMER_SAMPLE_MODULUS)
+        return int(Decimal(str(self.fraction)) * FREQUENCY_CUSTOMER_SAMPLE_MODULUS)
 
 
 class FrequencyResponseProcessor(_ProcessorBase):

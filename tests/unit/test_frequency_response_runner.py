@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import duckdb
 import polars as pl
+import pyarrow as pa
 import pytest
 
 from valuestream.config import model
@@ -165,6 +167,81 @@ def _frequency_context(chunk_id: str) -> ChunkContext:
         chunk_id=chunk_id,
         created_at=dt.datetime(2024, 1, 2, 13, tzinfo=dt.UTC),
     )
+
+
+@pytest.mark.unit
+def test_single_frequency_shard_keeps_duckdb_polars_stream_on_owning_thread() -> None:
+    owner_thread = threading.get_ident()
+    lazy_calls: list[tuple[int, int]] = []
+    table_calls: list[tuple[int, int]] = []
+    aggregate_threads: list[int] = []
+
+    class Session:
+        def focal_lazy(self, shard_id: int) -> pl.LazyFrame:
+            lazy_calls.append((shard_id, threading.get_ident()))
+            return pl.DataFrame({"value": [shard_id]}).lazy()
+
+        def focal_table(self, shard_id: int) -> pa.Table:
+            table_calls.append((shard_id, threading.get_ident()))
+            return pa.table({"value": [shard_id]})
+
+    class Processor:
+        def aggregate_focal_lazy(
+            self,
+            focal: pl.LazyFrame,
+            _ctx: ChunkContext,
+        ) -> pl.LazyFrame:
+            aggregate_threads.append(threading.get_ident())
+            return focal
+
+    partials = runner._collect_shard_partials(
+        cast(Any, Session()),
+        cast(Any, Processor()),
+        [3],
+        _frequency_context("2024-01-02"),
+    )
+
+    assert lazy_calls == [(3, owner_thread)]
+    assert table_calls == []
+    assert aggregate_threads == [owner_thread]
+    assert [partial.get_column("value").item() for partial in partials] == [3]
+
+
+@pytest.mark.unit
+def test_multiple_frequency_shards_fetch_on_owner_and_aggregate_detached_in_worker() -> None:
+    owner_thread = threading.get_ident()
+    table_calls: list[tuple[int, int]] = []
+    aggregate_calls: list[tuple[int, int]] = []
+
+    class Session:
+        def focal_lazy(self, _shard_id: int) -> pl.LazyFrame:
+            raise AssertionError("multi-shard path must detach before worker aggregation")
+
+        def focal_table(self, shard_id: int) -> pa.Table:
+            table_calls.append((shard_id, threading.get_ident()))
+            return pa.table({"value": [shard_id]})
+
+    class Processor:
+        def aggregate_focal_lazy(
+            self,
+            focal: pl.LazyFrame,
+            _ctx: ChunkContext,
+        ) -> pl.LazyFrame:
+            frame = focal.collect()
+            aggregate_calls.append((frame.get_column("value").item(), threading.get_ident()))
+            return frame.lazy()
+
+    partials = runner._collect_shard_partials(
+        cast(Any, Session()),
+        cast(Any, Processor()),
+        [5, 2, 7],
+        _frequency_context("2024-01-02"),
+    )
+
+    assert table_calls == [(5, owner_thread), (2, owner_thread), (7, owner_thread)]
+    assert [shard_id for shard_id, _thread_id in aggregate_calls] == [5, 2, 7]
+    assert all(thread_id != owner_thread for _shard_id, thread_id in aggregate_calls)
+    assert [partial.get_column("value").item() for partial in partials] == [5, 2, 7]
 
 
 @pytest.mark.unit

@@ -13,7 +13,7 @@ from polars.testing import assert_frame_equal
 
 from valuestream.config import model
 from valuestream.engine.frequency import DuckDBFrequencySession
-from valuestream.processors.context import ChunkContext
+from valuestream.processors.context import TARGET_CHUNK_COLUMN, ChunkContext
 from valuestream.processors.frequency_fields import (
     CHECKPOINT_SHARD_COLUMN,
     EXPOSED_COLUMN,
@@ -643,6 +643,71 @@ def test_rolling_frequency_sql_matches_polars_for_daily_granularity() -> None:
     assert actual.select(pl.col("ExposureBucket").sum()).item() == 6
     assert actual.select(pl.col("Contacts").sum()).item() == 3
     assert actual.select(pl.col("RunnerAvailableContacts").sum()).item() == 1
+
+
+@pytest.mark.unit
+def test_rolling_daily_sql_matches_source_scan_for_cross_chunk_duplicate_contacts() -> None:
+    config = _config(window_granularity="daily")
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+    target_chunk = "2024-01-08"
+    duplicate = _row(
+        "customer",
+        "duplicate",
+        dt.datetime(2024, 1, 2, 12, tzinfo=dt.UTC),
+    )
+    current_rows = [
+        _row(
+            "customer",
+            "target-day-one",
+            dt.datetime(2024, 1, 7, 23, 59, tzinfo=dt.UTC),
+        ),
+        _row(
+            "customer",
+            "target-day-two",
+            dt.datetime(2024, 1, 8, 0, 1, tzinfo=dt.UTC),
+        ),
+    ]
+    source_rows = [
+        {**duplicate, TARGET_CHUNK_COLUMN: False},
+        {**duplicate, TARGET_CHUNK_COLUMN: False},
+        *({**row, TARGET_CHUNK_COLUMN: True} for row in current_rows),
+    ]
+    expected = processor.chunk_aggregate(pl.DataFrame(source_rows).lazy(), _ctx()).sort(
+        ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"], nulls_last=False
+    )
+
+    oldest = _prepared_history(processor, [duplicate])
+    newest = _prepared_history(processor, [duplicate])
+    current = _prepared_current(processor, current_rows)
+    with duckdb.connect(":memory:") as connection:
+        _create_rolling_tables(
+            connection,
+            history=[
+                ("2024-01-02", oldest),
+                ("2024-01-03", newest),
+            ],
+            current=[(target_chunk, current)],
+            empty_history=oldest.head(0),
+        )
+        with DuckDBFrequencySession(
+            config=config,
+            connection=connection,
+            current_chunk_id=target_chunk,
+        ) as session:
+            actual = (
+                processor.aggregate_focal_lazy(session.focal_lazy(0), _ctx())
+                .collect()
+                .sort(
+                    ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"],
+                    nulls_last=False,
+                )
+            )
+
+    assert_frame_equal(actual, expected)
+    assert actual.select("Day", "ExposureBucket", "Contacts").rows() == [
+        (dt.date(2024, 1, 7), 2, 1),
+        (dt.date(2024, 1, 8), 2, 1),
+    ]
 
 
 @pytest.mark.unit

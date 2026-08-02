@@ -1045,15 +1045,44 @@ def test_daily_granularity_validates_whole_days_and_zero_lag() -> None:
 
 @pytest.mark.unit
 def test_customer_sample_fraction_must_be_representable() -> None:
-    with pytest.raises(ValidationError, match="representable"):
+    with pytest.raises(ValidationError):
         _config(customer_sample={"fraction": 1e-9})
+    with pytest.raises(ValidationError, match="multiple of"):
+        _config(customer_sample={"fraction": 1.49e-6})
     with pytest.raises(ValidationError):
         _config(customer_sample={"fraction": 0.0})
     with pytest.raises(ValidationError):
         _config(customer_sample={"fraction": 1.5})
+    minimum = _config(customer_sample={"fraction": 1e-6})
+    assert minimum.customer_sample is not None
+    assert minimum.customer_sample.sample_threshold == 1
     config = _config(customer_sample={"fraction": 0.25})
     assert config.customer_sample is not None
     assert config.customer_sample.sample_threshold == 250_000
+
+
+@pytest.mark.unit
+def test_checkpoint_memory_limit_requires_positive_absolute_size() -> None:
+    for value in (
+        "1K",
+        "1KB",
+        "1KiB",
+        "2M",
+        "2MB",
+        "2MiB",
+        "3G",
+        "3GB",
+        "3GiB",
+        "4T",
+        "4TB",
+        "4TiB",
+        "0.5 gb",
+    ):
+        assert _config(checkpoint={"memory_limit": value}).checkpoint.memory_limit == value
+
+    for value in ("0GB", "0.0MiB", "80%", "1B", "1", "-1GB"):
+        with pytest.raises(ValidationError):
+            _config(checkpoint={"memory_limit": value})
 
 
 @pytest.mark.unit
@@ -1083,7 +1112,9 @@ def test_customer_sampling_is_deterministic_and_keeps_whole_customers() -> None:
         frame.select(pl.col("CustomerID").unique().sort())
         .with_columns(
             (
-                pl.col("CustomerID").hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
+                pl.col("CustomerID")
+                .cast(pl.String)
+                .hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
                 % pl.lit(model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS, dtype=pl.UInt64)
                 < pl.lit(config.customer_sample.sample_threshold, dtype=pl.UInt64)
             ).alias("sampled")
@@ -1103,6 +1134,32 @@ def test_customer_sampling_is_deterministic_and_keeps_whole_customers() -> None:
 
     aggregated = processor.chunk_aggregate(frame.lazy(), _ctx())
     assert aggregated["Contacts"].sum() == len(expected)
+
+
+@pytest.mark.unit
+def test_customer_sampling_matches_text_integer_and_dictionary_ids_that_render_alike() -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    config = _config(customer_sample={"fraction": 0.5})
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+
+    strings = pl.DataFrame(
+        [
+            _row(customer=str(index), interaction=f"i{index}", decision_time=when, target=True)
+            for index in range(10)
+        ]
+    ).drop(TARGET_CHUNK_COLUMN)
+    integers = strings.with_columns(pl.col("CustomerID").cast(pl.Int64))
+    categoricals = strings.with_columns(pl.col("CustomerID").cast(pl.Categorical))
+
+    def selected(frame: pl.DataFrame) -> set[str]:
+        prepared = processor.checkpoint_contacts_lazy(frame.lazy()).collect()
+        return set(prepared["CustomerID"].cast(pl.String).to_list())
+
+    expected = selected(strings)
+    assert expected
+    assert expected != set(strings["CustomerID"].to_list())
+    assert selected(integers) == expected
+    assert selected(categoricals) == expected
 
 
 @pytest.mark.unit
@@ -1145,6 +1202,31 @@ def test_daily_bucket_adds_prior_full_day_counters_to_exact_intraday_sequence() 
     # Prior counters: 2024-01-02 and 2024-01-03 => 2; intra-day sequence adds 1.
     assert aggregated["ExposureBucket"].to_list() == [3]
     assert aggregated["Contacts"].sum() == 1
+
+
+@pytest.mark.unit
+def test_daily_intrachunk_sequence_resets_for_each_utc_decision_day() -> None:
+    rows = [
+        _row(
+            customer="c",
+            interaction="day-one",
+            decision_time=dt.datetime(2024, 1, 7, 23, 59, tzinfo=dt.UTC),
+            target=True,
+        ),
+        _row(
+            customer="c",
+            interaction="day-two",
+            decision_time=dt.datetime(2024, 1, 8, 0, 1, tzinfo=dt.UTC),
+            target=True,
+        ),
+    ]
+
+    aggregated = _aggregate(rows, _config(window_granularity="daily"))
+
+    assert aggregated.select("Day", "ExposureBucket", "Contacts").rows() == [
+        (dt.date(2024, 1, 7), 1, 1),
+        (dt.date(2024, 1, 8), 1, 1),
+    ]
 
 
 @pytest.mark.unit

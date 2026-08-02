@@ -1104,6 +1104,15 @@ and pruning expired state is one DuckDB transaction. Candidate rows remain
 uncollapsed until current and history are combined, preserving cross-partition
 duplicate precedence. The connection remains open across the complete source
 run and closes once at the source-run boundary.
+
+The DuckDB connection is used only by its owning ingestion thread. A single
+queried shard keeps the batched lazy Arrow-to-Polars path. With multiple shards,
+the owner materializes the next shard as a detached Arrow table while one
+worker aggregates the preceding detached table; at most two complete focal
+shard results are live. DuckDB's `memory_limit` governs DuckDB, not those
+detached Arrow/Polars allocations, so shard count remains the operator's bound
+on this pipeline working set.
+
 The two modes implement the same following rules:
 
 1. A contact is identified by customer, interaction, action, placement, and
@@ -1189,6 +1198,13 @@ by timestamp. Exactness requires UTC-aligned daily chunk IDs, or an equivalent
 partition convention whose displacement from decision time stays within the
 configured allowance. Extra dependency days only increase source I/O.
 
+For `window_granularity: daily`, that allowance is fixed at zero. The daily
+algorithm still resets an intra-chunk counter at each UTC decision-day boundary
+and deduplicates repeated historical contact identities across chunks in the
+planned closure, but it cannot reconstruct a decision omitted from that
+closure; zero lag is a source-partition contract, not proof inferred from the
+chunk id.
+
 Every transformed history chunk is validated independently for the decision
 time, customer, interaction, action, placement, rank, outcome, and any
 processor-filter fields before it is combined or checkpointed. This prevents a
@@ -1208,14 +1224,16 @@ silently undercounting the number of impressions.
   processor computation hash, shard count, history projection, and customer
   dtype are stored inside the database as compatibility metadata; DuckDB
   version is audit-only. The complete current candidates remain
-  temporary; persisted history is filtered to exposed rank-1 rows, normalized
-  to one row per contact and source day (earliest decision time and source
-  order, or-combined outcome flags), and projected to customer, interaction,
-  action, placement, decision time, contact classification, deterministic
-  local order, source chunk id, and logical shard. Propensity, priority,
-  report/alternative groups, outcome, and every rank>1 candidate are omitted
-  from history. `shards` is an integer from `1` through `4096` and defaults to
-  `64`; it controls a logical partition, not a physical file count.
+  temporary; persisted exact history is filtered to exposed rank-1 rows,
+  normalized to one row per contact and source chunk (earliest decision time
+  and source order, or-combined outcome flags), and projected to customer,
+  interaction, action, placement, decision time, contact classification,
+  deterministic local order, source chunk id, and logical shard. Daily history
+  instead keeps one row per contact, canonical UTC decision day, and source
+  chunk. Propensity, priority, report/alternative groups, outcome, and every
+  rank>1 candidate are omitted from history. `shards` is an integer from `1`
+  through `4096` and defaults to `64`; it controls a logical partition, not a
+  physical file count.
 
   Choosing `shards` trades fixed per-query cost against SQL working-set size:
   each target day runs one normalization/window plan per staged shard, so many
@@ -1238,7 +1256,9 @@ computation hashes:
   artifact identity;
 - `threads` and `memory_limit` tune only the rolling DuckDB connection
   (`SET threads` / `SET memory_limit`); when unset, DuckDB defaults apply.
-  They never trigger a state rebuild.
+  They never trigger a state rebuild. `memory_limit` accepts a positive
+  absolute DuckDB size such as `512MiB`, `4GB`, or `1TB`; percentages and zero
+  limits are rejected before the writer opens.
 
 Changing these fields does not schedule aggregate replay. Unchanged targets
 remain skipped. After a shard change, valid incompatible state is replaced at
@@ -1259,25 +1279,36 @@ remain result semantics and therefore do change computation hashes.
   full days come from day-level history, and the focal day itself is
   sequenced exactly. Days use the canonical UTC calendar date of the decision
   time. `window_hours` must be divisible by 24 and `partition_lag_hours` must
-  be `0`: without a lag allowance, one interaction's rows cannot straddle
-  source days, which is what lets day-level history drop contact-level
-  cross-day deduplication. Rolling state then persists only contact identity
-  per calendar day (no time-of-day, source order, or outcome flags), and the
-  per-target SQL replaces timestamp windowing with a per-day counter join.
+  be `0`. Current-day sequencing is partitioned by the canonical decision day,
+  so a physical source chunk that contains adjacent UTC decision days does not
+  carry a same-day counter across midnight. Rolling state persists contact
+  identity per calendar day (no time-of-day, source order, or outcome flags),
+  and the per-target SQL globally deduplicates that identity across retained
+  source chunks before replacing timestamp windowing with a per-day counter
+  join.
   The approximation error is bounded by one day at the old edge of the
   window; the `max_frequency` terminal bucket absorbs most of it.
 
 `customer_sample` optionally evaluates the processor over a deterministic
 customer-hash subsample with otherwise exact semantics. Every row of a sampled
-customer is kept in both execution modes and in history, so ratio metrics
-(CTR by bucket) remain unbiased; absolute counts describe the sample and can
-be scaled by `1 / fraction` with a formula metric. Sampling is result
-semantics: changing `fraction` republishes the processor's aggregates. Sample
-membership is computed with `polars.Expr.hash` under fixed seeds and a fixed
-modulus, and the Polars version is pinned into the computation contract — a
-Polars upgrade therefore recomputes sampled processors rather than silently
-changing which customers are sampled. Small segments become noisy under
-sampling; prefer it for high-volume decision-support analytics.
+customer is kept in both execution modes and in history. CTR by bucket remains
+an approximate ratio estimated from the sample; numerator and denominator
+totals can each be estimated by scaling by `1 / fraction`, but their finite-
+sample ratio is not generally unbiased. Sampling is result
+semantics: changing the effective `fraction` republishes the processor's
+aggregates. The fraction must be an exact multiple of `0.000001`, from that
+minimum through `1.0`, so the configured fraction, hash threshold, and
+`1 / fraction` scale always describe the same cohort. Membership hashes the
+customer key after conversion to Polars `String`, under fixed seeds and a fixed
+modulus. Text, integer, and dictionary-backed IDs share membership when they
+render to the same string. Distinct renderings such as integer `2` and float
+`2.0` remain distinct IDs; normalize such source drift explicitly in
+`pipelines.yaml`. The Polars version is pinned into the computation contract,
+so a Polars upgrade recomputes sampled processors rather than silently changing
+membership. `fraction: 1.0` retains the explicit author setting in the catalog
+but is computation-equivalent to omitting `customer_sample`. Small segments
+become noisy under sampling; prefer it for high-volume decision-support
+analytics.
 
 `retention_days` optionally sets the number of source-day journal entries
 kept in each processor's rolling state. Its default is
@@ -1320,7 +1351,7 @@ Queries, reports, DuckDB views, API/MCP, and SQL export cannot read
 `rolling.duckdb`. Missing state is initialized from authoritative IH. Corrupt
 state fails closed and can be replaced with a forced rebuild.
 Earlier per-day checkpoints are incompatible acceleration state and are
-rebuilt, not migrated, into schema-revision-7 state. Legacy nested identity
+rebuilt, not migrated, into schema-revision-8 state. Legacy nested identity
 layouts are likewise obsolete and may be vacuumed. A
 persistent frequency source processes target chunks oldest-to-newest in one
 process; a requested `--parallel` value is capped at one for that source while

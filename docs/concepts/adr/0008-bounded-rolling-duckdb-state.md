@@ -48,13 +48,15 @@ Raw-file fingerprints and chunk ids live in the transactional journal rather
 than in the path. The state contains:
 
 - bounded exposed rank-1 history normalized to one row per contact and source
-  day (earliest decision time and source order, or-combined outcome flags —
-  MIN/BOOL_OR are associative, so per-day rows merge across days exactly like
-  the raw rows they replace), including its source `chunk_id` and persisted
-  logical customer shard. Under `window_granularity: daily` the projection
-  narrows further to contact identity plus the canonical UTC calendar day,
-  and the per-target SQL reduces it to per-day exposure counters instead of
-  joining history into the contact union; and
+  chunk (earliest decision time and source order, or-combined outcome flags —
+  MIN/BOOL_OR are associative, so normalized rows combine exactly like the raw
+  rows they replace), including its source `chunk_id` and persisted logical
+  customer shard. Under `window_granularity: daily` the projection instead
+  keeps one row per contact, canonical UTC decision day, and source chunk while
+  dropping time-of-day, source order, and outcome detail. The per-target SQL
+  first deduplicates that daily identity globally across retained source chunks
+  and then reduces it to per-day exposure counters instead of joining history
+  into the contact union; and
 - a transactional journal mapping every retained/processed ISO-date chunk to
   the authoritative raw fingerprint, alongside database-level state-schema
   metadata needed for validation.
@@ -77,6 +79,14 @@ tail for virtual state columns, state-level `where`, configured count/value-sum
 aggregation, grouping, and provenance. `source_scan` remains the correctness
 reference; both paths must produce equivalent aggregate states, subject only to
 ordinary floating-point reduction tolerance.
+
+The DuckDB connection never crosses a thread boundary. A single queried shard
+uses the batched lazy Arrow-to-Polars stream. When several shards are queried,
+the owning thread may fetch the next shard into a detached Arrow table while a
+single worker applies the Polars tail to the preceding detached table. This
+keeps overlap without concurrent connection access and bounds detached focal
+data to two complete shard results. DuckDB `memory_limit` does not cover those
+detached Arrow/Polars allocations; logical shard sizing is the explicit bound.
 
 Before either execution path performs contact normalization, decision time is
 canonicalized to timezone-naive UTC truncated to whole seconds. Sub-second
@@ -163,16 +173,22 @@ independently.
 Earlier per-day checkpoints, nested identity layouts, and checkpoint schema
 revisions before 8 are unsupported acceleration artifacts. They are not
 migrated; the rolling database is reconstructed from authoritative IH and
-obsolete layouts may be vacuumed. `checkpoint.mode`, `checkpoint.shards`, and
-`checkpoint.retention_days` remain execution/storage policy outside processor
-and source computation hashes. The shard count still selects the logical
-partitioning used to bound SQL working data; it does not select a file count or
-another database path.
+obsolete layouts may be vacuumed. Every field under `checkpoint` remains
+execution/storage policy outside processor and source computation hashes. The
+shard count still selects the logical partitioning used to bound SQL working
+data; `threads` and a positive absolute `memory_limit` tune the rolling DuckDB
+connection. None selects another database path.
 
 This decision changes only ingestion acceleration state. Published business
 aggregates remain immutable, hive-partitioned Parquet. Reports, API/MCP,
 governed SQL, aggregate views, and query planning cannot address
 `.valuestream/state/` or `rolling.duckdb`.
+
+Schema validation treats the normalized projection as a physical invariant,
+not an optimization hint. Every persisted projection column must be non-null,
+and `projection key + chunk_id + shard` must be unique. A reopened database
+that violates either condition is corrupt acceleration state and fails closed
+rather than silently inflating a daily counter.
 
 ## Consequences
 

@@ -11,8 +11,10 @@ from pathlib import Path
 import polars as pl
 import pytest
 import yaml
+from jsonschema import Draft202012Validator
 
 from valuestream.config import model
+from valuestream.config._schema_gen import generate_all
 from valuestream.config.canonical import (
     _processor_computation_fields,
     canonicalize,
@@ -28,6 +30,13 @@ from valuestream.config.loader import load
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEMO_WS = REPO_ROOT / "examples" / "demo"
+
+
+@pytest.mark.unit
+def test_customer_sample_schema_accepts_common_representable_fraction() -> None:
+    schema = generate_all()["processors.json"]["$defs"]["FrequencyResponseCustomerSample"]
+
+    Draft202012Validator(schema).validate({"fraction": 0.1})
 
 
 @pytest.mark.unit
@@ -264,6 +273,7 @@ class TestCatalogHash:
         daily = frequency(window_granularity="daily")
         sampled = frequency(customer_sample={"fraction": 0.25})
         resampled = frequency(customer_sample={"fraction": 0.5})
+        full_sample = frequency(customer_sample={"fraction": 1.0})
 
         base_hash = processor_computation_hash(catalog, base)
         # Spelling the default granularity explicitly is not a semantic edit.
@@ -272,18 +282,26 @@ class TestCatalogHash:
         sampled_hash = processor_computation_hash(catalog, sampled)
         assert sampled_hash != base_hash
         assert sampled_hash != processor_computation_hash(catalog, resampled)
+        assert processor_computation_hash(catalog, full_sample) == base_hash
+        assert full_sample.customer_sample is not None
+        assert full_sample.customer_sample.fraction == 1.0
+        assert config_hash(full_sample) != config_hash(base)
 
         fields = _processor_computation_fields(sampled)
         contract = fields["customer_sample_contract"]
         assert contract == {
-            "algorithm": "polars.Expr.hash",
+            "algorithm": "polars.Expr.cast(String).hash",
             "modulus": model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS,
             "polars_version": pl.__version__,
+            "revision": 2,
             "seeds": list(model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS),
         }
         assert "customer_sample_contract" not in _processor_computation_fields(base)
+        assert "customer_sample" not in _processor_computation_fields(full_sample)
+        assert "customer_sample_contract" not in _processor_computation_fields(full_sample)
         assert "window_granularity" not in _processor_computation_fields(explicit_exact)
         assert _processor_computation_fields(daily)["window_granularity"] == "daily"
+        assert fields["__valuestream_algorithm_revision"]["frequency_response_semantics"] == 4
 
     def test_bounded_ml_order_revision_is_scoped_to_score_processors(self) -> None:
         catalog = load(DEMO_WS)

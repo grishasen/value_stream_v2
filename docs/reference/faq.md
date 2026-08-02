@@ -22,7 +22,7 @@ Parquet is the resting form of every aggregate (one directory per `source/proces
 
 Optional processor checkpoints use a separate state namespace. DuckDB views,
 metric planning, SQL export, and the chunk publication ledger do not expose it.
-Schema-revision-7 persistent frequency processing uses one bounded
+Schema-revision-8 persistent frequency processing uses one bounded
 `.valuestream/state/frequency_response/source=<source>/processor=<processor>/rolling.duckdb`;
 revision 8 is the default and only supported checkpoint schema. Its
 transactional raw-fingerprint journal and compatibility/audit metadata live

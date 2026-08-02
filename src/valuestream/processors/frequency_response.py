@@ -464,16 +464,25 @@ class FrequencyResponseProcessor:
         time_column = self.config.time.property
         exposure_keys = [columns.customer, columns.action, columns.placement]
         window_days = self.config.window_days
-        ordered = contacts.filter(pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)).sort(
-            [*exposure_keys, time_column, columns.interaction, _CONTACT_ORDER_COLUMN]
+        ordered = (
+            contacts.filter(pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1))
+            .with_columns(pl.col(time_column).dt.date().alias(_DECISION_DAY_COLUMN))
+            .sort(
+                [
+                    *exposure_keys,
+                    _DECISION_DAY_COLUMN,
+                    time_column,
+                    columns.interaction,
+                    _CONTACT_ORDER_COLUMN,
+                ]
+            )
         )
         ordered = ordered.with_columns(
             pl.col(time_column)
             .cum_count()
-            .over(exposure_keys)
+            .over([*exposure_keys, _DECISION_DAY_COLUMN])
             .cast(pl.Int64)
             .alias(_EXPOSURE_SEQUENCE_COLUMN),
-            pl.col(time_column).dt.date().alias(_DECISION_DAY_COLUMN),
         )
         sequence = pl.col(_EXPOSURE_SEQUENCE_COLUMN)
         if counters is None:
@@ -617,7 +626,9 @@ class FrequencyResponseProcessor:
             # source-scan and rolling modes and to current and history rows
             # alike, so a sampled customer's contact set stays complete.
             source = source.filter(
-                pl.col(columns.customer).hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
+                pl.col(columns.customer)
+                .cast(pl.String)
+                .hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
                 % pl.lit(model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS, dtype=pl.UInt64)
                 < pl.lit(
                     self.config.customer_sample.sample_threshold,

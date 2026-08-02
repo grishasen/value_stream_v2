@@ -265,9 +265,7 @@ def test_duckdb_settings_apply_to_the_rolling_connection(tmp_path: Path) -> None
     )
     with checkpoint:
         threads = checkpoint.connection.execute("SELECT current_setting('threads')").fetchone()
-        memory = checkpoint.connection.execute(
-            "SELECT current_setting('memory_limit')"
-        ).fetchone()
+        memory = checkpoint.connection.execute("SELECT current_setting('memory_limit')").fetchone()
     assert threads == (2,)
     assert memory is not None
     assert memory[0] == "512.0 MiB"
@@ -295,6 +293,66 @@ def test_duckdb_settings_apply_to_the_rolling_connection(tmp_path: Path) -> None
             retention_days=7,
             history_projection=HISTORY_SPEC,
             duckdb_memory_limit="lots",
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "memory_limit",
+    [
+        "1K",
+        "1KB",
+        "1KiB",
+        "1M",
+        "1MB",
+        "1MiB",
+        "1G",
+        "1GB",
+        "1GiB",
+        "1T",
+        "1TB",
+        "1TiB",
+    ],
+)
+def test_duckdb_memory_limit_accepts_positive_absolute_sizes(
+    tmp_path: Path,
+    memory_limit: str,
+) -> None:
+    checkpoint = RollingCheckpoint(
+        tmp_path,
+        **PATH_IDENTITY,
+        config_hash=CONFIG_HASH,
+        customer_column="CustomerID",
+        customer_dtype="String",
+        shard_count=8,
+        retention_days=7,
+        history_projection=HISTORY_SPEC,
+        duckdb_memory_limit=memory_limit,
+    )
+
+    assert checkpoint.duckdb_memory_limit == memory_limit
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "memory_limit",
+    ["80%", "0GB", "0.0MiB", "-1GB", "1B", "GB", "1PB"],
+)
+def test_duckdb_memory_limit_rejects_relative_zero_and_unsupported_sizes(
+    tmp_path: Path,
+    memory_limit: str,
+) -> None:
+    with pytest.raises(ValueError, match="positive absolute DuckDB size"):
+        RollingCheckpoint(
+            tmp_path,
+            **PATH_IDENTITY,
+            config_hash=CONFIG_HASH,
+            customer_column="CustomerID",
+            customer_dtype="String",
+            shard_count=8,
+            retention_days=7,
+            history_projection=HISTORY_SPEC,
+            duckdb_memory_limit=memory_limit,
         )
 
 
@@ -337,6 +395,63 @@ def test_commit_normalizes_history_to_one_row_per_key_with_min_and_bool_or(
         ("customer-a", 3, 0, True, True),
         ("customer-b", 9, 2, False, True),
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("corruption", ["null-key", "null-min", "duplicate-key"])
+def test_reopen_rejects_corrupt_normalized_history(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    normalized_spec = HistoryProjectionSpec(
+        columns=("CustomerID", "ActionID", "DecisionTime", "Rank", "Exposed"),
+        rank_column="Rank",
+        exposed_column="Exposed",
+        min_columns=("DecisionTime",),
+        bool_or_columns=("Exposed",),
+    )
+    frame = pl.DataFrame(
+        {
+            "CustomerID": ["customer-a", "customer-b"],
+            "ActionID": ["A", "B"],
+            "DecisionTime": [3, 9],
+            "Rank": [1, 1],
+            "Exposed": [True, True],
+        }
+    )
+    with _rolling(tmp_path, history_projection=normalized_spec) as checkpoint:
+        _stage_and_commit(
+            checkpoint,
+            "2026-07-31",
+            _fingerprint(3),
+            frame,
+        )
+        path = checkpoint.path
+
+    with duckdb.connect(str(path)) as connection:
+        if corruption == "null-key":
+            connection.execute(
+                f'UPDATE "{HISTORY_TABLE}" SET "ActionID" = NULL '
+                "WHERE \"CustomerID\" = 'customer-a'"
+            )
+        elif corruption == "null-min":
+            connection.execute(
+                f'UPDATE "{HISTORY_TABLE}" SET "DecisionTime" = NULL '
+                "WHERE \"CustomerID\" = 'customer-a'"
+            )
+        else:
+            connection.execute(
+                f'INSERT INTO "{HISTORY_TABLE}" SELECT * FROM "{HISTORY_TABLE}" LIMIT 1'
+            )
+
+    expected = (
+        "normalized projection column" if corruption.startswith("null") else "duplicate normalized"
+    )
+    with (
+        pytest.raises(CheckpointValidationError, match=expected),
+        _rolling(tmp_path, history_projection=normalized_spec),
+    ):
+        pass
 
 
 @pytest.mark.unit

@@ -1533,12 +1533,12 @@
     },
     "FrequencyResponseCheckpoint": {
       "additionalProperties": false,
-      "description": "Execution strategy for bounded frequency-response contact state.\n\n``threads`` and ``memory_limit`` tune the rolling DuckDB connection only.\nLike every checkpoint field they are operational settings outside processor\nand source computation hashes.",
+      "description": "Execution strategy for bounded frequency-response contact state.\n\n``threads`` and ``memory_limit`` tune the rolling DuckDB connection only;\nthe latter is a positive absolute size from K through TiB, never a percent.\nLike every checkpoint field they are operational settings outside processor\nand source computation hashes.",
       "properties": {
         "memory_limit": {
           "anyOf": [
             {
-              "pattern": "^[0-9]+(\\.[0-9]+)?\\s*(%|[KMGTkmgt][iI]?[bB])$",
+              "pattern": "^(?:[0-9]*[1-9][0-9]*(?:\\.[0-9]+)?|[0-9]+\\.[0-9]*[1-9][0-9]*)\\s*[KMGTkmgt](?:[iI]?[bB])?$",
               "type": "string"
             },
             {
@@ -1663,11 +1663,11 @@
     },
     "FrequencyResponseCustomerSample": {
       "additionalProperties": false,
-      "description": "Deterministic customer-hash subsample evaluated with exact semantics.\n\nSampling keeps every row of a sampled customer and drops every row of an\nunsampled customer, in both ``source_scan`` and ``persistent_sharded``\nmodes. Ratio metrics stay unbiased; absolute counts represent the sample\nand scale by ``1 / fraction``.",
+      "description": "Deterministic customer-hash subsample evaluated with exact semantics.\n\nSampling keeps every row of a sampled customer and drops every row of an\nunsampled customer, in both ``source_scan`` and ``persistent_sharded``\nmodes. Membership hashes the customer's Polars string representation, so\ntext, integer, and dictionary-backed IDs that render identically share a\ncohort. Ratio metrics are sample estimates; absolute totals represent the\nsample and may be estimated by scaling by ``1 / fraction``. The fraction is\nan exact multiple of one residue in the fixed modulus, so the configured\nfraction and effective cohort cannot drift.",
       "properties": {
         "fraction": {
-          "exclusiveMinimum": 0.0,
           "maximum": 1.0,
+          "minimum": 1e-06,
           "title": "Fraction",
           "type": "number"
         }

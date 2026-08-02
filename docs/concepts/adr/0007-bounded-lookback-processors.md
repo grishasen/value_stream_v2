@@ -3,7 +3,7 @@
 **Status:** Accepted (2026-07-31; amended 2026-07-31, 2026-08-01, and 2026-08-02)
 
 The bounded-state and exactness decision remains current. The current and only
-supported schema-revision-7 physical contract is the bounded rolling DuckDB
+supported schema-revision-8 physical contract is the bounded rolling DuckDB
 state defined in
 [ADR 0008](0008-bounded-rolling-duckdb-state.md).
 
@@ -71,16 +71,16 @@ A bounded processor may choose one of two exact execution strategies:
    chunk id, and shard for later targets. Historical alternatives and
    target-only grouping/state values are excluded. Frequency targets execute
    oldest-to-newest in one process so the rolling state has one writer. ADR
-   0008 defines the schema-revision-7 physical, reconciliation, maintenance,
+   0008 defines the schema-revision-8 physical, reconciliation, maintenance,
    and WAL contract.
 
-The strategy is operational rather than semantic. `checkpoint.mode`,
-`checkpoint.shards`, and `checkpoint.retention_days` remain in the full catalog
-hash for authorship and audit, but are excluded from processor and source
-computation hashes. Consequently, changing checkpoint execution or storage
-policy does not republish otherwise identical aggregates. Counts are exact
-across layouts; ordinary floating-point sums retain their normal machine-
-precision reduction tolerance.
+The strategy is operational rather than semantic. Every field under
+`checkpoint`—`mode`, `shards`, `retention_days`, `threads`, and
+`memory_limit`—remains in the full catalog hash for authorship and audit, but
+is excluded from processor and source computation hashes. Consequently,
+changing checkpoint execution or storage policy does not republish otherwise
+identical aggregates. Counts are exact across layouts; ordinary floating-point
+sums retain their normal machine-precision reduction tolerance.
 
 Persistent processor state is permitted only under these constraints:
 
@@ -151,6 +151,16 @@ frequency-response contract: sketches cannot recover per-customer event order
 or join a selected rank-1 action to the selected rank-2 action available in its
 configured comparison group.
 
+When deterministic customer sampling is configured, membership hashes the
+Polars string representation of the logical customer key under the pinned hash
+contract. Text, integer, and dictionary-backed IDs share a cohort when their
+rendered strings are identical; representations that render differently, such
+as integer `2` and floating-point `2.0`, are distinct keys. The configured
+fraction must be an exact multiple of the fixed sampling-modulus quantum; this
+keeps membership, published scaling, and computation identity aligned. A
+fraction of `1.0` is computation-equivalent to sampling being absent, while the
+explicit author setting remains in the full catalog hash.
+
 `frequency_response.alternative_group_by` makes that comparison group an
 explicit semantic part of the processor. Customer and interaction are implicit
 mandatory base keys: customer preserves source-scan/checkpoint equivalence and
@@ -174,6 +184,13 @@ partitions, but the processor still applies exactly `(decision_time - W,
 decision_time]`. Correctness therefore requires the partition-date displacement
 to stay within the configured allowance. Over-padding changes I/O and
 invalidation fan-out, never impression-count membership.
+
+`window_granularity: daily` fixes the allowance at zero and therefore requires
+decision-day-aligned source partitioning. The implementation nevertheless
+resets current counters at UTC midnight and globally deduplicates retained
+daily contact identity across source chunks inside the planned closure. Those
+defenses prevent double counting; they cannot recover a row that an invalid
+partition convention placed outside the closure.
 
 ## Consequences
 

@@ -451,7 +451,12 @@ def _daily_focal_sql(
     normalized_select = _normalized_select_sql(config, contact_keys, passthrough)
 
     exposure_keys = [columns.customer, columns.action, columns.placement]
-    exposure_partition = _identifier_csv(exposure_keys)
+    exposure_partition = ", ".join(
+        [
+            _qualified_identifier_csv("contact", exposure_keys),
+            f"CAST({_qualified_identifier('contact', time_column)} AS DATE)",
+        ]
+    )
     exposure_order = _qualified_order(
         "contact",
         [time_column, columns.interaction, CONTACT_ORDER_COLUMN],
@@ -463,6 +468,15 @@ def _daily_focal_sql(
 
     day = _quote_identifier(DECISION_DAY_COLUMN)
     prior = _quote_identifier(PRIOR_EXPOSURES_COLUMN)
+    history_contact_keys_csv = _identifier_csv(
+        [
+            columns.customer,
+            columns.interaction,
+            columns.action,
+            columns.placement,
+            DECISION_DAY_COLUMN,
+        ]
+    )
     counter_keys_csv = _identifier_csv([*exposure_keys, DECISION_DAY_COLUMN])
     focal_day_keys = _qualified_identifier_csv("focal", exposure_keys)
     prior_join = "\n            AND ".join(
@@ -470,8 +484,7 @@ def _daily_focal_sql(
         for key in exposure_keys
     )
     exposure_prior_join = "\n        AND ".join(
-        f"{_qualified_identifier('ordered_contact', key)} = "
-        f"{_qualified_identifier('prior', key)}"
+        f"{_qualified_identifier('ordered_contact', key)} = {_qualified_identifier('prior', key)}"
         for key in exposure_keys
     )
 
@@ -515,13 +528,18 @@ ordered_exposures AS MATERIALIZED (
     WHERE {_qualified_identifier("contact", EXPOSED_COLUMN)}
       AND {_qualified_identifier("contact", RANK_COLUMN)} = 1
 ),
+distinct_history_contacts AS (
+    SELECT DISTINCT
+        {history_contact_keys_csv}
+    FROM {_quote_identifier(history_table)}
+    WHERE {_quote_identifier(shard_column)} = {shard_id}
+      AND {_quote_identifier(chunk_id_column)} < {_quote_literal(current_chunk_id)}
+),
 prior_exposures AS (
     SELECT
         {counter_keys_csv},
         CAST(count(*) AS BIGINT) AS {prior}
-    FROM {_quote_identifier(history_table)}
-    WHERE {_quote_identifier(shard_column)} = {shard_id}
-      AND {_quote_identifier(chunk_id_column)} < {_quote_literal(current_chunk_id)}
+    FROM distinct_history_contacts
     GROUP BY {counter_keys_csv}
 ),
 focal_days AS (

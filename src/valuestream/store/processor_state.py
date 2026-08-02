@@ -46,11 +46,26 @@ CURRENT_TABLE = "current"
 CHECKPOINT_MAINTENANCE_INTERVAL_DAYS = 30
 
 _HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
-_MEMORY_LIMIT_PATTERN = re.compile(r"[0-9]+(\.[0-9]+)?\s*(%|[KMGT]i?B)", re.IGNORECASE)
+_MEMORY_LIMIT_PATTERN = re.compile(
+    r"(?P<value>(?:[0-9]*[1-9][0-9]*(?:\.[0-9]+)?|"
+    r"[0-9]+\.[0-9]*[1-9][0-9]*))\s*[KMGT](?:i?B)?",
+    re.IGNORECASE,
+)
 _FrameT = TypeVar("_FrameT", pl.DataFrame, pl.LazyFrame)
 _CollectEngine = Literal["auto", "streaming"]
 _RESERVED_COLUMNS = frozenset({SHARD_COLUMN, CHUNK_ID_COLUMN})
 logger = get_logger(__name__)
+
+
+def _valid_memory_limit(value: object) -> bool:
+    """Return whether ``value`` is a positive absolute DuckDB memory size."""
+
+    if not isinstance(value, str):
+        return False
+    match = _MEMORY_LIMIT_PATTERN.fullmatch(value)
+    if match is None:
+        return False
+    return any(character != "0" for character in match.group("value") if character != ".")
 
 
 class CheckpointValidationError(ValueError):
@@ -229,12 +244,10 @@ class RollingCheckpoint:
             or duckdb_threads < 1
         ):
             raise ValueError("checkpoint duckdb_threads must be a positive integer")
-        if duckdb_memory_limit is not None and (
-            not isinstance(duckdb_memory_limit, str)
-            or _MEMORY_LIMIT_PATTERN.fullmatch(duckdb_memory_limit) is None
-        ):
+        if duckdb_memory_limit is not None and not _valid_memory_limit(duckdb_memory_limit):
             raise ValueError(
-                "checkpoint duckdb_memory_limit must be a DuckDB size such as '4GB' or '80%'"
+                "checkpoint duckdb_memory_limit must be a positive absolute DuckDB size "
+                "such as '4GB' or '512MiB'"
             )
 
         self.path = rolling_checkpoint_path(
@@ -844,6 +857,8 @@ class RollingCheckpoint:
             raise CheckpointValidationError(
                 "rolling checkpoint history contains a chunk absent from the journal"
             )
+        if self.history_projection.normalizes:
+            self._validate_normalized_history(connection)
         actual_dtype = _polars_dtype_for_column(
             connection,
             HISTORY_TABLE,
@@ -853,6 +868,46 @@ class RollingCheckpoint:
             raise CheckpointValidationError(
                 f"rolling checkpoint history customer storage dtype {actual_dtype!r} does not "
                 f"match {self._effective_customer_storage_dtype!r}"
+            )
+
+    def _validate_normalized_history(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+    ) -> None:
+        required_columns = self.history_projection.columns
+        column_nulls = connection.execute(
+            "SELECT "
+            + ", ".join(
+                f"coalesce(count_if({_quote_identifier(column)} IS NULL), 0)"
+                for column in required_columns
+            )
+            + f" FROM {_quote_identifier(HISTORY_TABLE)}"
+        ).fetchone()
+        if column_nulls is None:  # pragma: no cover - aggregate always returns one row
+            raise RuntimeError("checkpoint normalized-column validation query returned no row")
+        null_columns = [
+            column
+            for column, null_count in zip(required_columns, column_nulls, strict=True)
+            if int(null_count)
+        ]
+        if null_columns:
+            raise CheckpointValidationError(
+                "rolling checkpoint history normalized projection column(s) contain nulls: "
+                + ", ".join(null_columns)
+            )
+        normalized_keys = self.history_projection.key_columns
+        unique_columns = [*normalized_keys, CHUNK_ID_COLUMN, SHARD_COLUMN]
+        quoted_unique_columns = ", ".join(_quote_identifier(column) for column in unique_columns)
+        duplicate = connection.execute(
+            "SELECT 1 FROM "
+            f"(SELECT {quoted_unique_columns} "
+            f"FROM {_quote_identifier(HISTORY_TABLE)} "
+            f"GROUP BY {quoted_unique_columns} HAVING count(*) > 1) "
+            "AS duplicate_normalized_history LIMIT 1"
+        ).fetchone()
+        if duplicate is not None:
+            raise CheckpointValidationError(
+                "rolling checkpoint history contains duplicate normalized key rows"
             )
 
     def _ensure_history_table(
