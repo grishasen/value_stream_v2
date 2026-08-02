@@ -541,6 +541,15 @@ class FrequencyResponseCheckpoint(_StrictModel):
     retention_days: int | None = Field(default=None, ge=1, le=3650)
 
 
+def _minimum_frequency_checkpoint_retention_days(
+    window_hours: int,
+    partition_lag_hours: int,
+) -> int:
+    """Return source days needed by the exact window plus partition lag."""
+
+    return (window_hours + partition_lag_hours + 23) // 24
+
+
 class FrequencyResponseProcessor(_ProcessorBase):
     """Frequency-window response states over a marked current chunk plus lookback."""
 
@@ -593,7 +602,10 @@ class FrequencyResponseProcessor(_ProcessorBase):
             raise ValueError(
                 "frequency_response customer and interaction bindings must be distinct"
             )
-        minimum_retention_days = (self.window_hours + self.partition_lag_hours + 23) // 24 + 1
+        minimum_retention_days = _minimum_frequency_checkpoint_retention_days(
+            self.window_hours,
+            self.partition_lag_hours,
+        )
         if (
             self.checkpoint.mode == "persistent_sharded"
             and self.checkpoint.retention_days is not None
@@ -694,11 +706,14 @@ class FrequencyResponseProcessor(_ProcessorBase):
 
     @property
     def checkpoint_retention_days(self) -> int:
-        """Return the bounded number of daily checkpoint partitions retained."""
+        """Return the bounded number of source days retained in rolling state."""
 
         if self.checkpoint.retention_days is not None:
             return self.checkpoint.retention_days
-        return (self.window_hours + self.partition_lag_hours + 23) // 24 + 1
+        return _minimum_frequency_checkpoint_retention_days(
+            self.window_hours,
+            self.partition_lag_hours,
+        )
 
     @property
     def alternative_group_columns(self) -> list[str]:

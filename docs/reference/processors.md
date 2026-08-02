@@ -1000,7 +1000,7 @@ processors:
     checkpoint:
       mode: persistent_sharded       # default: source_scan
       shards: 64                     # default 64; routing, not anonymization
-      retention_days: 9              # optional; >= active history + current
+      retention_days: 8              # optional; default/min ceil((168+24)/24)
     group_by:
       - Day
       - Channel
@@ -1071,14 +1071,33 @@ decision timestamp; it does not change the semantic exposure window.
 
 With `checkpoint.mode: source_scan`, the processor receives the transformed
 target/history rows in an ephemeral frame. With `persistent_sharded`, each raw
-chunk is transformed, filtered, classified, and projected through a partitioned
-streaming sink into customer-hash shards without collecting the complete
-prepared day. That complete target payload is the source for a second, narrow
-history payload in the same atomic generation, so building the history role
-does not reread raw IH. Candidate rows remain uncollapsed until current and
-history shards are combined, preserving cross-partition duplicate precedence.
-Target processing reads the complete corresponding target shard and only the
-narrow history shard from each earlier day.
+target is transformed, filtered, classified, projected, and assigned a
+deterministic logical customer shard. Polars passes the complete prepared
+current payload as an Arrow C Stream to a temporary relation in one long-lived
+`rolling.duckdb` writer; it is not persisted. The database persists only
+exposed rank-1 history required by later targets, tagged with its source chunk
+id and logical shard, plus a transactional fingerprint journal.
+
+Both modes canonicalize the configured decision-time field to timezone-naive
+UTC `Datetime(ns)` before contact normalization. `Day` then attaches UTC and
+converts to the configured calendar timezone. A raw decision-time field used in
+`group_by` or a state predicate therefore has the same type and value in both
+modes, including sub-microsecond strict-window boundaries.
+Dictionary-backed projected fields are likewise represented as strings in the
+source-scan relational tail, matching DuckDB `VARCHAR`; customer sharding still
+hashes the original logical `Categorical`/`Enum` value first.
+
+Frequency targets run in ascending ISO-date order in one process. For each
+logical shard, one native SQL plan combines temporary current candidates with
+rolling history, performs cross-partition contact normalization, the exact
+timestamp window, and selected rank-2 action resolution, then streams only
+enriched target rank-1 rows to Polars. Polars applies virtual state columns,
+state-level `where`, configured count/value-sum aggregation, grouping, and
+provenance. Appending the target's narrow history, recording its fingerprint,
+and pruning expired state is one DuckDB transaction. Candidate rows remain
+uncollapsed until current and history are combined, preserving cross-partition
+duplicate precedence. The connection remains open across the complete source
+run and closes once at the source-run boundary.
 The two modes implement the same following rules:
 
 1. A contact is identified by customer, interaction, action, placement, and
@@ -1174,76 +1193,111 @@ silently undercounting the number of impressions.
 
 - `source_scan` (the compatibility default) retains no processor state and
   rereads the bounded source closure for each target.
-- `persistent_sharded` persists a complete target-candidate role containing the
-  fields required to repeat exact cross-partition normalization,
-  number-of-impressions bucketing, deduplication, grouping/state calculation,
-  and configured alternative-group selected rank-2 action resolution. In the
-  same generation it persists a history role filtered to exposed rank-1 rows
-  and projected to customer, interaction, action, placement, decision time,
-  contact classification, and deterministic local order. The history role is
-  derived from staged target shards and deliberately omits propensity,
-  priority, report/alternative groups, outcome, and all rank>1 candidates.
-  `shards`
-  is an integer from `1` through `4096` and defaults to
-  `64`; larger values lower per-shard memory while increasing file count.
+- `persistent_sharded` is the compatibility name for schema-revision-7 bounded
+  rolling DuckDB state. Revision 7 is the default and only supported checkpoint
+  schema. One `rolling.duckdb` has the stable path
+  `.valuestream/state/frequency_response/source=<source>/processor=<processor>/rolling.duckdb`.
+  Schema, hashing, Polars-version, processor-config, and layout values do not
+  create directory levels. Schema and hashing revisions, Polars version,
+  processor computation hash, shard count, history projection, and customer
+  dtype are stored inside the database as compatibility metadata; DuckDB
+  version is audit-only. The complete current candidates remain
+  temporary; persisted history is filtered to exposed rank-1 rows and projected
+  to customer, interaction, action, placement, decision time, contact
+  classification, deterministic local order, source chunk id, and logical
+  shard. Propensity, priority, report/alternative groups, outcome, and every
+  rank>1 candidate are omitted from history. `shards` is an integer from `1`
+  through `4096` and defaults to `64`; larger values lower per-shard SQL working
+  data. It controls a logical partition, not a physical file count.
 
 All fields under `checkpoint` are execution/storage settings. They remain in
 the full catalog hash for audit but are excluded from processor and source
 computation hashes:
 
 - `mode` selects the exact execution path;
-- `shards` selects a separately hashed physical checkpoint layout;
-- `retention_days` selects vacuum policy and is not part of artifact identity.
+- `shards` selects logical SQL partitioning within the same stable rolling
+  database;
+- `retention_days` selects bounded live-state policy and is not part of
+  artifact identity.
 
 Changing these fields does not schedule aggregate replay. Unchanged targets
-remain skipped. After a shard change, vacuum may remove the old layout and the
-new layout is built lazily from authoritative IH for the bounded closure of the
-next new or invalidated target. `--force` is still an explicit request to
-rebuild both aggregates and state. Window, partition lag, columns, filters,
-outcome/contact rules, groups, and states remain result semantics and therefore
-do change computation hashes.
+remain skipped. After a shard change, valid incompatible state is replaced at
+the same path and initialized from authoritative IH when next opened. The new
+database is validated in a sibling temporary file before an atomic swap.
+`--force` explicitly rebuilds both aggregates and rolling state. Window,
+partition lag, columns, filters, outcome/contact rules, groups, and states
+remain result semantics and therefore do change computation hashes.
 
-`retention_days` optionally sets the number of daily checkpoint partitions
-kept per processor. Its default is
-`ceil((window_hours + partition_lag_hours) / 24) + 1`, and an explicit value
-cannot be smaller. Retention runs after each terminal source run and during
-workspace vacuum. Replaying an older correction rebuilds any evicted IH
-partition for that bounded replay and may evict it again afterward.
+`retention_days` optionally sets the number of source-day journal entries
+kept in each processor's rolling state. Its default is
+`ceil((window_hours + partition_lag_hours) / 24)`, and an explicit value cannot
+be smaller. The default 168-hour window with zero lag therefore retains only
+the last seven calendar source days; missing dates can leave fewer stored chunk
+entries. Retention pruning occurs in the rolling writer transaction after each
+committed target. The writer retains at most this many calendar source days of
+history and journal entries. Replaying an older correction
+rebuilds the required state from IH and may evict it again after the bounded
+replay.
+Opening an existing store applies the current retention even when every target
+is skipped. A forced run replaces configured rolling state even when discovery
+returns no chunks.
 
-Persistent generations are source-fingerprint-addressed by the source,
-processor semantic computation identity, independent checkpoint-layout
-identity, chunk id, and raw-file fingerprint; their manifests also version the
-checkpoint schema, customer dtype, shard-hash algorithm/seeds, and Polars
-runtime used for native hashing. Before workers start, the parent validates the
-manifest plus the exact payload roles pending work can open: `target` for a
-current chunk, `history` for a historical dependency, or both when the chunk is
-needed in both roles. Each selected role's declared files, sizes, row counts,
-schemas, and SHA-256 digests are checked once; a history-only validation never
-reads the complete target payload. A newly written shard supplies its manifest
-metadata from that first inspection; publication revalidates the JSON against
-those entries rather than hashing and scanning the file again. Customer
-dtype must be stable across the bounded closure; normalize it in source
-transforms if exports drift. They live in the processor-state namespace,
-outside aggregates and ledger publication.
-Queries, reports, DuckDB views, API/MCP, and SQL export cannot read them. A
-missing, obsolete, or vacuumed generation is rebuilt from authoritative IH. A
-corrupt generation is rejected rather than used silently; a forced run safely
-replaces it from IH. A preparation failure fails only target chunks whose
-closures require that generation. Checkpoint retention therefore changes
-storage/rebuild cost rather than results.
+The rolling journal records each retained/processed ISO-date chunk and its
+authoritative raw fingerprint. Before each pending target, it is reconciled
+with that target's expected ordered history closure. If the journal is an exact
+prefix, missing intermediate chunks—including chunks skipped by aggregate-
+ledger reuse—are prepared from IH in date order without publishing aggregates.
+Expired-prefix and state-ahead-suffix rows outside the target closure are
+removed first. A fingerprint or order/non-prefix mismatch resets the required
+closure. Valid but incompatible schema, hashing, processor, shard, or
+projection metadata reinitializes the stable database and rebuilds it from IH;
+checkpoint schemas are not migrated. Corrupt, identity-invalid, or customer-
+dtype-drifted state fails closed; `--force` replaces it and rebuilds from IH
+oldest-to-newest. Normalize customer dtype in source transforms if exports
+drift.
 
-Customer hashing determines which exact shard to open; it does not anonymize
+Adding history, journal fingerprint, and retention deletes is one transaction.
+That acceleration-state commit may precede aggregate publication, but it never
+creates a chunk-ledger `ok` row or authorizes query visibility. DuckDB deletion
+is logical. Every 30 committed source days, `CHECKPOINT` runs on the same open
+connection to fold the expected WAL and partially reclaim or reuse deleted-row
+space. It does not close the writer, guarantee complete compaction, or guarantee
+an immediate file-size reduction. The WAL is expected while the writer is
+active or recovering from a crash and must not be removed independently.
+
+Queries, reports, DuckDB views, API/MCP, and SQL export cannot read
+`rolling.duckdb`. Missing state is initialized from authoritative IH. Corrupt
+state fails closed and can be replaced with a forced rebuild.
+Earlier per-day checkpoints are incompatible acceleration state and are
+rebuilt, not migrated, into schema-revision-7 state. Legacy nested identity
+layouts are likewise obsolete and may be vacuumed. A
+persistent frequency source processes target chunks oldest-to-newest in one
+process; a requested `--parallel` value is capped at one for that source while
+other source/processor semantics remain unchanged.
+
+Customer hashing determines which logical shard to query; it does not anonymize
 the original customer key retained for exact comparison. Treat the checkpoint
 as sensitive source-derived data, apply workspace access/encryption and
 retention controls, and tokenize or HMAC identifiers upstream where required.
 Sampling or sketches are not a transparent replacement because they cannot
 preserve exact event order and selected rank-2 action joins.
+The source's exact logical customer dtype governs hashing and drift checks;
+DuckDB's learned physical storage dtype is validated separately. Consequently,
+Polars `Categorical` and `Enum` keys may persist physically as `VARCHAR` without
+silently becoming compatible with a later `String` or differently ordered
+`Enum` source.
+
+The SQL is internal ingestion implementation, not governed workspace SQL. It
+is parameterized by the processor's typed semantic contract and cannot be
+called by reports, API/MCP, DuckDB aggregate views, or SQL export. The complete
+physical decision is recorded in
+[ADR 0008](../concepts/adr/0008-bounded-rolling-duckdb-state.md).
 
 A late positive outcome that arrives in a later chunk is not allowed to rewrite
 an already materialized earlier-day contact; recompute the affected source
 history when corrected source files replace the original export. Its changed raw
-fingerprint creates a new checkpoint generation in persistent mode and
-invalidates the same bounded target set in both modes.
+fingerprint invalidates the same bounded target set in both modes and forces
+rolling-state reconciliation/rebuild in persistent mode.
 
 An impression is only an exposure proxy unless the source explicitly guarantees
 viewability. The processor does not infer dismisses, irritation, or a dismiss

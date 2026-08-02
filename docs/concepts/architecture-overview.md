@@ -35,6 +35,8 @@ workspace/
     ...
   .valuestream/
     state/                 # optional, non-queryable processor checkpoints
+      frequency_response/
+        source=<source_id>/processor=<processor_id>/rolling.duckdb
   meta/
     chunks.duckdb
     pipeline_runs.duckdb
@@ -91,15 +93,23 @@ files, and computation hashes, finalizes the interrupted run, and reuses only
 the verified chunks.
 
 Processor checkpoints are ingestion-only acceleration state. They are
-versioned, source-fingerprint-addressed, bounded by configured retention, and
-rebuildable from the authoritative source;
+versioned internally, bounded by configured retention, and rebuildable from the
+authoritative source. Persistent frequency state uses checkpoint schema
+revision 7—the default and only supported revision—and one stable database path
+per source and processor. Schema, hash, config, shard, projection, and version
+metadata stay inside that database rather than creating path levels. Polars
+version participates in shard compatibility; DuckDB version is audit-only.
+The raw fingerprint journal is likewise inside the database;
 they do not create a successful chunk marker and no report/query path reads
 them. Aggregate-first is therefore the serving contract even when a processor
 retains the minimal identity state required for exact bounded computation.
 Checkpoint mode, shard count, and retention remain visible in the full catalog
-identity but do not change aggregate/source computation hashes. Shard count has
-its own state-layout identity; a new layout is prepared lazily when a new or
-invalidated bounded target next needs it.
+identity but do not change aggregate/source computation hashes. A valid
+incompatible state contract reinitializes the same stable database lazily when
+a bounded target next needs it; corrupt state still fails closed. Chronological
+commits prune old rows each day, and every 30 committed days run DuckDB
+`CHECKPOINT` without closing the source-run connection. The writer closes once
+at the source-run boundary.
 
 ## Processor and State Model
 

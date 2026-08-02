@@ -51,10 +51,6 @@ _FLOAT64_VALUE_SUM_REVISION = 1
 # implementation change invalidates aggregates in both source-scan and
 # persistent modes without making the mode itself part of aggregate identity.
 _FREQUENCY_RESPONSE_SEMANTICS_REVISION = 2
-# Checkpoint layout is an ingestion-only identity. It is deliberately separate
-# from processor/source computation hashes so tuning storage cannot republish
-# otherwise identical aggregates.
-_FREQUENCY_CHECKPOINT_LAYOUT_REVISION = 1
 
 
 def canonicalize(value: Any) -> Any:
@@ -130,23 +126,6 @@ def processor_config_hash(processor: model.Processor) -> str:
     if isinstance(processor, model.FrequencyResponseProcessor):
         return config_hash(_processor_computation_fields(processor))
     return config_hash(processor)
-
-
-def frequency_checkpoint_layout_hash(processor: model.FrequencyResponseProcessor) -> str:
-    """Hash only fields that determine persistent checkpoint layout.
-
-    ``mode`` selects an execution path and ``retention_days`` controls vacuum;
-    neither changes an artifact's physical layout. The processor semantic hash
-    remains a separate path component and protects the stored candidate
-    contract itself.
-    """
-
-    return config_hash(
-        {
-            "checkpoint_layout_revision": _FREQUENCY_CHECKPOINT_LAYOUT_REVISION,
-            "shards": processor.checkpoint.shards,
-        }
-    )
 
 
 def processor_computation_hash(
@@ -322,7 +301,6 @@ __all__ = [
     "canonicalize",
     "catalog_config_hash",
     "config_hash",
-    "frequency_checkpoint_layout_hash",
     "processor_computation_config",
     "processor_computation_hash",
     "processor_config_hash",

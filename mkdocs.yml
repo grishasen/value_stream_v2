@@ -105,6 +105,7 @@ nav:
           - 0005 Unified metric-owned heatmaps: concepts/adr/0005-unified-metric-owned-heatmaps.md
           - 0006 Strict catalog v2: concepts/adr/0006-strict-catalog-v2.md
           - 0007 Bounded lookback processors: concepts/adr/0007-bounded-lookback-processors.md
+          - 0008 Bounded rolling DuckDB state: concepts/adr/0008-bounded-rolling-duckdb-state.md
   - Reference:
       - CLI: reference/cli.md
       - Expression DSL: reference/expression-dsl.md

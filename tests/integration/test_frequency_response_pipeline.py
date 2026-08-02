@@ -9,9 +9,6 @@ import duckdb
 import polars as pl
 import pytest
 
-from valuestream.config import model
-from valuestream.config.canonical import frequency_checkpoint_layout_hash
-from valuestream.config.loader import load
 from valuestream.engine import run_source
 from valuestream.query import query_metric_result
 from valuestream.store.parquet import scan_aggregate
@@ -166,6 +163,22 @@ def _frequency_rows(workspace: Path) -> dict[int, tuple[int, int, float]]:
     }
 
 
+def _rolling_databases(workspace: Path) -> list[Path]:
+    return sorted(
+        (workspace / ".valuestream" / "state" / "frequency_response").glob("**/rolling.duckdb")
+    )
+
+
+def _rolling_journal(database: Path) -> list[str]:
+    with duckdb.connect(str(database), read_only=True) as connection:
+        return [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT chunk_id FROM chunk_journal ORDER BY sequence"
+            ).fetchall()
+        ]
+
+
 @pytest.mark.integration
 def test_frequency_response_pipeline_replays_bounded_dependencies_and_hides_empty_rewrite(
     tmp_path: Path,
@@ -207,13 +220,11 @@ def test_frequency_response_pipeline_replays_bounded_dependencies_and_hides_empt
             """
         ).fetchone()
     assert lineage == (9, 9, 9)
-    checkpoint_manifests = sorted(
-        (tmp_path / ".valuestream" / "state" / "frequency_response").glob("**/manifest.json")
-    )
-    # Default retention is exactly seven history partitions plus current.
-    assert len(checkpoint_manifests) == 8
-    assert all(list(path.parent.glob("target-shard=*.parquet")) for path in checkpoint_manifests)
-    assert all(list(path.parent.glob("history-shard=*.parquet")) for path in checkpoint_manifests)
+    rolling_databases = _rolling_databases(tmp_path)
+    assert len(rolling_databases) == 1
+    # After each commit, default retention keeps exactly the seven source days
+    # needed as history by the next target.
+    assert _rolling_journal(rolling_databases[0]) == list(_DAYS[2:])
 
     before = query_metric_result(
         tmp_path,
@@ -294,23 +305,15 @@ def test_frequency_response_pipeline_replays_bounded_dependencies_and_hides_empt
             """
         ).fetchone()
     assert lineage == (16, 9, 16)
-    # The corrected raw day is rebuilt for replay, then falls outside the
-    # active eight-partition retention horizon. Unchanged retained checkpoints
-    # are reused by all replayed targets.
-    assert (
-        len(
-            list(
-                (tmp_path / ".valuestream" / "state" / "frequency_response").glob(
-                    "**/manifest.json"
-                )
-            )
-        )
-        == 8
-    )
+    # Chronological replay rewinds and advances the same bounded state. Day 9
+    # remains ledger-skipped, so the resulting journal ends at replayed day 8.
+    rolling_databases = _rolling_databases(tmp_path)
+    assert len(rolling_databases) == 1
+    assert _rolling_journal(rolling_databases[0]) == list(_DAYS[1:8])
 
 
 @pytest.mark.integration
-def test_checkpoint_tuning_skips_aggregates_and_rebuilds_layout_lazily(
+def test_checkpoint_tuning_skips_aggregates_and_rebuilds_stable_state_lazily(
     tmp_path: Path,
 ) -> None:
     _seed_workspace(tmp_path)
@@ -334,14 +337,6 @@ def test_checkpoint_tuning_skips_aggregates_and_rebuilds_layout_lazily(
         ),
         encoding="utf-8",
     )
-    tuned_catalog = load(tmp_path)
-    tuned_processor = next(
-        processor
-        for processor in tuned_catalog.processors.processors
-        if isinstance(processor, model.FrequencyResponseProcessor)
-    )
-    tuned_layout_hash = frequency_checkpoint_layout_hash(tuned_processor)
-
     tuning_run = run_source(tmp_path, "ih")
 
     assert (tuning_run.chunks_ok, tuning_run.chunks_skipped, tuning_run.chunks_failed) == (0, 9, 0)
@@ -354,12 +349,12 @@ def test_checkpoint_tuning_skips_aggregates_and_rebuilds_layout_lazily(
     assert unchanged.height == before.height
     assert unchanged.get_column("config_hash").unique().to_list() == original_hashes
     assert _frequency_rows(tmp_path) == original_rows
-    # The old layout is acceleration state only, so terminal vacuum may remove
-    # it without scheduling aggregate replay. The replacement is built only
-    # when a target actually needs processing.
-    assert not list(
-        (tmp_path / ".valuestream" / "state" / "frequency_response").glob("**/manifest.json")
-    )
+    # Storage tuning changes neither aggregate identity nor its stable path.
+    # The incompatible acceleration payload is reset eagerly, then populated
+    # only when a target actually needs processing.
+    rolling_databases = _rolling_databases(tmp_path)
+    assert len(rolling_databases) == 1
+    assert _rolling_journal(rolling_databases[0]) == []
 
     next_day = (_START + dt.timedelta(days=9)).isoformat()
     _write_day(tmp_path, next_day, focal_outcome="Impression")
@@ -370,11 +365,10 @@ def test_checkpoint_tuning_skips_aggregates_and_rebuilds_layout_lazily(
         9,
         0,
     )
-    rebuilt_manifests = list(
-        (tmp_path / ".valuestream" / "state" / "frequency_response").glob("**/manifest.json")
-    )
-    assert len(rebuilt_manifests) == 8
-    assert all(f"layout={tuned_layout_hash}" in path.parts for path in rebuilt_manifests)
+    rebuilt_databases = _rolling_databases(tmp_path)
+    assert len(rebuilt_databases) == 1
+    assert rebuilt_databases[0] == rolling_databases[0]
+    assert _rolling_journal(rebuilt_databases[0]) == [*_DAYS[2:], next_day]
     after = scan_aggregate(
         tmp_path,
         source_id="ih",
@@ -385,32 +379,30 @@ def test_checkpoint_tuning_skips_aggregates_and_rebuilds_layout_lazily(
 
 
 @pytest.mark.integration
-def test_checkpoint_failure_only_fails_targets_that_depend_on_it(tmp_path: Path) -> None:
+def test_rolling_checkpoint_corruption_fails_loudly_and_force_rebuilds(tmp_path: Path) -> None:
     _seed_workspace(tmp_path)
     initial = run_source(tmp_path, "ih")
     assert initial.status == "ok"
 
-    corrupted = next(
-        (tmp_path / ".valuestream" / "state" / "frequency_response").glob(
-            f"**/chunk={_DAYS[1]}/**/target-shard=*.parquet"
-        )
-    )
-    with corrupted.open("ab") as handle:
-        handle.write(b"corrupt")
+    corrupted = _rolling_databases(tmp_path)[0]
+    with corrupted.open("r+b") as handle:
+        handle.write(b"not-a-duckdb")
 
-    # Changing day 1 schedules targets 1..8. Only target 1 is independent of
-    # the corrupt day-2 checkpoint; target 9 remains idempotently skipped.
+    # Changing day 1 schedules targets 1..8. One corrupt rolling database is
+    # shared acceleration state, so every pending target fails loudly while
+    # target 9 remains idempotently skipped.
     _write_day(tmp_path, _DAYS[0], focal_outcome="Pending")
     replay = run_source(tmp_path, "ih")
 
     assert replay.status == "failed"
-    assert (replay.chunks_ok, replay.chunks_failed, replay.chunks_skipped) == (1, 7, 1)
+    assert (replay.chunks_ok, replay.chunks_failed, replay.chunks_skipped) == (0, 8, 1)
     statuses = {chunk.chunk_id: chunk.status for chunk in replay.chunks}
-    assert statuses[_DAYS[0]] == "ok"
-    assert all(statuses[day] == "failed" for day in _DAYS[1:8])
+    assert all(statuses[day] == "failed" for day in _DAYS[:8])
     assert statuses[_DAYS[8]] == "skipped"
-    assert all(
-        "does not match manifest" in (chunk.error or "")
-        for chunk in replay.chunks
-        if chunk.status == "failed"
-    )
+
+    rebuilt = run_source(tmp_path, "ih", force=True)
+    assert rebuilt.status == "ok"
+    assert (rebuilt.chunks_ok, rebuilt.chunks_failed, rebuilt.chunks_skipped) == (9, 0, 0)
+    rebuilt_databases = _rolling_databases(tmp_path)
+    assert len(rebuilt_databases) == 1
+    assert _rolling_journal(rebuilt_databases[0]) == list(_DAYS[2:])

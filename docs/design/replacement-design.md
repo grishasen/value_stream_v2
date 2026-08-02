@@ -190,7 +190,9 @@ The aggregate store is rooted at a configurable workspace path:
 │   │           └── _manifest.json
 ├── .valuestream/
 │   └── state/                       # optional processor-owned checkpoints
-│       └── frequency_response/...
+│       └── frequency_response/
+│           └── source=<source_id>/
+│               └── processor=<processor_id>/rolling.duckdb
 ├── snapshots/
 │   └── <snapshot_id>/
 │       └── as_of=YYYY-MM-DD/
@@ -206,14 +208,26 @@ The aggregate store is rooted at a configurable workspace path:
 
 The processor-state namespace is deliberately separate from aggregate and
 metadata publication. It is never scanned by query planning or DuckDB views.
-Each persistent frequency-response generation is normally immutable,
-source-fingerprint-addressed, schema/customer-dtype/sharding-versioned, and
-rebuildable from IH; an explicit forced run may replace the same state address,
-and stale generations have an independent bounded-retention lifecycle.
+Persistent frequency response uses checkpoint schema revision 7, the default
+and only supported revision, at one stable source/processor path. Schema,
+hashing, Polars-version, processor-config, and layout values do not create path
+levels. Schema and hashing revisions, Polars version, processor computation
+hash, logical shard count, history projection, and customer dtype remain inside
+the database as compatibility metadata; DuckDB version is audit-only. Its
+transactional journal records ISO-date chunks and authoritative raw
+fingerprints; its history relation retains only exposed rank-1 rows needed by
+later targets. The complete current candidate payload is temporary. State is
+reconciled and rebuilt from IH on fingerprint/order mismatch or correction and
+has an independent bounded-retention lifecycle. Valid incompatible state is
+reinitialized at the same path; corrupt or identity-invalid state fails closed,
+and a forced run replaces and rebuilds it. This
+processor-internal DuckDB state is not a published aggregate; business
+aggregates remain Parquet. A DuckDB WAL is expected while the long-lived writer
+is active or recovering and must not be deleted independently.
 
 This replaces the current single `db/pov_data_<variant>.duckdb` monolith. Variants survive as the top-level **workspace** identifier.
 
-### 6.2 Why Parquet for aggregates and DuckDB for query
+### 6.2 Why Parquet for aggregates and DuckDB for query and bounded state
 
 Parquet at rest gives:
 
@@ -228,6 +242,18 @@ DuckDB on top gives:
 - `read_parquet('aggregates/.../**/*.parquet', hive_partitioning=true)`,
 - table-valued functions for the metadata DBs,
 - governed views over aggregate state, used by SQL tooling and the read-only HTTP/MCP surfaces when SQL is explicitly enabled.
+
+The same engine is also used in a different, non-queryable role for persistent
+`frequency_response` checkpoints. One long-lived writer opens
+`rolling.duckdb`, uses a transactional fingerprint journal, and processes
+targets oldest-to-newest. The connection stays open across the source run and
+closes once at the source-run boundary. The complete prepared current day streams into a
+temporary relation through the Arrow C Stream interface; only bounded exposed
+rank-1 history plus chunk id and logical customer shard persists. This removes
+both the schema-v4 one-Parquet-file-per-role-per-shard layout and the evaluated
+per-day DuckDB layout. The rolling database is exact and rebuildable
+from IH, but is deliberately unavailable to every query surface. See
+[ADR 0008](../concepts/adr/0008-bounded-rolling-duckdb-state.md).
 
 ### 6.3 Aggregate tables — common columns
 
@@ -1179,18 +1205,36 @@ current-target rows even when they share the source.
 
 The bounded processor then uses its declared execution mode. `source_scan`
 builds a marked, ephemeral dependency frame. `persistent_sharded` filters,
-classifies, and projects a raw chunk through a partitioned streaming sink into
-customer-hash shards addressed by source, processor semantic computation
-identity, independent checkpoint-layout identity, chunk id, and raw
-fingerprint. The resulting atomic generation has a complete target payload and
-a narrow history payload derived from those staged target shards without a
-second raw scan, then processes one corresponding target/history shard set at
-a time. Contact collapse happens after those shards are combined so both modes
-retain identical cross-partition duplicate precedence. Neither mode changes
-the raw dependency fingerprint or aggregate publication barrier. Checkpoint
-mode, shard count, and retention remain in the full catalog hash but not in
-processor or source computation hashes. Checkpoint manifests and files are not
-ledger `ok` rows and are never query-visible.
+classifies, projects, and adds a logical customer shard to the current target,
+then exposes its batches to that processor's long-lived DuckDB writer through
+the Arrow C Stream interface. The complete current payload is temporary. One
+parameterized SQL plan per logical shard combines it with retained history, performs cross-
+partition contact collapse, the strict timestamp window, and configured
+alternative-group selected rank-2 resolution, then streams only enriched target
+rank-1 rows to Polars. Polars applies the configured-state tail: virtual state
+columns, state-level predicates, count/value-sum aggregation, grouping, and
+provenance.
+
+After target calculation, DuckDB transactionally appends only exposed rank-1
+history with chunk id/shard, records the raw fingerprint, and deletes expired
+history/journal rows. This acceleration-state commit can precede aggregate
+publication but is not a ledger `ok` row and is never query-visible. Before
+each pending target, the journal is reconciled with that target's expected
+ordered history closure. Rows outside that closure are removed; an exact
+retained prefix is advanced by filling missing intermediate chunks from IH
+without aggregate publication. Fingerprint or order/non-prefix mismatch resets
+the required closure. Valid-but-incompatible schema, hashing, processor, shard,
+or projection metadata reinitializes the same stable database from IH; earlier
+schemas are not migrated. Corrupt, identity-invalid, or customer-dtype-drifted
+state fails closed; `--force` replaces it and rebuilds from IH in ascending ISO-
+date order. Both execution modes retain identical aggregate semantics and the
+normal dependency fingerprint/publication barrier.
+
+When any selected processor uses this rolling mode, the runner sorts frequency
+targets by ISO date and caps the source chunk process pool at one even if
+`--parallel` is larger. The single process owns the writer for the source run;
+ordinary processors still receive the same current-target population, and
+other eligible source runs retain their normal concurrency semantics.
 
 Re-processing a chunk:
 
@@ -1211,16 +1255,20 @@ chunks are removed only after those checks. DuckDB run, chunk, lineage, and
 configuration-version metadata is not deleted.
 
 Processor-state retention is separate from aggregate publication retention.
-After a terminal source run, and during explicit vacuum, the engine removes
-incomplete or incompatible generations, superseded raw fingerprints, and daily
-partitions beyond `checkpoint.retention_days`. The default keeps exactly the
-active history closure plus the current partition. A target never relies on a
-checkpoint as authoritative data: if the required generation is absent after
-cleanup, ingestion rebuilds it from the discovered source chunk before
-calculating the aggregate. Changing mode, shard count, or retention does not
-schedule aggregate replay. A new shard layout is prepared lazily for the
-bounded closure of the next new or invalidated target; a retention-only change
-applies during vacuum.
+The rolling writer retains at most `checkpoint.retention_days` source-day journal
+entries and their matching history rows. The default and minimum are
+`ceil((window_hours + partition_lag_hours) / 24)`; 168 hours with zero lag
+therefore retains only the last seven calendar source days, with fewer stored
+chunks when dates are missing. Logical history and journal pruning occurs in
+every chronological source-day commit. Every 30 committed
+source days, DuckDB `CHECKPOINT` runs on the same open connection to fold the
+WAL and partially reclaim or reuse deleted-row space. It does not close the
+writer, guarantee complete compaction, or guarantee immediate file-size
+shrinkage. A target never relies on rolling state as authoritative data:
+missing or mismatched state is rebuilt from IH. Changing mode, shard count, or
+retention does not schedule aggregate replay or select another database path;
+the stable source/processor database is initialized or reconciled on the next
+persistent run.
 
 ### 10.3 Transform materialization and streaming
 
@@ -1240,22 +1288,25 @@ bounds ordinary raw-frame ownership to one active chunk per worker. A bounded
 processor in `source_scan` mode additionally owns its dependency frame, so
 memory and scan cost scale with target size plus lookback. In
 `persistent_sharded` mode, checkpoint construction owns one transformed source
-lazy plan and streams it directly into partitioned Parquet without collecting
-the complete prepared day. It derives a narrow historical payload from the
-staged target Parquet and target computation reads one complete current shard
-plus only narrow historical shards across the bounded days at a time. Neither
-path guarantees a fixed RSS ceiling; an
+lazy plan and streams its complete current payload into a temporary relation in
+that processor's long-lived `rolling.duckdb` writer over the Arrow C Stream interface. The
+complete day is not collected or persisted; only bounded exposed rank-1 history
+is retained. Target SQL reads one logical customer shard from current plus
+history at a time and streams enriched selected rank-1 rows back to the
+configured Polars state tail. Neither path guarantees a fixed RSS ceiling; an
 upstream blocking transform or the allocator may
 retain freed pages for reuse. Operators control memory with chunk size,
-checkpoint shard count, and bounded chunk-process parallelism, then verify peak
+logical checkpoint shard count, and source-process concurrency. Persistent
+frequency sources are capped at one chunk process, then operators verify peak
 RSS with the ingestion benchmark.
 
 ### 10.4 Processor fan-out
 
-Processor lazy plans are collected as one batch. Ordinary processors fan out
-from the current-target frame; source-scanned bounded processors fan out from
-the marked dependency frame. Persistent bounded processors consume validated
-immutable checkpoint shards through their processor-specific path. With
+Source-backed processor lazy plans are collected as one batch. Ordinary
+processors fan out from the current-target frame; source-scanned bounded
+processors fan out from the marked dependency frame. A persistent bounded
+processor is excluded from that source-frame batch and uses its reconciled
+rolling DuckDB writer and processor-specific SQL path. With
 transform materialization the source-backed plans use the relevant shared
 in-memory frame described above; without it they remain branches of the source
 lazy plan and use the configured source engine. If the batched collect fails,
@@ -1524,9 +1575,10 @@ For one release, the legacy Streamlit app and the new one can read the same work
 4. **Headless auth** — the read-only HTTP API supports a bearer token and requires one for non-loopback CLI binds. In-process SDK and local stdio MCP run under the host process identity; OIDC/SSO and remote HTTP MCP remain deferred.
 5. **Config provenance** — every aggregate row is tied to a `config_hash` and YAML body in `config_versions`. A reviewer can reconstruct the exact config that produced any number on a dashboard.
 6. **Cardinality-sketch caveat** — CPC is the generated distinct-count default and HLL remains supported. Theta also answers distinct count and should be selected when the same persisted state needs intersection/difference. Hashing inside a sketch is not a substitute for governed upstream tokenization.
-7. **Checkpoint-shard caveat** — customer hashing routes exact records to a
-   shard; it is not encryption, anonymization, or a substitute for upstream
-   tokenization/HMAC.
+7. **Checkpoint-shard caveat** — the persisted logical customer shard routes
+   exact records; it is not encryption, anonymization, or a substitute for
+   upstream tokenization/HMAC. `rolling.duckdb` and its expected WAL remain
+   sensitive processor state outside query surfaces.
 
 ---
 

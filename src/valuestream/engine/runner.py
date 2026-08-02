@@ -8,8 +8,10 @@ import time
 from collections import deque
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import TracebackType
 from typing import Literal, TypeAlias
 
 import polars as pl
@@ -17,7 +19,6 @@ import polars as pl
 from valuestream.config import model
 from valuestream.config.canonical import (
     catalog_config_hash,
-    frequency_checkpoint_layout_hash,
     processor_computation_config,
     processor_computation_hash,
     serialize,
@@ -27,6 +28,7 @@ from valuestream.config.canonical import (
 from valuestream.config.loader import load
 from valuestream.config.validate import validate_catalog
 from valuestream.engine import ledger
+from valuestream.engine.frequency import DuckDBFrequencySession
 from valuestream.processors import grain_levels
 from valuestream.processors.binary_outcome import ChunkContext
 from valuestream.processors.context import SOURCE_ORDER_COLUMN
@@ -51,17 +53,9 @@ from valuestream.readers.discovery import Chunk
 from valuestream.store.duckdb_views import refresh_aggregate_views
 from valuestream.store.parquet import AggregateWriteReceipt, write_aggregate_with_receipts
 from valuestream.store.processor_state import (
-    CheckpointManifest,
-    CheckpointPayload,
-)
-from valuestream.store.processor_state import (
-    load_manifest as load_processor_state_manifest,
-)
-from valuestream.store.processor_state import (
-    scan_shard as scan_processor_state_shard,
-)
-from valuestream.store.processor_state import (
-    write_checkpoint as write_processor_state_checkpoint,
+    HistoryProjectionSpec,
+    RollingCheckpoint,
+    rolling_checkpoint_path,
 )
 from valuestream.store.vacuum import vacuum_processor_state
 from valuestream.transforms import apply_transforms
@@ -283,6 +277,14 @@ def _run_source_locked(  # noqa: PLR0912, PLR0915
     processors = _processors_for_source(catalog, source_id)
     chunks = discover(workspace, source)
     chunk_plans = _plan_source_chunks(source, chunks, processors)
+    if parallel > 1 and any(_is_persistent_frequency_processor(item) for item in processors):
+        logger.warning(
+            "Persistent frequency state requires chronological single-process chunks; "
+            "using parallel=1 instead of parallel=%s: source=%s",
+            parallel,
+            source_id,
+        )
+        parallel = 1
 
     run_id = new_pipeline_run_id()
     config_hash = source_computation_hash(catalog, source_id)
@@ -366,32 +368,6 @@ def _run_source_locked(  # noqa: PLR0912, PLR0915
                 continue
             to_process.append((chunk_order, plan))
 
-        checkpoint_failures = _ensure_persistent_frequency_checkpoints(
-            workspace,
-            source,
-            processors,
-            [plan for _, plan in to_process],
-            force=force,
-        )
-        ready_to_process: list[tuple[int, _ChunkPlan]] = []
-        for chunk_order, plan in to_process:
-            checkpoint_error = checkpoint_failures.get(plan.chunk_id)
-            if checkpoint_error is None:
-                ready_to_process.append((chunk_order, plan))
-                continue
-            _notify_chunk_progress(
-                progress_callback,
-                source=source,
-                chunk=plan.chunk,
-                chunk_order=chunk_order,
-                chunks_total=chunks_total,
-                status="processing",
-            )
-            outcome = _checkpoint_failure_outcome(plan, checkpoint_error)
-            _record_chunk_outcome(workspace, source_id, run_id, outcome)
-            results_by_order[chunk_order] = outcome.result
-        to_process = ready_to_process
-
         if parallel > 1 and len(to_process) > 1:
             _run_chunks_parallel(
                 workspace,
@@ -405,19 +381,32 @@ def _run_source_locked(  # noqa: PLR0912, PLR0915
                 results_by_order=results_by_order,
             )
         else:
-            for chunk_order, plan in to_process:
-                chunk = plan.chunk
-                _notify_chunk_progress(
-                    progress_callback,
-                    source=source,
-                    chunk=chunk,
-                    chunk_order=chunk_order,
-                    chunks_total=chunks_total,
-                    status="processing",
-                )
-                outcome = _process_chunk(workspace, source, processors, plan, run_id)
-                _record_chunk_outcome(workspace, source_id, run_id, outcome)
-                results_by_order[chunk_order] = outcome.result
+            with _PersistentFrequencyCoordinator(
+                workspace,
+                source,
+                processors,
+                force=force,
+            ) as frequency_coordinator:
+                for chunk_order, plan in to_process:
+                    chunk = plan.chunk
+                    _notify_chunk_progress(
+                        progress_callback,
+                        source=source,
+                        chunk=chunk,
+                        chunk_order=chunk_order,
+                        chunks_total=chunks_total,
+                        status="processing",
+                    )
+                    outcome = _process_chunk(
+                        workspace,
+                        source,
+                        processors,
+                        plan,
+                        run_id,
+                        frequency_coordinator=frequency_coordinator,
+                    )
+                    _record_chunk_outcome(workspace, source_id, run_id, outcome)
+                    results_by_order[chunk_order] = outcome.result
 
         chunk_results = [results_by_order[order] for order in sorted(results_by_order)]
         finished_at = utc_now()
@@ -514,6 +503,8 @@ def _process_chunk(
     processors: list[_Processor],
     plan: _ChunkPlan,
     run_id: str,
+    *,
+    frequency_coordinator: _PersistentFrequencyCoordinator | None = None,
 ) -> _ChunkOutcome:
     """Read, transform, aggregate, and write one chunk (no ledger writes)."""
     chunk = plan.chunk
@@ -571,6 +562,15 @@ def _process_chunk(
             _log_chunk_schema(source, chunk, "transformed", transformed)
             if frequency_transformed is not None:
                 _log_chunk_schema(source, chunk, "frequency_transformed", frequency_transformed)
+
+        persistent_processor_frames = _collect_rolling_frequency_frames(
+            frequency_processors,
+            frequency_coordinator,
+            transformed,
+            plan,
+            ctx,
+            engine=source_engine,
+        )
         if source.materialize_transforms:
             rows_in, rows_kept, processor_frames, written = _collect_chunk_materialized(
                 workspace,
@@ -597,16 +597,15 @@ def _process_chunk(
                 transformed,
                 frequency_transformed,
             )
-
-        processor_frames.extend(
-            _collect_persistent_frequency_frames(
-                workspace,
-                source,
-                frequency_processors,
-                plan,
-                ctx,
-            )
-        )
+        processor_frames.extend(persistent_processor_frames)
+        frames_by_processor = {
+            processor.id: (processor, frame) for processor, frame in processor_frames
+        }
+        processor_frames = [
+            frames_by_processor[processor.id]
+            for processor in processors
+            if processor.id in frames_by_processor
+        ]
 
         # Transfer ownership before writing so the writer can drop each frame
         # without mutating the list returned by the collection stage.  Keeping
@@ -658,6 +657,22 @@ def _process_chunk(
         )
     finally:
         cleanup_temporaries()
+
+
+def _collect_rolling_frequency_frames(
+    processors: Sequence[_Processor],
+    coordinator: _PersistentFrequencyCoordinator | None,
+    current: pl.LazyFrame,
+    plan: _ChunkPlan,
+    ctx: ChunkContext,
+    *,
+    engine: _CollectEngine,
+) -> list[tuple[_Processor, pl.DataFrame]]:
+    if not any(_is_persistent_frequency_processor(processor) for processor in processors):
+        return []
+    if coordinator is None:  # pragma: no cover - scheduling invariant
+        raise RuntimeError("persistent frequency processing requires a rolling-state coordinator")
+    return coordinator.collect(current, plan, ctx, engine=engine)
 
 
 def _prepare_chunk_frames(
@@ -717,258 +732,252 @@ def _prepare_chunk_frames(
     return normal_raw, current_transformed, frequency_transformed
 
 
-def _ensure_persistent_frequency_checkpoints(  # noqa: PLR0912, PLR0915
-    workspace: Path,
-    source: model.Source,
-    processors: list[_Processor],
-    plans: list[_ChunkPlan],
-    *,
-    force: bool = False,
-) -> dict[str, str]:
-    """Prepare and validate checkpoint dependencies, isolating failures by target."""
+class _PersistentFrequencyCoordinator:
+    """Own rolling frequency stores for one chronological source run."""
 
-    persistent = [
-        processor for processor in processors if _is_persistent_frequency_processor(processor)
-    ]
-    if not persistent or not plans:
-        return {}
+    def __init__(
+        self,
+        workspace: Path,
+        source: model.Source,
+        processors: Sequence[_Processor],
+        *,
+        force: bool,
+    ) -> None:
+        self.workspace = workspace
+        self.source = source
+        self.processors = tuple(
+            _as_persistent_frequency_processor(processor)
+            for processor in processors
+            if _is_persistent_frequency_processor(processor)
+        )
+        self.force = force
+        self._stack = ExitStack()
+        self._checkpoints: dict[str, RollingCheckpoint] = {}
+        self._open_errors: dict[str, Exception] = {}
+        self._entered = False
 
-    required_chunks: dict[str, Chunk] = {}
-    required_roles: dict[str, set[CheckpointPayload]] = {}
-    for plan in plans:
-        required_chunks[plan.chunk.chunk_id] = plan.chunk
-        required_roles.setdefault(plan.chunk.chunk_id, set()).add("target")
-        for chunk in plan.history_chunks:
-            required_chunks[chunk.chunk_id] = chunk
-            required_roles.setdefault(chunk.chunk_id, set()).add("history")
-
-    engine: Literal["auto", "streaming"] = "streaming" if source.reader.streaming else "auto"
-    manifests: dict[tuple[str, str], CheckpointManifest] = {}
-    failures: dict[tuple[str, str], str] = {}
-    for chunk_id in sorted(required_chunks):
-        chunk = required_chunks[chunk_id]
-        raw_fingerprint = ledger.file_fingerprint(chunk.files)
-        transformed: pl.LazyFrame | None = None
-        transformed_schema: pl.Schema | None = None
-        try:
-            for candidate in persistent:
-                processor = _as_persistent_frequency_processor(candidate)
-                key = (processor.id, chunk.chunk_id)
-                layout_hash = frequency_checkpoint_layout_hash(processor.config)
-                try:
-                    manifest = None
-                    if not force:
-                        roles = required_roles[chunk.chunk_id]
-                        validation: bool | CheckpointPayload = (
-                            True if len(roles) > 1 else next(iter(roles))
-                        )
-                        # Validate every payload byte that a worker can open,
-                        # without hashing target-only columns for history reads.
-                        manifest = load_processor_state_manifest(
-                            workspace,
-                            source_id=source.id,
-                            processor_id=processor.id,
-                            config_hash=processor.config_hash,
-                            layout_hash=layout_hash,
-                            chunk_id=chunk.chunk_id,
-                            raw_fingerprint=raw_fingerprint,
-                            validate=validation,
-                        )
-                    if manifest is None:
-                        logger.info(
-                            "Building persistent frequency checkpoint: "
-                            "source=%s processor=%s chunk=%s force=%s",
-                            source.id,
-                            processor.id,
-                            chunk.chunk_id,
-                            force,
-                        )
-                        if transformed is None:
-                            transformed = apply_transforms(read(source.reader, chunk.files), source)
-                            transformed_schema = transformed.collect_schema()
-                        if transformed_schema is None:  # pragma: no cover - paired assignment
-                            raise RuntimeError("transformed checkpoint schema was not prepared")
-                        _validate_frequency_current_input_columns([processor], transformed_schema)
-                        manifest = write_processor_state_checkpoint(
-                            processor.checkpoint_contacts_lazy(transformed),
-                            workspace,
-                            source_id=source.id,
-                            processor_id=processor.id,
-                            config_hash=processor.config_hash,
-                            layout_hash=layout_hash,
-                            chunk_id=chunk.chunk_id,
-                            raw_fingerprint=raw_fingerprint,
-                            customer_column=processor.config.columns.customer,
-                            shard_count=processor.config.checkpoint.shards,
-                            history_projection=processor.checkpoint_history_contacts_lazy,
-                            engine=engine,
-                            replace_existing=force,
-                        )
-                    _validate_checkpoint_manifest(processor, manifest)
-                    manifests[key] = manifest
-                except Exception as exc:
-                    failures[key] = str(exc)
-                    logger.exception(
-                        "Persistent frequency checkpoint failed: source=%s processor=%s chunk=%s",
-                        source.id,
-                        processor.id,
-                        chunk.chunk_id,
-                    )
-        finally:
-            cleanup_temporaries()
-
-    plan_failures: dict[str, str] = {}
-    for plan in plans:
-        errors: list[str] = []
-        closure = (*plan.history_chunks, plan.chunk)
-        for candidate in persistent:
-            processor = _as_persistent_frequency_processor(candidate)
-            closure_manifests: list[CheckpointManifest] = []
-            for chunk in closure:
-                key = (processor.id, chunk.chunk_id)
-                if key in failures:
-                    errors.append(
-                        f"processor {processor.id!r} checkpoint {chunk.chunk_id!r}: {failures[key]}"
-                    )
-                    continue
-                manifest = manifests.get(key)
-                if manifest is None:  # pragma: no cover - preparation invariant
-                    errors.append(
-                        f"processor {processor.id!r} checkpoint {chunk.chunk_id!r} was not prepared"
-                    )
-                    continue
-                closure_manifests.append(manifest)
+    def __enter__(self) -> _PersistentFrequencyCoordinator:
+        if self._entered:
+            raise RuntimeError("persistent frequency coordinator is already open")
+        self._stack.__enter__()
+        self._entered = True
+        for processor in self.processors:
+            path = rolling_checkpoint_path(
+                self.workspace,
+                source_id=self.source.id,
+                processor_id=processor.id,
+            )
+            wal_path = path.with_name(f"{path.name}.wal")
+            if not self.force and not path.exists() and not wal_path.exists():
+                continue
             try:
-                _validate_checkpoint_customer_dtypes(processor, closure_manifests)
-            except ValueError as exc:
-                errors.append(str(exc))
-        if errors:
-            plan_failures[plan.chunk_id] = "; ".join(dict.fromkeys(errors))
-    return plan_failures
+                checkpoint = self._open_checkpoint(processor, customer_dtype="Null")
+                checkpoint.prune_retention()
+            except Exception as exc:
+                if self.force:
+                    self._entered = False
+                    self._stack.__exit__(type(exc), exc, exc.__traceback__)
+                    raise
+                self._open_errors[processor.id] = exc
+                logger.exception(
+                    "Could not maintain rolling frequency state; a pending target will fail "
+                    "closed: source=%s processor=%s path=%s",
+                    self.source.id,
+                    processor.id,
+                    path,
+                )
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None:
+        self._entered = False
+        self._checkpoints.clear()
+        self._open_errors.clear()
+        return self._stack.__exit__(exc_type, exc_value, traceback)
+
+    def collect(
+        self,
+        current: pl.LazyFrame,
+        plan: _ChunkPlan,
+        ctx: ChunkContext,
+        *,
+        engine: _CollectEngine,
+    ) -> list[tuple[_Processor, pl.DataFrame]]:
+        """Reconcile, calculate, and advance each processor's bounded state."""
+
+        if not self._entered:  # pragma: no cover - lifecycle invariant
+            raise RuntimeError("persistent frequency coordinator is not open")
+        collected: list[tuple[_Processor, pl.DataFrame]] = []
+        for processor in self.processors:
+            open_error = self._open_errors.get(processor.id)
+            if open_error is not None:
+                raise open_error
+            prepared = processor.checkpoint_contacts_lazy(current)
+            checkpoint = self._checkpoint_for(processor, prepared.collect_schema())
+            self._reconcile_history(processor, checkpoint, plan, engine=engine)
+            shards = self._stage(
+                checkpoint,
+                prepared,
+                plan.chunk,
+                engine=engine,
+            )
+            try:
+                shard_partials: list[pl.DataFrame] = []
+                with DuckDBFrequencySession(
+                    config=processor.config,
+                    connection=checkpoint.connection,
+                    current_chunk_id=plan.chunk_id,
+                ) as session:
+                    for shard_id in shards:
+                        partial = processor.aggregate_focal_lazy(
+                            session.focal_lazy(shard_id),
+                            ctx,
+                        ).collect()
+                        if not partial.is_empty():
+                            shard_partials.append(partial)
+                daily = (
+                    pl.concat(shard_partials, how="diagonal_relaxed")
+                    if shard_partials
+                    else pl.DataFrame()
+                )
+                checkpoint.commit_staged()
+            except Exception:
+                checkpoint.abort_staged()
+                raise
+            collected.append((processor, daily))
+        return collected
+
+    def _checkpoint_for(
+        self,
+        processor: FrequencyResponseRuntime,
+        prepared_schema: pl.Schema,
+    ) -> RollingCheckpoint:
+        existing = self._checkpoints.get(processor.id)
+        if existing is not None:
+            return existing
+        customer_column = processor.config.columns.customer
+        if customer_column not in prepared_schema:
+            raise ValueError(
+                f"frequency_response processor {processor.id!r} checkpoint is missing "
+                f"customer column {customer_column!r}"
+            )
+        return self._open_checkpoint(
+            processor,
+            customer_dtype=str(prepared_schema[customer_column]),
+        )
+
+    def _open_checkpoint(
+        self,
+        processor: FrequencyResponseRuntime,
+        *,
+        customer_dtype: str,
+    ) -> RollingCheckpoint:
+        existing = self._checkpoints.get(processor.id)
+        if existing is not None:
+            return existing
+        history_columns, history_rank, history_exposed = processor.checkpoint_history_projection()
+        checkpoint = self._stack.enter_context(
+            RollingCheckpoint(
+                self.workspace,
+                source_id=self.source.id,
+                processor_id=processor.id,
+                config_hash=processor.config_hash,
+                customer_column=processor.config.columns.customer,
+                customer_dtype=customer_dtype,
+                shard_count=processor.config.checkpoint.shards,
+                retention_days=processor.config.checkpoint_retention_days,
+                history_projection=HistoryProjectionSpec(
+                    columns=history_columns,
+                    rank_column=history_rank,
+                    exposed_column=history_exposed,
+                ),
+                force=self.force,
+            )
+        )
+        self._checkpoints[processor.id] = checkpoint
+        return checkpoint
+
+    def _reconcile_history(
+        self,
+        processor: FrequencyResponseRuntime,
+        checkpoint: RollingCheckpoint,
+        plan: _ChunkPlan,
+        *,
+        engine: _CollectEngine,
+    ) -> None:
+        history_chunks = _processor_history_chunks(processor, plan)
+        expected = tuple(
+            (chunk.chunk_id, ledger.file_fingerprint(chunk.files)) for chunk in history_chunks
+        )
+        missing = checkpoint.reconcile_history(expected)
+        if not missing:
+            return
+        history_by_id = {chunk.chunk_id: chunk for chunk in history_chunks}
+        for chunk_id in missing:
+            chunk = history_by_id.get(chunk_id)
+            if chunk is None:  # pragma: no cover - store contract invariant
+                raise RuntimeError(
+                    f"rolling frequency state requested unknown history chunk {chunk_id!r}"
+                )
+            logger.info(
+                "Filling rolling frequency history: source=%s processor=%s chunk=%s",
+                self.source.id,
+                processor.id,
+                chunk.chunk_id,
+            )
+            try:
+                transformed = apply_transforms(read(self.source.reader, chunk.files), self.source)
+                _validate_frequency_current_input_columns(
+                    [processor],
+                    transformed.collect_schema(),
+                )
+                self._stage(
+                    checkpoint,
+                    processor.checkpoint_contacts_lazy(transformed),
+                    chunk,
+                    engine=engine,
+                )
+                checkpoint.commit_staged()
+            except Exception:
+                checkpoint.abort_staged()
+                raise
+
+    @staticmethod
+    def _stage(
+        checkpoint: RollingCheckpoint,
+        prepared: pl.LazyFrame,
+        chunk: Chunk,
+        *,
+        engine: _CollectEngine,
+    ) -> tuple[int, ...]:
+        checkpoint_engine: Literal["auto", "streaming"] = (
+            "streaming" if engine == "streaming" else "auto"
+        )
+        return checkpoint.stage_current(
+            prepared,
+            chunk_id=chunk.chunk_id,
+            raw_fingerprint=ledger.file_fingerprint(chunk.files),
+            engine=checkpoint_engine,
+        )
 
 
-def _collect_persistent_frequency_frames(
-    workspace: Path,
-    source: model.Source,
-    processors: list[_Processor],
+def _processor_history_chunks(
+    processor: FrequencyResponseRuntime,
     plan: _ChunkPlan,
-    ctx: ChunkContext,
-) -> list[tuple[_Processor, pl.DataFrame]]:
-    """Aggregate persistent checkpoint closures one bounded customer shard at a time."""
+) -> tuple[Chunk, ...]:
+    """Return this processor's closure from the source-wide maximum plan."""
 
-    collected: list[tuple[_Processor, pl.DataFrame]] = []
-    for candidate in processors:
-        if not _is_persistent_frequency_processor(candidate):
-            continue
-        processor = _as_persistent_frequency_processor(candidate)
-        current = _load_checkpoint_manifest(workspace, source, processor, plan.chunk)
-        history = [
-            _load_checkpoint_manifest(workspace, source, processor, chunk)
-            for chunk in plan.history_chunks
-        ]
-        _validate_checkpoint_customer_dtypes(processor, [*history, current])
-        shard_partials: list[pl.DataFrame] = []
-        history_shards = [set(manifest.nonempty_history_shard_ids) for manifest in history]
-        for shard_id in current.nonempty_shard_ids:
-            current_scan = scan_processor_state_shard(current, shard_id)
-            historical_scans = [
-                scan_processor_state_shard(manifest, shard_id, payload="history")
-                for manifest, available in zip(history, history_shards, strict=True)
-                if shard_id in available
-            ]
-            partial = processor.checkpoint_aggregate_lazy(
-                current_scan,
-                historical_scans,
-                ctx,
-            ).collect()
-            if not partial.is_empty():
-                shard_partials.append(partial)
-        daily = (
-            pl.concat(shard_partials, how="diagonal_relaxed") if shard_partials else pl.DataFrame()
-        )
-        collected.append((processor, daily))
-    return collected
-
-
-def _load_checkpoint_manifest(
-    workspace: Path,
-    source: model.Source,
-    processor: FrequencyResponseRuntime,
-    chunk: Chunk,
-) -> CheckpointManifest:
-    raw_fingerprint = ledger.file_fingerprint(chunk.files)
-    layout_hash = frequency_checkpoint_layout_hash(processor.config)
-    manifest = load_processor_state_manifest(
-        workspace,
-        source_id=source.id,
-        processor_id=processor.id,
-        config_hash=processor.config_hash,
-        layout_hash=layout_hash,
-        chunk_id=chunk.chunk_id,
-        raw_fingerprint=raw_fingerprint,
-        validate=False,
+    target_date = dt.date.fromisoformat(plan.chunk_id)
+    lookback_days = math.ceil(
+        (processor.config.window_hours + processor.config.partition_lag_hours) / 24
     )
-    if manifest is None:
-        raise RuntimeError(
-            f"persistent frequency checkpoint is missing for processor {processor.id!r}, "
-            f"chunk {chunk.chunk_id!r}"
-        )
-    _validate_checkpoint_manifest(processor, manifest)
-    return manifest
-
-
-def _validate_checkpoint_manifest(
-    processor: FrequencyResponseRuntime,
-    manifest: CheckpointManifest,
-) -> None:
-    expected_customer = processor.config.columns.customer
-    expected_shards = processor.config.checkpoint.shards
-    expected_layout = frequency_checkpoint_layout_hash(processor.config)
-    if manifest.layout_hash != expected_layout:
-        raise ValueError(
-            f"frequency checkpoint layout hash {manifest.layout_hash!r} does not match "
-            f"{expected_layout!r}"
-        )
-    if manifest.customer_column != expected_customer:
-        raise ValueError(
-            f"frequency checkpoint customer column {manifest.customer_column!r} does not "
-            f"match {expected_customer!r}"
-        )
-    if manifest.shard_count != expected_shards:
-        raise ValueError(
-            f"frequency checkpoint shard count {manifest.shard_count} does not match "
-            f"{expected_shards}"
-        )
-
-
-def _validate_checkpoint_customer_dtypes(
-    processor: FrequencyResponseRuntime,
-    manifests: Sequence[CheckpointManifest],
-) -> None:
-    # Empty partitions route no identity and therefore cannot disagree with a
-    # non-empty partition's hash domain. In particular, an all-null source day
-    # can legitimately retain a zero-row checkpoint whose inferred dtype is
-    # ``Null`` after the processor drops unusable identities.
-    dtypes = sorted({manifest.customer_dtype for manifest in manifests if manifest.rows > 0})
-    if len(dtypes) > 1:
-        raise ValueError(
-            f"frequency checkpoint customer dtype drift for processor {processor.id!r}: "
-            f"{', '.join(dtypes)}; normalize the authoritative source identity type "
-            "before persistent sharding"
-        )
-
-
-def _checkpoint_failure_outcome(plan: _ChunkPlan, error: str) -> _ChunkOutcome:
-    timestamp = utc_now()
-    return _ChunkOutcome(
-        result=ChunkRunResult(
-            chunk_id=plan.chunk_id,
-            status="failed",
-            error=f"persistent frequency checkpoint preparation failed: {error}",
-        ),
-        files=plan.dependency_files,
-        started_at=timestamp,
-        finished_at=timestamp,
+    earliest = target_date - dt.timedelta(days=lookback_days)
+    return tuple(
+        chunk for chunk in plan.history_chunks if dt.date.fromisoformat(chunk.chunk_id) >= earliest
     )
 
 
@@ -1447,7 +1456,12 @@ def _plan_source_chunks(
 
     lookback_days = _frequency_lookback_days(frequency_processors)
     plans: list[_ChunkPlan] = []
-    for target_date, target in dated_chunks:
+    target_chunks = (
+        sorted(dated_chunks, key=lambda item: item[0])
+        if any(_is_persistent_frequency_processor(item) for item in frequency_processors)
+        else dated_chunks
+    )
+    for target_date, target in target_chunks:
         earliest = target_date - dt.timedelta(days=lookback_days)
         history = tuple(
             chunk

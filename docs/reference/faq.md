@@ -22,6 +22,14 @@ Parquet is the resting form of every aggregate (one directory per `source/proces
 
 Optional processor checkpoints use a separate state namespace. DuckDB views,
 metric planning, SQL export, and the chunk publication ledger do not expose it.
+Schema-revision-7 persistent frequency processing uses one bounded
+`.valuestream/state/frequency_response/source=<source>/processor=<processor>/rolling.duckdb`;
+revision 7 is the default and only supported checkpoint schema. Its
+transactional raw-fingerprint journal and compatibility/audit metadata live
+inside the database rather than in schema/hash/Polars/config/layout path levels.
+Polars version participates in the internal shard compatibility contract;
+DuckDB version is audit-only. This is ingestion acceleration state, not another
+DuckDB query surface.
 
 **A3. Why not keep Polars DataFrames in memory and skip persistence?**
 Process-bound DataFrames die on Streamlit reload, can't be shared across the API and the UI, and force the system to re-aggregate from raw on every restart. The current app already discovered this and bolted on a DuckDB-backed cache; Value Stream makes the persistence explicit and uniform.
@@ -48,8 +56,10 @@ The planner classifies the change against the existing store (concepts/domain-mo
 - *Compatible widening* (add a derived metric or new processor) → no invalidation.
 - *Compatible narrowing* (drop a group-by column, coarsen a grain) → re-compact directly from existing aggregates.
 - *Execution/storage tuning* (`frequency_response.checkpoint.mode`, `shards`,
-  or `retention_days`) → no aggregate invalidation. A new shard layout is
-  created lazily when a later target needs it; retention applies at vacuum.
+  or `retention_days`) → no aggregate invalidation. An incompatible shard
+  contract reinitializes the same stable database from IH when a later
+  persistent target needs it; retention is enforced transactionally after
+  commits and whenever the rolling writer opens.
 - *Incompatible* (add a group-by column that was not materialized, change a
   filter or `frequency_response.alternative_group_by`, change
   positive/negative outcomes, change CPC/HLL `lg_k`, switch sketch type) →
@@ -59,8 +69,9 @@ Aggregate `config_hash` is the processor computation hash: workspace defaults,
 source reader/schema/transforms/defaults, and result-affecting processor
 semantics. A source computation hash additionally covers the semantics of every
 processor bound to the source and controls ingestion skip decisions. The full
-catalog hash still records checkpoint execution/storage settings for audit,
-while a separate checkpoint-layout hash distinguishes shard layouts.
+catalog hash still records checkpoint execution/storage settings for audit.
+Checkpoint schema/hash/config/shard/projection/Polars metadata lives inside the
+stable database and participates in compatibility; DuckDB version is audit-only.
 Presentation-only descriptions, metrics, and dashboards do not trigger
 reprocessing. Old and new aggregate hashes coexist until `valuestream vacuum`,
 or until a confirmed Data Load clean rebuild completes successfully for that
@@ -367,8 +378,9 @@ Current product: SDK and local stdio MCP run under the host process identity; UI
 
 **F3. How do I redact a customer?**
 Remove or redact the customer's records in the authoritative source, delete or
-vacuum affected processor-checkpoint generations, and re-run every target in
-the bounded dependency fan-out. The customer's contribution is then removed
+rebuild affected rolling processor state while its writer is closed and the
+source lock is held, and re-run every target in the bounded dependency fan-out.
+The customer's contribution is then removed
 from recomputed aggregates. CPC/HLL/Theta states must be rebuilt from remaining
 source rows; scalar states are recomputed through the same deterministic replay.
 
@@ -390,13 +402,21 @@ chunk workers. Streaming reduces transient scan/transform memory, while
 fan-out. Measure the actual catalog with the ingestion benchmark; if peak RSS is
 too high, split the grouping interval (for example, daily to hourly) and lower
 chunk-process parallelism. For `frequency_response`, persistent customer-hash
-shards bound target lookback work to one shard at a time; tune
-`checkpoint.shards` against file-count overhead. `checkpoint.retention_days`
-defaults to the active lookback plus the current partition; increase it only
-when reduced correction-replay I/O justifies retaining more identity state.
-Neither setting changes aggregate computation hashes: shard changes take
-effect lazily for the next processed target and retention changes take effect
-during vacuum.
+shards bound rolling SQL work to one logical shard at a time; tune
+`checkpoint.shards` against per-shard working data. A persistent frequency
+source is processed oldest-to-newest through one writer, so `--parallel` is
+capped at one for that source. `checkpoint.retention_days` defaults to the
+ceiling of `(window_hours + partition_lag_hours) / 24`; with the default 168-
+hour window and zero lag, the writer retains only the last seven calendar
+source days, and missing dates can leave fewer stored chunk entries. Increase
+it only when reduced correction-replay I/O justifies retaining more
+identity state. Old history and journal rows are pruned after every
+chronological commit. Every 30 committed days, DuckDB `CHECKPOINT` runs on the
+same open connection to fold the WAL and partially reclaim or reuse deleted-row
+space; it does not guarantee complete compaction or immediate file shrinkage.
+The connection closes once at the source-run boundary. Neither setting changes
+aggregate computation hashes: a shard change reinitializes the same stable
+database, while retention is enforced transactionally by the writer.
 Apply the same data policy to the checkpoint as to the source-derived identity
 fields it retains.
 

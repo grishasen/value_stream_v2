@@ -93,8 +93,8 @@ The effective idempotency key is `(source_id, chunk_id,
 source_computation_hash, file_hash)`. The source computation hash covers
 workspace defaults, source behavior, and the result-affecting semantics of all
 bound processors. Ingestion-only `frequency_response.checkpoint.*` settings are
-excluded; they remain in the full catalog hash and use separate state layout
-and retention identities. `file_hash` covers sorted absolute paths, nanosecond
+excluded; they remain in the full catalog hash and are recorded as checkpoint
+metadata/lifecycle policy. `file_hash` covers sorted absolute paths, nanosecond
 mtimes, and sizes. Unchanged inputs are skipped; changed files or behavior are
 reprocessed without invalidating the previous successful aggregate until the
 new run commits.
@@ -102,10 +102,10 @@ new run commits.
 For a bounded-lookback target, `file_hash` covers the complete raw dependency
 closure, not only the target files. This remains true when a processor uses a
 persistent checkpoint: the checkpoint is an acceleration artifact keyed by the
-processor semantic identity, independent layout identity, and per-chunk raw
-fingerprint, never the source of the idempotency decision or a successful
-ledger marker. Missing state after layout tuning is rebuilt lazily only when a
-new or invalidated target needs that bounded closure.
+stable source/processor path, metadata compatibility contract, and per-chunk
+raw fingerprint, never the source of the idempotency decision or a successful
+ledger marker. Missing or valid-but-incompatible state is rebuilt lazily at the
+same path only when a new or invalidated target needs that bounded closure.
 
 ### 2.4 Chunk granularity
 
@@ -439,12 +439,22 @@ chunks, so process RSS need not fall immediately.
 A bounded processor adds one of two memory profiles. `source_scan` owns the
 target plus its declared dependency closure for that calculation. A
 `persistent_sharded` frequency processor transforms a source chunk once to
-build a checkpoint through a partitioned streaming sink, then reads only one
-customer shard across the target and bounded history at a time. Increasing
-`checkpoint.shards` reduces per-shard working data at the cost of more files.
-The checkpoint is processor state rather than a reader cache: it is
-source-fingerprint-addressed, has bounded daily retention, and is always
-rebuildable from the source files.
+pass its complete prepared current payload to a temporary relation in one
+long-lived `rolling.duckdb` writer for that processor through the Arrow C
+Stream interface. It neither collects the complete prepared day nor stages
+temporary Parquet. Only
+exposed rank-1 history, source chunk id, and logical customer shard persist.
+Native SQL reads one logical shard across temporary current plus bounded
+history at a time and reduces the result before Arrow streams the configured-
+state tail back to Polars. Increasing `checkpoint.shards` reduces per-shard
+working data without increasing file count. Increasing chunk-process
+parallelism does not apply to this source: persistent frequency targets execute
+oldest-to-newest in one process through the same writer and open connection.
+Expired history is pruned after every chronological source-day commit; every 30
+committed days run DuckDB `CHECKPOINT` on that connection. It closes once at the
+source-run boundary. The state is a bounded, transactionally journaled
+acceleration structure rather than a reader cache and is always rebuildable
+from the source files.
 
 There is currently no automatic RSS threshold, processing pause, or spill of a
 materialized chunk to temporary Parquet. If a transformed chunk does not fit,

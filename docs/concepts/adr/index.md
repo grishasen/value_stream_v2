@@ -14,6 +14,7 @@ new decisions get a new numbered file in this folder.
 | [0005](0005-unified-metric-owned-heatmaps.md) | One metric-owned adaptive heatmap; old aliases are rejected | Accepted |
 | [0006](0006-strict-catalog-v2.md) | Strict versioned catalog with no compatibility translation | Accepted |
 | [0007](0007-bounded-lookback-processors.md) | Bounded lookback with optional rebuildable sharded checkpoints | Accepted |
+| [0008](0008-bounded-rolling-duckdb-state.md) | Bounded rolling DuckDB processor state with transactional reconciliation | Accepted |
 
 ## Writing a New ADR
 

@@ -11,7 +11,7 @@ from valuestream.config import model
 from valuestream.config.canonical import processor_config_hash
 from valuestream.expr.references import column_references
 from valuestream.expr.translator import translate
-from valuestream.processors import grain_levels
+from valuestream.processors import frequency_fields, grain_levels
 from valuestream.processors.context import (
     PROVENANCE_COLUMNS,
     TARGET_CHUNK_COLUMN,
@@ -23,22 +23,22 @@ from valuestream.utils.timer import timed
 VIRTUAL_COLUMNS = model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS
 DERIVED_GROUP_COLUMNS = frozenset({"Day"})
 
-_RANK_COLUMN = "__valuestream_frequency_rank"
-_ROW_ORDER_COLUMN = "__valuestream_frequency_row_order"
-_POSITIVE_COLUMN = "__valuestream_frequency_positive"
-_EXPOSED_COLUMN = "__valuestream_frequency_exposed"
-_SEEN_CURRENT_COLUMN = "__valuestream_frequency_seen_current"
-_SEEN_HISTORY_COLUMN = "__valuestream_frequency_seen_history"
-_CONTACT_ORDER_COLUMN = "__valuestream_frequency_contact_order"
-_EXPOSURE_SEQUENCE_COLUMN = "__valuestream_frequency_exposure_sequence"
-_WINDOW_START_COLUMN = "__valuestream_frequency_window_start"
-_BOUNDARY_TIME_COLUMN = "__valuestream_frequency_boundary_time"
-_BOUNDARY_SEQUENCE_COLUMN = "__valuestream_frequency_boundary_sequence"
-_RUNNER_PROPENSITY_COLUMN = "__valuestream_runner_propensity"
-_RUNNER_PRIORITY_COLUMN = "__valuestream_runner_priority"
-_RUNNER_AVAILABLE_COLUMN = "__valuestream_runner_available"
-_CHECKPOINT_PARTITION_ORDER_COLUMN = "__valuestream_frequency_checkpoint_partition_order"
-_CHECKPOINT_LOCAL_ORDER_COLUMN = "__valuestream_frequency_checkpoint_local_order"
+_RANK_COLUMN = frequency_fields.RANK_COLUMN
+_ROW_ORDER_COLUMN = frequency_fields.ROW_ORDER_COLUMN
+_POSITIVE_COLUMN = frequency_fields.POSITIVE_COLUMN
+_EXPOSED_COLUMN = frequency_fields.EXPOSED_COLUMN
+_SEEN_CURRENT_COLUMN = frequency_fields.SEEN_CURRENT_COLUMN
+_SEEN_HISTORY_COLUMN = frequency_fields.SEEN_HISTORY_COLUMN
+_CONTACT_ORDER_COLUMN = frequency_fields.CONTACT_ORDER_COLUMN
+_EXPOSURE_SEQUENCE_COLUMN = frequency_fields.EXPOSURE_SEQUENCE_COLUMN
+_WINDOW_START_COLUMN = frequency_fields.WINDOW_START_COLUMN
+_BOUNDARY_TIME_COLUMN = frequency_fields.BOUNDARY_TIME_COLUMN
+_BOUNDARY_SEQUENCE_COLUMN = frequency_fields.BOUNDARY_SEQUENCE_COLUMN
+_RUNNER_PROPENSITY_COLUMN = frequency_fields.RUNNER_PROPENSITY_COLUMN
+_RUNNER_PRIORITY_COLUMN = frequency_fields.RUNNER_PRIORITY_COLUMN
+_RUNNER_AVAILABLE_COLUMN = frequency_fields.RUNNER_AVAILABLE_COLUMN
+_CHECKPOINT_PARTITION_ORDER_COLUMN = frequency_fields.CHECKPOINT_PARTITION_ORDER_COLUMN
+_CHECKPOINT_LOCAL_ORDER_COLUMN = frequency_fields.CHECKPOINT_LOCAL_ORDER_COLUMN
 
 
 def required_input_columns(config: model.FrequencyResponseProcessor) -> frozenset[str]:
@@ -176,25 +176,45 @@ class FrequencyResponseProcessor:
         return self._aggregate_contacts_lazy(contacts, ctx)
 
     def checkpoint_contacts_lazy(self, frame: pl.LazyFrame) -> pl.LazyFrame:
-        """Prepare one current source chunk for immutable checkpoint storage.
+        """Prepare one current source chunk for rolling checkpoint staging.
 
-        The checkpoint retains filtered/projected current candidate rows because
-        cross-partition contact normalization must see duplicates before collapsing
-        them. A separate history payload is derived from this prepared target
-        payload after it has been streamed to checkpoint storage.
+        The temporary current table retains filtered/projected candidate rows
+        because cross-partition contact normalization must see duplicates before
+        collapsing them. Its exposed rank-1 projection is committed as bounded
+        history only after the target calculation succeeds.
         """
 
         source_schema = frame.collect_schema()
         validate_current_input_schema(self.config, source_schema)
         marked = frame.with_columns(pl.lit(True).alias(TARGET_CHUNK_COLUMN))
         marked_schema = marked.collect_schema()
-        return self._prepare_checkpoint_rows(marked, marked_schema)
+        prepared = self._prepare_checkpoint_rows(marked, marked_schema)
+        return self._canonicalize_decision_time(
+            prepared,
+            source_schema[self.config.time.property],
+        )
 
     def checkpoint_history_contacts_lazy(self, frame: pl.LazyFrame) -> pl.LazyFrame:
         """Project staged target candidates to the exact bounded-history payload."""
 
+        history_projection, rank_column, exposed_column = self.checkpoint_history_projection()
+        history_columns = list(history_projection)
+        schema = frame.collect_schema()
+        missing = sorted(set(history_columns) - set(schema.names()))
+        if missing:
+            raise ValueError(
+                f"frequency_response processor {self.id!r} target checkpoint is missing "
+                f"history column(s): {', '.join(missing)}"
+            )
+        return frame.filter(pl.col(exposed_column) & (pl.col(rank_column) == 1)).select(
+            history_columns
+        )
+
+    def checkpoint_history_projection(self) -> tuple[tuple[str, ...], str, str]:
+        """Return the persisted history fields and its rank/exposure selectors."""
+
         columns = self.config.columns
-        history_columns = list(
+        history_columns = tuple(
             dict.fromkeys(
                 [
                     columns.customer,
@@ -209,16 +229,7 @@ class FrequencyResponseProcessor:
                 ]
             )
         )
-        schema = frame.collect_schema()
-        missing = sorted(set(history_columns) - set(schema.names()))
-        if missing:
-            raise ValueError(
-                f"frequency_response processor {self.id!r} target checkpoint is missing "
-                f"history column(s): {', '.join(missing)}"
-            )
-        return frame.filter(pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)).select(
-            history_columns
-        )
+        return history_columns, _RANK_COLUMN, _EXPOSED_COLUMN
 
     @timed
     def checkpoint_aggregate_lazy(
@@ -227,7 +238,7 @@ class FrequencyResponseProcessor:
         history: list[pl.LazyFrame],
         ctx: ChunkContext,
     ) -> pl.LazyFrame:
-        """Aggregate one customer shard from prepared daily checkpoints."""
+        """Reference aggregation over prepared current and history chunks."""
 
         columns = self.config.columns
         prepared: list[pl.LazyFrame] = []
@@ -253,6 +264,7 @@ class FrequencyResponseProcessor:
             .with_row_index(_ROW_ORDER_COLUMN)
             .drop(_CHECKPOINT_PARTITION_ORDER_COLUMN, _CHECKPOINT_LOCAL_ORDER_COLUMN)
         )
+        contacts = self._canonicalize_dictionary_columns(contacts)
         checkpoint_schema = contacts.collect_schema()
         missing = sorted(
             {
@@ -282,7 +294,41 @@ class FrequencyResponseProcessor:
     def _prepare_contacts(self, frame: pl.LazyFrame, source_schema: pl.Schema) -> pl.LazyFrame:
         """Filter, classify, project, and normalize transformed source contacts."""
 
-        return self._normalize_contacts(self._prepare_checkpoint_rows(frame, source_schema))
+        prepared = self._prepare_checkpoint_rows(frame, source_schema)
+        canonical = self._canonicalize_decision_time(
+            prepared,
+            source_schema[self.config.time.property],
+        )
+        return self._normalize_contacts(self._canonicalize_dictionary_columns(canonical))
+
+    def _canonicalize_decision_time(
+        self,
+        frame: pl.LazyFrame,
+        dtype: pl.DataType,
+    ) -> pl.LazyFrame:
+        """Represent decision instants identically in source-scan and DuckDB modes."""
+
+        time_column = self.config.time.property
+        timestamp = pl.col(time_column)
+        if isinstance(dtype, pl.Datetime) and dtype.time_zone is not None:
+            # DuckDB stores TIMESTAMPTZ at microsecond precision. Convert aware
+            # instants to naive UTC before Arrow streaming so TIMESTAMP_NS keeps
+            # strict sub-microsecond window boundaries. The aggregation tail
+            # interprets this canonical naive representation as UTC.
+            timestamp = timestamp.dt.convert_time_zone("UTC").dt.replace_time_zone(None)
+        return frame.with_columns(timestamp.cast(pl.Datetime("ns")).alias(time_column))
+
+    @staticmethod
+    def _canonicalize_dictionary_columns(frame: pl.LazyFrame) -> pl.LazyFrame:
+        """Match the Arrow/DuckDB VARCHAR representation of dictionary columns."""
+
+        schema = frame.collect_schema()
+        expressions = [
+            pl.col(name).cast(pl.String).alias(name)
+            for name, dtype in schema.items()
+            if dtype == pl.Categorical or isinstance(dtype, pl.Enum)
+        ]
+        return frame.with_columns(*expressions) if expressions else frame
 
     def _prepare_checkpoint_rows(
         self,
@@ -369,7 +415,6 @@ class FrequencyResponseProcessor:
     ) -> pl.LazyFrame:
         """Build daily additive states from normalized current/history contacts."""
 
-        contact_schema = contacts.collect_schema()
         exposures = self._with_exposure_frequency(contacts)
         runners = self._runner_candidates(contacts)
 
@@ -384,10 +429,24 @@ class FrequencyResponseProcessor:
             how="left",
             nulls_equal=True,
         )
+        return self.aggregate_focal_lazy(focal, ctx)
+
+    def aggregate_focal_lazy(
+        self,
+        focal: pl.LazyFrame,
+        ctx: ChunkContext,
+    ) -> pl.LazyFrame:
+        """Aggregate already-normalized focal contacts into daily additive states."""
+
+        focal_schema = focal.collect_schema()
+        time_column = self.config.time.property
+        if time_column not in focal_schema.names():
+            raise ValueError(
+                f"frequency_response processor {self.id!r} focal rows are missing "
+                f"decision-time column {time_column!r}"
+            )
         focal = self._with_virtual_columns(focal)
-        focal = focal.with_columns(
-            self._decision_day_expr(contact_schema[self.config.time.property]).alias("Day")
-        )
+        focal = focal.with_columns(self._decision_day_expr(focal_schema[time_column]).alias("Day"))
 
         group_keys = list(dict.fromkeys([*self.group_by_columns, "Day"]))
         enriched_columns = set(focal.collect_schema().names())
@@ -524,6 +583,8 @@ class FrequencyResponseProcessor:
     def _with_exposure_frequency(self, contacts: pl.LazyFrame) -> pl.LazyFrame:
         columns = self.config.columns
         time_column = self.config.time.property
+        time_dtype = contacts.collect_schema()[time_column]
+        time_unit = time_dtype.time_unit if isinstance(time_dtype, pl.Datetime) else None
         exposure_keys = [columns.customer, columns.action, columns.placement]
         ordered = contacts.filter(pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)).sort(
             [*exposure_keys, time_column, columns.interaction, _CONTACT_ORDER_COLUMN]
@@ -536,9 +597,10 @@ class FrequencyResponseProcessor:
             .alias(_EXPOSURE_SEQUENCE_COLUMN)
         )
         left = ordered.with_columns(
-            (pl.col(time_column) - pl.duration(hours=self.config.window_hours)).alias(
-                _WINDOW_START_COLUMN
-            )
+            (
+                pl.col(time_column)
+                - pl.duration(hours=self.config.window_hours, time_unit=time_unit)
+            ).alias(_WINDOW_START_COLUMN)
         ).sort([*exposure_keys, _WINDOW_START_COLUMN, columns.interaction, _CONTACT_ORDER_COLUMN])
         right = ordered.select(
             *exposure_keys,

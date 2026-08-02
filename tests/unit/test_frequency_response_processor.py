@@ -131,7 +131,7 @@ def test_model_requires_daily_bucketed_mergeable_states() -> None:
     assert config.checkpoint.mode == "source_scan"
     assert config.checkpoint.shards == 64
     assert config.checkpoint.retention_days is None
-    assert config.checkpoint_retention_days == 8
+    assert config.checkpoint_retention_days == 7
     assert config.alternative_group_by == ["Placement"]
     assert config.alternative_group_columns == ["CustomerID", "InteractionID", "Placement"]
     assert set(config.positive_values).isdisjoint(config.exposure_values)
@@ -181,14 +181,22 @@ def test_model_requires_daily_bucketed_mergeable_states() -> None:
         _config(columns=duplicate_columns)
     with pytest.raises(ValidationError, match="shards"):
         _config(checkpoint={"mode": "persistent_sharded", "shards": 0})
-    with pytest.raises(ValidationError, match=r"retention_days must be at least 8"):
+    with pytest.raises(ValidationError, match=r"retention_days must be at least 7"):
         _config(
             checkpoint={
                 "mode": "persistent_sharded",
                 "shards": 8,
-                "retention_days": 7,
+                "retention_days": 6,
             }
         )
+    exact_minimum = _config(
+        checkpoint={
+            "mode": "persistent_sharded",
+            "shards": 8,
+            "retention_days": 7,
+        }
+    )
+    assert exact_minimum.checkpoint_retention_days == 7
     columns = config.columns.model_dump()
     columns["rank"] = "__valuestream_frequency_rank"
     with pytest.raises(
@@ -205,6 +213,56 @@ def test_model_requires_daily_bucketed_mergeable_states() -> None:
                 }
             }
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("window_hours", "partition_lag_hours", "expected_days"),
+    [
+        (1, 0, 1),
+        (24, 0, 1),
+        (25, 0, 2),
+        (167, 0, 7),
+        (168, 0, 7),
+        (169, 0, 8),
+        (168, 24, 8),
+        (168, 25, 9),
+    ],
+)
+def test_checkpoint_retention_is_exact_source_day_closure(
+    window_hours: int,
+    partition_lag_hours: int,
+    expected_days: int,
+) -> None:
+    defaulted = _config(
+        window_hours=window_hours,
+        partition_lag_hours=partition_lag_hours,
+        checkpoint={"mode": "persistent_sharded"},
+    )
+    exact = _config(
+        window_hours=window_hours,
+        partition_lag_hours=partition_lag_hours,
+        checkpoint={
+            "mode": "persistent_sharded",
+            "retention_days": expected_days,
+        },
+    )
+
+    assert defaulted.checkpoint_retention_days == expected_days
+    assert exact.checkpoint_retention_days == expected_days
+    if expected_days > 1:
+        with pytest.raises(
+            ValidationError,
+            match=rf"retention_days must be at least {expected_days}",
+        ):
+            _config(
+                window_hours=window_hours,
+                partition_lag_hours=partition_lag_hours,
+                checkpoint={
+                    "mode": "persistent_sharded",
+                    "retention_days": expected_days - 1,
+                },
+            )
 
 
 @pytest.mark.unit
@@ -355,6 +413,76 @@ def test_decision_day_uses_the_configured_calendar_timezone_and_compact_keeps_da
     assert out["Day"].to_list() == [dt.date(2024, 1, 7)]
     assert "Month" not in compacted.columns
     assert compacted["Day"].to_list() == [dt.date(2024, 1, 7)]
+
+
+@pytest.mark.unit
+def test_raw_decision_time_grouping_is_canonical_and_matches_checkpoint_mode() -> None:
+    config = _config(group_by=["Day", "DecisionTime", "ExposureBucket"])
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+    when = dt.datetime(2024, 1, 8, 0, 30, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+    rows = [
+        _row(customer="c1", interaction="i1", decision_time=when, target=True),
+        _row(
+            customer="c1",
+            interaction="i1",
+            decision_time=when,
+            target=True,
+            action="B",
+            rank=2,
+            outcome="Pending",
+        ),
+    ]
+    source = pl.DataFrame(rows)
+
+    expected = processor.chunk_aggregate(source.lazy(), _ctx()).sort(
+        ["Day", "DecisionTime", "ExposureBucket"]
+    )
+    current = processor.checkpoint_contacts_lazy(source.drop(TARGET_CHUNK_COLUMN).lazy())
+    actual = (
+        processor.checkpoint_aggregate_lazy(current, [], _ctx())
+        .collect()
+        .sort(["Day", "DecisionTime", "ExposureBucket"])
+    )
+
+    assert expected.schema["DecisionTime"] == pl.Datetime("ns")
+    assert actual.equals(expected)
+
+
+@pytest.mark.unit
+def test_dictionary_dimensions_match_duckdb_varchar_semantics() -> None:
+    config = _config(group_by=["Day", "Placement", "ExposureBucket"])
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    source = pl.DataFrame(
+        [
+            _row(customer="c1", interaction="i1", decision_time=when, target=True),
+            _row(
+                customer="c1",
+                interaction="i1",
+                decision_time=when,
+                target=True,
+                action="B",
+                rank=2,
+                outcome="Pending",
+            ),
+        ]
+    ).with_columns(
+        pl.col("CustomerID").cast(pl.Categorical),
+        pl.col("Placement").cast(pl.Enum(["Hero"])),
+    )
+
+    expected = processor.chunk_aggregate(source.lazy(), _ctx()).sort(
+        ["Day", "Placement", "ExposureBucket"]
+    )
+    current = processor.checkpoint_contacts_lazy(source.drop(TARGET_CHUNK_COLUMN).lazy())
+    actual = (
+        processor.checkpoint_aggregate_lazy(current, [], _ctx())
+        .collect()
+        .sort(["Day", "Placement", "ExposureBucket"])
+    )
+
+    assert expected.schema["Placement"] == pl.String
+    assert actual.equals(expected)
 
 
 @pytest.mark.unit

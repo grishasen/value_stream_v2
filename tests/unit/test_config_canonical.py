@@ -17,7 +17,6 @@ from valuestream.config.canonical import (
     canonicalize,
     catalog_config_hash,
     config_hash,
-    frequency_checkpoint_layout_hash,
     processor_computation_config,
     processor_computation_hash,
     processor_config_hash,
@@ -217,13 +216,6 @@ class TestCatalogHash:
             == 3
         )
 
-        assert frequency_checkpoint_layout_hash(source_scan) == frequency_checkpoint_layout_hash(
-            persistent
-        )
-        assert frequency_checkpoint_layout_hash(tuned) != frequency_checkpoint_layout_hash(
-            persistent
-        )
-
         semantic_change = frequency(
             {"mode": "persistent_sharded", "shards": 32, "retention_days": 30},
             window_hours=192,
@@ -237,9 +229,6 @@ class TestCatalogHash:
         )
         assert processor_computation_hash(catalog, cross_placement) != semantic_hash
         assert source_hash(cross_placement) != source_hash(persistent)
-        assert frequency_checkpoint_layout_hash(cross_placement) == (
-            frequency_checkpoint_layout_hash(tuned)
-        )
 
     def test_bounded_ml_order_revision_is_scoped_to_score_processors(self) -> None:
         catalog = load(DEMO_WS)

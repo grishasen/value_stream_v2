@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import duckdb
 import polars as pl
 import pytest
 
 from valuestream.config import model
-from valuestream.config.canonical import frequency_checkpoint_layout_hash
 from valuestream.engine.ledger import insert_chunk, insert_run, start_run
 from valuestream.store import vacuum
 
@@ -69,9 +67,8 @@ def test_file_metadata_uses_mtime_when_created_at_is_absent(tmp_path: Path) -> N
 
 
 @pytest.mark.unit
-def test_checkpoint_vacuum_keeps_latest_current_generation_and_removes_stale_state(
+def test_checkpoint_vacuum_keeps_current_rolling_database_and_removes_stale_state(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     processor = model.FrequencyResponseProcessor.model_validate(
         {
@@ -97,89 +94,43 @@ def test_checkpoint_vacuum_keeps_latest_current_generation_and_removes_stale_sta
             "checkpoint": {"mode": "persistent_sharded", "shards": 4},
         }
     )
-    catalog = SimpleNamespace(processors=SimpleNamespace(processors=[processor]))
-    monkeypatch.setattr(vacuum, "processor_computation_hash", lambda *_args: "current")
-    layout_hash = frequency_checkpoint_layout_hash(processor)
-    root = (
-        tmp_path
-        / (
-            ".valuestream/state/frequency_response/"
-            f"schema={vacuum.CHECKPOINT_SCHEMA_REVISION}/"
-            f"hash={vacuum.SHARD_HASH_REVISION}/polars={pl.__version__}"
-        )
-        / "source=ih/processor=frequency"
+    source_scan = processor.model_copy(
+        update={
+            "id": "source-scan",
+            "checkpoint": model.FrequencyResponseCheckpoint(mode="source_scan"),
+        }
     )
+    catalog = SimpleNamespace(processors=SimpleNamespace(processors=[processor, source_scan]))
+    state_root = tmp_path / ".valuestream/state/frequency_response"
+    source_root = state_root / "source=ih"
+    processor_root = source_root / "processor=frequency"
+    processor_root.mkdir(parents=True)
+    current_database = processor_root / "rolling.duckdb"
+    current_database.write_bytes(b"current rolling state")
+    current_wal = processor_root / "rolling.duckdb.wal"
+    current_wal.write_bytes(b"current rolling WAL")
 
-    def generation(
-        config_hash: str,
-        raw: str,
-        *,
-        mtime_ns: int,
-        state_layout_hash: str = layout_hash,
-    ) -> Path:
-        directory = (
-            root / f"config={config_hash}/layout={state_layout_hash}/chunk=2024-01-01/raw={raw}"
-        )
-        directory.mkdir(parents=True)
-        manifest = directory / "manifest.json"
-        manifest.write_text(
-            json.dumps(
-                {
-                    "source_id": "ih",
-                    "processor_id": "frequency",
-                    "config_hash": config_hash,
-                    "layout_hash": state_layout_hash,
-                    "chunk_id": "2024-01-01",
-                }
-            ),
-            encoding="utf-8",
-        )
-        os.utime(manifest, ns=(mtime_ns, mtime_ns))
-        return directory
-
-    old = generation("current", "old", mtime_ns=1)
-    latest = generation("current", "latest", mtime_ns=2)
-    stale_config = generation("stale", "obsolete", mtime_ns=3)
-    stale_layout = generation("current", "old-layout", mtime_ns=4, state_layout_hash="f" * 64)
-    temporary = root / f"config=current/layout={layout_hash}/chunk=2024-01-02/.raw=work.tmp"
+    legacy_nested = processor_root / "config=old/layout=old"
+    legacy_nested.mkdir(parents=True)
+    temporary = processor_root / ".rewrite.tmp"
     temporary.mkdir(parents=True)
-    incompatible = (
-        tmp_path
-        / ".valuestream/state/frequency_response/schema=999/hash=1/polars=test"
-        / (
-            "source=ih/processor=frequency/config=current/"
-            f"layout={layout_hash}/chunk=2024-01-01/raw=old-schema"
-        )
-    )
-    incompatible.mkdir(parents=True)
-    (incompatible / "manifest.json").write_text(
-        json.dumps(
-            {
-                "source_id": "ih",
-                "processor_id": "frequency",
-                "config_hash": "current",
-                "layout_hash": layout_hash,
-                "chunk_id": "2024-01-01",
-            }
-        ),
-        encoding="utf-8",
-    )
-    legacy = (
-        tmp_path
-        / (f".valuestream/state/frequency_response/schema=2/hash=1/polars={pl.__version__}")
-        / "source=ih/processor=frequency/config=current/chunk=2024-01-01/raw=legacy"
-    )
-    legacy.mkdir(parents=True)
-    (legacy / "manifest.json").write_text(
-        json.dumps(
-            {
-                "source_id": "ih",
-                "processor_id": "frequency",
-                "config_hash": "current",
-                "chunk_id": "2024-01-01",
-            }
-        ),
-        encoding="utf-8",
+    removed_processor = source_root / "processor=removed"
+    removed_processor.mkdir(parents=True)
+    source_scan_processor = source_root / "processor=source-scan"
+    source_scan_processor.mkdir(parents=True)
+    removed_source = state_root / "source=removed/processor=frequency"
+    removed_source.mkdir(parents=True)
+    legacy_runtime = state_root / "schema=6/hash=1/polars=1.43.2"
+    legacy_source = legacy_runtime / "source=ih"
+    legacy_layout = legacy_source / "processor=frequency/config=old/layout=old/chunk=2024-01-01"
+    legacy_layout.mkdir(parents=True)
+
+    while_running = vacuum._stale_processor_state_dirs(
+        tmp_path,
+        cast(Any, catalog),
+        source_ids={"ih"},
+        running_run_ids={"ih": frozenset({"run"})},
+        include_tmp=True,
     )
 
     stale = vacuum._stale_processor_state_dirs(
@@ -189,15 +140,43 @@ def test_checkpoint_vacuum_keeps_latest_current_generation_and_removes_stale_sta
         running_run_ids={},
         include_tmp=True,
     )
+    scoped_stale = vacuum._stale_processor_state_dirs(
+        tmp_path,
+        cast(Any, catalog),
+        source_ids={"ih"},
+        running_run_ids={},
+        include_tmp=True,
+    )
 
-    assert stale == sorted([old, stale_config, stale_layout, temporary, incompatible, legacy])
-    assert latest not in stale
+    assert while_running == []
+    assert legacy_runtime.parents[1] in scoped_stale
+    assert removed_source.parent not in scoped_stale
+    assert stale == sorted(
+        [
+            legacy_nested.parent,
+            temporary,
+            removed_processor,
+            source_scan_processor,
+            removed_source.parent,
+            legacy_runtime.parents[1],
+        ]
+    )
+    result = vacuum.vacuum_processor_state(
+        tmp_path,
+        cast(Any, catalog),
+        include_tmp=True,
+    )
+
+    assert result.dirs_deleted == len(stale)
+    assert current_database.exists()
+    assert current_wal.exists()
+    assert not legacy_nested.exists()
+    assert not source_scan_processor.exists()
 
 
 @pytest.mark.unit
-def test_checkpoint_vacuum_applies_bounded_daily_retention(
+def test_checkpoint_vacuum_does_not_prune_history_inside_current_rolling_database(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     processor = model.FrequencyResponseProcessor.model_validate(
         {
@@ -228,47 +207,36 @@ def test_checkpoint_vacuum_applies_bounded_daily_retention(
         }
     )
     catalog = SimpleNamespace(processors=SimpleNamespace(processors=[processor]))
-    monkeypatch.setattr(vacuum, "processor_computation_hash", lambda *_args: "current")
-    layout_hash = frequency_checkpoint_layout_hash(processor)
-    workspace = tmp_path / "source=outer" / "workspace"
-    root = (
-        workspace
-        / (
-            ".valuestream/state/frequency_response/"
-            f"schema={vacuum.CHECKPOINT_SCHEMA_REVISION}/"
-            f"hash={vacuum.SHARD_HASH_REVISION}/polars={pl.__version__}"
+    processor_dir = tmp_path / ".valuestream/state/frequency_response/source=ih/processor=frequency"
+    processor_dir.mkdir(parents=True)
+    temporary = processor_dir / ".load.tmp"
+    temporary.mkdir()
+    database = processor_dir / "rolling.duckdb"
+    with duckdb.connect(str(database)) as connection:
+        connection.execute("CREATE TABLE history (chunk_id VARCHAR)")
+        connection.executemany(
+            "INSERT INTO history VALUES (?)",
+            [(f"2024-01-{day:02d}",) for day in range(1, 11)],
         )
-        / f"source=ih/processor=frequency/config=current/layout={layout_hash}"
-    )
-    generations: dict[str, Path] = {}
-    for day in range(1, 11):
-        chunk_id = f"2024-01-{day:02d}"
-        directory = root / f"chunk={chunk_id}/raw={day}"
-        directory.mkdir(parents=True)
-        (directory / "manifest.json").write_text(
-            json.dumps(
-                {
-                    "source_id": "ih",
-                    "processor_id": "frequency",
-                    "config_hash": "current",
-                    "layout_hash": layout_hash,
-                    "chunk_id": chunk_id,
-                }
-            ),
-            encoding="utf-8",
-        )
-        generations[chunk_id] = directory
 
     stale = vacuum._stale_processor_state_dirs(
-        workspace,
+        tmp_path,
         cast(Any, catalog),
         source_ids=None,
         running_run_ids={},
         include_tmp=False,
     )
+    result = vacuum.vacuum_processor_state(
+        tmp_path,
+        cast(Any, catalog),
+        include_tmp=False,
+    )
 
-    assert stale == [generations["2024-01-01"], generations["2024-01-02"]]
-    assert generations["2024-01-03"] not in stale
+    assert stale == []
+    assert result.dirs_deleted == 0
+    assert temporary.exists()
+    with duckdb.connect(str(database), read_only=True) as connection:
+        assert connection.execute("SELECT count(*) FROM history").fetchone() == (10,)
 
 
 @pytest.mark.unit

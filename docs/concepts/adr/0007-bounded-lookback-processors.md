@@ -1,6 +1,11 @@
 # ADR 0007 — Bounded Lookback Processors and Rebuildable Checkpoints
 
-**Status:** Accepted (2026-07-31; amended 2026-07-31 and 2026-08-01)
+**Status:** Accepted (2026-07-31; amended 2026-07-31, 2026-08-01, and 2026-08-02)
+
+The bounded-state and exactness decision remains current. The current and only
+supported schema-revision-7 physical contract is the bounded rolling DuckDB
+state defined in
+[ADR 0008](0008-bounded-rolling-duckdb-state.md).
 
 ## Context
 
@@ -20,8 +25,8 @@ duplicates source I/O and makes ingestion unnecessarily slow.
 A pre-enriched source or a report-visible customer contact table would create a
 second source of business truth. A bounded, processor-owned checkpoint is
 different when it is only an internal acceleration structure: its contents are
-minimal, versioned, immutable, and completely rebuildable from the authoritative
-source files. Reports never read it.
+minimal, versioned, transactionally reconciled, bounded, and completely
+rebuildable from the authoritative source files. Reports never read it.
 
 The chunk ledger also needs more information than the target day's own file
 fingerprint. If day D contributes to a seven-day number-of-impressions calculation for day
@@ -39,7 +44,7 @@ kinds whose typed configuration declares one. The first such kind is
   files and the preceding calendar partitions needed to cover the configured
   window plus an explicit partition-lag allowance. The selected execution mode
   supplies either marked transformed rows or the matching prepared-contact
-  checkpoint shards.
+  rolling state partitioned by logical customer shard.
 - Other processors bound to the same source continue to receive only the
   target chunk. The lookback contract does not change their populations.
 - The ledger fingerprints and records the complete dependency file set for the
@@ -58,20 +63,16 @@ A bounded processor may choose one of two exact execution strategies:
    target and persists no processor state. This remains the compatibility
    default and the correctness reference.
 2. `persistent_sharded` filters, classifies, and projects each source chunk
-   once per processor into a processor-owned checkpoint and uses a partitioned
-   streaming sink to route it by a deterministic customer hash. Each atomic
-   generation has a complete `target` payload plus a role-specific `history`
-   payload derived from the staged target shards without rereading Interaction
-   History. Target calculation reads the complete matching target shard;
-   bounded lookback reads only matching history shards. Candidate rows are
-   retained before cross-partition contact collapse so duplicate/outcome
-   precedence remains exactly equivalent to `source_scan`.
-   The checkpoint may retain identity-level keys and values needed for exact
-   ordering, deduplication, number-of-impressions bucketing, grouping/state
-   calculation, and the configured alternative-group selected rank-2 action
-   resolution. The history role retains only exposed rank-1 contact identity,
-   time, classification, and local-order fields; historical alternatives and
-   target-only grouping/state values are excluded.
+   once per target into a temporary current relation inside one long-lived
+   processor-owned DuckDB writer. The complete current payload arrives through
+   the Arrow C Stream interface and is not persisted. Exact SQL combines it
+   with bounded rolling history one logical customer shard at a time, then
+   persists only exposed rank-1 identity, time, classification, local order,
+   chunk id, and shard for later targets. Historical alternatives and
+   target-only grouping/state values are excluded. Frequency targets execute
+   oldest-to-newest in one process so the rolling state has one writer. ADR
+   0008 defines the schema-revision-7 physical, reconciliation, maintenance,
+   and WAL contract.
 
 The strategy is operational rather than semantic. `checkpoint.mode`,
 `checkpoint.shards`, and `checkpoint.retention_days` remain in the full catalog
@@ -86,54 +87,59 @@ Persistent processor state is permitted only under these constraints:
 - Interaction History remains authoritative. A checkpoint is not a Source,
   aggregate, business record, publication marker, or queryable table. Deleting
   it may make ingestion slower, but cannot change a reported result.
-- Each stored role uses the smallest prepared state required by that role;
-  unrelated source columns and outcomes are excluded. A role-specific history
-  payload may duplicate a narrow subset of target rows when that lowers bounded
-  replay I/O. State is bounded by the declared dependency semantics and its
-  retention policy, rather than becoming an unbounded raw-event archive.
-- Every generation is identity-addressed by source, processor semantic
-  computation identity, independent checkpoint-layout identity, chunk id, and
-  raw-file fingerprint. The layout identity currently covers shard count;
-  explicit state-schema and sharding revisions plus the hashing-runtime version
-  cover format and routing compatibility. Writes are atomic and ordinary-run
-  generations are immutable. A changed source file, processor semantic
-  contract, checkpoint layout, state schema, sharding algorithm, or incompatible
-  runtime builds a new generation instead of mutating one in place. An explicit
-  forced run rebuilds and safely replaces the same address as well, so a
-  metadata-preserving source-file replacement cannot force reuse of stale
-  acceleration state.
-- Every existing manifest is structurally validated in the parent run. Each
-  payload role that a pending target can open is then file-set-, size-,
-  row-count-, schema-, and SHA-256-validated once: the current chunk validates
-  `target`, a historical dependency validates `history`, and a chunk needed in
-  both roles validates both. This prevents integrity validation from rereading
-  target-only columns during a history-only replay. During a new atomic write,
-  each shard is scanned and hashed once to construct its manifest entry; the
-  serialized manifest is checked against those already inspected entries
-  without reopening the same files. The recorded customer identity dtype must
-  agree across a target's complete closure; dtype drift fails that target
-  instead of routing equal logical keys to different shards silently.
-- Checkpoints do not create chunk-ledger `ok` rows and are not covered by query
-  publication. The target aggregate still commits through the normal lineage
-  and chunk-ledger barrier, whose fingerprint covers the complete raw
-  dependency closure.
-- Stale or incomplete generations are independently vacuumable. A current
-  generation may always be reconstructed by replaying the authoritative IH
-  chunks, so processor-state backup is optional unless an operator values faster
-  recovery over storage.
-- `checkpoint.retention_days` bounds the number of daily checkpoint partitions
-  retained per processor. It defaults to
-  `ceil((window_hours + partition_lag_hours) / 24) + 1` and cannot be configured
-  below that active closure. Retention is applied after a terminal ingestion
-  run and by workspace vacuum. An older correction can rebuild an evicted
-  partition from IH for that replay and discard it again afterward.
+- Persisted history uses the smallest prepared state required by later targets:
+  exposed rank-1 identity, time, classification, deterministic order, source
+  chunk id, and logical customer shard. Unrelated source columns, rank>1
+  alternatives, and target-only state/grouping values are excluded. Live rows
+  are bounded by the declared retention policy rather than becoming an
+  unbounded raw-event archive.
+- One stable `rolling.duckdb` is addressed only by source and processor at
+  `.valuestream/state/frequency_response/source=<source>/processor=<processor>/rolling.duckdb`.
+  Schema and hashing revisions, Polars version, processor computation hash,
+  logical shard count, history projection, and customer dtype are compatibility
+  metadata rather than directory levels; DuckDB version is audit-only. Chunk
+  ids and raw fingerprints are stored in a transactional journal inside the
+  database.
+- Before each pending target, the writer reconciles that journal with the
+  target's expected ordered history closure and authoritative fingerprints. An
+  expired prefix or state-ahead suffix outside that closure is removed. The
+  remaining journal must be an exact fingerprinted prefix; its missing suffix
+  is filled from IH, which covers intermediate chunks skipped by aggregate-
+  ledger reuse. Fingerprint or order/non-prefix mismatch resets and rebuilds
+  the required closure. Structurally valid but incompatible state is replaced
+  at the same stable path and rebuilt from IH; old schemas are not migrated.
+  Corrupt, identity-tampered, or customer-dtype-drifted state fails closed;
+  `--force` replaces it and rebuilds from IH oldest-to-newest.
+- Appending one target's narrow history, recording its fingerprint, and pruning
+  expired rows are one DuckDB transaction. That acceleration-state commit may
+  precede aggregate publication, but it never creates a chunk-ledger `ok` row
+  or authorizes query visibility. The aggregate still commits through normal
+  Parquet, lineage, run, and chunk-ledger barriers whose fingerprint covers the
+  complete raw dependency closure.
+- One long-lived writer owns the rolling database. Persistent frequency targets
+  are processed in ascending ISO-date order and the source chunk process pool
+  is capped at one. A DuckDB WAL is expected during the writer session and
+  crash recovery; it must not be treated as an incomplete-generation file or
+  deleted independently. The connection remains open for the source run and is
+  closed once at the source-run boundary.
+- `checkpoint.retention_days` bounds the number of source-day journal entries
+  retained in each processor's rolling state. It defaults to
+  `ceil((window_hours + partition_lag_hours) / 24)` and cannot be configured
+  below that active closure. A 168-hour window with zero lag therefore retains
+  only the last seven calendar source days; missing dates can leave fewer than
+  seven stored chunk entries. Expired history/journal rows are deleted in every
+  chronological source-day commit. Every 30 commits, DuckDB `CHECKPOINT`
+  runs on the same open connection to fold the WAL and partially reclaim or
+  reuse deleted-row space; the maintenance step does not close the writer or
+  guarantee complete compaction or an immediate file-size reduction.
 - `checkpoint.mode` selects the execution path, `checkpoint.shards` selects the
-  checkpoint layout, and `checkpoint.retention_days` selects lifecycle policy.
-  None changes aggregate identity. A shard-layout change is built lazily for
-  the bounded closure of the next new or invalidated target; vacuum may remove
-  the previous layout immediately. A retention-only change applies at vacuum
-  without rebuilding state. `--force` remains an explicit request to rebuild
-  aggregates and state regardless of idempotent hashes.
+  logical SQL partitioning, and `checkpoint.retention_days` selects lifecycle
+  policy. None changes aggregate identity or the stable database path. An
+  incompatible shard or processor contract reinitializes that database from
+  IH; a retention-only change is applied when the next pending target opens and
+  commits through the writer.
+  `--force` explicitly rebuilds aggregates and rolling state regardless of
+  idempotent hashes.
 - Customer-hash sharding is an execution index, not anonymization. Exact
   processing can retain the original customer key inside a shard, so workspace
   access controls, encryption/retention policy, and upstream tokenization or
@@ -154,7 +160,7 @@ columns appended to them. The default `[Placement]` therefore means customer +
 interaction + placement. Multiple additional fields are allowed, and null
 values match null values within a configured group. Because this field changes
 computed populations, it remains in processor/source computation hashes; it is
-not checkpoint-layout tuning.
+not checkpoint storage tuning.
 
 For `frequency_response`, the impression-count window is `(decision_time - W,
 decision_time]`, with `W=168h` by default. The number of impressions is capped
@@ -177,16 +183,17 @@ invalidation fan-out, never impression-count membership.
 - Source corrections invalidate the dependent daily aggregates automatically;
   interrupted-run recovery verifies the same raw dependency fingerprints.
 - `source_scan` trades repeated lookback I/O for zero retained identity state.
-  `persistent_sharded` trades governed local storage for one checkpoint-
-  preparation pass per source generation and bounded one-shard-at-a-time
-  processing.
-- Checkpoint tuning does not replay historical aggregates. Missing state for a
-  new layout is reconstructed lazily from only the authoritative chunks needed
-  by the next bounded target, while unchanged targets remain skipped.
-- Chunks remain independently retryable and may run in parallel because
-  workers read published generations and do not share mutable per-customer
-  state. Checkpoint preparation errors are mapped only to target chunks whose
-  dependency closures use the failed generation; independent chunks continue.
+  `persistent_sharded` trades governed local storage and sequential target
+  execution for one reusable rolling DuckDB history and bounded one-shard-at-a-
+  time SQL processing.
+- Checkpoint tuning does not replay historical aggregates. Incompatible state
+  at the stable source/processor path is reconstructed lazily from only the
+  authoritative chunks needed by the next bounded target, while unchanged
+  targets remain skipped.
+- Chunks remain independently retryable, but a source containing persistent
+  frequency state processes its targets oldest-to-newest in one process because
+  the rolling database has one writer. Other processor semantics and eligible
+  source runs remain unchanged.
 - Persistent mode increases data-at-rest and compliance scope. Operators must
   apply the same workspace isolation and retention controls used for sensitive
   source-derived data and must not treat hash sharding as de-identification.

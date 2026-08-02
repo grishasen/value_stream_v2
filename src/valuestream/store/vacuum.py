@@ -3,28 +3,20 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 import shutil
 import tempfile
 from collections.abc import Mapping, Set
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 import duckdb
 import polars as pl
 import polars.selectors as cs
 
 from valuestream.config import model
-from valuestream.config.canonical import (
-    frequency_checkpoint_layout_hash,
-    processor_computation_hash,
-)
+from valuestream.config.canonical import processor_computation_hash
 from valuestream.store.meta import meta_dir
-from valuestream.store.processor_state import (
-    CHECKPOINT_SCHEMA_REVISION,
-    SHARD_HASH_REVISION,
-)
 from valuestream.utils.timer import timed
 
 
@@ -230,7 +222,7 @@ def _aggregate_files(workspace: Path, source_ids: Set[str] | None = None) -> lis
     )
 
 
-def _stale_processor_state_dirs(  # noqa: PLR0912, PLR0915
+def _stale_processor_state_dirs(  # noqa: PLR0912
     workspace: Path,
     catalog: model.Catalog,
     *,
@@ -238,139 +230,117 @@ def _stale_processor_state_dirs(  # noqa: PLR0912, PLR0915
     running_run_ids: Mapping[str, frozenset[str]],
     include_tmp: bool,
 ) -> list[Path]:
-    """Return stale immutable frequency-checkpoint generations.
+    """Return stale rolling frequency-checkpoint directories.
 
     Checkpoint publication is outside the business ledger. Vacuum therefore
-    scopes it independently, never removes state for a running source, retains
-    only the newest raw generation per current processor/chunk contract, and
-    drops generations for removed or source-scan processors.
+    scopes it independently, never removes state for a running source, keeps
+    the flat directory for each configured persistent processor, and drops
+    obsolete or legacy directory layouts. Bounded history inside
+    ``rolling.duckdb`` is owned by :class:`RollingCheckpoint`; vacuum must not
+    inspect or prune that database (or its WAL).
     """
 
     root = workspace / ".valuestream" / "state" / "frequency_response"
     if not root.exists():
         return []
-    current_contracts = {
-        (processor.source, processor.id): (
-            processor_computation_hash(catalog, processor),
-            frequency_checkpoint_layout_hash(processor),
-            processor.checkpoint_retention_days,
-        )
+    current_processors = {
+        (processor.source, processor.id)
         for processor in catalog.processors.processors
         if isinstance(processor, model.FrequencyResponseProcessor)
         and processor.checkpoint.mode == "persistent_sharded"
         and (source_ids is None or processor.source in source_ids)
     }
     stale: set[Path] = set()
-    candidates: dict[tuple[str, str, str, str, dt.date], list[tuple[int, Path]]] = {}
-    latest_dates: dict[tuple[str, str, str, str], dt.date] = {}
-    expected_runtime = (
-        f"schema={CHECKPOINT_SCHEMA_REVISION}",
-        f"hash={SHARD_HASH_REVISION}",
-        f"polars={quote(pl.__version__, safe='-._~')}",
-    )
-    # Enumerate every historical layout shape under the dedicated state root.
-    # Incompatible schema revisions (including the pre-layout-hash shape) are
-    # then classified stale instead of becoming unreachable vacuum debris.
-    generation_dirs = {path for path in root.glob("**/raw=*") if path.is_dir()}
-    if include_tmp:
-        generation_dirs.update(path for path in root.glob("**/*.tmp") if path.is_dir())
-    for directory in sorted(generation_dirs):
-        relative_parts = _processor_state_relative_parts(root, directory)
-        source_id = _processor_state_source(relative_parts)
-        if source_id is None:
-            if source_ids is None:
-                stale.add(directory)
-            continue
+
+    # The supported layout is deliberately flat:
+    # source=<source>/processor=<processor>/rolling.duckdb. Compatibility
+    # revisions and hashes live in DuckDB metadata and are validated when the
+    # store is opened, not represented by directories vacuum must understand.
+    source_dirs = sorted(path for path in root.glob("source=*") if path.is_dir())
+    for source_dir in source_dirs:
+        source_id = unquote(source_dir.name.removeprefix("source="))
         if source_ids is not None and source_id not in source_ids:
             continue
         if running_run_ids.get(source_id):
             continue
-        if directory.name.startswith(".raw=") or directory.name.endswith(".tmp"):
-            if include_tmp:
-                stale.add(directory)
+
+        configured_for_source = {
+            processor_id
+            for processor_source, processor_id in current_processors
+            if processor_source == source_id
+        }
+        if not configured_for_source:
+            stale.add(source_dir)
             continue
-        if relative_parts[:3] != expected_runtime:
-            stale.add(directory)
+
+        for child in sorted(source_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            if not child.name.startswith("processor="):
+                if include_tmp or not _is_processor_state_temp_dir(child):
+                    stale.add(child)
+                continue
+            processor_id = unquote(child.name.removeprefix("processor="))
+            if processor_id not in configured_for_source:
+                stale.add(child)
+                continue
+
+            # A current flat processor directory contains files only. Any
+            # child directory is either a previous nested layout or temporary
+            # work. Preserve temporary directories only when requested.
+            for nested in sorted(path for path in child.iterdir() if path.is_dir()):
+                if include_tmp or not _is_processor_state_temp_dir(nested):
+                    stale.add(nested)
+
+    # Everything below a non-source top-level directory belongs to a legacy
+    # schema/hash/runtime hierarchy. Delete the whole hierarchy when it is safe
+    # to do so; source-scoped or active runs retain their exact source subtree.
+    for legacy_root in sorted(
+        path for path in root.iterdir() if path.is_dir() and not path.name.startswith("source=")
+    ):
+        if _is_processor_state_temp_dir(legacy_root) and not include_tmp:
             continue
-        manifest_path = directory / "manifest.json"
-        identity = _processor_state_identity(manifest_path)
-        if identity is None:
-            stale.add(directory)
+        legacy_sources = _legacy_processor_state_source_dirs(legacy_root)
+        if not legacy_sources:
+            if source_ids is None:
+                stale.add(legacy_root)
             continue
-        manifest_source, processor_id, config_hash, layout_hash, chunk_id = identity
-        if manifest_source != source_id:
-            stale.add(directory)
+        if all(
+            (source_ids is None or source_id in source_ids) and not running_run_ids.get(source_id)
+            for source_id, _ in legacy_sources
+        ):
+            stale.add(legacy_root)
             continue
-        contract = current_contracts.get((source_id, processor_id))
-        if contract is None or contract[:2] != (config_hash, layout_hash):
-            stale.add(directory)
-            continue
-        try:
-            chunk_date = dt.date.fromisoformat(chunk_id)
-        except ValueError:
-            stale.add(directory)
-            continue
-        if chunk_date.isoformat() != chunk_id:
-            stale.add(directory)
-            continue
-        try:
-            created_order_ns = manifest_path.stat().st_mtime_ns
-        except FileNotFoundError:
-            stale.add(directory)
-            continue
-        candidates.setdefault(
-            (source_id, processor_id, config_hash, layout_hash, chunk_date), []
-        ).append((created_order_ns, directory))
-        processor_key = (source_id, processor_id, config_hash, layout_hash)
-        latest_dates[processor_key] = max(
-            chunk_date,
-            latest_dates.get(processor_key, chunk_date),
-        )
-    for (
-        source_id,
-        processor_id,
-        config_hash,
-        layout_hash,
-        chunk_date,
-    ), group in candidates.items():
-        retention_days = current_contracts[(source_id, processor_id)][2]
-        latest_date = latest_dates[(source_id, processor_id, config_hash, layout_hash)]
-        cutoff = latest_date - dt.timedelta(days=retention_days - 1)
-        if chunk_date < cutoff:
-            stale.update(path for _, path in group)
-            continue
-        keep = max(group, key=lambda item: (item[0], str(item[1])))[1]
-        stale.update(path for _, path in group if path != keep)
-    return sorted(stale)
+        for source_id, legacy_source_dir in legacy_sources:
+            if source_ids is not None and source_id not in source_ids:
+                continue
+            if not running_run_ids.get(source_id):
+                stale.add(legacy_source_dir)
+
+    return _outermost_directories(stale)
 
 
-def _processor_state_identity(path: Path) -> tuple[str, str, str, str, str] | None:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    values = tuple(
-        payload.get(name)
-        for name in ("source_id", "processor_id", "config_hash", "layout_hash", "chunk_id")
-    )
-    if any(not isinstance(value, str) or not value for value in values):
-        return None
-    return values  # type: ignore[return-value]
+def _legacy_processor_state_source_dirs(root: Path) -> list[tuple[str, Path]]:
+    """Return outermost source directories embedded in one legacy hierarchy."""
+
+    source_dirs = _outermost_directories({path for path in root.rglob("source=*") if path.is_dir()})
+    return sorted((unquote(path.name.removeprefix("source=")), path) for path in source_dirs)
 
 
-def _processor_state_relative_parts(root: Path, path: Path) -> tuple[str, ...]:
-    try:
-        return path.relative_to(root).parts
-    except ValueError:
-        return ()
+def _is_processor_state_temp_dir(path: Path) -> bool:
+    name = path.name
+    return name.endswith(".tmp") or name.startswith(".tmp-")
 
 
-def _processor_state_source(relative_parts: tuple[str, ...]) -> str | None:
-    if len(relative_parts) < 4 or not relative_parts[3].startswith("source="):
-        return None
-    return unquote(relative_parts[3].removeprefix("source="))
+def _outermost_directories(paths: Set[Path]) -> list[Path]:
+    """Return a stable list with descendants of selected directories removed."""
+
+    kept: list[Path] = []
+    for path in sorted(paths, key=lambda item: (len(item.parts), str(item))):
+        if any(parent == path or parent in path.parents for parent in kept):
+            continue
+        kept.append(path)
+    return sorted(kept)
 
 
 def _aggregate_temp_files(
