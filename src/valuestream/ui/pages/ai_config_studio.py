@@ -3849,31 +3849,37 @@ def _render_processor_parameter_editor(
         time_calendar = (
             time_def.get("calendar") if isinstance(time_def.get("calendar"), dict) else {}
         )
-        edited_processor = _without_empty(
-            {
-                **_processor_preserved_fields(processor_def),
-                "id": new_processor_id,
-                "source": source,
-                "kind": kind,
-                "description": description,
-                "group_by": group_by,
-                "dedup_keys": (
-                    cleaned_dedup_keys if builder.processor_supports_dedup(kind) else []
-                ),
-                "time": (
-                    {
-                        "property": time_column,
-                        "grain": model.normalize_grain_name(grain_label),
-                        **({"calendar": time_calendar} if time_calendar else {}),
-                    }
-                    if time_column
-                    else None
-                ),
-                **kind_fields,
-                "states": states,
-                "filter": filter_value,
-            }
-        )
+        group_by_fields = _processor_group_by_fields(processor_def, kind, kind_fields, group_by)
+        edited_processor = {
+            **_without_empty(
+                {
+                    **_processor_preserved_fields(processor_def),
+                    "id": new_processor_id,
+                    "source": source,
+                    "kind": kind,
+                    "description": description,
+                    "group_by": group_by_fields,
+                    "dedup_keys": (
+                        cleaned_dedup_keys if builder.processor_supports_dedup(kind) else []
+                    ),
+                    "time": (
+                        {
+                            "property": time_column,
+                            "grain": model.normalize_grain_name(grain_label),
+                            **({"calendar": time_calendar} if time_calendar else {}),
+                        }
+                        if time_column
+                        else None
+                    ),
+                }
+            ),
+            # The kind form is the sole author of its fields, and an empty value
+            # there is a decision rather than an omission: alternative_group_by
+            # of [] compares placements within one interaction. Emitting them
+            # verbatim keeps those choices out of the empty filter below.
+            **kind_fields,
+            **_without_empty({"states": states, "filter": filter_value}),
+        }
 
         with st.expander("Processor YAML Preview", expanded=False):
             st.code(
@@ -3923,6 +3929,57 @@ def _processor_kind_parameter_fields(
     )
 
 
+def _processor_group_by_fields(
+    processor_def: dict[str, Any],
+    kind: str,
+    kind_fields: dict[str, Any],
+    group_by: list[Any],
+) -> list[str]:
+    """Return published dimensions, keeping a kind's derived column in step."""
+
+    fields = [str(field) for field in group_by]
+    if kind != "frequency_response":
+        return fields
+    return builder.with_frequency_column(
+        fields,
+        configured=str(processor_def.get("frequency_column") or ""),
+        frequency_column=str(kind_fields.get("frequency_column") or ""),
+    )
+
+
+def _canonical_frequency_states(
+    kind_fields: dict[str, Any],
+    *,
+    editor_key: str,
+) -> tuple[dict[str, Any], bool]:
+    """Render the frequency-response state contract read-only and return it.
+
+    The priority binding is read from the live kind widgets, so adding or
+    clearing that column shows the arbitration diagnostics appearing or
+    disappearing on the same rerun that writes them.
+    """
+
+    raw_columns = kind_fields.get("columns")
+    definition = {"columns": raw_columns if isinstance(raw_columns, dict) else {}}
+    # Nothing may stay pinned for this kind: the editable grid must come back
+    # clean if the user switches to an authored kind.
+    components.clear_pinned_editor(editor_key)
+    with components.bordered_panel(
+        "Processor Sketches",
+        "Aggregate states this processor materializes — canonical for this kind.",
+    ):
+        config_builder._render_canonical_state_grid(
+            builder.frequency_response_state_frame(definition)
+        )
+        st.caption(builder.FREQUENCY_STATE_PANEL_CAPTION)
+    return (
+        model.frequency_response_state_definitions(
+            priority=builder.frequency_response_has_priority(definition)
+        ),
+        True,
+    )
+
+
 def _processor_state_editor(
     processor_def: dict[str, Any],
     kind: str,
@@ -3934,6 +3991,8 @@ def _processor_state_editor(
 
     state_key = f"{key_prefix}_state_rows"
     editor_key = f"{key_prefix}_states"
+    if kind == "frequency_response":
+        return _canonical_frequency_states(kind_fields, editor_key=editor_key)
     # Session rows survive reruns so the Add state popover and numeric sync can
     # append rows; a draft-definition change (apply, AI repair, accepted patch)
     # reseeds the grid from the updated states contract.

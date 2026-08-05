@@ -77,7 +77,7 @@ def test_checkpoint_vacuum_keeps_current_rolling_database_and_removes_stale_stat
             "kind": "frequency_response",
             "group_by": ["ExposureBucket"],
             "time": {"property": "DecisionTime", "grain": "daily"},
-            "states": {"Contacts": {"type": "count"}},
+            "states": {"Responses": {"type": "count"}},
             "columns": {
                 "customer": "CustomerID",
                 "interaction": "InteractionID",
@@ -185,7 +185,7 @@ def test_checkpoint_vacuum_does_not_prune_history_inside_current_rolling_databas
             "kind": "frequency_response",
             "group_by": ["ExposureBucket"],
             "time": {"property": "DecisionTime", "grain": "daily"},
-            "states": {"Contacts": {"type": "count"}},
+            "states": {"Responses": {"type": "count"}},
             "columns": {
                 "customer": "CustomerID",
                 "interaction": "InteractionID",

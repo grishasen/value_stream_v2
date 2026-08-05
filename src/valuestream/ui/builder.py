@@ -1977,6 +1977,97 @@ def state_spec_definitions(processor_def: dict[str, Any]) -> dict[str, dict[str,
     return specs
 
 
+FREQUENCY_STATE_EDITOR_COLUMNS = [
+    "State",
+    "Type",
+    "Source Column",
+    "Derived From",
+    "Explanation",
+]
+
+
+def with_frequency_column(
+    group_by: list[str],
+    *,
+    configured: str,
+    frequency_column: str,
+) -> list[str]:
+    """Return group-by dimensions carrying the derived impressions column.
+
+    The model requires ``frequency_column`` in ``group_by``, but Group By is
+    edited before the kind form, so renaming the derived column there would
+    otherwise leave an invalid pair. The previously configured name is dropped
+    and the current one appended, leaving the user's other dimensions in order.
+    """
+
+    if not frequency_column:
+        return list(group_by)
+    dimensions = [
+        dimension
+        for dimension in group_by
+        if dimension != frequency_column and not (configured and dimension == configured)
+    ]
+    dimensions.append(frequency_column)
+    return dimensions
+
+
+def frequency_response_has_priority(processor_def: dict[str, Any]) -> bool:
+    """Return whether a frequency-response definition binds the priority column."""
+
+    raw_columns = processor_def.get("columns")
+    if not isinstance(raw_columns, dict):
+        return False
+    return bool(str(raw_columns.get("priority", "") or "").strip())
+
+
+def frequency_response_state_rows(processor_def: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return read-only grid rows for the kind's canonical states.
+
+    The three arbitration-priority states appear only when the definition binds
+    a priority column, matching what the processor can actually publish.
+    """
+
+    priority = frequency_response_has_priority(processor_def)
+    rows: list[dict[str, Any]] = []
+    for name, state in model.frequency_response_states(priority=priority).items():
+        source_column = state.source_column or ""
+        if state.type == "value_sum":
+            derived = f"sum of {source_column}"
+        elif source_column:
+            derived = f"non-null {source_column}"
+        else:
+            derived = "included rows"
+        rows.append(
+            {
+                "State": name,
+                "Type": state.type,
+                "Source Column": source_column,
+                "Derived From": derived,
+                "Explanation": state.explanation,
+            }
+        )
+    return rows
+
+
+FREQUENCY_STATE_PANEL_CAPTION = (
+    "These states are fixed by the processor kind: it derives a known set of virtual "
+    "columns, so the published contract is the same for every catalog and cannot be "
+    "edited here. Ratios stay meaningful only inside one family — Responses, "
+    "ComparableResponses, and PriorityComparableContacts are three different "
+    "denominators. Binding a priority column adds the three arbitration diagnostics."
+)
+
+
+def frequency_response_state_frame(processor_def: dict[str, Any]) -> pl.DataFrame:
+    """Return the read-only grid frame for the canonical states."""
+
+    return editor_frame(
+        frequency_response_state_rows(processor_def),
+        FREQUENCY_STATE_EDITOR_COLUMNS,
+        dict,
+    )
+
+
 def score_properties_from_definition(processor_def: dict[str, Any]) -> list[str]:
     """Return score property names from a score-distribution definition dict."""
     raw = processor_def.get("score_properties")

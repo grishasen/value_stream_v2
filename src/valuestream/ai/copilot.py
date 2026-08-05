@@ -1993,13 +1993,38 @@ def _processor_field_references(processor: dict[str, Any]) -> set[str]:  # noqa:
                 continue
             references.update(_string_field_values(spec.get("source_column")))
     try:
-        typed = model.Processors.model_validate(
+        typed: model.Processor | None = model.Processors.model_validate(
             {"catalog_version": 2, "processors": [processor]}
         ).processors[0]
     except (TypeError, ValueError):
-        return references
-    references.update(_processor_state_source_fields(typed))
-    return references
+        typed = None
+    if typed is not None:
+        references.update(_processor_state_source_fields(typed))
+    return references - _processor_derived_fields(processor, typed)
+
+
+def _processor_derived_fields(
+    processor: dict[str, Any],
+    typed: model.Processor | None,
+) -> set[str]:
+    """Return columns a processor materializes itself rather than reads.
+
+    Mirrors ``config.validate._processor_source_columns``: frequency_response
+    binds its states to virtual columns it derives and groups by its own
+    exposure bucket, so none of those names belong to the approved schema. The
+    raw draft is the fallback because an otherwise invalid processor should not
+    also collect phantom field-reference issues.
+    """
+
+    if isinstance(typed, model.FrequencyResponseProcessor):
+        return {*model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS, "Day", typed.frequency_column}
+    if str(processor.get("kind") or "") != "frequency_response":
+        return set()
+    return {
+        *model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
+        "Day",
+        *_string_field_values(processor.get("frequency_column")),
+    }
 
 
 def _processor_calendar_fields(processor: dict[str, Any]) -> set[str]:
@@ -2038,7 +2063,13 @@ def _processor_state_source_fields(processor: model.Processor) -> set[str]:
     for name, state in model.effective_processor_states(processor).items():
         source_column = getattr(state, "source_column", None)
         if source_column:
-            references.add(str(source_column))
+            # Canonical frequency_response states bind virtual columns the
+            # processor derives, so they are outputs rather than source inputs.
+            if not (
+                isinstance(processor, model.FrequencyResponseProcessor)
+                and source_column in model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS
+            ):
+                references.add(str(source_column))
             continue
         if state.type not in source_state_types:
             continue

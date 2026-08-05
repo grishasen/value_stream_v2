@@ -49,13 +49,13 @@ def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
             "window_hours": 168,
             "max_frequency": 7,
             "states": {
-                "Contacts": {"type": "count"},
-                "Clicks": {"type": "count", "source_column": "ClickedContact"},
-                "ComparableContacts": {
+                "Responses": {"type": "count"},
+                "Positives": {"type": "count", "source_column": "ClickedContact"},
+                "ComparableResponses": {
                     "type": "count",
                     "source_column": "ComparableContact",
                 },
-                "RunnerAvailableContacts": {
+                "RunnerAvailable": {
                     "type": "count",
                     "source_column": "RunnerAvailable",
                 },
@@ -63,7 +63,7 @@ def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
                     "type": "value_sum",
                     "source_column": "RunnerPropensity",
                 },
-                "RunnerPrioritySum": {
+                "RunnerPriorityComparableSum": {
                     "type": "value_sum",
                     "source_column": "RunnerPriorityComparable",
                 },
@@ -358,16 +358,16 @@ def test_rolling_frequency_sql_matches_polars_for_exact_window_and_runner_semant
 
     assert_frame_equal(actual, expected)
     totals = actual.select(
-        pl.col("Contacts").sum(),
-        pl.col("Clicks").sum(),
-        pl.col("ComparableContacts").sum(),
-        pl.col("RunnerAvailableContacts").sum(),
+        pl.col("Responses").sum(),
+        pl.col("Positives").sum(),
+        pl.col("ComparableResponses").sum(),
+        pl.col("RunnerAvailable").sum(),
         pl.col("RunnerPropensitySum").sum(),
     ).row(0)
     assert totals[:4] == (4, 1, 4, 4)
     assert totals[4] == pytest.approx(1.65)
     strict = actual.filter((pl.col(_SEGMENT_COLUMN) == "A") & (pl.col("ExposureBucket") == 2))
-    assert strict.select(pl.col("Contacts").sum()).item() == 1
+    assert strict.select(pl.col("Responses").sum()).item() == 1
 
 
 @pytest.mark.unit
@@ -641,8 +641,8 @@ def test_rolling_frequency_sql_matches_polars_for_daily_granularity() -> None:
     assert_frame_equal(actual, expected)
     # strict: 2 prior-day contacts + 1 today = bucket 3; fresh: buckets 1 and 2.
     assert actual.select(pl.col("ExposureBucket").sum()).item() == 6
-    assert actual.select(pl.col("Contacts").sum()).item() == 3
-    assert actual.select(pl.col("RunnerAvailableContacts").sum()).item() == 1
+    assert actual.select(pl.col("Responses").sum()).item() == 3
+    assert actual.select(pl.col("RunnerAvailable").sum()).item() == 1
 
 
 @pytest.mark.unit
@@ -704,7 +704,7 @@ def test_rolling_daily_sql_matches_source_scan_for_cross_chunk_duplicate_contact
             )
 
     assert_frame_equal(actual, expected)
-    assert actual.select("Day", "ExposureBucket", "Contacts").rows() == [
+    assert actual.select("Day", "ExposureBucket", "Responses").rows() == [
         (dt.date(2024, 1, 7), 2, 1),
         (dt.date(2024, 1, 8), 2, 1),
     ]

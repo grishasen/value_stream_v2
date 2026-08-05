@@ -72,10 +72,10 @@ processors:
     frequency_column: ExposureBucket
     checkpoint: {mode: persistent_sharded, shards: 4}
     states:
-      Contacts: {type: count}
-      Clicks: {type: count, source_column: ClickedContact}
-      ComparableContacts: {type: count, source_column: ComparableContact}
-      ComparableClicks: {type: count, source_column: ComparableClick}
+      Responses: {type: count}
+      Positives: {type: count, source_column: ClickedContact}
+      ComparableResponses: {type: count, source_column: ComparableContact}
+      ComparablePositives: {type: count, source_column: ComparableClick}
       RunnerPropensitySum: {type: value_sum, source_column: RunnerPropensity}
 """,
         encoding="utf-8",
@@ -89,8 +89,8 @@ metrics:
     kind: formula
     expression:
       op: safe_div
-      num: {col: Clicks}
-      den: {col: Contacts}
+      num: {col: Positives}
+      den: {col: Responses}
 """,
         encoding="utf-8",
     )
@@ -155,8 +155,8 @@ def _frequency_rows(workspace: Path) -> dict[int, tuple[int, int, float]]:
     )
     return {
         int(row["ExposureBucket"]): (
-            int(row["Contacts"]),
-            int(row["Clicks"]),
+            int(row["Responses"]),
+            int(row["Positives"]),
             float(row["FrequencyMarginalCTR"]),
         )
         for row in result.rows.iter_rows(named=True)

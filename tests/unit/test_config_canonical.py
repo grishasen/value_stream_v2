@@ -186,7 +186,7 @@ class TestCatalogHash:
                     "exposure_values": ["Impression", "Clicked"],
                     "candidate_values": ["Pending", "Impression", "Clicked"],
                     "window_hours": window_hours,
-                    "states": {"Contacts": {"type": "count"}},
+                    "states": {"Responses": {"type": "count"}},
                     "checkpoint": checkpoint,
                 }
             )
@@ -263,7 +263,7 @@ class TestCatalogHash:
                 "positive_values": ["Clicked"],
                 "exposure_values": ["Impression", "Clicked"],
                 "candidate_values": ["Pending", "Impression", "Clicked"],
-                "states": {"Contacts": {"type": "count"}},
+                "states": {"Responses": {"type": "count"}},
             }
             payload.update(overrides)
             return model.FrequencyResponseProcessor.model_validate(payload)

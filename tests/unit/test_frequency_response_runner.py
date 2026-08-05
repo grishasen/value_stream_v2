@@ -55,11 +55,11 @@ def _processor(
                     "group_by": ["Placement", "ExposureBucket"],
                     "time": {"property": "DecisionTime", "grain": "daily"},
                     "states": {
-                        "clicked_contacts": {
+                        "Positives": {
                             "type": "count",
                             "source_column": "ClickedContact",
                         },
-                        "runner_propensity_sum": {
+                        "RunnerPropensitySum": {
                             "type": "value_sum",
                             "source_column": "RunnerPropensity",
                         },
@@ -759,7 +759,7 @@ def test_persistent_frequency_sql_accepts_categorical_customer_ids(
             engine="auto",
         )
 
-    assert collected[0][1].select(pl.col("clicked_contacts").sum()).item() == 0
+    assert collected[0][1].select(pl.col("Positives").sum()).item() == 0
     database = next(
         (tmp_path / ".valuestream" / "state" / "frequency_response").glob("**/rolling.duckdb")
     )

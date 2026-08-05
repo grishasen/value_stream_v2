@@ -58,62 +58,62 @@ def test_contact_policy_recipes_require_exact_frequency_response_states() -> Non
     processor = _frequency_response_processor()
     expected = {
         "contact_policy.frequency_marginal_ctr": (
-            {"clicks": "Clicks", "contacts": "Contacts"},
+            {"clicks": "Positives", "contacts": "Responses"},
             {
                 "op": "safe_div",
-                "num": {"col": "Clicks"},
-                "den": {"col": "Contacts"},
+                "num": {"col": "Positives"},
+                "den": {"col": "Responses"},
             },
         ),
         "contact_policy.frequency_comparable_ctr": (
             {
-                "comparable_clicks": "ComparableClicks",
-                "comparable_contacts": "ComparableContacts",
+                "comparable_clicks": "ComparablePositives",
+                "comparable_contacts": "ComparableResponses",
             },
             {
                 "op": "safe_div",
-                "num": {"col": "ComparableClicks"},
-                "den": {"col": "ComparableContacts"},
+                "num": {"col": "ComparablePositives"},
+                "den": {"col": "ComparableResponses"},
             },
         ),
         "contact_policy.runner_up_expected_ctr": (
             {
                 "runner_propensity_sum": "RunnerPropensitySum",
-                "comparable_contacts": "ComparableContacts",
+                "comparable_contacts": "ComparableResponses",
             },
             {
                 "op": "safe_div",
                 "num": {"col": "RunnerPropensitySum"},
-                "den": {"col": "ComparableContacts"},
+                "den": {"col": "ComparableResponses"},
             },
         ),
         "contact_policy.runner_up_coverage": (
             {
-                "comparable_contacts": "ComparableContacts",
-                "contacts": "Contacts",
+                "comparable_contacts": "ComparableResponses",
+                "contacts": "Responses",
             },
             {
                 "op": "safe_div",
-                "num": {"col": "ComparableContacts"},
-                "den": {"col": "Contacts"},
+                "num": {"col": "ComparableResponses"},
+                "den": {"col": "Responses"},
             },
         ),
         "contact_policy.response_opportunity_margin": (
             {
-                "comparable_clicks": "ComparableClicks",
+                "comparable_clicks": "ComparablePositives",
                 "runner_propensity_sum": "RunnerPropensitySum",
-                "comparable_contacts": "ComparableContacts",
+                "comparable_contacts": "ComparableResponses",
             },
             {
                 "op": "safe_div",
                 "num": {
                     "op": "sub",
                     "args": [
-                        {"col": "ComparableClicks"},
+                        {"col": "ComparablePositives"},
                         {"col": "RunnerPropensitySum"},
                     ],
                 },
-                "den": {"col": "ComparableContacts"},
+                "den": {"col": "ComparableResponses"},
             },
         ),
         "contact_policy.priority_opportunity_gap": (
@@ -1130,25 +1130,9 @@ def _material_upward_state(threshold: float) -> dict[str, object]:
 
 def _frequency_response_processor() -> SimpleNamespace:
     state_adapter = TypeAdapter(model.StateSpec)
-    definitions = {
-        "Clicks": {"type": "count"},
-        "Contacts": {"type": "count"},
-        "ComparableClicks": {"type": "count"},
-        "ComparableContacts": {"type": "count"},
-        "RunnerPropensitySum": {
-            "type": "value_sum",
-            "source_column": "RunnerPropensity",
-        },
-        "FocalPriorityComparableSum": {
-            "type": "value_sum",
-            "source_column": "FocalPriority",
-        },
-        "RunnerPriorityComparableSum": {
-            "type": "value_sum",
-            "source_column": "RunnerPriority",
-        },
-        "PriorityComparableContacts": {"type": "count"},
-    }
+    # The kind's states are canonical, so the recipes must bind against exactly
+    # what the model publishes rather than a hand-copied list.
+    definitions = model.frequency_response_state_definitions(priority=True)
     return SimpleNamespace(
         id="frequency",
         kind="frequency_response",

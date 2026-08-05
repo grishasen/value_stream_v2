@@ -648,6 +648,12 @@ def processor_with_recipe_states(
 
     if not state_additions:
         return processor
+    if isinstance(processor, model.FrequencyResponseProcessor):
+        # This kind publishes a canonical contract the model enforces, so a
+        # recipe can only bind states that already exist, never add one. The
+        # contact-policy recipes are written that way; anything else would be
+        # rejected on validation instead of silently reshaping the processor.
+        return processor
     data = processor.model_dump(mode="python", by_alias=True, exclude_none=True)
     configured_states = {
         name: spec.model_dump(mode="python", by_alias=True, exclude_none=True)

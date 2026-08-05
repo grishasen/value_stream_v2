@@ -190,11 +190,11 @@ internal state-ID choice.
 | `funnel.dropoff_rate` | Funnel stage loss | Ordered funnel stages | Exact | KPI card |
 | `lifecycle.summary` | Entity lifecycle measures | Entity lifecycle processor | Exact | Table |
 | `category.top_items` | Frequent categories | Frequent-items/Top-K state | Approximate | Table |
-| `contact_policy.frequency_marginal_ctr` | Selected rank-1 action CTR by number of impressions | Exact `Clicks` and `Contacts` states | Approximate fixed-window interpretation | Line |
-| `contact_policy.frequency_comparable_ctr` | Selected rank-1 action CTR on contacts with a selected rank-2 action | Exact `ComparableClicks` and `ComparableContacts` states | Approximate fixed-window interpretation | Line |
-| `contact_policy.runner_up_expected_ctr` | Mean selected rank-2 action raw Propensity | Exact `RunnerPropensitySum` and `ComparableContacts` states | Approximate fixed-window interpretation | Line |
-| `contact_policy.runner_up_coverage` | Selected rank-2 action coverage of selected rank-1 action contacts | Exact `ComparableContacts` and `Contacts` states | Approximate fixed-window interpretation | KPI card |
-| `contact_policy.response_opportunity_margin` | Selected rank-1 action response minus selected rank-2 action expectation | Exact `ComparableClicks`, `RunnerPropensitySum`, and shared `ComparableContacts` states | Approximate fixed-window interpretation | Bar |
+| `contact_policy.frequency_marginal_ctr` | Selected rank-1 action CTR by number of impressions | Exact `Positives` and `Responses` states | Approximate fixed-window interpretation | Line |
+| `contact_policy.frequency_comparable_ctr` | Selected rank-1 action CTR on contacts with a selected rank-2 action | Exact `ComparablePositives` and `ComparableResponses` states | Approximate fixed-window interpretation | Line |
+| `contact_policy.runner_up_expected_ctr` | Mean selected rank-2 action raw Propensity | Exact `RunnerPropensitySum` and `ComparableResponses` states | Approximate fixed-window interpretation | Line |
+| `contact_policy.runner_up_coverage` | Selected rank-2 action coverage of selected rank-1 action contacts | Exact `ComparableResponses` and `Responses` states | Approximate fixed-window interpretation | KPI card |
+| `contact_policy.response_opportunity_margin` | Selected rank-1 action response minus selected rank-2 action expectation | Exact `ComparablePositives`, `RunnerPropensitySum`, and shared `ComparableResponses` states | Approximate fixed-window interpretation | Bar |
 | `contact_policy.priority_opportunity_gap` | Selected rank-1 action minus selected rank-2 action Priority index | Exact comparable Priority sums and `PriorityComparableContacts` | Approximate arbitration diagnostic | Bar |
 
 The six **Contact policy** recipes target only the `frequency_response`
@@ -204,7 +204,7 @@ line and bar recommendations use `ExposureBucket`, whose value is an upstream
 fixed-window approximation; changing a report date filter does not recompute
 customer contact history.
 
-`Contacts` are derived from the processor's configured exposure outcomes. The
+`Responses` are derived from the processor's configured exposure outcomes. The
 user-facing number of impressions is therefore based on Impression proxies rather
 than measured viewability; dismiss telemetry is never inferred when the source does
 not provide it. Within the processor's implicit customer + interaction keys
@@ -214,7 +214,7 @@ its response uses raw `Propensity` as the probability. `Placement` is the
 default additional field, so comparison stays inside one decision and
 placement. Comparable selected rank-1 action CTR, selected
 rank-2 action expected CTR, and response opportunity margin use the same
-`ComparableContacts` denominator. `Priority` is retained only for the separate,
+`ComparableResponses` denominator. `Priority` is retained only for the separate,
 neutral arbitration index; it is never treated as CTR or probability.
 
 The unique-entity recipe prefers CPC states created by current processor

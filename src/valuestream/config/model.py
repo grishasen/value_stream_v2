@@ -26,7 +26,10 @@ the public contract and unknown or retired fields fail validation.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -443,6 +446,169 @@ FREQUENCY_RESPONSE_VIRTUAL_COLUMNS = frozenset(
         "RunnerPriorityComparable",
     }
 )
+
+
+@dataclass(frozen=True)
+class FrequencyResponseState:
+    """One canonical frequency-response state and its business meaning.
+
+    ``explanation`` is the plain-language definition rendered beside the state
+    in both configuration editors, so the grid explains the published contract
+    without sending the reader to the reference documentation.
+    """
+
+    type: Literal["count", "value_sum"]
+    source_column: str | None
+    explanation: str
+    requires_priority: bool = False
+
+
+# The published output contract of the kind. Unlike every other processor kind,
+# these states are not authored per catalog: the processor derives fixed virtual
+# columns, so the state set that can be built from them is fixed too. The
+# editors render this table read-only and write it verbatim.
+FREQUENCY_RESPONSE_STATES: Mapping[str, FrequencyResponseState] = MappingProxyType(
+    {
+        "Responses": FrequencyResponseState(
+            type="count",
+            source_column=None,
+            explanation=(
+                "Every selected rank-1 action impression in the bucket. Counts included "
+                "rows and is the denominator of the response curve."
+            ),
+        ),
+        "Positives": FrequencyResponseState(
+            type="count",
+            source_column="ClickedContact",
+            explanation=(
+                "Impressions whose outcome is one of the configured positive values. "
+                "Positives / Responses is the response rate at that number of impressions."
+            ),
+        ),
+        "ComparableResponses": FrequencyResponseState(
+            type="count",
+            source_column="ComparableContact",
+            explanation=(
+                "Impressions that had a selected rank-2 action with a known propensity — "
+                "the stricter denominator every opportunity comparison must use."
+            ),
+        ),
+        "ComparablePositives": FrequencyResponseState(
+            type="count",
+            source_column="ComparableClick",
+            explanation=(
+                "Positive outcomes inside that comparable subset. Divide by "
+                "ComparableResponses for the comparable response rate."
+            ),
+        ),
+        "RunnerAvailable": FrequencyResponseState(
+            type="count",
+            source_column="RunnerAvailable",
+            explanation=(
+                "Impressions where any lower-ranked candidate existed, whether or not its "
+                "propensity was usable. The gap to ComparableResponses is the coverage "
+                "lost to a missing propensity."
+            ),
+        ),
+        "RunnerPropensitySum": FrequencyResponseState(
+            type="value_sum",
+            source_column="RunnerPropensity",
+            explanation=(
+                "Sum of the selected rank-2 action's raw propensity over comparable "
+                "impressions: the responses that alternative was expected to produce. "
+                "Divide by ComparableResponses for the opportunity-cost rate."
+            ),
+        ),
+        "PriorityComparableContacts": FrequencyResponseState(
+            type="count",
+            source_column="PriorityComparableContact",
+            explanation=(
+                "Impressions where both the selected rank-1 and rank-2 actions carried a "
+                "priority value. Separate denominator for the arbitration diagnostic."
+            ),
+            requires_priority=True,
+        ),
+        "FocalPriorityComparableSum": FrequencyResponseState(
+            type="value_sum",
+            source_column="FocalPriorityComparable",
+            explanation=(
+                "Sum of the selected rank-1 action's priority over those rows."
+            ),
+            requires_priority=True,
+        ),
+        "RunnerPriorityComparableSum": FrequencyResponseState(
+            type="value_sum",
+            source_column="RunnerPriorityComparable",
+            explanation=(
+                "Sum of the selected rank-2 action's priority over the same rows. The "
+                "difference over PriorityComparableContacts is the average arbitration "
+                "priority gap; priority is not a probability and never a response rate."
+            ),
+            requires_priority=True,
+        ),
+    }
+)
+
+# States renamed when the contract became canonical. Kept only to turn a stale
+# catalog into an actionable error instead of an opaque "unknown state".
+FREQUENCY_RESPONSE_RENAMED_STATES: Mapping[str, str] = MappingProxyType(
+    {
+        "Contacts": "Responses",
+        "Clicks": "Positives",
+        "ComparableContacts": "ComparableResponses",
+        "ComparableClicks": "ComparablePositives",
+    }
+)
+
+
+def frequency_response_states(*, priority: bool) -> dict[str, FrequencyResponseState]:
+    """Return the canonical states available for one column binding.
+
+    The three arbitration-priority states depend on the optional ``priority``
+    binding: without it the processor emits all-null priority columns, so those
+    states would publish constant zeros.
+    """
+
+    return {
+        name: state
+        for name, state in FREQUENCY_RESPONSE_STATES.items()
+        if priority or not state.requires_priority
+    }
+
+
+def frequency_response_state_definitions(*, priority: bool) -> dict[str, dict[str, Any]]:
+    """Return canonical states as catalog definitions ready for ``states:``."""
+
+    definitions: dict[str, dict[str, Any]] = {}
+    for name, state in frequency_response_states(priority=priority).items():
+        definition: dict[str, Any] = {"type": state.type}
+        if state.source_column is not None:
+            definition["source_column"] = state.source_column
+        definitions[name] = definition
+    return definitions
+
+
+def _frequency_unknown_state_message(name: str, priority_column: str | None) -> str:
+    """Explain why a declared frequency-response state is not canonical."""
+
+    renamed = FREQUENCY_RESPONSE_RENAMED_STATES.get(name)
+    if renamed is not None:
+        return (
+            f"frequency_response state {name!r} was renamed to {renamed!r}; rename it in "
+            "processors.yaml and in every metric expression that reads it, then backfill "
+            "aggregates"
+        )
+    state = FREQUENCY_RESPONSE_STATES.get(name)
+    if state is not None and state.requires_priority and priority_column is None:
+        return (
+            f"frequency_response state {name!r} requires the optional columns.priority "
+            "binding; configure it or drop the state"
+        )
+    available = ", ".join(frequency_response_states(priority=priority_column is not None))
+    return (
+        f"frequency_response state {name!r} is not part of the kind's canonical contract; "
+        f"available states are: {available}"
+    )
 _FREQUENCY_RESPONSE_RESERVED_COLUMNS = frozenset(
     {
         "Day",
@@ -794,7 +960,41 @@ class FrequencyResponseProcessor(_ProcessorBase):
                     f"frequency_response state {name!r} must bind a virtual/source column "
                     "instead of an outcome or stage selector"
                 )
+        self._states_match_canonical_contract()
         return self
+
+    def _states_match_canonical_contract(self) -> None:
+        """Reject states outside the kind's fixed published contract.
+
+        The processor derives a fixed set of virtual columns, so its states are
+        canonical rather than authored: both editors render them read-only. A
+        catalog may declare a subset — hand-written configs that publish only
+        part of the contract stay valid — but never a different name, type, or
+        binding.
+        """
+
+        canonical = frequency_response_states(priority=self.columns.priority is not None)
+        for name, state in self.states.items():
+            expected = canonical.get(name)
+            if expected is None:
+                raise ValueError(_frequency_unknown_state_message(name, self.columns.priority))
+            settings = state.model_dump(mode="json", exclude_none=True)
+            actual_source = settings.pop("source_column", None)
+            if (
+                state.type != expected.type
+                or actual_source != expected.source_column
+                or settings.get("distinct", False)
+                or settings.get("where") is not None
+            ):
+                binding = (
+                    f"source_column {expected.source_column!r}"
+                    if expected.source_column is not None
+                    else "no source column"
+                )
+                raise ValueError(
+                    f"frequency_response state {name!r} is canonical and must be declared "
+                    f"as type {expected.type!r} with {binding}, without extra settings"
+                )
 
     @property
     def checkpoint_retention_days(self) -> int:

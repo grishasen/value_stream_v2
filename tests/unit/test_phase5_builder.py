@@ -1390,10 +1390,115 @@ forms.processor_kind_fields(
 
 
 @pytest.mark.unit
-def test_frequency_response_editor_defaults_to_placement_and_keeps_identity_implicit(
+def test_frequency_response_editor_renders_every_non_state_group() -> None:
+    app = AppTest.from_string(
+        """
+from valuestream.ui import forms
+
+processor = {
+    "columns": {
+        "customer": "CustomerID",
+        "interaction": "InteractionID",
+        "action": "ActionID",
+        "placement": "Placement",
+        "rank": "Rank",
+        "outcome": "Outcome",
+        "propensity": "Propensity",
+        "priority": "Priority",
+    },
+    "positive_values": ["Clicked"],
+    "exposure_values": ["Impression", "Clicked"],
+    "candidate_values": ["Pending", "Impression", "Clicked"],
+    "alternative_group_by": ["Placement"],
+    "checkpoint": {"mode": "persistent_sharded", "shards": 64, "retention_days": 9},
+}
+forms.processor_kind_fields(
+    processor,
+    "frequency_response",
+    field_options=["CustomerID", "InteractionID", "Placement", "Priority"],
+    key_prefix="frequency_render",
+)
+"""
+    ).run()
+
+    assert not app.exception
+    labels = {item.label for item in app.selectbox}
+    assert {
+        "Customer Column",
+        "Rank Column",
+        "Priority Column (optional)",
+        "Window Granularity",
+        "Checkpoint Mode",
+    } <= labels
+    assert {"Positive Values", "Exposure Values", "Candidate Values"} <= {
+        item.label for item in app.text_input
+    }
+    assert {"Window Hours", "Partition Lag Hours", "Max Frequency Bucket", "Shards"} <= {
+        item.label for item in app.number_input
+    }
+    assert [item.label for item in app.checkbox] == ["Sample customers"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("priority", "expected_rows"),
+    [("Priority", 9), ("", 6)],
+)
+def test_canonical_frequency_state_grid_is_read_only(priority: str, expected_rows: int) -> None:
+    app = AppTest.from_string(
+        f"""
+from valuestream.ui import builder
+from valuestream.ui.pages import config_builder
+
+definition = {{"columns": {{"priority": {priority!r}}}}}
+config_builder._render_canonical_state_grid(
+    builder.frequency_response_state_frame(definition)
+)
+"""
+    ).run()
+
+    assert not app.exception
+    # A read-only dataframe, never the editable grid or its Add state control.
+    assert not app.get("data_editor")
+    assert not app.button
+    frame = app.get("dataframe")[0].value
+    assert len(frame) == expected_rows
+    assert list(frame.columns) == builder.FREQUENCY_STATE_EDITOR_COLUMNS
+    assert list(frame["State"])[:2] == ["Responses", "Positives"]
+    assert all(explanation for explanation in frame["Explanation"])
+
+
+class _StubColumn:
+    """Stand-in for one ``st.columns`` slot used as both context and widget host."""
+
+    def __enter__(self) -> _StubColumn:
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(forms.st, name)
+
+
+def _stub_frequency_widgets(
     monkeypatch: pytest.MonkeyPatch,
+    captured: dict[str, object],
 ) -> None:
-    captured: dict[str, object] = {}
+    """Render the frequency form with every widget left at its seeded value.
+
+    The form is wide enough that asserting on its returned definition is the
+    only readable contract; each stub therefore returns what a user who touched
+    nothing would submit.
+    """
+
+    def fake_columns(spec: object, **_kwargs: object) -> list[_StubColumn]:
+        count = spec if isinstance(spec, int) else len(spec)  # type: ignore[arg-type]
+        return [_StubColumn() for _ in range(count)]
+
+    def fake_selectbox(label: str, options: list[str], **kwargs: object) -> str:
+        index = kwargs.get("index")
+        return options[index] if isinstance(index, int) else ""
 
     def fake_multiselect(label: str, options: list[str], **kwargs: object) -> list[str]:
         captured.update(label=label, options=options, **kwargs)
@@ -1403,9 +1508,29 @@ def test_frequency_response_editor_defaults_to_placement_and_keeps_identity_impl
     monkeypatch.setattr(
         forms.st,
         "caption",
-        lambda value, *_args, **_kwargs: captured.update(caption=value),
+        lambda value, *_args, **_kwargs: captured.setdefault("caption", value),
     )
+    monkeypatch.setattr(
+        forms.st,
+        "warning",
+        lambda value, *_args, **_kwargs: captured.setdefault("warning", value),
+    )
+    monkeypatch.setattr(forms.st, "columns", fake_columns)
+    monkeypatch.setattr(forms.st, "selectbox", fake_selectbox)
     monkeypatch.setattr(forms.st, "multiselect", fake_multiselect)
+    monkeypatch.setattr(
+        forms.st, "text_input", lambda _label, value="", **_kwargs: str(value)
+    )
+    monkeypatch.setattr(forms.st, "number_input", lambda _label, **kwargs: kwargs["value"])
+    monkeypatch.setattr(forms.st, "checkbox", lambda _label, value=False, **_kwargs: value)
+
+
+@pytest.mark.unit
+def test_frequency_response_editor_defaults_to_placement_and_keeps_identity_implicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _stub_frequency_widgets(monkeypatch, captured)
 
     fields = forms.processor_kind_fields(
         {
@@ -1427,12 +1552,28 @@ def test_frequency_response_editor_defaults_to_placement_and_keeps_identity_impl
         key_prefix="frequency",
     )
 
-    assert fields == {"alternative_group_by": ["PlacementName"]}
+    assert fields == {
+        "columns": {
+            "customer": "CustomerKey",
+            "interaction": "InteractionKey",
+            "action": "ActionID",
+            "placement": "PlacementName",
+            "rank": "Rank",
+            "outcome": "Outcome",
+            "propensity": "Propensity",
+        },
+        "positive_values": [],
+        "exposure_values": [],
+        "candidate_values": [],
+        "window_hours": 168,
+        "partition_lag_hours": 0,
+        "max_frequency": 7,
+        "frequency_column": "ExposureBucket",
+        "window_granularity": "exact",
+        "alternative_group_by": ["PlacementName"],
+        "checkpoint": {"mode": "source_scan", "shards": 64},
+    }
     assert captured["label"] == "Selected rank-2 action Group By"
-    assert captured["caption"] == (
-        "CustomerKey and InteractionKey are always included. "
-        "Select zero or more additional comparison fields."
-    )
     assert captured["default"] == ["PlacementName"]
     assert captured["options"] == ["PlacementName", "Channel"]
     assert captured["accept_new_options"] is True
@@ -1444,14 +1585,7 @@ def test_frequency_response_editor_preserves_explicit_empty_alternative_group_by
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
-
-    def fake_multiselect(_label: str, _options: list[str], **kwargs: object) -> list[str]:
-        captured.update(kwargs)
-        return list(kwargs["default"])  # type: ignore[arg-type]
-
-    monkeypatch.setattr(forms.st, "write", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(forms.st, "caption", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(forms.st, "multiselect", fake_multiselect)
+    _stub_frequency_widgets(monkeypatch, captured)
 
     fields = forms.processor_kind_fields(
         {
@@ -1464,7 +1598,9 @@ def test_frequency_response_editor_preserves_explicit_empty_alternative_group_by
     )
 
     assert captured["default"] == []
-    assert fields == {"alternative_group_by": []}
+    # An empty comparison group is a decision, not an omission: the key must
+    # still be emitted so it reaches the catalog.
+    assert fields["alternative_group_by"] == []
 
 
 @pytest.mark.unit
@@ -1473,14 +1609,7 @@ def test_frequency_response_editor_retains_multiple_and_custom_physical_fields(
 ) -> None:
     captured: dict[str, object] = {}
     configured = ["Placement", "Channel", "AudienceClass"]
-
-    def fake_multiselect(_label: str, options: list[str], **kwargs: object) -> list[str]:
-        captured.update(options=options, **kwargs)
-        return list(kwargs["default"])  # type: ignore[arg-type]
-
-    monkeypatch.setattr(forms.st, "write", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(forms.st, "caption", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(forms.st, "multiselect", fake_multiselect)
+    _stub_frequency_widgets(monkeypatch, captured)
 
     fields = forms.processor_kind_fields(
         {
@@ -1498,7 +1627,77 @@ def test_frequency_response_editor_retains_multiple_and_custom_physical_fields(
 
     assert captured["default"] == configured
     assert captured["options"] == ["Placement", "Channel", "AudienceClass"]
-    assert fields == {"alternative_group_by": configured}
+    assert fields["alternative_group_by"] == configured
+
+
+@pytest.mark.unit
+def test_frequency_response_editor_round_trips_every_non_state_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _stub_frequency_widgets(monkeypatch, captured)
+    configured = {
+        "columns": {
+            "customer": "CustomerID",
+            "interaction": "InteractionID",
+            "action": "ActionID",
+            "placement": "Placement",
+            "rank": "Rank",
+            "outcome": "Outcome",
+            "propensity": "Propensity",
+            "priority": "Priority",
+        },
+        "positive_values": ["Clicked"],
+        "exposure_values": ["Impression", "Clicked"],
+        "candidate_values": ["Pending", "Impression", "Clicked"],
+        "window_hours": 336,
+        "partition_lag_hours": 24,
+        "max_frequency": 9,
+        "frequency_column": "ExposureBucket",
+        "window_granularity": "daily",
+        "alternative_group_by": ["Placement"],
+        "checkpoint": {
+            "mode": "persistent_sharded",
+            "shards": 128,
+            "retention_days": 15,
+            "threads": 4,
+            "memory_limit": "4GB",
+        },
+        "customer_sample": {"fraction": 0.125},
+    }
+
+    fields = forms.processor_kind_fields(
+        dict(configured),
+        "frequency_response",
+        field_options=["CustomerID", "InteractionID", "Placement", "Priority"],
+        key_prefix="frequency",
+    )
+
+    assert fields == configured
+    assert set(fields) <= forms.PROCESSOR_KIND_MANAGED_FIELDS
+
+
+@pytest.mark.unit
+def test_frequency_response_editor_clears_optional_priority_and_sampling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _stub_frequency_widgets(monkeypatch, captured)
+
+    fields = forms.processor_kind_fields(
+        {
+            "columns": {"customer": "CustomerID", "interaction": "InteractionID"},
+            "alternative_group_by": ["Placement"],
+        },
+        "frequency_response",
+        field_options=["CustomerID", "InteractionID", "Placement"],
+        key_prefix="frequency",
+    )
+
+    # Both keys are managed, so omitting them is what removes them from YAML.
+    assert "priority" not in fields["columns"]
+    assert "customer_sample" not in fields
+    assert "customer_sample" in forms.PROCESSOR_KIND_MANAGED_FIELDS
 
 
 @pytest.mark.unit
@@ -2644,7 +2843,7 @@ def test_chart_field_options_use_display_labels_without_renaming_stored_values()
                 "candidate_values": ["Pending", "Impression", "Clicked"],
                 "frequency_column": "ExposureBucket",
                 "group_by": ["ExposureBucket"],
-                "states": {"Contacts": {"type": "count"}},
+                "states": {"Responses": {"type": "count"}},
             }
         )
     )
@@ -2652,7 +2851,7 @@ def test_chart_field_options_use_display_labels_without_renaming_stored_values()
         {
             "processor": "frequency_response",
             "kind": "formula",
-            "expression": {"col": "Contacts"},
+            "expression": {"col": "Responses"},
             "display": {"label": "Comparable selected rank-1 action CTR"},
         }
     )

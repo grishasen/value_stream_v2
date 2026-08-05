@@ -2239,6 +2239,75 @@ def _generate_visual_case_expression(
     )
 
 
+def _canonical_kind_states(kind: str, kind_settings: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the fixed state contract for a kind that owns one, else ``None``.
+
+    The bindings come from the live kind widgets rather than the stored
+    definition, so the contract follows the settings being edited.
+    """
+
+    if kind != "frequency_response":
+        return None
+    raw_columns = kind_settings.get("columns")
+    definition = {"columns": raw_columns if isinstance(raw_columns, dict) else {}}
+    return model.frequency_response_state_definitions(
+        priority=builder.frequency_response_has_priority(definition)
+    )
+
+
+def _render_canonical_states_panel(kind_settings: dict[str, Any], editor_key: str) -> None:
+    """Render a canonical state contract in place of the editable grid."""
+
+    raw_columns = kind_settings.get("columns")
+    definition = {"columns": raw_columns if isinstance(raw_columns, dict) else {}}
+    # Leave nothing pinned for this kind, so switching back to an authored kind
+    # rebuilds its editable grid from that kind's own rows.
+    components.clear_pinned_editor(editor_key)
+    with components.bordered_panel(
+        "Processor Sketches",
+        "Aggregate states this processor materializes — canonical for this kind.",
+    ):
+        _render_canonical_state_grid(builder.frequency_response_state_frame(definition))
+        st.caption(builder.FREQUENCY_STATE_PANEL_CAPTION)
+
+
+def _render_canonical_state_grid(state_frame: Any) -> None:
+    """Show a kind's fixed state contract with its definitions, read-only.
+
+    Kinds whose states are canonical publish the same contract for every
+    catalog, so the grid explains each state instead of offering edits.
+    """
+
+    st.dataframe(
+        state_frame,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "State": st.column_config.TextColumn(
+                "State", width="medium", help=config_help.field_help("state.name")
+            ),
+            "Type": st.column_config.TextColumn(
+                "Type", width="small", help=config_help.field_help("state.type")
+            ),
+            "Source Column": st.column_config.TextColumn(
+                "Source Column",
+                width="medium",
+                help=config_help.field_help("state.source_column"),
+            ),
+            "Derived From": st.column_config.TextColumn(
+                "Derived From",
+                width="medium",
+                help=config_help.field_help("state.derived_from"),
+            ),
+            "Explanation": st.column_config.TextColumn(
+                "Explanation",
+                width="large",
+                help=config_help.field_help("state.explanation"),
+            ),
+        },
+    )
+
+
 def _render_state_rows_editor(
     state_key: str,
     editor_key: str,
@@ -4119,51 +4188,56 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
 
     state_key = f"builder_proc_states_{processor.id}"
     state_editor_key = f"builder_proc_state_editor_{processor.id}"
+    canonical_states = _canonical_kind_states(kind, kind_settings)
+    if canonical_states is not None:
+        _render_canonical_states_panel(kind_settings, state_editor_key)
     states_baseline: model.Processor = processor
-    if creating:
+    if creating and canonical_states is None:
         states_baseline = _kind_candidate_processor(processor, kind, kind_settings)
         _reseed_state_rows_for_kind(states_baseline, state_key, processor.id, field_mapping)
-    if state_key not in st.session_state:
+    if canonical_states is None and state_key not in st.session_state:
         st.session_state[state_key] = _state_rows(states_baseline, field_mapping)
-    if kind == "numeric_distribution":
-        current_rows = builder.normalize_editor_rows(st.session_state[state_key])
-        synced_rows = _with_numeric_property_state_rows(
-            current_rows,
-            builder.string_list(kind_settings.get("properties")),
-            str(kind_settings.get("quantile_engine") or "tdigest"),
-        )
-        if synced_rows != current_rows:
-            st.session_state[state_key] = synced_rows
-            components.clear_pinned_editor(state_editor_key)
-    state_frame = builder.editor_frame(
-        st.session_state[state_key],
-        ["State", "Type", "Source Column", "Parameters", "Derived From", "Enabled"],
-        _blank_state_row,
-    )
-    with components.bordered_panel(
-        "Processor Sketches",
-        "Aggregate states this processor materializes — counters and sketches. "
-        "Edit them here; the Sketch Helper below can add recommended sketches.",
-    ):
-        _render_state_rows_editor(
-            state_key,
-            state_editor_key,
-            state_frame,
-        )
-        st.caption(
-            "Sketch parameters omitted from the YAML use these effective defaults: "
-            + "; ".join(
-                f"{sketch_type}: " + ", ".join(f"{name}={value}" for name, value in params.items())
-                for sketch_type, params in model.DEFAULT_STATE_PARAMETERS.items()
+    if canonical_states is None:
+        if kind == "numeric_distribution":
+            current_rows = builder.normalize_editor_rows(st.session_state[state_key])
+            synced_rows = _with_numeric_property_state_rows(
+                current_rows,
+                builder.string_list(kind_settings.get("properties")),
+                str(kind_settings.get("quantile_engine") or "tdigest"),
             )
-            + "."
+            if synced_rows != current_rows:
+                st.session_state[state_key] = synced_rows
+                components.clear_pinned_editor(state_editor_key)
+        state_frame = builder.editor_frame(
+            st.session_state[state_key],
+            ["State", "Type", "Source Column", "Parameters", "Derived From", "Enabled"],
+            _blank_state_row,
         )
-        st.caption(
-            "Applying a public t-digest or KLL state also creates its distribution "
-            "metric automatically. Numeric variance states also create a standard "
-            "deviation metric as sqrt(variance). Positive/negative outcome digests "
-            "remain inputs for curve and calibration metrics."
-        )
+        with components.bordered_panel(
+            "Processor Sketches",
+            "Aggregate states this processor materializes — counters and sketches. "
+            "Edit them here; the Sketch Helper below can add recommended sketches.",
+        ):
+            _render_state_rows_editor(
+                state_key,
+                state_editor_key,
+                state_frame,
+            )
+            st.caption(
+                "Sketch parameters omitted from the YAML use these effective defaults: "
+                + "; ".join(
+                    f"{sketch_type}: "
+                    + ", ".join(f"{name}={value}" for name, value in params.items())
+                    for sketch_type, params in model.DEFAULT_STATE_PARAMETERS.items()
+                )
+                + "."
+            )
+            st.caption(
+                "Applying a public t-digest or KLL state also creates its distribution "
+                "metric automatically. Numeric variance states also create a standard "
+                "deviation metric as sqrt(variance). Positive/negative outcome digests "
+                "remain inputs for curve and calibration metrics."
+            )
 
     filter_expression = builder.first_filter_expression(processor)
     filter_state = builder.condition_state_from_expression(filter_expression)
@@ -4247,19 +4321,28 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     for managed_key in forms.PROCESSOR_KIND_MANAGED_FIELDS:
         processor_def.pop(managed_key, None)
     processor_def.update(kind_settings)
-    state_rows_valid = True
-    try:
-        processor_def["states"] = _build_state_defs(
-            states_baseline,
-            st.session_state.get(state_key, _state_rows(states_baseline, field_mapping)),
+    if kind == "frequency_response":
+        processor_def["group_by"] = builder.with_frequency_column(
+            group_by,
+            configured=str(builder.processor_to_dict(processor).get("frequency_column") or ""),
+            frequency_column=str(kind_settings.get("frequency_column") or ""),
         )
-    except ValueError as exc:
-        state_rows_valid = False
-        st.warning(str(exc))
-        processor_def["states"] = {
-            name: spec.model_dump(mode="json", exclude_none=True)
-            for name, spec in model.effective_processor_states(states_baseline).items()
-        }
+    state_rows_valid = True
+    if canonical_states is not None:
+        processor_def["states"] = canonical_states
+    else:
+        try:
+            processor_def["states"] = _build_state_defs(
+                states_baseline,
+                st.session_state.get(state_key, _state_rows(states_baseline, field_mapping)),
+            )
+        except ValueError as exc:
+            state_rows_valid = False
+            st.warning(str(exc))
+            processor_def["states"] = {
+                name: spec.model_dump(mode="json", exclude_none=True)
+                for name, spec in model.effective_processor_states(states_baseline).items()
+            }
     if compiled_filter:
         processor_def["filter"] = compiled_filter
     else:
@@ -4403,10 +4486,20 @@ def _kind_candidate_processor(
         candidate_def.pop("dedup_keys", None)
     candidate_def.update(kind_settings)
     candidate_def["kind"] = kind
+    canonical_states = _canonical_kind_states(kind, kind_settings)
     if kind == "numeric_distribution":
         candidate_def["states"] = _numeric_property_state_definitions(
             builder.string_list(kind_settings.get("properties")),
             str(kind_settings.get("quantile_engine") or "tdigest"),
+        )
+    elif canonical_states is not None:
+        # States are required by the model, so a kind that owns its contract has
+        # to seed it here or the reshape below can never validate.
+        candidate_def["states"] = canonical_states
+        candidate_def["group_by"] = builder.with_frequency_column(
+            builder.string_list(candidate_def.get("group_by")),
+            configured=str(builder.processor_to_dict(processor).get("frequency_column") or ""),
+            frequency_column=str(kind_settings.get("frequency_column") or ""),
         )
     else:
         candidate_def.pop("states", None)
@@ -4479,7 +4572,7 @@ def _remap_processor_def_fields(
     """Remap source-field references in a processor definition copy."""
     if not field_mapping:
         return processor_def
-    out = yaml.safe_load(yaml.safe_dump(processor_def, sort_keys=False))
+    out: dict[str, Any] = yaml.safe_load(yaml.safe_dump(processor_def, sort_keys=False))
     entities = out.get("entities")
     if isinstance(entities, dict) and entities.get("subject"):
         entities["subject"] = field_remap.remap_field_name(str(entities["subject"]), field_mapping)
@@ -4498,7 +4591,24 @@ def _remap_processor_def_fields(
         for item in score_properties:
             if isinstance(item, dict) and item.get("column"):
                 item["column"] = field_remap.remap_field_name(str(item["column"]), field_mapping)
+    # frequency_response binds raw source columns by role; without remapping
+    # them the pickers would seed values no longer present in the source.
+    columns = out.get("columns")
+    if isinstance(columns, dict):
+        out["columns"] = _remapped_column_bindings(columns, field_mapping)
     return out
+
+
+def _remapped_column_bindings(
+    columns: dict[str, Any],
+    field_mapping: dict[str, str],
+) -> dict[str, Any]:
+    """Return role-keyed column bindings with their source fields remapped."""
+
+    return {
+        role: field_remap.remap_field_name(str(column), field_mapping) if column else column
+        for role, column in columns.items()
+    }
 
 
 @st.fragment()

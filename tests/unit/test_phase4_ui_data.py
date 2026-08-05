@@ -492,8 +492,14 @@ def test_frequency_combo_resolves_business_labels_through_chart_rendering() -> N
             "frequency_column": "ExposureBucket",
             "group_by": ["ExposureBucket"],
             "states": {
-                "ComparableClicks": {"type": "count"},
-                "ComparableContacts": {"type": "count"},
+                "ComparablePositives": {
+                    "type": "count",
+                    "source_column": "ComparableClick",
+                },
+                "ComparableResponses": {
+                    "type": "count",
+                    "source_column": "ComparableContact",
+                },
                 "RunnerPropensitySum": {
                     "type": "value_sum",
                     "source_column": "RunnerPropensity",
@@ -508,8 +514,8 @@ def test_frequency_combo_resolves_business_labels_through_chart_rendering() -> N
                 "kind": "formula",
                 "expression": {
                     "op": "safe_div",
-                    "num": {"col": "ComparableClicks"},
-                    "den": {"col": "ComparableContacts"},
+                    "num": {"col": "ComparablePositives"},
+                    "den": {"col": "ComparableResponses"},
                 },
                 "display": {"label": "Comparable selected rank-1 action CTR"},
             }
@@ -521,7 +527,7 @@ def test_frequency_combo_resolves_business_labels_through_chart_rendering() -> N
                 "expression": {
                     "op": "safe_div",
                     "num": {"col": "RunnerPropensitySum"},
-                    "den": {"col": "ComparableContacts"},
+                    "den": {"col": "ComparableResponses"},
                 },
                 "display": {"label": "Selected rank-2 action expected CTR"},
             }

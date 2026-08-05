@@ -200,6 +200,41 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
             "approx_distinct_count",
         ],
     },
+    "frequency_response": {
+        "purpose": (
+            "how response changes with the number of impressions of the same action in a "
+            "fixed trailing window, plus the opportunity cost of the alternative that lost "
+            "the placement"
+        ),
+        "key_fields": [
+            "columns.customer/interaction/action/placement/rank/outcome/propensity",
+            "columns.priority only when arbitration diagnostics are wanted",
+            "positive_values, exposure_values, candidate_values over columns.outcome",
+            "window_hours, partition_lag_hours, max_frequency, frequency_column",
+            "alternative_group_by for the selected rank-2 action comparison group",
+        ],
+        "authoring": (
+            "requires a source with ranked decision alternatives and a raw response "
+            "propensity; time.grain must be daily and frequency_column must appear in "
+            "group_by"
+        ),
+        "canonical_states": [
+            "Responses",
+            "Positives",
+            "ComparableResponses",
+            "ComparablePositives",
+            "RunnerAvailable",
+            "RunnerPropensitySum",
+            "PriorityComparableContacts",
+            "FocalPriorityComparableSum",
+            "RunnerPriorityComparableSum",
+        ],
+        "states_rule": (
+            "states are canonical for this kind: never invent, rename, or drop one, and "
+            "declare the last three only when columns.priority is bound"
+        ),
+        "compatible_metrics": ["formula"],
+    },
     "numeric_distribution": {
         "purpose": "descriptive distributions and percentiles for approved numeric properties",
         "key_fields": ["properties", "quantile_engine", "states"],

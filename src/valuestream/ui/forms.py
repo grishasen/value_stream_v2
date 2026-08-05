@@ -205,6 +205,19 @@ PROCESSOR_KIND_MANAGED_FIELDS = frozenset(
         "snapshot_kind",
         "cadence",
         "alternative_group_by",
+        # frequency_response owns every non-state field through its kind form,
+        # so each one must be strippable when the kind changes.
+        "columns",
+        "positive_values",
+        "exposure_values",
+        "candidate_values",
+        "window_hours",
+        "partition_lag_hours",
+        "max_frequency",
+        "frequency_column",
+        "window_granularity",
+        "customer_sample",
+        "checkpoint",
     }
 )
 
@@ -334,24 +347,243 @@ def processor_kind_fields(  # noqa: PLR0911 — dispatch table over the processo
     return {}
 
 
+FREQUENCY_COLUMN_SPECS = (
+    ("customer", "Customer Column", "CustomerID", "processor.frequency_customer"),
+    ("interaction", "Interaction Column", "InteractionID", "processor.frequency_interaction"),
+    ("action", "Action Column", "ActionID", "processor.frequency_action"),
+    ("placement", "Placement Column", "Placement", "processor.frequency_placement"),
+    ("rank", "Rank Column", "Rank", "processor.frequency_rank"),
+    ("outcome", "Outcome Column", "Outcome", "processor.frequency_outcome"),
+    ("propensity", "Propensity Column", "Propensity", "processor.frequency_propensity"),
+)
+FREQUENCY_WINDOW_GRANULARITY_OPTIONS = ("exact", "daily")
+FREQUENCY_CHECKPOINT_MODE_OPTIONS = ("source_scan", "persistent_sharded")
+FREQUENCY_CHECKPOINT_MODE_LABELS = {
+    "source_scan": "Source scan — rescan bounded source history each run",
+    "persistent_sharded": "Persistent sharded — retain a rebuildable rolling checkpoint",
+}
+FREQUENCY_SAMPLE_STEP = 1.0 / model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS
+
+
 def _frequency_response_fields(
     processor_def: dict[str, Any],
     field_options: list[str],
     key_prefix: str,
 ) -> dict[str, Any]:
+    """Render every non-state field of a frequency-response processor.
+
+    States are canonical for this kind and the state grid renders them
+    read-only, so everything the user can still decide lives here.
+    """
+
+    columns = _frequency_column_bindings(processor_def, field_options, key_prefix)
+    outcome_values = _frequency_outcome_values(processor_def, key_prefix)
+    window = _frequency_window_fields(processor_def, key_prefix)
+    alternative_group_by = _frequency_alternative_group_by(
+        processor_def,
+        field_options,
+        key_prefix,
+        columns=columns,
+        frequency_column=str(window["frequency_column"]),
+    )
+    execution = _frequency_execution_fields(processor_def, key_prefix)
+    return {
+        "columns": columns,
+        **outcome_values,
+        **window,
+        "alternative_group_by": alternative_group_by,
+        **execution,
+    }
+
+
+def _frequency_column_bindings(
+    processor_def: dict[str, Any],
+    field_options: list[str],
+    key_prefix: str,
+) -> dict[str, str]:
+    """Render the raw source bindings the processor normalizes contacts from."""
+
+    st.write("### Source Column Bindings")
+    raw_columns = processor_def.get("columns")
+    configured: dict[str, Any] = raw_columns if isinstance(raw_columns, dict) else {}
+    edited: dict[str, str] = {}
+    for row_specs in (FREQUENCY_COLUMN_SPECS[:4], FREQUENCY_COLUMN_SPECS[4:]):
+        row = st.columns(len(row_specs), gap="small")
+        for column, (name, label, default, help_key) in zip(row, row_specs, strict=True):
+            with column:
+                value = select_or_text(
+                    label,
+                    field_options,
+                    str(configured.get(name, "") or "") or default,
+                    key=f"{key_prefix}_frequency_column_{name}",
+                    help_key=help_key,
+                ).strip()
+            edited[name] = value or default
+    priority_col, _spacer = st.columns(2, gap="small")
+    with priority_col:
+        priority = select_or_text(
+            "Priority Column (optional)",
+            field_options,
+            str(configured.get("priority", "") or ""),
+            key=f"{key_prefix}_frequency_column_priority",
+            help_key="processor.frequency_priority",
+        ).strip()
+    if priority:
+        edited["priority"] = priority
+    else:
+        st.caption(
+            "Without a priority binding the arbitration diagnostic states "
+            "(PriorityComparableContacts, FocalPriorityComparableSum, "
+            "RunnerPriorityComparableSum) are not published."
+        )
+    if edited["customer"] == edited["interaction"]:
+        st.warning("Customer and interaction bindings must be different columns.")
+    return edited
+
+
+def _frequency_outcome_values(
+    processor_def: dict[str, Any],
+    key_prefix: str,
+) -> dict[str, Any]:
+    """Render the three outcome classifications read from the outcome column."""
+
+    st.write("### Outcome Classification")
+    value_specs = (
+        ("positive_values", "Positive Values", "processor.frequency_positive_values"),
+        ("exposure_values", "Exposure Values", "processor.frequency_exposure_values"),
+        ("candidate_values", "Candidate Values", "processor.frequency_candidate_values"),
+    )
+    columns = st.columns(len(value_specs), gap="small")
+    settings: dict[str, Any] = {}
+    for column, (name, label, help_key) in zip(columns, value_specs, strict=True):
+        configured = processor_def.get(name)
+        with column:
+            edited = csv_list_field(
+                label,
+                configured,
+                key=f"{key_prefix}_frequency_{name}",
+                help_key=help_key,
+            )
+        if not edited:
+            st.warning(f"{label} cannot be empty.")
+        settings[name] = _preserved_value_types(configured, edited)
+    st.caption(
+        "A positive outcome always counts as an exposure. Candidate values additionally keep "
+        "never-shown ranked alternatives selectable as the rank-2 action. Values are matched "
+        "exactly, so casing must follow the source."
+    )
+    return settings
+
+
+def _preserved_value_types(configured: Any, edited: list[str]) -> list[Any]:
+    """Return edited values, restoring the configured type of unchanged entries.
+
+    Outcome values are compared against the raw source column, which may hold
+    integers or booleans. The comma-separated editor is text, so a value the
+    user did not touch keeps the type it had in YAML.
+    """
+
+    originals = {str(value): value for value in configured} if isinstance(configured, list) else {}
+    return [originals.get(value, value) for value in edited]
+
+
+def _frequency_window_fields(
+    processor_def: dict[str, Any],
+    key_prefix: str,
+) -> dict[str, Any]:
+    """Render the trailing impression window and its derived bucket column."""
+
+    st.write("### Impression Window")
+    window_col, lag_col, max_col = st.columns(3, gap="small")
+    window_hours = int(
+        window_col.number_input(
+            "Window Hours",
+            min_value=1,
+            max_value=8760,
+            value=int(processor_def.get("window_hours") or 168),
+            step=1,
+            key=f"{key_prefix}_frequency_window_hours",
+            help=config_help.field_help("processor.frequency_window_hours"),
+        )
+    )
+    partition_lag_hours = int(
+        lag_col.number_input(
+            "Partition Lag Hours",
+            min_value=0,
+            max_value=8760,
+            value=int(processor_def.get("partition_lag_hours") or 0),
+            step=1,
+            key=f"{key_prefix}_frequency_partition_lag_hours",
+            help=config_help.field_help("processor.frequency_partition_lag_hours"),
+        )
+    )
+    max_frequency = int(
+        max_col.number_input(
+            "Max Frequency Bucket",
+            min_value=1,
+            max_value=1000,
+            value=int(processor_def.get("max_frequency") or 7),
+            step=1,
+            key=f"{key_prefix}_frequency_max_frequency",
+            help=config_help.field_help("processor.frequency_max_frequency"),
+        )
+    )
+    column_col, granularity_col = st.columns(2, gap="small")
+    frequency_column = (
+        column_col.text_input(
+            "Number-of-impressions Column",
+            value=str(processor_def.get("frequency_column") or "ExposureBucket"),
+            key=f"{key_prefix}_frequency_column",
+            help=config_help.field_help("processor.frequency_column"),
+        ).strip()
+        or "ExposureBucket"
+    )
+    window_granularity = granularity_col.selectbox(
+        "Window Granularity",
+        list(FREQUENCY_WINDOW_GRANULARITY_OPTIONS),
+        index=builder.option_index(
+            FREQUENCY_WINDOW_GRANULARITY_OPTIONS,
+            processor_def.get("window_granularity"),
+        ),
+        key=f"{key_prefix}_frequency_window_granularity",
+        help=config_help.field_help("processor.frequency_window_granularity"),
+    )
+    if window_granularity == "daily":
+        if window_hours % 24:
+            st.warning("Daily window granularity requires Window Hours to be a multiple of 24.")
+        if partition_lag_hours:
+            st.warning("Daily window granularity requires Partition Lag Hours to be 0.")
+    st.caption(
+        f"`{frequency_column}` is derived by the processor and kept in Group By automatically. "
+        f"Bucket {max_frequency} is terminal: that impression and every later one share it."
+    )
+    return {
+        "window_hours": window_hours,
+        "partition_lag_hours": partition_lag_hours,
+        "max_frequency": max_frequency,
+        "frequency_column": frequency_column,
+        "window_granularity": window_granularity,
+    }
+
+
+def _frequency_alternative_group_by(
+    processor_def: dict[str, Any],
+    field_options: list[str],
+    key_prefix: str,
+    *,
+    columns: dict[str, str],
+    frequency_column: str,
+) -> list[str]:
     """Render the candidate-matching dimensions for frequency response."""
 
     st.write("### Selected Action Comparison")
-    raw_columns = processor_def.get("columns")
-    columns: dict[str, Any] = raw_columns if isinstance(raw_columns, dict) else {}
-    customer_column = str(columns.get("customer") or "CustomerID")
-    interaction_column = str(columns.get("interaction") or "InteractionID")
-    placement_column = str(columns.get("placement") or "Placement")
+    customer_column = columns.get("customer") or "CustomerID"
+    interaction_column = columns.get("interaction") or "InteractionID"
+    placement_column = columns.get("placement") or "Placement"
     configured = builder.string_list(processor_def.get("alternative_group_by"))
     current = (
         configured if processor_def.get("alternative_group_by") is not None else [placement_column]
     )
-    frequency_column = str(processor_def.get("frequency_column") or "ExposureBucket")
     reserved = {
         "Day",
         "pipeline_run_id",
@@ -383,7 +615,124 @@ def _frequency_response_fields(
         key=f"{key_prefix}_alternative_group_by",
         help=config_help.field_help("processor.alternative_group_by"),
     )
-    return {"alternative_group_by": builder.dedupe([str(value).strip() for value in selected])}
+    return builder.dedupe([str(value).strip() for value in selected])
+
+
+def _frequency_execution_fields(
+    processor_def: dict[str, Any],
+    key_prefix: str,
+) -> dict[str, Any]:
+    """Render checkpoint execution settings and the optional customer subsample."""
+
+    st.write("### Execution")
+    raw_checkpoint = processor_def.get("checkpoint")
+    configured: dict[str, Any] = raw_checkpoint if isinstance(raw_checkpoint, dict) else {}
+    mode_col, shards_col = st.columns(2, gap="small")
+    mode = mode_col.selectbox(
+        "Checkpoint Mode",
+        list(FREQUENCY_CHECKPOINT_MODE_OPTIONS),
+        index=builder.option_index(FREQUENCY_CHECKPOINT_MODE_OPTIONS, configured.get("mode")),
+        format_func=lambda value: FREQUENCY_CHECKPOINT_MODE_LABELS[value],
+        key=f"{key_prefix}_frequency_checkpoint_mode",
+        help=config_help.field_help("processor.frequency_checkpoint_mode"),
+    )
+    shards = int(
+        shards_col.number_input(
+            "Shards",
+            min_value=1,
+            max_value=4096,
+            value=int(configured.get("shards") or 64),
+            step=1,
+            key=f"{key_prefix}_frequency_checkpoint_shards",
+            help=config_help.field_help("processor.frequency_checkpoint_shards"),
+        )
+    )
+    retention_col, threads_col, memory_col = st.columns(3, gap="small")
+    retention_days = int(
+        retention_col.number_input(
+            "Retention Days (0 = automatic)",
+            min_value=0,
+            max_value=3650,
+            value=int(configured.get("retention_days") or 0),
+            step=1,
+            key=f"{key_prefix}_frequency_checkpoint_retention_days",
+            help=config_help.field_help("processor.frequency_checkpoint_retention_days"),
+        )
+    )
+    threads = int(
+        threads_col.number_input(
+            "DuckDB Threads (0 = automatic)",
+            min_value=0,
+            max_value=256,
+            value=int(configured.get("threads") or 0),
+            step=1,
+            key=f"{key_prefix}_frequency_checkpoint_threads",
+            help=config_help.field_help("processor.frequency_checkpoint_threads"),
+        )
+    )
+    memory_limit = memory_col.text_input(
+        "DuckDB Memory Limit",
+        value=str(configured.get("memory_limit") or ""),
+        placeholder="4GB",
+        key=f"{key_prefix}_frequency_checkpoint_memory_limit",
+        help=config_help.field_help("processor.frequency_checkpoint_memory_limit"),
+    ).strip()
+    checkpoint: dict[str, Any] = {"mode": mode, "shards": shards}
+    if retention_days:
+        checkpoint["retention_days"] = retention_days
+    if threads:
+        checkpoint["threads"] = threads
+    if memory_limit:
+        checkpoint["memory_limit"] = memory_limit
+    if mode == "source_scan":
+        st.caption(
+            "Source scan rereads bounded source history for every target day; shards, "
+            "retention, and the DuckDB tuning fields apply to the rolling checkpoint only."
+        )
+    settings: dict[str, Any] = {"checkpoint": checkpoint}
+    sample = _frequency_customer_sample(processor_def, key_prefix)
+    if sample is not None:
+        settings["customer_sample"] = sample
+    return settings
+
+
+def _frequency_customer_sample(
+    processor_def: dict[str, Any],
+    key_prefix: str,
+) -> dict[str, Any] | None:
+    """Render the optional deterministic customer subsample."""
+
+    raw_sample = processor_def.get("customer_sample")
+    configured: dict[str, Any] = raw_sample if isinstance(raw_sample, dict) else {}
+    enabled = st.checkbox(
+        "Sample customers",
+        value=bool(configured),
+        key=f"{key_prefix}_frequency_customer_sample_enabled",
+        help=config_help.field_help("processor.frequency_customer_sample"),
+    )
+    if not enabled:
+        return None
+    fraction = float(
+        st.number_input(
+            "Sampled Fraction",
+            min_value=FREQUENCY_SAMPLE_STEP,
+            max_value=1.0,
+            value=float(configured.get("fraction") or 1.0),
+            step=FREQUENCY_SAMPLE_STEP,
+            format="%.6f",
+            key=f"{key_prefix}_frequency_customer_sample_fraction",
+            help=config_help.field_help("processor.frequency_customer_sample_fraction"),
+        )
+    )
+    # The model requires an exact multiple of one residue in the fixed modulus,
+    # so snap the widget's float to the nearest residue rather than forwarding
+    # accumulated step error.
+    residues = max(1, round(fraction * model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS))
+    st.caption(
+        "Ratio metrics stay sample estimates; absolute totals represent the sample "
+        "and may be scaled by 1 / fraction."
+    )
+    return {"fraction": residues / model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS}
 
 
 def _subject_field(

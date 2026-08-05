@@ -213,6 +213,112 @@ FIELD_HELP: dict[str, str] = {
         "from the published aggregate Group By.",
         "Placement",
     ),
+    "processor.frequency_customer": _tip(
+        "Field identifying the customer whose prior impressions are counted.", "CustomerID"
+    ),
+    "processor.frequency_interaction": _tip(
+        "Field identifying one decision. Ranked alternatives are never compared across "
+        "interactions.",
+        "InteractionID",
+    ),
+    "processor.frequency_action": _tip(
+        "Field identifying the offered action, used for contact identity and impression "
+        "counting.",
+        "ActionID",
+    ),
+    "processor.frequency_placement": _tip(
+        "Field identifying where the action was shown; part of contact identity.", "Placement"
+    ),
+    "processor.frequency_rank": _tip(
+        "Integer arbitration rank. Rank 1 is the served action; lower ranks supply the "
+        "selected rank-2 alternative.",
+        "Rank",
+    ),
+    "processor.frequency_outcome": _tip(
+        "Categorical field classified by the positive, exposure, and candidate value lists.",
+        "Outcome",
+    ),
+    "processor.frequency_propensity": _tip(
+        "Numeric response probability. The selected rank-2 action's value becomes the "
+        "opportunity-cost estimate.",
+        "Propensity",
+    ),
+    "processor.frequency_priority": _tip(
+        "Optional arbitration priority. It is a ranking score, never a probability, and "
+        "publishes the three arbitration diagnostic states when bound.",
+        "Priority",
+    ),
+    "processor.frequency_positive_values": _tip(
+        "Outcome values that count as a positive response. A positive always counts as an "
+        "exposure too. Matching is exact and case-sensitive.",
+        "Clicked",
+    ),
+    "processor.frequency_exposure_values": _tip(
+        "Outcome values that mean the action was shown. Repeated rows for one contact "
+        "collapse, and a positive outcome wins.",
+        "Impression, Clicked",
+    ),
+    "processor.frequency_candidate_values": _tip(
+        "Outcome values kept as eligible ranked alternatives, including actions that were "
+        "arbitrated but never shown.",
+        "Pending, Impression, Clicked",
+    ),
+    "processor.frequency_window_hours": _tip(
+        "Length of the trailing window that counts prior impressions of the same action, "
+        "evaluated as a strict interval ending at the decision time.",
+        "168",
+    ),
+    "processor.frequency_partition_lag_hours": _tip(
+        "Extra input-planning allowance for sources whose partition timestamp trails the "
+        "decision timestamp. It does not widen the semantic window.",
+        "24",
+    ),
+    "processor.frequency_max_frequency": _tip(
+        "Terminal bucket. That impression and every later one are stored under this value.",
+        "7",
+    ),
+    "processor.frequency_column": _tip(
+        "Name of the derived number-of-impressions dimension. It is added to Group By "
+        "automatically and must not exist in the source.",
+        "ExposureBucket",
+    ),
+    "processor.frequency_window_granularity": _tip(
+        "Exact evaluates the window at second precision; daily counts calendar days and "
+        "requires whole-day hours with no partition lag.",
+        "exact",
+    ),
+    "processor.frequency_checkpoint_mode": _tip(
+        "Source scan rereads bounded history each run. Persistent sharded retains a "
+        "rebuildable rolling checkpoint that reports never read.",
+        "persistent_sharded",
+    ),
+    "processor.frequency_checkpoint_shards": _tip(
+        "Logical customer shards in the rolling checkpoint. Routing only, not "
+        "anonymization; the operator's bound on pipeline working set.",
+        "64",
+    ),
+    "processor.frequency_checkpoint_retention_days": _tip(
+        "Source days retained in rolling state. Leave 0 to derive the minimum from the "
+        "window plus partition lag.",
+        "9",
+    ),
+    "processor.frequency_checkpoint_threads": _tip(
+        "Thread limit for the rolling DuckDB connection only. Leave 0 for the default.",
+        "4",
+    ),
+    "processor.frequency_checkpoint_memory_limit": _tip(
+        "Absolute memory limit for the rolling DuckDB connection, never a percentage. "
+        "Leave empty for the default.",
+        "4GB",
+    ),
+    "processor.frequency_customer_sample": _tip(
+        "Evaluate a deterministic customer subsample. Every row of a sampled customer is "
+        "kept so contact history stays complete."
+    ),
+    "processor.frequency_customer_sample_fraction": _tip(
+        "Share of customers evaluated, as an exact multiple of one millionth.",
+        "0.125",
+    ),
     "processor.time_column": _tip(
         "Timestamp column used to assign each input row to the configured grains.",
         "OutcomeTime",
@@ -324,6 +430,10 @@ FIELD_HELP: dict[str, str] = {
     ),
     "state.derived_from": _tip(
         "Processor setting that generated this state; shown for provenance.", "score_properties"
+    ),
+    "state.explanation": _tip(
+        "What this state measures and how to read it. Canonical states are fixed by the "
+        "processor kind, so this definition is part of the published contract."
     ),
     # Dimensions and exploration.
     "dimension.common": _tip(

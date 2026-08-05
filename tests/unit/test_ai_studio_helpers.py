@@ -67,6 +67,7 @@ from valuestream.ui.pages.ai_config_studio import (
     _install_recipe_in_draft,
     _load_ai_settings_config,
     _normalize_studio_step,
+    _processor_group_by_fields,
     _processor_state_rows,
     _processor_states_from_rows,
     _rename_capitalize_mapping,
@@ -2010,6 +2011,54 @@ def test_processor_editor_state_rows_preserve_kind_specific_extras() -> None:
         "source_column": "CustomerID",
         "lg_k": 12,
     }
+
+
+@pytest.mark.unit
+def test_frequency_response_state_editor_returns_the_canonical_contract() -> None:
+    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+
+    app = AppTest.from_string(
+        """
+from valuestream.ui.pages import ai_config_studio
+
+states, valid = ai_config_studio._processor_state_editor(
+    {"states": {"Legacy": {"type": "count"}}},
+    "frequency_response",
+    {"columns": {"customer": "CustomerID", "priority": "Priority"}},
+    key_prefix="studio_frequency",
+)
+import streamlit as st
+st.session_state["result"] = (states, valid)
+"""
+    ).run()
+
+    assert not app.exception
+    states, valid = app.session_state["result"]
+    # The draft's own states are ignored: this kind publishes a fixed contract.
+    assert valid is True
+    assert states == model.frequency_response_state_definitions(priority=True)
+    assert not app.get("data_editor")
+
+
+@pytest.mark.unit
+def test_frequency_response_group_by_follows_the_derived_column() -> None:
+    renamed = _processor_group_by_fields(
+        {"frequency_column": "ExposureBucket"},
+        "frequency_response",
+        {"frequency_column": "Impressions"},
+        ["Day", "ExposureBucket", "Channel"],
+    )
+    other_kind = _processor_group_by_fields(
+        {"frequency_column": "ExposureBucket"},
+        "binary_outcome",
+        {},
+        ["Day", "Channel"],
+    )
+
+    # The model requires the derived column in group_by, and Group By is edited
+    # before the kind form can rename it.
+    assert renamed == ["Day", "Channel", "Impressions"]
+    assert other_kind == ["Day", "Channel"]
 
 
 @pytest.mark.unit

@@ -66,7 +66,7 @@ def test_registry_constructs_frequency_response_processor() -> None:
             "positive_values": ["Clicked"],
             "exposure_values": ["Impression"],
             "candidate_values": ["Pending"],
-            "states": {"Contacts": {"type": "count"}},
+            "states": {"Responses": {"type": "count"}},
         }
     )
 

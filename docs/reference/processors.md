@@ -1013,16 +1013,31 @@ processors:
       - ActionID
       - ExposureBucket
     states:
-      Contacts:                    {type: count}
-      Clicks:                      {type: count, source_column: ClickedContact}
-      ComparableContacts:         {type: count, source_column: ComparableContact}
-      ComparableClicks:           {type: count, source_column: ComparableClick}
-      RunnerAvailable:            {type: count, source_column: RunnerAvailable}
-      RunnerPropensitySum:        {type: value_sum, source_column: RunnerPropensity}
-      PriorityComparableContacts: {type: count, source_column: PriorityComparableContact}
-      FocalPriorityComparableSum: {type: value_sum, source_column: FocalPriorityComparable}
+      Responses:                   {type: count}
+      Positives:                   {type: count, source_column: ClickedContact}
+      ComparableResponses:         {type: count, source_column: ComparableContact}
+      ComparablePositives:         {type: count, source_column: ComparableClick}
+      RunnerAvailable:             {type: count, source_column: RunnerAvailable}
+      RunnerPropensitySum:         {type: value_sum, source_column: RunnerPropensity}
+      PriorityComparableContacts:  {type: count, source_column: PriorityComparableContact}
+      FocalPriorityComparableSum:  {type: value_sum, source_column: FocalPriorityComparable}
       RunnerPriorityComparableSum: {type: value_sum, source_column: RunnerPriorityComparable}
 ```
+
+These states are **canonical**: they are not authored per catalog. The processor
+derives a fixed set of virtual columns, so the state set that can be built from
+them is fixed too, and both configuration editors render the table above
+read-only with a plain-language definition of each state. A catalog may publish a
+subset, but never a different name, type, or binding; anything else fails
+validation. The three arbitration diagnostics
+(`PriorityComparableContacts`, `FocalPriorityComparableSum`,
+`RunnerPriorityComparableSum`) exist only when `columns.priority` is bound —
+without it the processor emits all-null priority columns, so those states would
+publish constant zeros.
+
+Three of the states are denominators — `Responses`, `ComparableResponses`, and
+`PriorityComparableContacts` — and a ratio is meaningful only when its numerator
+comes from the same family.
 
 The processor accepts only `count` and `value_sum` states. `Day` and the
 configured number-of-impressions column (`frequency_column` in YAML) are
@@ -1165,12 +1180,12 @@ crossing one of its boundaries.
 All stored states merge by addition. Canonical formulas include:
 
 ```text
-selected rank-1 action CTR = Clicks / Contacts
-comparable selected rank-1 action CTR = ComparableClicks / ComparableContacts
-selected rank-2 action expected CTR = RunnerPropensitySum / ComparableContacts
-selected rank-2 action coverage = ComparableContacts / Contacts
-response opportunity    = (ComparableClicks - RunnerPropensitySum)
-                          / ComparableContacts
+selected rank-1 action CTR = Positives / Responses
+comparable selected rank-1 action CTR = ComparablePositives / ComparableResponses
+selected rank-2 action expected CTR = RunnerPropensitySum / ComparableResponses
+selected rank-2 action coverage = ComparableResponses / Responses
+response opportunity    = (ComparablePositives - RunnerPropensitySum)
+                          / ComparableResponses
 priority opportunity gap = (FocalPriorityComparableSum
                             - RunnerPriorityComparableSum)
                            / PriorityComparableContacts

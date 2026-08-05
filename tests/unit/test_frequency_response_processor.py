@@ -41,17 +41,17 @@ def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
         "exposure_values": ["Impression"],
         "candidate_values": ["Pending"],
         "states": {
-            "Contacts": {"type": "count"},
-            "Clicks": {"type": "count", "source_column": "ClickedContact"},
-            "ComparableContacts": {
+            "Responses": {"type": "count"},
+            "Positives": {"type": "count", "source_column": "ClickedContact"},
+            "ComparableResponses": {
                 "type": "count",
                 "source_column": "ComparableContact",
             },
-            "ComparableClicks": {
+            "ComparablePositives": {
                 "type": "count",
                 "source_column": "ComparableClick",
             },
-            "RunnerAvailableContacts": {
+            "RunnerAvailable": {
                 "type": "count",
                 "source_column": "RunnerAvailable",
             },
@@ -63,11 +63,11 @@ def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
                 "type": "count",
                 "source_column": "PriorityComparableContact",
             },
-            "FocalPrioritySum": {
+            "FocalPriorityComparableSum": {
                 "type": "value_sum",
                 "source_column": "FocalPriorityComparable",
             },
-            "RunnerPrioritySum": {
+            "RunnerPriorityComparableSum": {
                 "type": "value_sum",
                 "source_column": "RunnerPriorityComparable",
             },
@@ -212,6 +212,80 @@ def test_model_requires_daily_bucketed_mergeable_states() -> None:
                     "source_column": "__valuestream_runner_propensity",
                 }
             }
+        )
+
+
+@pytest.mark.unit
+def test_states_are_canonical_for_the_kind() -> None:
+    priority_states = model.frequency_response_state_definitions(priority=True)
+    plain_states = model.frequency_response_state_definitions(priority=False)
+
+    assert list(plain_states) == [
+        "Responses",
+        "Positives",
+        "ComparableResponses",
+        "ComparablePositives",
+        "RunnerAvailable",
+        "RunnerPropensitySum",
+    ]
+    assert set(priority_states) - set(plain_states) == {
+        "PriorityComparableContacts",
+        "FocalPriorityComparableSum",
+        "RunnerPriorityComparableSum",
+    }
+    assert priority_states["Responses"] == {"type": "count"}
+    assert set(_config(states=priority_states).states) == set(priority_states)
+    # A catalog may publish part of the contract without publishing all of it.
+    assert set(_config(states={"Responses": {"type": "count"}}).states) == {"Responses"}
+
+    with pytest.raises(ValidationError, match=r"'Contacts' was renamed to 'Responses'"):
+        _config(states={"Contacts": {"type": "count"}})
+    with pytest.raises(ValidationError, match="not part of the kind's canonical contract"):
+        _config(states={"MyOwnCounter": {"type": "count"}})
+    with pytest.raises(ValidationError, match=r"'Positives' is canonical"):
+        _config(states={"Positives": {"type": "count", "source_column": "ComparableClick"}})
+    with pytest.raises(ValidationError, match=r"'RunnerPropensitySum' is canonical"):
+        _config(
+            states={
+                "RunnerPropensitySum": {"type": "count", "source_column": "RunnerPropensity"}
+            }
+        )
+    with pytest.raises(ValidationError, match=r"'Positives' is canonical"):
+        _config(
+            states={
+                "Positives": {
+                    "type": "count",
+                    "source_column": "ClickedContact",
+                    "distinct": True,
+                }
+            }
+        )
+
+
+@pytest.mark.unit
+def test_priority_states_require_the_priority_binding() -> None:
+    columns = {
+        "customer": "CustomerID",
+        "interaction": "InteractionID",
+        "action": "ActionID",
+        "placement": "Placement",
+        "rank": "Rank",
+        "outcome": "Outcome",
+        "propensity": "Propensity",
+    }
+
+    unbound = _config(
+        columns=columns,
+        states=model.frequency_response_state_definitions(priority=False),
+    )
+    assert unbound.columns.priority is None
+
+    # Without the binding the processor emits all-null priority columns, so
+    # these states could only ever publish zeros.
+    with pytest.raises(ValidationError, match=r"requires the optional columns\.priority"):
+        _config(
+            columns=columns,
+            states=model.frequency_response_state_definitions(priority=True),
         )
 
 
@@ -381,7 +455,7 @@ def test_strict_168_hour_boundary_is_excluded_and_frequency_is_capped_at_seven()
 
     out = _aggregate(rows)
 
-    assert out.select("ExposureBucket", "Contacts").rows() == [(1, 1), (7, 1)]
+    assert out.select("ExposureBucket", "Responses").rows() == [(1, 1), (7, 1)]
 
 
 @pytest.mark.unit
@@ -509,7 +583,7 @@ def test_clicked_wins_contact_normalization_and_history_overlap_is_not_targeted(
 
     out = _aggregate(rows)
 
-    assert out.select("Contacts", "Clicks").row(0) == (1, 1)
+    assert out.select("Responses", "Positives").row(0) == (1, 1)
 
 
 @pytest.mark.unit
@@ -706,11 +780,11 @@ def test_selected_rank_two_uses_configured_group_and_fallback(
     row = (
         _aggregate(rows, _config(alternative_group_by=alternative_group_by))
         .select(
-            pl.col("Contacts").sum(),
-            pl.col("RunnerAvailableContacts").sum(),
-            pl.col("ComparableContacts").sum(),
+            pl.col("Responses").sum(),
+            pl.col("RunnerAvailable").sum(),
+            pl.col("ComparableResponses").sum(),
             pl.col("RunnerPropensitySum").sum(),
-            pl.col("RunnerPrioritySum").sum(),
+            pl.col("RunnerPriorityComparableSum").sum(),
         )
         .row(0)
     )
@@ -747,7 +821,7 @@ def test_alternative_group_never_crosses_interactions(
     ]
 
     result = _aggregate(rows, _config(alternative_group_by=alternative_group_by)).select(
-        pl.col("ComparableContacts").sum(),
+        pl.col("ComparableResponses").sum(),
         pl.col("RunnerPropensitySum").sum(),
     )
 
@@ -793,7 +867,7 @@ def test_multiple_alternative_group_fields_constrain_runner_selection() -> None:
         rows,
         _config(alternative_group_by=["Placement", "ComparisonGroup"]),
     ).select(
-        pl.col("ComparableContacts").sum(),
+        pl.col("ComparableResponses").sum(),
         pl.col("RunnerPropensitySum").sum(),
     )
 
@@ -831,7 +905,7 @@ def test_null_alternative_group_values_compare_as_one_group() -> None:
     result = _aggregate(
         rows,
         _config(alternative_group_by=["Placement", "ComparisonGroup"]),
-    ).select(pl.col("ComparableContacts").sum())
+    ).select(pl.col("ComparableResponses").sum())
 
     assert result.item() == 2
 
@@ -865,9 +939,9 @@ def test_placement_scoped_alternative_does_not_cross_placements() -> None:
     ]
 
     result = _aggregate(rows).select(
-        pl.col("Contacts").sum(),
-        pl.col("RunnerAvailableContacts").sum(),
-        pl.col("ComparableContacts").sum(),
+        pl.col("Responses").sum(),
+        pl.col("RunnerAvailable").sum(),
+        pl.col("ComparableResponses").sum(),
         pl.col("RunnerPropensitySum").sum(),
     )
 
@@ -893,9 +967,9 @@ def test_alternative_group_never_crosses_customers() -> None:
     ]
 
     result = _aggregate(rows).select(
-        pl.col("Contacts").sum(),
-        pl.col("RunnerAvailableContacts").sum(),
-        pl.col("ComparableContacts").sum(),
+        pl.col("Responses").sum(),
+        pl.col("RunnerAvailable").sum(),
+        pl.col("ComparableResponses").sum(),
         pl.col("RunnerPropensitySum").sum(),
     )
 
@@ -928,7 +1002,7 @@ def test_frequency_keys_isolate_customer_action_and_placement() -> None:
 
     out = _aggregate(rows)
 
-    assert out.select("ExposureBucket", "Contacts").rows() == [(1, 3), (2, 1)]
+    assert out.select("ExposureBucket", "Responses").rows() == [(1, 3), (2, 1)]
 
 
 @pytest.mark.unit
@@ -966,11 +1040,11 @@ def test_comparable_clicks_and_propensity_share_the_same_eligible_population() -
     row = (
         _aggregate(rows)
         .select(
-            pl.col("Contacts").sum(),
-            pl.col("Clicks").sum(),
-            pl.col("RunnerAvailableContacts").sum(),
-            pl.col("ComparableContacts").sum(),
-            pl.col("ComparableClicks").sum(),
+            pl.col("Responses").sum(),
+            pl.col("Positives").sum(),
+            pl.col("RunnerAvailable").sum(),
+            pl.col("ComparableResponses").sum(),
+            pl.col("ComparablePositives").sum(),
             pl.col("RunnerPropensitySum").sum(),
         )
         .row(0)
@@ -1133,7 +1207,7 @@ def test_customer_sampling_is_deterministic_and_keeps_whole_customers() -> None:
     assert again.equals(prepared)
 
     aggregated = processor.chunk_aggregate(frame.lazy(), _ctx())
-    assert aggregated["Contacts"].sum() == len(expected)
+    assert aggregated["Responses"].sum() == len(expected)
 
 
 @pytest.mark.unit
@@ -1201,7 +1275,7 @@ def test_daily_bucket_adds_prior_full_day_counters_to_exact_intraday_sequence() 
 
     # Prior counters: 2024-01-02 and 2024-01-03 => 2; intra-day sequence adds 1.
     assert aggregated["ExposureBucket"].to_list() == [3]
-    assert aggregated["Contacts"].sum() == 1
+    assert aggregated["Responses"].sum() == 1
 
 
 @pytest.mark.unit
@@ -1223,7 +1297,7 @@ def test_daily_intrachunk_sequence_resets_for_each_utc_decision_day() -> None:
 
     aggregated = _aggregate(rows, _config(window_granularity="daily"))
 
-    assert aggregated.select("Day", "ExposureBucket", "Contacts").rows() == [
+    assert aggregated.select("Day", "ExposureBucket", "Responses").rows() == [
         (dt.date(2024, 1, 7), 1, 1),
         (dt.date(2024, 1, 8), 1, 1),
     ]
@@ -1256,4 +1330,4 @@ def test_daily_and_exact_agree_on_midnight_aligned_exposures() -> None:
     daily = _aggregate(rows, _config(window_granularity="daily"))
 
     assert exact.equals(daily)
-    assert exact.filter(pl.col("Contacts") > 0)["ExposureBucket"].sort().to_list() == [1, 3]
+    assert exact.filter(pl.col("Responses") > 0)["ExposureBucket"].sort().to_list() == [1, 3]

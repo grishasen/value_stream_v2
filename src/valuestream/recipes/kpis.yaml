@@ -761,7 +761,7 @@ recipes:
         description: Exact frequency-response state containing clicks for the selected rank-1 action.
         source: state
         state_types: [ count ]
-        preferred_names: [ Clicks ]
+        preferred_names: [ Positives ]
         selection: automatic
         require_preferred: true
       - role: contacts
@@ -769,7 +769,7 @@ recipes:
         description: Exact frequency-response state containing all contact proxies for the selected rank-1 action.
         source: state
         state_types: [ count ]
-        preferred_names: [ Contacts ]
+        preferred_names: [ Responses ]
         selection: automatic
         require_preferred: true
         different_from: clicks
@@ -777,7 +777,7 @@ recipes:
     metric:
       processor: ${processor_id}
       kind: formula
-      description: Clicks for the selected rank-1 action divided by its Impression-proxy contacts.
+      description: Positives for the selected rank-1 action divided by its Impression-proxy contacts.
       display:
         label: Selected rank-1 action CTR by number of impressions
         unit: percent
@@ -788,10 +788,10 @@ recipes:
         num: { col: "${clicks}" }
         den: { col: "${contacts}" }
     method:
-      calculation: Clicks / Contacts
+      calculation: Positives / Responses
       accuracy: approximate
       algorithm: Safe division over mergeable fixed-window frequency-response counts.
-      caveat: This all-contact rate is not directly comparable with a selected rank-2 action expectation unless their populations match. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: This all-contact rate is not directly comparable with a selected rank-2 action expectation unless their populations match. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Responses count configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: line, placement: content, x: ExposureBucket }
 
   - id: contact_policy.frequency_comparable_ctr
@@ -810,7 +810,7 @@ recipes:
         description: Exact selected rank-1 action click count restricted to contacts with a comparable selected rank-2 action.
         source: state
         state_types: [ count ]
-        preferred_names: [ ComparableClicks ]
+        preferred_names: [ ComparablePositives ]
         selection: automatic
         require_preferred: true
       - role: comparable_contacts
@@ -818,7 +818,7 @@ recipes:
         description: Exact selected rank-1 action contact count with a recorded comparable selected rank-2 action Propensity.
         source: state
         state_types: [ count ]
-        preferred_names: [ ComparableContacts ]
+        preferred_names: [ ComparableResponses ]
         selection: automatic
         require_preferred: true
         different_from: comparable_clicks
@@ -837,10 +837,10 @@ recipes:
         num: { col: "${comparable_clicks}" }
         den: { col: "${comparable_contacts}" }
     method:
-      calculation: ComparableClicks / ComparableContacts
+      calculation: ComparablePositives / ComparableResponses
       accuracy: approximate
       algorithm: Safe division over matched, mergeable frequency-response counts.
-      caveat: ComparableClicks and every selected rank-2 action comparison must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: ComparablePositives and every selected rank-2 action comparison must use the same ComparableResponses denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Responses count configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: line, placement: content, x: ExposureBucket }
 
   - id: contact_policy.runner_up_expected_ctr
@@ -867,7 +867,7 @@ recipes:
         description: Exact denominator shared with the comparable selected rank-1 action response rate.
         source: state
         state_types: [ count ]
-        preferred_names: [ ComparableContacts ]
+        preferred_names: [ ComparableResponses ]
         selection: automatic
         require_preferred: true
     default_metric_id: VS_Runner_Up_Expected_CTR
@@ -885,10 +885,10 @@ recipes:
         num: { col: "${runner_propensity_sum}" }
         den: { col: "${comparable_contacts}" }
     method:
-      calculation: RunnerPropensitySum / ComparableContacts
+      calculation: RunnerPropensitySum / ComparableResponses
       accuracy: approximate
       algorithm: Safe division over a mergeable raw-Propensity sum and its matched count.
-      caveat: RunnerPropensitySum and the comparable selected rank-1 action rate must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: RunnerPropensitySum and the comparable selected rank-1 action rate must use the same ComparableResponses denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Responses count configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: line, placement: content, x: ExposureBucket }
 
   - id: contact_policy.runner_up_coverage
@@ -907,7 +907,7 @@ recipes:
         description: Exact count of selected rank-1 action contacts with a comparable selected rank-2 action Propensity.
         source: state
         state_types: [ count ]
-        preferred_names: [ ComparableContacts ]
+        preferred_names: [ ComparableResponses ]
         selection: automatic
         require_preferred: true
       - role: contacts
@@ -915,7 +915,7 @@ recipes:
         description: Exact count of all selected rank-1 action Impression-proxy contacts.
         source: state
         state_types: [ count ]
-        preferred_names: [ Contacts ]
+        preferred_names: [ Responses ]
         selection: automatic
         require_preferred: true
         different_from: comparable_contacts
@@ -934,10 +934,10 @@ recipes:
         num: { col: "${comparable_contacts}" }
         den: { col: "${contacts}" }
     method:
-      calculation: ComparableContacts / Contacts
+      calculation: ComparableResponses / Responses
       accuracy: approximate
       algorithm: Safe division over mergeable comparable and all-contact counts.
-      caveat: ComparableContacts must be a subset of Contacts, and comparable selected rank-1 action and selected rank-2 action response metrics must retain that same eligible denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: ComparableResponses must be a subset of Responses, and comparable selected rank-1 action and selected rank-2 action response metrics must retain that same eligible denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Responses count configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: kpi_card, placement: kpi_strip }
 
   - id: contact_policy.response_opportunity_margin
@@ -956,7 +956,7 @@ recipes:
         description: Exact selected rank-1 action click count restricted to contacts with a comparable selected rank-2 action.
         source: state
         state_types: [ count ]
-        preferred_names: [ ComparableClicks ]
+        preferred_names: [ ComparablePositives ]
         selection: automatic
         require_preferred: true
       - role: runner_propensity_sum
@@ -972,7 +972,7 @@ recipes:
         description: Exact denominator shared by both response contributions.
         source: state
         state_types: [ count ]
-        preferred_names: [ ComparableContacts ]
+        preferred_names: [ ComparableResponses ]
         selection: automatic
         require_preferred: true
         different_from: comparable_clicks
@@ -995,10 +995,10 @@ recipes:
             - { col: "${runner_propensity_sum}" }
         den: { col: "${comparable_contacts}" }
     method:
-      calculation: (ComparableClicks - RunnerPropensitySum) / ComparableContacts
+      calculation: (ComparablePositives - RunnerPropensitySum) / ComparableResponses
       accuracy: approximate
       algorithm: Difference of matched response contributions over one mergeable denominator.
-      caveat: ComparableClicks and RunnerPropensitySum must use the same ComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: ComparablePositives and RunnerPropensitySum must use the same ComparableResponses denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Responses count configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: bar, placement: content, x: ExposureBucket }
 
   - id: contact_policy.priority_opportunity_gap
@@ -1059,5 +1059,5 @@ recipes:
       calculation: (FocalPriorityComparableSum - RunnerPriorityComparableSum) / PriorityComparableContacts
       accuracy: approximate
       algorithm: Difference of matched arbitration sums over one mergeable denominator.
-      caveat: FocalPriorityComparableSum and RunnerPriorityComparableSum must use the same PriorityComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Contacts are configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
+      caveat: FocalPriorityComparableSum and RunnerPriorityComparableSum must use the same PriorityComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Responses count configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: bar, placement: content, x: ExposureBucket }
