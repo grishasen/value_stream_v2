@@ -4245,7 +4245,7 @@ aggregates merely because a draft references their schema.</p>
   /data/ih/2024-08-21/interaction-XYZ-20240821000000_002.json.zip
   /data/ih/2024-08-22/interaction-XYZ-20240822000000_001.json.zip
 
-group_by_filename: &#39;\d{8}(?=\d{6}_)&#39;
+group_by_filename: '\d{8}(?=\d{6}_)'
 
 Chunks:
   20240821 -&gt; [2 files]
@@ -4253,7 +4253,7 @@ Chunks:
 
 Run: 8a32fa3d-...
 
-Per chunk, for processor &#39;engagement&#39;:
+Per chunk, for processor 'engagement':
   -&gt; aggregates/ih/engagement/daily/period=2024-08/part-8a32fa3d.parquet (rows for both days)
 
 After compaction:
@@ -4261,7 +4261,7 @@ After compaction:
   -&gt; aggregates/ih/engagement/summary/period=2024-08/part-8a32fa3d.parquet
 </code></pre></div>
 <h3 id="62-metric-resolution">6.2 Metric resolution<a class="headerlink" href="#62-metric-resolution" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>User asks: tile.metric = &quot;CTR&quot;
+<div class="highlight"><pre><span></span><code>User asks: tile.metric = "CTR"
 
 Resolver:
   CTR -&gt; processor=engagement, kind=formula, expression=safe_div(Positives, Positives+Negatives)
@@ -4280,7 +4280,7 @@ Derive (formula):
 Return: rows + plan + freshness + config_hash
 </code></pre></div>
 <h3 id="63-state-catalog-snippet">6.3 State catalog snippet<a class="headerlink" href="#63-state-catalog-snippet" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>States produced by &#39;engagement&#39; processor:
+<div class="highlight"><pre><span></span><code>States produced by 'engagement' processor:
 
   Count               type=count            (sum-merge)
   Positives           type=count            (sum-merge)

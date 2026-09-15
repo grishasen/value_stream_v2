@@ -3478,8 +3478,8 @@ LazyFrame ready for processor.chunk_aggregate
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pega_ds_export</span>
-<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.zip&quot;</span>
-<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;\d{8}(?=\d{6}_)&#39;</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"**/*.zip"</span>
+<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">'\d{8}(?=\d{6}_)'</span>
 <span class="w">      </span><span class="nt">hive_partitioning</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 <span class="w">      </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">      </span><span class="nt">background</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
@@ -3487,14 +3487,14 @@ LazyFrame ready for processor.chunk_aggregate
 <h3 id="22-algorithm">2.2 Algorithm<a class="headerlink" href="#22-algorithm" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>files = sorted( glob(folder, file_pattern, recursive=true) )
 if files is empty:
-    fallback_pattern = &#39;**/*.json&#39;                   # convention
+    fallback_pattern = '**/*.json'                   # convention
     files = glob(folder, fallback_pattern, recursive=true)
-    reader.kind = &#39;pega_ds_export&#39;                   # auto-promote
+    reader.kind = 'pega_ds_export'                   # auto-promote
 
 groups = defaultdict(set)
 for f in files:
     if hive_partitioning:
-        # the path&#39;s parent (a partition directory) is the file unit
+        # the path's parent (a partition directory) is the file unit
         unit = parent(f)
     else:
         unit = f
@@ -3605,8 +3605,8 @@ same path only when a new or invalidated target needs that bounded closure.</p>
 <h3 id="34-parameters">3.4 Parameters<a class="headerlink" href="#34-parameters" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pega_ds_export</span>
-<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.zip&quot;</span>
-<span class="w">  </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;\d{8}(?=\d{6}_)&#39;</span>
+<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"**/*.zip"</span>
+<span class="w">  </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">'\d{8}(?=\d{6}_)'</span>
 <span class="w">  </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                  </span><span class="c1"># use Polars streaming engine on collect</span>
 <span class="w">  </span><span class="nt">infer_schema_length</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100000</span><span class="w">      </span><span class="c1"># optional, default 100000</span>
 <span class="w">  </span><span class="nt">archive_temp_dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/tmp/valuestream</span><span class="w">   </span><span class="c1"># optional, default OS tempdir</span>
@@ -3618,20 +3618,20 @@ same path only when a new or invalidated target needs that bounded closure.</p>
 <h3 id="41-parameters">4.1 Parameters<a class="headerlink" href="#41-parameters" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parquet</span>
-<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.parquet&quot;</span>
-<span class="w">  </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;(\d{4}-\d{2}-\d{2})&#39;</span><span class="w">   </span><span class="c1"># optional</span>
+<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"**/*.parquet"</span>
+<span class="w">  </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">'(\d{4}-\d{2}-\d{2})'</span><span class="w">   </span><span class="c1"># optional</span>
 <span class="w">  </span><span class="nt">hive_partitioning</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                    </span><span class="c1"># if directory layout uses hive partitions</span>
 <span class="w">  </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<span class="w">  </span><span class="nt">missing_columns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">insert</span><span class="w">                    </span><span class="c1"># behavior when a chunk&#39;s file lacks a known column</span>
-<span class="w">  </span><span class="nt">extra_columns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ignore</span><span class="w">                      </span><span class="c1"># behavior when a chunk&#39;s file has extra columns</span>
+<span class="w">  </span><span class="nt">missing_columns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">insert</span><span class="w">                    </span><span class="c1"># behavior when a chunk's file lacks a known column</span>
+<span class="w">  </span><span class="nt">extra_columns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ignore</span><span class="w">                      </span><span class="c1"># behavior when a chunk's file has extra columns</span>
 </code></pre></div>
 <h3 id="42-implementation">4.2 Implementation<a class="headerlink" href="#42-implementation" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>ih = pl.scan_parquet(
     files,
     cache=False,
     hive_partitioning=hive_partitioning,
-    missing_columns=&quot;insert&quot;,
-    extra_columns=&quot;ignore&quot;,
+    missing_columns="insert",
+    extra_columns="ignore",
 )
 </code></pre></div>
 <h3 id="43-notes">4.3 Notes<a class="headerlink" href="#43-notes" title="Permanent link">&para;</a></h3>
@@ -3644,8 +3644,8 @@ same path only when a new or invalidated target needs that bounded closure.</p>
 <h3 id="51-parameters">5.1 Parameters<a class="headerlink" href="#51-parameters" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
-<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.csv&quot;</span>
-<span class="w">  </span><span class="nt">separator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">              </span><span class="c1"># auto | &quot;,&quot; | &quot;;&quot; | &quot;\t&quot; | &quot;|&quot; | &quot;:&quot;</span>
+<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"**/*.csv"</span>
+<span class="w">  </span><span class="nt">separator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">auto</span><span class="w">              </span><span class="c1"># auto | "," | ";" | "\t" | "|" | ":"</span>
 <span class="w">  </span><span class="nt">infer_schema_length</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10000</span>
 <span class="w">  </span><span class="nt">try_parse_dates</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </code></pre></div>
@@ -3665,7 +3665,7 @@ same path only when a new or invalidated target needs that bounded closure.</p>
 <h2 id="6-reader-xlsx">6. Reader: <code>xlsx</code><a class="headerlink" href="#6-reader-xlsx" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">xlsx</span>
-<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.xlsx&quot;</span>
+<span class="w">  </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"**/*.xlsx"</span>
 <span class="w">  </span><span class="nt">sheet</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span><span class="w">           </span><span class="c1"># int index or sheet name</span>
 </code></pre></div>
 <h3 id="61-notes">6.1 Notes<a class="headerlink" href="#61-notes" title="Permanent link">&para;</a></h3>
@@ -3692,6 +3692,10 @@ same path only when a new or invalidated target needs that bounded closure.</p>
 <td>Column exists but has nulls</td>
 <td><code>fill_null(default)</code></td>
 </tr>
+<tr>
+<td>Default is <code>null</code></td>
+<td>Preserve an existing column unchanged; create an all-null column if absent. This keeps missing Cost distinct from a recorded zero.</td>
+</tr>
 </tbody>
 </table>
 <p>Type promotion: if the default value parses as a float, it becomes Float64; otherwise it stays a string.</p>
@@ -3704,13 +3708,13 @@ string and make downstream <code>date_diff</code> expressions invalid.</p>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">defaults</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">ModelControlGroup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Test</span>
-<span class="w">      </span><span class="nt">PlacementType</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
-<span class="w">      </span><span class="nt">ExperimentName</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
-<span class="w">      </span><span class="nt">ExperimentGroup</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">PlacementType</span><span class="p">:</span><span class="w"> </span><span class="s">"N/A"</span>
+<span class="w">      </span><span class="nt">ExperimentName</span><span class="p">:</span><span class="w"> </span><span class="s">"N/A"</span>
+<span class="w">      </span><span class="nt">ExperimentGroup</span><span class="p">:</span><span class="w"> </span><span class="s">"N/A"</span>
 <span class="w">      </span><span class="nt">FinalPropensity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
 <span class="w">      </span><span class="nt">Priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-10</span>
 <span class="w">      </span><span class="nt">Revenue</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">      </span><span class="nt">ConversionEventID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">ConversionEventID</span><span class="p">:</span><span class="w"> </span><span class="s">"N/A"</span>
 </code></pre></div>
 <hr />
 <h2 id="8-transforms-catalog">8. Transforms catalog<a class="headerlink" href="#8-transforms-catalog" title="Permanent link">&para;</a></h2>
@@ -3727,7 +3731,7 @@ schemas) pass through unchanged, so the same source configuration works for
 string-timestamp previews and typed runtime reads.</p>
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parse_datetime</span>
 <span class="w">  </span><span class="nt">columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">OutcomeTime</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DecisionTime</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z&quot;</span><span class="w">   </span><span class="c1"># strptime format</span>
+<span class="w">  </span><span class="nt">format</span><span class="p">:</span><span class="w"> </span><span class="s">"%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z"</span><span class="w">   </span><span class="c1"># strptime format</span>
 <span class="w">  </span><span class="nt">utc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">                         </span><span class="c1"># convert to UTC</span>
 </code></pre></div>
 <h3 id="83-derive_calendar">8.3 <code>derive_calendar</code><a class="headerlink" href="#83-derive_calendar" title="Permanent link">&para;</a></h3>
@@ -3735,14 +3739,14 @@ string-timestamp previews and typed runtime reads.</p>
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">derive_calendar</span>
 <span class="w">  </span><span class="nt">from</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
 <span class="w">  </span><span class="nt">outputs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">]</span><span class="w">    </span><span class="c1"># any subset</span>
-<span class="w">  </span><span class="nt">week_iso</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">                          </span><span class="c1"># also compute &quot;Week&quot;</span>
+<span class="w">  </span><span class="nt">week_iso</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">                          </span><span class="c1"># also compute "Week"</span>
 </code></pre></div>
 <p>Output columns: <code>Day</code> (date), <code>Month</code> (string <code>YYYY-MM</code>), <code>Year</code> (Int16), <code>Quarter</code> (string <code>YYYY_Qn</code>), optional <code>Week</code> (string <code>YYYY-Www</code>).</p>
 <h3 id="84-derive_action_id">8.4 <code>derive_action_id</code><a class="headerlink" href="#84-derive_action_id" title="Permanent link">&para;</a></h3>
 <p>Concatenates business-key parts into a single <code>ActionID</code>. Mirrors Pega's <code>Issue/Group/Name</code>.</p>
 <div class="highlight"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">derive_action_id</span>
 <span class="w">  </span><span class="nt">parts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">sep</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/&quot;</span>
+<span class="w">  </span><span class="nt">sep</span><span class="p">:</span><span class="w"> </span><span class="s">"/"</span>
 <span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ActionID</span>
 </code></pre></div>
 <h3 id="85-derive_column">8.5 <code>derive_column</code><a class="headerlink" href="#85-derive_column" title="Permanent link">&para;</a></h3>
@@ -3849,10 +3853,10 @@ required.</p>
 <hr />
 <h2 id="11-logging">11. Logging<a class="headerlink" href="#11-logging" title="Permanent link">&para;</a></h2>
 <p>For each chunk, the reader emits structured log lines:</p>
-<div class="highlight"><pre><span></span><code>{&quot;event&quot;:&quot;chunk_start&quot;, &quot;source&quot;:&quot;ih&quot;, &quot;chunk_id&quot;:&quot;20240821&quot;, &quot;files&quot;:2}
-{&quot;event&quot;:&quot;reader_done&quot;,  &quot;source&quot;:&quot;ih&quot;, &quot;chunk_id&quot;:&quot;20240821&quot;, &quot;rows_in&quot;:12_345_678, &quot;ms&quot;:4321}
-{&quot;event&quot;:&quot;transforms_done&quot;,&quot;source&quot;:&quot;ih&quot;,&quot;chunk_id&quot;:&quot;20240821&quot;, &quot;rows_kept&quot;:12_300_000, &quot;ms&quot;:250}
-{&quot;event&quot;:&quot;chunk_done&quot;,   &quot;source&quot;:&quot;ih&quot;, &quot;chunk_id&quot;:&quot;20240821&quot;, &quot;ms&quot;:12_500}
+<div class="highlight"><pre><span></span><code>{"event":"chunk_start", "source":"ih", "chunk_id":"20240821", "files":2}
+{"event":"reader_done",  "source":"ih", "chunk_id":"20240821", "rows_in":12_345_678, "ms":4321}
+{"event":"transforms_done","source":"ih","chunk_id":"20240821", "rows_kept":12_300_000, "ms":250}
+{"event":"chunk_done",   "source":"ih", "chunk_id":"20240821", "ms":12_500}
 </code></pre></div>
 <p>These are correlated by <code>pipeline_run_id</code> for trace assembly.</p>
 <hr />
@@ -3861,18 +3865,18 @@ required.</p>
 <div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Reader</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
     <span class="n">kind</span><span class="p">:</span> <span class="nb">str</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">discover</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">folder</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]]:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return chunk_id -&gt; list of file paths.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">"""Return chunk_id -&gt; list of file paths."""</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">read_chunk</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">files</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">],</span> <span class="n">params</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">LazyFrame</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a Polars LazyFrame for one chunk.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">"""Return a Polars LazyFrame for one chunk."""</span>
 </code></pre></div>
 <p>Plug it into the registry:</p>
-<div class="highlight"><pre><span></span><code><span class="n">register_reader</span><span class="p">(</span><span class="s2">&quot;oracle_table&quot;</span><span class="p">,</span> <span class="n">OracleTableReader</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">register_reader</span><span class="p">(</span><span class="s2">"oracle_table"</span><span class="p">,</span> <span class="n">OracleTableReader</span><span class="p">)</span>
 </code></pre></div>
 <p>The new kind is then usable from YAML:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">reader</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">oracle_table</span>
 <span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${env.ORACLE_DSN}</span>
-<span class="w">  </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SELECT</span><span class="nv"> </span><span class="s">...</span><span class="nv"> </span><span class="s">WHERE</span><span class="nv"> </span><span class="s">created_at</span><span class="nv"> </span><span class="s">&gt;=</span><span class="nv"> </span><span class="s">:since&quot;</span>
+<span class="w">  </span><span class="nt">query</span><span class="p">:</span><span class="w"> </span><span class="s">"SELECT</span><span class="nv"> </span><span class="s">...</span><span class="nv"> </span><span class="s">WHERE</span><span class="nv"> </span><span class="s">created_at</span><span class="nv"> </span><span class="s">&gt;=</span><span class="nv"> </span><span class="s">:since"</span>
 <span class="w">  </span><span class="nt">group_by_value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">created_at_date</span>
 </code></pre></div>
 <p>Built-in readers ship in <code>valuestream.readers.builtin</code>; community readers may live in plugins.</p>
@@ -3883,53 +3887,53 @@ required.</p>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ih</span>
 <span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pega_ds_export</span>
-<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.zip&quot;</span>
-<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;\d{8}(?=\d{6}_)&#39;</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"**/*.zip"</span>
+<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">'\d{8}(?=\d{6}_)'</span>
 <span class="w">      </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">schema</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">timestamp_column</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">OutcomeTime</span>
 <span class="w">      </span><span class="nt">natural_key</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">InteractionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ActionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Rank</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">]</span>
 <span class="w">    </span><span class="nt">transforms</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">rename_capitalize</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">parse_datetime</span><span class="p p-Indicator">,</span><span class="nt"> columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">OutcomeTime</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DecisionTime</span><span class="p p-Indicator">],</span><span class="nt"> format</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">parse_datetime</span><span class="p p-Indicator">,</span><span class="nt"> columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">OutcomeTime</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">DecisionTime</span><span class="p p-Indicator">],</span><span class="nt"> format</span><span class="p">:</span><span class="w"> </span><span class="s">"%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z"</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_calendar</span><span class="p p-Indicator">,</span><span class="nt"> from</span><span class="p">:</span><span class="w"> </span><span class="nv">OutcomeTime</span><span class="p p-Indicator">,</span><span class="nt"> outputs</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Day</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Month</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Year</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Quarter</span><span class="p p-Indicator">]}</span>
-<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_action_id</span><span class="p p-Indicator">,</span><span class="nt"> parts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">],</span><span class="nt"> sep</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;/&quot;</span><span class="p p-Indicator">,</span><span class="nt"> output</span><span class="p">:</span><span class="w"> </span><span class="nv">ActionID</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_action_id</span><span class="p p-Indicator">,</span><span class="nt"> parts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Issue</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Group</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">],</span><span class="nt"> sep</span><span class="p">:</span><span class="w"> </span><span class="s">"/"</span><span class="p p-Indicator">,</span><span class="nt"> output</span><span class="p">:</span><span class="w"> </span><span class="nv">ActionID</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_column</span><span class="p p-Indicator">,</span><span class="nt"> output</span><span class="p">:</span><span class="w"> </span><span class="nv">ResponseTime</span><span class="p p-Indicator">,</span><span class="nt"> expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">date_diff</span><span class="p p-Indicator">,</span><span class="nt"> unit</span><span class="p">:</span><span class="w"> </span><span class="nv">seconds</span><span class="p p-Indicator">,</span><span class="nt"> end</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">OutcomeTime</span><span class="p p-Indicator">},</span><span class="nt"> start</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">DecisionTime</span><span class="p p-Indicator">}}}</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">filter</span><span class="p p-Indicator">,</span><span class="nt"> expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">not_null</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Channel</span><span class="p p-Indicator">}}</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">coalesce</span><span class="p p-Indicator">,</span><span class="nt"> target</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="nt"> from</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">]}</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">dedup</span><span class="p p-Indicator">,</span><span class="nt"> keys</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">InteractionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ActionID</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Rank</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">]}</span>
 <span class="w">    </span><span class="nt">defaults</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">ModelControlGroup</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Test</span>
-<span class="w">      </span><span class="nt">PlacementType</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
-<span class="w">      </span><span class="nt">ExperimentName</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
-<span class="w">      </span><span class="nt">ExperimentGroup</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">PlacementType</span><span class="p">:</span><span class="w"> </span><span class="s">"N/A"</span>
+<span class="w">      </span><span class="nt">ExperimentName</span><span class="p">:</span><span class="w"> </span><span class="s">"N/A"</span>
+<span class="w">      </span><span class="nt">ExperimentGroup</span><span class="p">:</span><span class="w"> </span><span class="s">"N/A"</span>
 <span class="w">      </span><span class="nt">FinalPropensity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
 <span class="w">      </span><span class="nt">Priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1e-10</span>
 <span class="w">      </span><span class="nt">Revenue</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
-<span class="w">      </span><span class="nt">ConversionEventID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">ConversionEventID</span><span class="p">:</span><span class="w"> </span><span class="s">"N/A"</span>
 </code></pre></div>
 <h3 id="132-product-holdings-json-exports">13.2 Product Holdings (JSON exports)<a class="headerlink" href="#132-product-holdings-json-exports" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">holdings</span>
 <span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pega_ds_export</span>
-<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.json&quot;</span>
-<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;(.*)&#39;</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"**/*.json"</span>
+<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">'(.*)'</span>
 <span class="w">      </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
 <span class="w">    </span><span class="nt">transforms</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">rename_capitalize</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">parse_datetime</span><span class="p p-Indicator">,</span><span class="nt"> columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">PurchasedDate</span><span class="p p-Indicator">],</span><span class="nt"> format</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">parse_datetime</span><span class="p p-Indicator">,</span><span class="nt"> columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">PurchasedDate</span><span class="p p-Indicator">],</span><span class="nt"> format</span><span class="p">:</span><span class="w"> </span><span class="s">"%Y%m%dT%H%M%S%.3f</span><span class="nv"> </span><span class="s">%Z"</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">derive_column</span><span class="p p-Indicator">,</span><span class="nt"> output</span><span class="p">:</span><span class="w"> </span><span class="nv">PurchasedDateTime</span><span class="p p-Indicator">,</span><span class="nt"> expression</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">PurchasedDate</span><span class="p p-Indicator">}}</span>
 <span class="w">    </span><span class="nt">defaults</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">Channel</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;N/A&quot;</span>
+<span class="w">      </span><span class="nt">Channel</span><span class="p">:</span><span class="w"> </span><span class="s">"N/A"</span>
 </code></pre></div>
 <h3 id="133-internal-csv">13.3 Internal CSV<a class="headerlink" href="#133-internal-csv" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="nt">sources</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">subscriptions</span>
 <span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
-<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.csv&quot;</span>
-<span class="w">      </span><span class="nt">separator</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;,&quot;</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"**/*.csv"</span>
+<span class="w">      </span><span class="nt">separator</span><span class="p">:</span><span class="w"> </span><span class="s">","</span>
 <span class="w">      </span><span class="nt">try_parse_dates</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">transforms</span><span class="p">:</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">cast</span><span class="p p-Indicator">,</span><span class="nt"> columns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">monthly_recurring</span><span class="p">:</span><span class="w"> </span><span class="nv">Float64</span><span class="p p-Indicator">,</span><span class="nt"> plan_id</span><span class="p">:</span><span class="w"> </span><span class="nv">Int32</span><span class="p p-Indicator">}}</span>
@@ -3940,8 +3944,8 @@ required.</p>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">events</span>
 <span class="w">    </span><span class="nt">reader</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">parquet</span>
-<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;**/*.parquet&quot;</span>
-<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;(\d{4}-\d{2}-\d{2})&#39;</span>
+<span class="w">      </span><span class="nt">file_pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"**/*.parquet"</span>
+<span class="w">      </span><span class="nt">group_by_filename</span><span class="p">:</span><span class="w"> </span><span class="s">'(\d{4}-\d{2}-\d{2})'</span>
 <span class="w">      </span><span class="nt">hive_partitioning</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">      </span><span class="nt">streaming</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">    </span><span class="nt">transforms</span><span class="p">:</span>

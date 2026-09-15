@@ -2761,6 +2761,11 @@
 <li><code>state.&lt;name&gt;.where</code> — conditional state (snapshot/funnel processors).</li>
 </ul>
 <p>The DSL is a small AST encoded as JSON / YAML dicts. It is <strong>never</strong> Python and is <strong>never</strong> <code>eval</code>-ed. The evaluator translates each AST node into a <code>polars.Expr</code> at load time.</p>
+<p>Use <code>{lit: null}</code> for an unavailable value, for example a marketing-cost total
+with incomplete cost data. Serialization preserves the <code>lit</code> key even when
+optional null fields are omitted elsewhere in the catalog, so this expression
+remains valid after saving and reloading. An explicit null differs from a
+recorded zero; <code>safe_div</code> returns zero for a zero denominator.</p>
 <hr />
 <h2 id="1-design-goals">1. Design goals<a class="headerlink" href="#1-design-goals" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2774,57 +2779,57 @@
 <h2 id="2-grammar-bnf">2. Grammar (BNF)<a class="headerlink" href="#2-grammar-bnf" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>expr  <span class="o">::=</span> atom | unary | nary | predicate | conditional | datetime
 
-atom  <span class="o">::=</span> { &quot;col&quot;: <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span> }
-        | { &quot;lit&quot;: <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span> }
-        | { &quot;param&quot;: <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span> }                 # workspace-level parameter
+atom  <span class="o">::=</span> { "col": <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span> }
+        | { "lit": <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span> }
+        | { "param": <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span> }                 # workspace-level parameter
 
 scalar <span class="o">::=</span> number | string | bool | null | array<span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span>
 
-unary <span class="o">::=</span> { &quot;op&quot;: &quot;not&quot;,   &quot;arg&quot;: expr }
-        | { &quot;op&quot;: &quot;neg&quot;,   &quot;arg&quot;: expr }
-        | { &quot;op&quot;: &quot;abs&quot;,   &quot;arg&quot;: expr }
-        | { &quot;op&quot;: &quot;sqrt&quot;,  &quot;arg&quot;: expr }
-        | { &quot;op&quot;: &quot;log&quot;,   &quot;arg&quot;: expr,  &quot;base&quot;?: number }
-        | { &quot;op&quot;: &quot;exp&quot;,   &quot;arg&quot;: expr }
-        | { &quot;op&quot;: &quot;ceil&quot;   &quot;arg&quot;: expr }
-        | { &quot;op&quot;: &quot;floor&quot;, &quot;arg&quot;: expr }
-        | { &quot;op&quot;: &quot;round&quot;, &quot;arg&quot;: expr,  &quot;ndigits&quot;?: int }
-        | { &quot;op&quot;: &quot;cast&quot;,  &quot;arg&quot;: expr,  &quot;dtype&quot;: <span class="p">&lt;</span><span class="nc">dtype</span><span class="p">&gt;</span> }
+unary <span class="o">::=</span> { "op": "not",   "arg": expr }
+        | { "op": "neg",   "arg": expr }
+        | { "op": "abs",   "arg": expr }
+        | { "op": "sqrt",  "arg": expr }
+        | { "op": "log",   "arg": expr,  "base"?: number }
+        | { "op": "exp",   "arg": expr }
+        | { "op": "ceil"   "arg": expr }
+        | { "op": "floor", "arg": expr }
+        | { "op": "round", "arg": expr,  "ndigits"?: int }
+        | { "op": "cast",  "arg": expr,  "dtype": <span class="p">&lt;</span><span class="nc">dtype</span><span class="p">&gt;</span> }
 
-nary  <span class="o">::=</span> { &quot;op&quot;: &quot;and&quot;|&quot;or&quot;, &quot;args&quot;: [ expr, expr, ... ] }
-        | { &quot;op&quot;: &quot;add&quot;|&quot;sub&quot;|&quot;mul&quot;|&quot;div&quot;, &quot;args&quot;: [ expr, expr, ... ] }
-        | { &quot;op&quot;: &quot;safe_div&quot;, &quot;num&quot;: expr, &quot;den&quot;: expr }
-        | { &quot;op&quot;: &quot;concat&quot;,   &quot;args&quot;: [ expr, ... ], &quot;sep&quot;?: string }
-        | { &quot;op&quot;: &quot;least&quot;|&quot;greatest&quot;, &quot;args&quot;: [ expr, ... ] }
-        | { &quot;op&quot;: &quot;coalesce&quot;, &quot;args&quot;: [ expr, ... ] }
+nary  <span class="o">::=</span> { "op": "and"|"or", "args": [ expr, expr, ... ] }
+        | { "op": "add"|"sub"|"mul"|"div", "args": [ expr, expr, ... ] }
+        | { "op": "safe_div", "num": expr, "den": expr }
+        | { "op": "concat",   "args": [ expr, ... ], "sep"?: string }
+        | { "op": "least"|"greatest", "args": [ expr, ... ] }
+        | { "op": "coalesce", "args": [ expr, ... ] }
 
-predicate <span class="o">::=</span> { &quot;op&quot;: &quot;eq&quot;|&quot;ne&quot;|&quot;lt&quot;|&quot;le&quot;|&quot;gt&quot;|&quot;ge&quot;,
-                &quot;column&quot;: <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, &quot;value&quot;: <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span> }
-            | { &quot;op&quot;: &quot;eq&quot;|&quot;ne&quot;|&quot;lt&quot;|&quot;le&quot;|&quot;gt&quot;|&quot;ge&quot;,
-                &quot;args&quot;: [ expr, expr ] }
-            | { &quot;op&quot;: &quot;in&quot;|&quot;not_in&quot;, &quot;column&quot;: <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, &quot;values&quot;: [ <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span>, ... ] }
-            | { &quot;op&quot;: &quot;between&quot;,     &quot;column&quot;: <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, &quot;low&quot;: <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span>, &quot;high&quot;: <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span> }
-            | { &quot;op&quot;: &quot;is_null&quot;|&quot;not_null&quot;,   &quot;column&quot;: <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span> }
-            | { &quot;op&quot;: &quot;matches&quot;, &quot;column&quot;: <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, &quot;pattern&quot;: <span class="p">&lt;</span><span class="nc">regex</span><span class="p">&gt;</span> }
-            | { &quot;op&quot;: &quot;starts_with&quot;|&quot;ends_with&quot;, &quot;column&quot;: <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, &quot;value&quot;: <span class="p">&lt;</span><span class="nc">string</span><span class="p">&gt;</span> }
+predicate <span class="o">::=</span> { "op": "eq"|"ne"|"lt"|"le"|"gt"|"ge",
+                "column": <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, "value": <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span> }
+            | { "op": "eq"|"ne"|"lt"|"le"|"gt"|"ge",
+                "args": [ expr, expr ] }
+            | { "op": "in"|"not_in", "column": <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, "values": [ <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span>, ... ] }
+            | { "op": "between",     "column": <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, "low": <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span>, "high": <span class="p">&lt;</span><span class="nc">scalar</span><span class="p">&gt;</span> }
+            | { "op": "is_null"|"not_null",   "column": <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span> }
+            | { "op": "matches", "column": <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, "pattern": <span class="p">&lt;</span><span class="nc">regex</span><span class="p">&gt;</span> }
+            | { "op": "starts_with"|"ends_with", "column": <span class="p">&lt;</span><span class="nc">ident</span><span class="p">&gt;</span>, "value": <span class="p">&lt;</span><span class="nc">string</span><span class="p">&gt;</span> }
 
-conditional <span class="o">::=</span> { &quot;op&quot;: &quot;case&quot;,
-                  &quot;when&quot;: [ { &quot;cond&quot;: expr, &quot;then&quot;: expr }, ... ],
-                  &quot;else&quot;: expr }
-              | { &quot;op&quot;: &quot;when_then&quot;,
-                  &quot;cond&quot;: expr, &quot;then&quot;: expr, &quot;else&quot;: expr }    # binary form
+conditional <span class="o">::=</span> { "op": "case",
+                  "when": [ { "cond": expr, "then": expr }, ... ],
+                  "else": expr }
+              | { "op": "when_then",
+                  "cond": expr, "then": expr, "else": expr }    # binary form
 
-datetime <span class="o">::=</span> { &quot;op&quot;: &quot;date_trunc&quot;, &quot;unit&quot;: &quot;day&quot;|&quot;month&quot;|&quot;quarter&quot;|&quot;year&quot;|&quot;hour&quot;|&quot;week_iso&quot;,
-               &quot;arg&quot;: expr }
-           | { &quot;op&quot;: &quot;date_diff&quot;,  &quot;unit&quot;: &quot;seconds&quot;|&quot;minutes&quot;|&quot;hours&quot;|&quot;days&quot;|&quot;months&quot;|&quot;years&quot;,
-               &quot;end&quot;: expr, &quot;start&quot;: expr }
-           | { &quot;op&quot;: &quot;date_part&quot;,  &quot;unit&quot;: &quot;year&quot;|&quot;month&quot;|&quot;day&quot;|&quot;quarter&quot;|&quot;hour&quot;|&quot;weekday&quot;,
-               &quot;arg&quot;: expr }
-           | { &quot;op&quot;: &quot;now&quot; }
-           | { &quot;op&quot;: &quot;strftime&quot;, &quot;arg&quot;: expr, &quot;format&quot;: <span class="p">&lt;</span><span class="nc">string</span><span class="p">&gt;</span> }
-           | { &quot;op&quot;: &quot;strptime&quot;, &quot;arg&quot;: expr, &quot;format&quot;: <span class="p">&lt;</span><span class="nc">string</span><span class="p">&gt;</span> }
+datetime <span class="o">::=</span> { "op": "date_trunc", "unit": "day"|"month"|"quarter"|"year"|"hour"|"week_iso",
+               "arg": expr }
+           | { "op": "date_diff",  "unit": "seconds"|"minutes"|"hours"|"days"|"months"|"years",
+               "end": expr, "start": expr }
+           | { "op": "date_part",  "unit": "year"|"month"|"day"|"quarter"|"hour"|"weekday",
+               "arg": expr }
+           | { "op": "now" }
+           | { "op": "strftime", "arg": expr, "format": <span class="p">&lt;</span><span class="nc">string</span><span class="p">&gt;</span> }
+           | { "op": "strptime", "arg": expr, "format": <span class="p">&lt;</span><span class="nc">string</span><span class="p">&gt;</span> }
 
-dtype <span class="o">::=</span> &quot;Int8&quot;|&quot;Int16&quot;|&quot;Int32&quot;|&quot;Int64&quot;|&quot;Float32&quot;|&quot;Float64&quot;|&quot;String&quot;|&quot;Date&quot;|&quot;Datetime&quot;|&quot;Boolean&quot;
+dtype <span class="o">::=</span> "Int8"|"Int16"|"Int32"|"Int64"|"Float32"|"Float64"|"String"|"Date"|"Datetime"|"Boolean"
 ident <span class="o">::=</span> /[A-Za-z_][A-Za-z0-9_]*/
 </code></pre></div>
 <hr />
@@ -3185,7 +3190,7 @@ ident <span class="o">::=</span> /[A-Za-z_][A-Za-z0-9_]*/
 <span class="w">  </span><span class="nt">expression</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">case</span>
 <span class="w">    </span><span class="nt">when</span><span class="p">:</span>
-<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">cond</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">ne</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">cond</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">ne</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">""</span><span class="p p-Indicator">}</span>
 <span class="w">        </span><span class="nt">then</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">}</span>
 <span class="w">    </span><span class="nt">else</span><span class="p">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">}</span>
 </code></pre></div>
@@ -3250,7 +3255,7 @@ details</strong> disclosure.</p>
 <p>Direct Polars mode accepts the guarded expression subset documented by the
 translator. It must return a <code>polars.Expr</code> and only the <code>pl</code> namespace is
 available:</p>
-<div class="highlight"><pre><span></span><code><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;Revenue&quot;</span><span class="p">)</span> <span class="o">-</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">&quot;Cost&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">"Revenue"</span><span class="p">)</span> <span class="o">-</span> <span class="n">pl</span><span class="o">.</span><span class="n">col</span><span class="p">(</span><span class="s2">"Cost"</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h2 id="6-validation-rules">6. Validation rules<a class="headerlink" href="#6-validation-rules" title="Permanent link">&para;</a></h2>
@@ -3281,10 +3286,10 @@ available:</p>
 <h2 id="8-error-messages">8. Error messages<a class="headerlink" href="#8-error-messages" title="Permanent link">&para;</a></h2>
 <p>A validation error includes:</p>
 <div class="highlight"><pre><span></span><code>ERROR validating  metrics.CTR.expression
-       at .num.col   = &quot;Positives&quot;      (OK — type Int64)
+       at .num.col   = "Positives"      (OK — type Int64)
        at .den.op    = add
-            .args[0].col = &quot;Positives&quot;  (OK — type Int64)
-            .args[1].col = &quot;negatives&quot;  (FAIL — column not found in processor &#39;engagement&#39; state)
+            .args[0].col = "Positives"  (OK — type Int64)
+            .args[1].col = "negatives"  (FAIL — column not found in processor 'engagement' state)
 </code></pre></div>
 <p>The error is structured (machine-parseable) and shown the same way in CLI and Builder UI. The read-only HTTP API translates the same governed validation failures to 400 responses.</p>
 <hr />

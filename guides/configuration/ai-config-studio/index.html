@@ -3121,13 +3121,13 @@ hashes, aggregate-only persistence, lineage, and the five deterministic Chat
 starters. No checked-in example data or catalog is modified.</p>
 <p>Run the fast release gate with:</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-q<span class="w"> </span>tests/integration/test_ai_studio_release_journey.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-m<span class="w"> </span><span class="s2">&quot;e2e and not slow&quot;</span>
+<span class="w">  </span>-m<span class="w"> </span><span class="s2">"e2e and not slow"</span>
 </code></pre></div>
 <p>The separate slow/read-only qualification checks the canonical full fixture's
 exact path, SHA-256, row count, and outcome totals, and confirms its size and
 modification time are unchanged:</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-q<span class="w"> </span>tests/integration/test_ai_studio_release_journey.py<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-m<span class="w"> </span><span class="s2">&quot;e2e and slow&quot;</span>
+<span class="w">  </span>-m<span class="w"> </span><span class="s2">"e2e and slow"</span>
 </code></pre></div>
 <h2 id="provider-failure-receipts">Provider failure receipts<a class="headerlink" href="#provider-failure-receipts" title="Permanent link">&para;</a></h2>
 <p>Provider failures are normalized before they reach logs or interactive

@@ -3858,24 +3858,24 @@
 
     <span class="c1"># 1. Output schema announcement</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">schema</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">grain</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pyarrow</span><span class="o">.</span><span class="n">Schema</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Returns the Parquet schema for one grain.</span>
+<span class="w">        </span><span class="sd">"""Returns the Parquet schema for one grain.</span>
 <span class="sd">        Includes group-by columns, time-grain column,</span>
-<span class="sd">        all state columns, and the 5 provenance columns.&quot;&quot;&quot;</span>
+<span class="sd">        all state columns, and the 5 provenance columns."""</span>
 
     <span class="c1"># 2. Per-chunk aggregation</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">chunk_aggregate</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
-        <span class="n">lazy_frame</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">LazyFrame</span><span class="p">,</span>        <span class="c1"># output of the source&#39;s transforms</span>
+        <span class="n">lazy_frame</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">LazyFrame</span><span class="p">,</span>        <span class="c1"># output of the source's transforms</span>
         <span class="n">chunk_ctx</span><span class="p">:</span> <span class="n">ChunkCtx</span><span class="p">,</span>             <span class="c1"># chunk_id, run_id, period, config_hash</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>                   <span class="c1"># at the FINEST grain</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Reduces the chunk&#39;s rows to one row per (group_by tuple, time_grain).</span>
-<span class="sd">        Output schema must match self.schema(finest_grain).&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">"""Reduces the chunk's rows to one row per (group_by tuple, time_grain).</span>
+<span class="sd">        Output schema must match self.schema(finest_grain)."""</span>
 
     <span class="c1"># 3. State merging across rows</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">merge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Group by (group_by columns + time_grain) and apply the per-state-type</span>
+<span class="w">        </span><span class="sd">"""Group by (group_by columns + time_grain) and apply the per-state-type</span>
 <span class="sd">        merge rule. Used by compaction and by the query layer to fold</span>
-<span class="sd">        multiple chunks&#39; partials into a single answer.&quot;&quot;&quot;</span>
+<span class="sd">        multiple chunks' partials into a single answer."""</span>
 
     <span class="c1"># 4. Base-grain projection/merge</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">compact</span><span class="p">(</span>
@@ -3883,12 +3883,12 @@
         <span class="n">frame</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>             <span class="c1"># chunk aggregate</span>
         <span class="n">target_grain</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>               <span class="c1"># configured base grain</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Project or merge the chunk aggregate to the one stored base grain.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">"""Project or merge the chunk aggregate to the one stored base grain."""</span>
 
     <span class="c1"># 5. Optional: derived helpers</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">derive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="p">:</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pl</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Some processors expose derived helpers (e.g. RFM segmentation);</span>
-<span class="sd">        most leave this to the metric DSL.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">"""Some processors expose derived helpers (e.g. RFM segmentation);</span>
+<span class="sd">        most leave this to the metric DSL."""</span>
 </code></pre></div>
 <p>The default <code>merge</code> and <code>compact</code> implementations are generic — they iterate
 over <code>self.states</code> and dispatch to the per-state-type merge rule. Ingestion
@@ -4102,7 +4102,7 @@ they are paired implementation inputs for curve and calibration metrics.</p>
 | &lt;configured CPC/HLL/Theta/Top-K sketch states&gt; | BLOB   |
 | pipeline_run_id    | UUID   |
 | chunk_id           | STRING |
-| period             | STRING |  -- &quot;YYYY-MM&quot;
+| period             | STRING |  -- "YYYY-MM"
 | created_at         | TIMESTAMP |
 | config_hash        | STRING |
 +--------------------+--------+
@@ -4122,7 +4122,7 @@ F = F.filter(F[outcome.column] in (positive_values + negative_values))
 F = F.with_columns(
     Outcome_Binary = (F[outcome.column] in positive_values).cast(Int8))
 
-# Step 4. Deduplicate per (interaction key) keeping the most &quot;positive&quot; row.
+# Step 4. Deduplicate per (interaction key) keeping the most "positive" row.
 if dedup_keys is set:
     F = F.filter(
         F.Outcome_Binary == max(F.Outcome_Binary).over(dedup_keys)
@@ -4133,18 +4133,18 @@ if touchpoint is set:
     T = (F.filter(Outcome_Binary == 1)
             .group_by([touchpoint.customer_column, touchpoint.event_column])
             .agg(pl.len().alias(touchpoint.output_state)))
-    F = F.join(T, on=[touchpoint.customer_column, touchpoint.event_column], how=&quot;left&quot;)
+    F = F.join(T, on=[touchpoint.customer_column, touchpoint.event_column], how="left")
     F = F.with_columns(F[touchpoint.output_state].fill_null(0))
 
 # Step 6. Group-by and aggregate.
 group_keys = group_by + (variant_column or []) + finest_time_grain_columns
 agg_exprs = [
-    pl.len().alias(&quot;Count&quot;),
-    pl.sum(&quot;Outcome_Binary&quot;).alias(&quot;Positives&quot;),
+    pl.len().alias("Count"),
+    pl.sum("Outcome_Binary").alias("Positives"),
     *[ getattr(pl.col(va.column), va.agg)().alias(va.alias) for va in value_aggs ],
     *[ pl.sum(touchpoint.output_state).alias(touchpoint.output_state) ] if touchpoint set,
     *[ build_sketch(pl.col(s.source_column), s).alias(name)
-       for name, s in states.items() if s.type in (&quot;cpc&quot;, &quot;hll&quot;, &quot;theta&quot;, &quot;topk&quot;) ],
+       for name, s in states.items() if s.type in ("cpc", "hll", "theta", "topk") ],
 ]
 G = F.group_by(group_keys).agg(agg_exprs)
 
@@ -4176,8 +4176,8 @@ OUTPUT M
 <h3 id="37-compact-algorithm">3.7 compact algorithm<a class="headerlink" href="#37-compact-algorithm" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>INPUT finer_grain frame F, target_grain G
 
-if target_grain == &#39;monthly&#39;:   drop_columns = [&#39;Day&#39;]
-if target_grain == &#39;summary&#39;:   drop_columns = [&#39;Day&#39;, &#39;Month&#39;, &#39;Year&#39;, &#39;Quarter&#39;]
+if target_grain == 'monthly':   drop_columns = ['Day']
+if target_grain == 'summary':   drop_columns = ['Day', 'Month', 'Year', 'Quarter']
 
 F2 = F.drop(drop_columns)
 OUTPUT merge(F2)
@@ -4326,34 +4326,34 @@ group_keys = group_by + finest_time_grain_columns
 
 agg_exprs = []
 for p in existing_props:
-    agg_exprs.append(pl.col(p).count().alias(f&quot;{p}_Count&quot;))
+    agg_exprs.append(pl.col(p).count().alias(f"{p}_Count"))
 for p in numeric_props:
     agg_exprs += [
-        pl.col(p).sum().alias(f&quot;{p}_Sum&quot;),
-        pl.col(p).mean().alias(f&quot;{p}_Mean&quot;),
-        pl.col(p).var().alias(f&quot;{p}_Var&quot;),
-        pl.col(p).min().alias(f&quot;{p}_Min&quot;),
-        pl.col(p).max().alias(f&quot;{p}_Max&quot;),
+        pl.col(p).sum().alias(f"{p}_Sum"),
+        pl.col(p).mean().alias(f"{p}_Mean"),
+        pl.col(p).var().alias(f"{p}_Var"),
+        pl.col(p).min().alias(f"{p}_Min"),
+        pl.col(p).max().alias(f"{p}_Max"),
     ]
 
 # t-digest state via map_groups (one struct field per numeric property,
 # then unnest into top-level columns to avoid nested schema growth).
-if config.quantile_engine == &quot;tdigest&quot;:
+if config.quantile_engine == "tdigest":
     agg_exprs.append(map_groups_build_tdigests(numeric_props, k=500)
-                       .alias(&quot;__tdigests&quot;))
+                       .alias("__tdigests"))
 
 G = F.group_by(group_keys).agg(agg_exprs)
-if &quot;__tdigests&quot; in G.columns:
-    G = G.unnest(&quot;__tdigests&quot;)
+if "__tdigests" in G.columns:
+    G = G.unnest("__tdigests")
 
 OUTPUT G
 </code></pre></div>
 <p><code>map_groups_build_tdigests(props, k)</code> builds one t-digest per numeric property by feeding the property's values into a <code>datasketches.tdigest_double(k)</code>. See reference/algorithms.md §2.4 for the exact procedure.</p>
 <h3 id="46-merge-algorithm-pooled-variance">4.6 merge algorithm — pooled variance<a class="headerlink" href="#46-merge-algorithm-pooled-variance" title="Permanent link">&para;</a></h3>
 <p>The non-trivial part of merging is variance. <code>merge</code> follows the Welford pooled formula. For each numeric property <code>p</code>:</p>
-<div class="highlight"><pre><span></span><code>let n_i  = group i&#39;s &lt;p&gt;_Count
-let m_i  = group i&#39;s &lt;p&gt;_Mean
-let v_i  = group i&#39;s &lt;p&gt;_Var
+<div class="highlight"><pre><span></span><code>let n_i  = group i's &lt;p&gt;_Count
+let m_i  = group i's &lt;p&gt;_Mean
+let v_i  = group i's &lt;p&gt;_Var
 
 global_n    = sum(n_i)
 global_mean = sum(n_i * m_i) / global_n        # weighted_mean
@@ -4470,14 +4470,14 @@ F = F.with_columns(Outcome_Boolean = (F[outcome.column] in pos))
 F = F.filter(any(Outcome_Boolean) over group_keys)             # drop groups with zero positives
 F = F.filter(F.Outcome_Boolean == max(F.Outcome_Boolean).over(dedup_keys))
 G = F.group_by(group_keys).agg(
-    pl.len().alias(&quot;Count&quot;),
-    map_groups(personalization, [CustomerID, Name]).alias(&quot;personalization&quot;),
-    map_groups(novelty, [CustomerID, InteractionID, Name]).alias(&quot;novelty&quot;),
-    build_tdigest(F[states.Propensity_tdigest_positives.source_column] where Outcome_Boolean is true).alias(&quot;Propensity_tdigest_positives&quot;),
-    build_tdigest(F[states.Propensity_tdigest_negatives.source_column] where Outcome_Boolean is false).alias(&quot;Propensity_tdigest_negatives&quot;),
-    build_tdigest(F[states.FinalPropensity_tdigest_positives.source_column] where Outcome_Boolean is true).alias(&quot;FinalPropensity_tdigest_positives&quot;),
-    build_tdigest(F[states.FinalPropensity_tdigest_negatives.source_column] where Outcome_Boolean is false).alias(&quot;FinalPropensity_tdigest_negatives&quot;),
-    build_cpc(F[CustomerID]).alias(&quot;UniqueCustomers_cpc&quot;),
+    pl.len().alias("Count"),
+    map_groups(personalization, [CustomerID, Name]).alias("personalization"),
+    map_groups(novelty, [CustomerID, InteractionID, Name]).alias("novelty"),
+    build_tdigest(F[states.Propensity_tdigest_positives.source_column] where Outcome_Boolean is true).alias("Propensity_tdigest_positives"),
+    build_tdigest(F[states.Propensity_tdigest_negatives.source_column] where Outcome_Boolean is false).alias("Propensity_tdigest_negatives"),
+    build_tdigest(F[states.FinalPropensity_tdigest_positives.source_column] where Outcome_Boolean is true).alias("FinalPropensity_tdigest_positives"),
+    build_tdigest(F[states.FinalPropensity_tdigest_negatives.source_column] where Outcome_Boolean is false).alias("FinalPropensity_tdigest_negatives"),
+    build_cpc(F[CustomerID]).alias("UniqueCustomers_cpc"),
 )
 </code></pre></div>
 <p><code>personalization</code> and <code>novelty</code> formulas live in reference/algorithms.md §5; their inputs are <code>(CustomerID, ActionName)</code> and <code>(CustomerID, InteractionID, ActionName)</code> respectively.</p>
@@ -4590,12 +4590,12 @@ F = F.with_columns(F[monetary_col].cast(Float64))
 # Calendar derivation specific to lifecycle (per row).
 F = F.with_columns(
     Day      = F[purchase_date_col].dt.date(),
-    Month    = F[purchase_date_col].dt.strftime(&quot;%Y-%m&quot;),
+    Month    = F[purchase_date_col].dt.strftime("%Y-%m"),
     Year     = F[purchase_date_col].dt.year().cast(String),
-    Quarter  = concat(Year, &quot;_Q&quot;, F[purchase_date_col].dt.quarter().cast(String)),
+    Quarter  = concat(Year, "_Q", F[purchase_date_col].dt.quarter().cast(String)),
 )
 
-group_keys = group_by + [customer_id_col, &quot;Year&quot;, &quot;Quarter&quot;]   # entity-level keys
+group_keys = group_by + [customer_id_col, "Year", "Quarter"]   # entity-level keys
 
 agg = [
     build_state(state_id, typed_state_spec)
@@ -4632,11 +4632,11 @@ observation_end = max(F.MaxPurchasedDate)
 group_keys      = group_by + [customer_id]    # entity-level
 
 S = F.group_by(group_keys).agg([
-    pl.n_unique(customer_id).alias(&quot;customers_count&quot;),
-    pl.sum(unique_holdings).alias(&quot;unique_holdings&quot;),
-    pl.sum(lifetime_value).alias(&quot;lifetime_value&quot;),
-    pl.min(MinPurchasedDate).alias(&quot;MinPurchasedDate&quot;),
-    pl.max(MaxPurchasedDate).alias(&quot;MaxPurchasedDate&quot;),
+    pl.n_unique(customer_id).alias("customers_count"),
+    pl.sum(unique_holdings).alias("unique_holdings"),
+    pl.sum(lifetime_value).alias("lifetime_value"),
+    pl.min(MinPurchasedDate).alias("MinPurchasedDate"),
+    pl.max(MaxPurchasedDate).alias("MaxPurchasedDate"),
 ])
 
 S = S.with_columns(
@@ -4651,8 +4651,8 @@ S = S.with_columns(
 )
 
 # Quartile labeling.
-labels    = [&quot;1&quot;,&quot;2&quot;,&quot;3&quot;,&quot;4&quot;]
-labels_r  = [&quot;4&quot;,&quot;3&quot;,&quot;2&quot;,&quot;1&quot;]    # reversed for recency
+labels    = ["1","2","3","4"]
+labels_r  = ["4","3","2","1"]    # reversed for recency
 
 S = S.with_columns(
     f_quartile = qcut(frequency,      4, labels  ),
@@ -4662,7 +4662,7 @@ S = S.with_columns(
 
 S = S.with_columns(
     rfm_seg     = concat(r_quartile, f_quartile, m_quartile),
-    rfm_segment = lookup_segment(rfm_seg, rfm_segments_dict, default=&quot;Unknown&quot;),
+    rfm_segment = lookup_segment(rfm_seg, rfm_segments_dict, default="Unknown"),
     rfm_score   = mean(r_quartile.to_decimal, f_quartile.to_decimal, m_quartile.to_decimal),
 )
 
@@ -4694,8 +4694,8 @@ OUTPUT S
 </code></pre></div>
 <h3 id="73-chunk_aggregate-algorithm">7.3 chunk_aggregate algorithm<a class="headerlink" href="#73-chunk_aggregate-algorithm" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>G = F.group_by(group_by + finest_time_grain_columns).agg(
-    build_cpc(F[source_column]).alias(&quot;ActiveUsers_cpc&quot;),
-    build_theta(F[source_column]).alias(&quot;ActiveUsers_theta&quot;),
+    build_cpc(F[source_column]).alias("ActiveUsers_cpc"),
+    build_theta(F[source_column]).alias("ActiveUsers_theta"),
 )
 </code></pre></div>
 <h3 id="74-merge-set-algebra">7.4 merge — set algebra<a class="headerlink" href="#74-merge-set-algebra" title="Permanent link">&para;</a></h3>
@@ -4766,7 +4766,7 @@ monthly period label must not advance the window anchor to September 30.</p>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">Impression</span><span class="p p-Indicator">,</span><span class="nt"> when</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">eq</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">Impression</span><span class="p p-Indicator">}}</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">Clicked</span><span class="p p-Indicator">,</span><span class="nt">    when</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">eq</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">Clicked</span><span class="p p-Indicator">}}</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">Conversion</span><span class="p p-Indicator">,</span><span class="nt"> when</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">eq</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">Outcome</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">Conversion</span><span class="p p-Indicator">}}</span>
-<span class="w">    </span><span class="nt">entity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CustomerID</span><span class="w">                </span><span class="c1"># optional; if set, also produces &quot;&lt;stage&gt;_Customers_cpc&quot;</span>
+<span class="w">    </span><span class="nt">entity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CustomerID</span><span class="w">                </span><span class="c1"># optional; if set, also produces "&lt;stage&gt;_Customers_cpc"</span>
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span><span class="w">                           </span><span class="c1"># optional unscoped recipe states</span>
 <span class="w">      </span><span class="nt">Region_cpc</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">cpc</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">Region</span><span class="p p-Indicator">,</span><span class="nt"> lg_k</span><span class="p">:</span><span class="w"> </span><span class="nv">11</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">Category_topk</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">topk</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">Category</span><span class="p p-Indicator">,</span><span class="nt"> lg_max_map_size</span><span class="p">:</span><span class="w"> </span><span class="nv">10</span><span class="p p-Indicator">}</span>
@@ -4774,10 +4774,10 @@ monthly period label must not advance the window anchor to September 30.</p>
 <h3 id="83-chunk_aggregate">8.3 chunk_aggregate<a class="headerlink" href="#83-chunk_aggregate" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>F = lazy_frame
 G = F.group_by(group_by + finest_time_grain_columns).agg([
-    pl.sum(when(stage1.when).then(1).otherwise(0)).alias(&quot;Impression_Count&quot;),
-    pl.sum(when(stage2.when).then(1).otherwise(0)).alias(&quot;Clicked_Count&quot;),
-    pl.sum(when(stage3.when).then(1).otherwise(0)).alias(&quot;Conversion_Count&quot;),
-    *[ build_cpc(when(s.when).then(F[entity]).otherwise(NULL)).alias(f&quot;{s.name}_Customers_cpc&quot;)
+    pl.sum(when(stage1.when).then(1).otherwise(0)).alias("Impression_Count"),
+    pl.sum(when(stage2.when).then(1).otherwise(0)).alias("Clicked_Count"),
+    pl.sum(when(stage3.when).then(1).otherwise(0)).alias("Conversion_Count"),
+    *[ build_cpc(when(s.when).then(F[entity]).otherwise(NULL)).alias(f"{s.name}_Customers_cpc")
        for s in stages ] if entity is set,
     *[ build_configured_sketch(state.source_column).alias(state.name)
        for state in unscoped_sketch_states ]
@@ -4857,8 +4857,8 @@ funnel has no <code>entity</code> default.</p>
 <span class="w">      </span><span class="nt">ResolvedTickets</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> where</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">not_null</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">resolved_at</span><span class="p p-Indicator">}}</span>
 </code></pre></div>
 <h3 id="94-chunk_aggregate-periodic">9.4 chunk_aggregate (periodic)<a class="headerlink" href="#94-chunk_aggregate-periodic" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>F = lazy_frame.with_columns(as_of_date = today())   # or chunk&#39;s effective date
-G = F.group_by(group_by + [&#39;as_of_date&#39;]).agg(...)
+<div class="highlight"><pre><span></span><code>F = lazy_frame.with_columns(as_of_date = today())   # or chunk's effective date
+G = F.group_by(group_by + ['as_of_date']).agg(...)
 </code></pre></div>
 <p>Periodic snapshots never add <code>entity</code> to their grouping key. If an <code>entity</code>
 field is present for sketch source defaults, it remains an input column only;
@@ -4868,10 +4868,10 @@ the persisted aggregate still has one row per <code>(as_of_date, group_by_tuple)
 the latest <code>as_of_date</code> (bounded by the query range when supplied).</p>
 <h3 id="95-chunk_aggregate-accumulating">9.5 chunk_aggregate (accumulating)<a class="headerlink" href="#95-chunk_aggregate-accumulating" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>For each entity in the chunk:
-    - upsert the entity&#39;s row with the latest non-null milestone columns
+    - upsert the entity's row with the latest non-null milestone columns
     - state aggregates are recomputed from the merged row
 
-The &quot;merge&quot; rule is therefore &quot;MAX(as_of_date) wins per entity&quot;
+The "merge" rule is therefore "MAX(as_of_date) wins per entity"
 inside the snapshot.parquet, with a deterministic tiebreaker.
 </code></pre></div>
 <p>Accumulating snapshots first keep the latest row per entity within a chunk.
@@ -4933,16 +4933,29 @@ checkpoint that is never exposed to reports.</p>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ActionID</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ExposureBucket</span>
 <span class="w">    </span><span class="nt">states</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">Contacts</span><span class="p">:</span><span class="w">                    </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">Clicks</span><span class="p">:</span><span class="w">                      </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ClickedContact</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">ComparableContacts</span><span class="p">:</span><span class="w">         </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ComparableContact</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">ComparableClicks</span><span class="p">:</span><span class="w">           </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ComparableClick</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">RunnerAvailable</span><span class="p">:</span><span class="w">            </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">RunnerAvailable</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">RunnerPropensitySum</span><span class="p">:</span><span class="w">        </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">RunnerPropensity</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">PriorityComparableContacts</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">PriorityComparableContact</span><span class="p p-Indicator">}</span>
-<span class="w">      </span><span class="nt">FocalPriorityComparableSum</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">FocalPriorityComparable</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">Responses</span><span class="p">:</span><span class="w">                   </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">Positives</span><span class="p">:</span><span class="w">                   </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ClickedContact</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">ComparableResponses</span><span class="p">:</span><span class="w">         </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ComparableContact</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">ComparablePositives</span><span class="p">:</span><span class="w">         </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">ComparableClick</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">RunnerAvailable</span><span class="p">:</span><span class="w">             </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">RunnerAvailable</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">RunnerPropensitySum</span><span class="p">:</span><span class="w">         </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">RunnerPropensity</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">PriorityComparableContacts</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">count</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">PriorityComparableContact</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">FocalPriorityComparableSum</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">FocalPriorityComparable</span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">RunnerPriorityComparableSum</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="nv">value_sum</span><span class="p p-Indicator">,</span><span class="nt"> source_column</span><span class="p">:</span><span class="w"> </span><span class="nv">RunnerPriorityComparable</span><span class="p p-Indicator">}</span>
 </code></pre></div>
+<p>These states are <strong>canonical</strong>: they are not authored per catalog. The processor
+derives a fixed set of virtual columns, so the state set that can be built from
+them is fixed too, and both configuration editors render the table above
+read-only with a plain-language definition of each state. A catalog may publish a
+subset, but never a different name, type, or binding; anything else fails
+validation. The three arbitration diagnostics
+(<code>PriorityComparableContacts</code>, <code>FocalPriorityComparableSum</code>,
+<code>RunnerPriorityComparableSum</code>) exist only when <code>columns.priority</code> is bound —
+without it the processor emits all-null priority columns, so those states would
+publish constant zeros.</p>
+<p>Three of the states are denominators — <code>Responses</code>, <code>ComparableResponses</code>, and
+<code>PriorityComparableContacts</code> — and a ratio is meaningful only when its numerator
+comes from the same family.</p>
 <p>The processor accepts only <code>count</code> and <code>value_sum</code> states. <code>Day</code> and the
 configured number-of-impressions column (<code>frequency_column</code> in YAML) are
 derived by the processor; the other group-by
@@ -4979,8 +4992,9 @@ number-of-impressions buckets, or virtual state columns are derived. It may
 reference only raw/transformed source fields—not <code>Day</code>, the configured
 number-of-impressions column,
 <code>ClickedContact</code>, <code>RunnerPropensity</code>, or another processor-created field.
-State-level <code>where</code> expressions run after enrichment and may use the documented
-virtual fields.</p>
+Canonical frequency-response states do not accept state-level <code>where</code>
+expressions or any other extra settings. Use the processor-level <code>filter</code> when
+the entire published contract should share an additional source-row predicate.</p>
 <h3 id="103-contact-and-number-of-impressions-semantics">10.3 Contact and number-of-impressions semantics<a class="headerlink" href="#103-contact-and-number-of-impressions-semantics" title="Permanent link">&para;</a></h3>
 <p>For one target day, the engine plans the target chunk plus the bounded set of
 preceding calendar-day chunks needed to cover
@@ -4998,8 +5012,8 @@ id and logical shard, plus a transactional fingerprint journal.</p>
 <p>Both modes canonicalize the configured decision-time field to timezone-naive
 UTC <code>Datetime(us)</code> truncated to whole seconds before contact normalization.
 <code>Day</code> then attaches UTC and converts to the configured calendar timezone. A raw
-decision-time field used in <code>group_by</code> or a state predicate therefore has the
-same type and value in both modes; the strict <code>(t − window, t]</code> boundary is
+decision-time field used in <code>group_by</code> therefore has the same type and value in
+both modes; the strict <code>(t − window, t]</code> boundary is
 evaluated at second precision, which both engines compute identically.
 Dictionary-backed projected fields are likewise represented as strings in the
 source-scan relational tail, matching DuckDB <code>VARCHAR</code>; customer sharding still
@@ -5009,9 +5023,9 @@ logical shard, one native SQL plan combines temporary current candidates with
 rolling history, performs cross-partition contact normalization, the exact
 timestamp window, and selected rank-2 action resolution, then streams only
 enriched target rank-1 rows to Polars. Polars applies virtual state columns,
-state-level <code>where</code>, configured count/value-sum aggregation, grouping, and
-provenance. Appending the target's narrow history, recording its fingerprint,
-and pruning expired state is one DuckDB transaction. Candidate rows remain
+canonical count/value-sum aggregation, grouping, and provenance. Appending the
+target's narrow history, recording its fingerprint, and pruning expired state
+is one DuckDB transaction. Candidate rows remain
 uncollapsed until current and history are combined, preserving cross-partition
 duplicate precedence. The connection remains open across the complete source
 run and closes once at the source-run boundary.</p>
@@ -5066,12 +5080,12 @@ greater than 1 inside the complete configured group rather than silently
 crossing one of its boundaries.</p>
 <h3 id="105-merge-and-derived-kpis">10.5 Merge and derived KPIs<a class="headerlink" href="#105-merge-and-derived-kpis" title="Permanent link">&para;</a></h3>
 <p>All stored states merge by addition. Canonical formulas include:</p>
-<div class="highlight"><pre><span></span><code>selected rank-1 action CTR = Clicks / Contacts
-comparable selected rank-1 action CTR = ComparableClicks / ComparableContacts
-selected rank-2 action expected CTR = RunnerPropensitySum / ComparableContacts
-selected rank-2 action coverage = ComparableContacts / Contacts
-response opportunity    = (ComparableClicks - RunnerPropensitySum)
-                          / ComparableContacts
+<div class="highlight"><pre><span></span><code>selected rank-1 action CTR = Positives / Responses
+comparable selected rank-1 action CTR = ComparablePositives / ComparableResponses
+selected rank-2 action expected CTR = RunnerPropensitySum / ComparableResponses
+selected rank-2 action coverage = ComparableResponses / Responses
+response opportunity    = (ComparablePositives - RunnerPropensitySum)
+                          / ComparableResponses
 priority opportunity gap = (FocalPriorityComparableSum
                             - RunnerPriorityComparableSum)
                            / PriorityComparableContacts

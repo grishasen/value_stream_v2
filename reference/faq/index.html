@@ -2618,7 +2618,7 @@ Process-bound DataFrames die on Streamlit reload, can't be shared across the API
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><span class="c1"># Value Stream — right</span>
 <span class="c1"># aggregates persist as Parquet partitions; the SDK reads them on demand</span>
-<span class="l l-Scalar l-Scalar-Plain">ws.metric(&quot;CTR&quot;).by(&quot;day&quot;, &quot;channel&quot;).to_polars()</span>
+<span class="l l-Scalar l-Scalar-Plain">ws.metric("CTR").by("day", "channel").to_polars()</span>
 </code></pre></div>
 <p><strong>A4. Are the aggregate tables dynamic?</strong>
 Append-only by run, with logical replacement: yes. Each chunk writes an immutable run-specific Parquet partial under its <code>period</code> partition; latest-successful-run-wins reads surface the freshest committed one. Schema-mutating without an explicit reprocess: no. The schema is determined by the Processor's computation contract; changing group-by columns or states is a behavior change, not a runtime mutation.</p>
@@ -2693,7 +2693,7 @@ Revert the YAML and re-run. The previous <code>config_hash</code>'s aggregates a
 <p><strong>B6. Can I share configs across workspaces?</strong>
 Yes — split optional column metadata, <code>dashboards.yaml</code>, and the common <code>metrics.yaml</code> into a shared module and import via Jinja2 includes:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># bdt/catalog/dashboards.yaml</span>
-<span class="p p-Indicator">{</span><span class="err">%</span><span class="w"> </span><span class="nv">include &quot;../shared/dashboards/marketing_overview.yaml&quot; %</span><span class="p p-Indicator">}</span>
+<span class="p p-Indicator">{</span><span class="err">%</span><span class="w"> </span><span class="nv">include "../shared/dashboards/marketing_overview.yaml" %</span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <p>Workspace-specific overrides live alongside the include.</p>
 <hr />
@@ -2706,7 +2706,7 @@ Three ways:</p>
 valuestream<span class="w"> </span>run<span class="w"> </span>--workspace<span class="w"> </span>bdt<span class="w"> </span>--source<span class="w"> </span>ih
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><span class="c1"># SDK</span>
-<span class="n">ws</span><span class="o">.</span><span class="n">run_source</span><span class="p">(</span><span class="s2">&quot;ih&quot;</span><span class="p">)</span>
+<span class="n">ws</span><span class="o">.</span><span class="n">run_source</span><span class="p">(</span><span class="s2">"ih"</span><span class="p">)</span>
 </code></pre></div>
 <p>Both surfaces are idempotent: a chunk is skipped only when the source computation hash and current input-file fingerprint match a successful prior run. Pass <code>--force</code> to re-process. The read-only HTTP API does not trigger ingestion.</p>
 <p><strong>C3. What happens when the same chunk is re-run?</strong>
@@ -2961,11 +2961,11 @@ Two options. (1) Plug in a custom processor — implement the <code>Processor</c
 <p><strong>I1. Translating legacy <code>[metrics.engagement]</code> to Value Stream.</strong>
 Before:</p>
 <div class="highlight"><pre><span></span><code><span class="k">[metrics.engagement]</span>
-<span class="n">group_by</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;Day&#39;</span><span class="p">,</span><span class="s1">&#39;Month&#39;</span><span class="p">,</span><span class="s1">&#39;Year&#39;</span><span class="p">,</span><span class="s1">&#39;Quarter&#39;</span><span class="p">,</span><span class="s1">&#39;Channel&#39;</span><span class="p">,</span><span class="s1">&#39;PlacementType&#39;</span><span class="p">,</span><span class="s1">&#39;PropensitySource&#39;</span><span class="p">,</span><span class="s1">&#39;Issue&#39;</span><span class="p">,</span><span class="s1">&#39;Group&#39;</span><span class="p">]</span>
-<span class="n">filter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;&quot;&quot;&quot;&quot;</span>
-<span class="n">scores</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;CTR&#39;</span><span class="p">,</span><span class="s1">&#39;Lift&#39;</span><span class="p">,</span><span class="s1">&#39;Lift_Z_Score&#39;</span><span class="p">,</span><span class="s1">&#39;Lift_P_Val&#39;</span><span class="p">,</span><span class="s1">&#39;Positives&#39;</span><span class="p">,</span><span class="s1">&#39;Negatives&#39;</span><span class="p">,</span><span class="s1">&#39;Count&#39;</span><span class="p">]</span>
-<span class="n">positive_model_response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;Clicked&#39;</span><span class="p">]</span>
-<span class="n">negative_model_response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;Impression&#39;</span><span class="p">,</span><span class="s1">&#39;Pending&#39;</span><span class="p">]</span>
+<span class="n">group_by</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">'Day'</span><span class="p">,</span><span class="s1">'Month'</span><span class="p">,</span><span class="s1">'Year'</span><span class="p">,</span><span class="s1">'Quarter'</span><span class="p">,</span><span class="s1">'Channel'</span><span class="p">,</span><span class="s1">'PlacementType'</span><span class="p">,</span><span class="s1">'PropensitySource'</span><span class="p">,</span><span class="s1">'Issue'</span><span class="p">,</span><span class="s1">'Group'</span><span class="p">]</span>
+<span class="n">filter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""""""</span>
+<span class="n">scores</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">'CTR'</span><span class="p">,</span><span class="s1">'Lift'</span><span class="p">,</span><span class="s1">'Lift_Z_Score'</span><span class="p">,</span><span class="s1">'Lift_P_Val'</span><span class="p">,</span><span class="s1">'Positives'</span><span class="p">,</span><span class="s1">'Negatives'</span><span class="p">,</span><span class="s1">'Count'</span><span class="p">]</span>
+<span class="n">positive_model_response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">'Clicked'</span><span class="p">]</span>
+<span class="n">negative_model_response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">'Impression'</span><span class="p">,</span><span class="s1">'Pending'</span><span class="p">]</span>
 </code></pre></div>
 <p>After (minus sugar — full form in design/replacement-design.md):</p>
 <div class="highlight"><pre><span></span><code><span class="nt">processors</span><span class="p">:</span>
@@ -3017,7 +3017,7 @@ After:</p>
 <span class="w">  </span><span class="nt">expression</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">case</span>
 <span class="w">    </span><span class="nt">when</span><span class="p">:</span>
-<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">cond</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">ne</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">cond</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">op</span><span class="p">:</span><span class="w"> </span><span class="nv">ne</span><span class="p p-Indicator">,</span><span class="nt"> column</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="s">""</span><span class="p p-Indicator">}</span>
 <span class="w">        </span><span class="nt">then</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">ConversionEventID</span><span class="p p-Indicator">}</span>
 <span class="w">    </span><span class="nt">else</span><span class="p">:</span><span class="w">      </span><span class="p p-Indicator">{</span><span class="nt">col</span><span class="p">:</span><span class="w"> </span><span class="nv">Name</span><span class="p p-Indicator">}</span>
 </code></pre></div>

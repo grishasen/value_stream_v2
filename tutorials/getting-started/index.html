@@ -2571,13 +2571,13 @@ table (1 source, 4 processors, and the demo metrics and dashboards).</p>
 <h2 id="generate-demo-data">Generate Demo Data<a class="headerlink" href="#generate-demo-data" title="Permanent link">&para;</a></h2>
 <p>On a clean clone <code>examples/demo/data/</code> is empty. Generate a small synthetic
 Pega-shaped dataset with the same helper the test suite uses:</p>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;</span>
-<span class="s2">import sys; sys.path.insert(0, &#39;tests&#39;)</span>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"</span>
+<span class="s2">import sys; sys.path.insert(0, 'tests')</span>
 <span class="s2">from pathlib import Path</span>
 <span class="s2">from conftest import generate_demo_interactions</span>
-<span class="s2">files = generate_demo_interactions(Path(&#39;examples/demo/data&#39;))</span>
-<span class="s2">print(f&#39;wrote {len(files)} parquet files&#39;)</span>
-<span class="s2">&quot;</span>
+<span class="s2">files = generate_demo_interactions(Path('examples/demo/data'))</span>
+<span class="s2">print(f'wrote {len(files)} parquet files')</span>
+<span class="s2">"</span>
 </code></pre></div>
 <p>This writes eight small Parquet files (<code>pega_interactions_*.parquet</code>) shaped
 like a Pega Interaction History export. If you have a real Pega export sample

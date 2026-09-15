@@ -3557,7 +3557,7 @@ SS_between  = Σ ( n_i · (m_i − GroupMean)² )
 <p>Reference implementation pattern (in pseudocode close to Polars):</p>
 <div class="highlight"><pre><span></span><code># Inputs: a frame F with columns Count, Mean, Var per group.
 # Step 1: compute GroupMean per merge group.
-GM = F.group_by(group_keys).agg(weighted_mean(Mean, Count).alias(&quot;GroupMean&quot;))
+GM = F.group_by(group_keys).agg(weighted_mean(Mean, Count).alias("GroupMean"))
 F  = F.join(GM, on=group_keys)
 # Step 2: compute the two helper columns per row.
 F  = F.with_columns(
@@ -3567,9 +3567,9 @@ F  = F.with_columns(
 # Step 3: re-aggregate.
 M = F.group_by(group_keys).agg(
     Count.sum(),
-    weighted_mean(Mean, Count).alias(&quot;Mean&quot;),
-    n_minus1_variance.sum().alias(&quot;ssw&quot;),
-    n_mean_diff_sq.sum().alias(&quot;ssb&quot;),
+    weighted_mean(Mean, Count).alias("Mean"),
+    n_minus1_variance.sum().alias("ssw"),
+    n_mean_diff_sq.sum().alias("ssb"),
 )
 M = M.with_columns(Var = (ssw + ssb) / (Count - 1))
 </code></pre></div>
@@ -3937,7 +3937,7 @@ MaxPurchasedDate  = latest purchase
 frequency      = unique_holdings − 1            # repeat purchases
 tenure         = (observation_period_end − MinPurchasedDate).days
 recency_raw    = (MaxPurchasedDate − MinPurchasedDate).days
-recency        = tenure − recency_raw            # so larger = &quot;more recently active&quot;
+recency        = tenure − recency_raw            # so larger = "more recently active"
 monetary_value = lifetime_value / unique_holdings
                  (set to 0 when frequency == 0)
 </code></pre></div>
@@ -3950,21 +3950,21 @@ R: r_quartile in {1,2,3,4}             # higher = MORE RECENT
 </code></pre></div>
 <p>Polars helper: <code>pl.col(x).qcut(4, labels=labels, allow_duplicates=true)</code>.</p>
 <h3 id="73-segment-code">7.3 Segment code<a class="headerlink" href="#73-segment-code" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>rfm_seg = concat(r_quartile, f_quartile, m_quartile)    # e.g. &quot;344&quot;
+<div class="highlight"><pre><span></span><code>rfm_seg = concat(r_quartile, f_quartile, m_quartile)    # e.g. "344"
 </code></pre></div>
 <h3 id="74-segment-dictionaries">7.4 Segment dictionaries<a class="headerlink" href="#74-segment-dictionaries" title="Permanent link">&para;</a></h3>
 <p>A segment dictionary maps <code>rfm_seg</code> → segment name. Defaults:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">default</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">Premium Customer</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="s">&quot;334&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;443&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;444&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;344&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;434&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;433&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;343&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;333&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">Repeat Customer</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">[</span><span class="s">&quot;244&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;234&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;232&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;332&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;143&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;233&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;243&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;242&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">Top Spender</span><span class="p">:</span><span class="w">       </span><span class="p p-Indicator">[</span><span class="s">&quot;424&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;414&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;144&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;314&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;324&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;124&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;224&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;423&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;413&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;133&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;323&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;313&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;134&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">At Risk Customer</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="s">&quot;422&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;223&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;212&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;122&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;222&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;132&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;322&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;312&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;412&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;123&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;214&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">Inactive Customer</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;411&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;111&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;113&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;114&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;112&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;211&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;311&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Premium Customer</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="s">"334"</span><span class="p p-Indicator">,</span><span class="s">"443"</span><span class="p p-Indicator">,</span><span class="s">"444"</span><span class="p p-Indicator">,</span><span class="s">"344"</span><span class="p p-Indicator">,</span><span class="s">"434"</span><span class="p p-Indicator">,</span><span class="s">"433"</span><span class="p p-Indicator">,</span><span class="s">"343"</span><span class="p p-Indicator">,</span><span class="s">"333"</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Repeat Customer</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">[</span><span class="s">"244"</span><span class="p p-Indicator">,</span><span class="s">"234"</span><span class="p p-Indicator">,</span><span class="s">"232"</span><span class="p p-Indicator">,</span><span class="s">"332"</span><span class="p p-Indicator">,</span><span class="s">"143"</span><span class="p p-Indicator">,</span><span class="s">"233"</span><span class="p p-Indicator">,</span><span class="s">"243"</span><span class="p p-Indicator">,</span><span class="s">"242"</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Top Spender</span><span class="p">:</span><span class="w">       </span><span class="p p-Indicator">[</span><span class="s">"424"</span><span class="p p-Indicator">,</span><span class="s">"414"</span><span class="p p-Indicator">,</span><span class="s">"144"</span><span class="p p-Indicator">,</span><span class="s">"314"</span><span class="p p-Indicator">,</span><span class="s">"324"</span><span class="p p-Indicator">,</span><span class="s">"124"</span><span class="p p-Indicator">,</span><span class="s">"224"</span><span class="p p-Indicator">,</span><span class="s">"423"</span><span class="p p-Indicator">,</span><span class="s">"413"</span><span class="p p-Indicator">,</span><span class="s">"133"</span><span class="p p-Indicator">,</span><span class="s">"323"</span><span class="p p-Indicator">,</span><span class="s">"313"</span><span class="p p-Indicator">,</span><span class="s">"134"</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">At Risk Customer</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="s">"422"</span><span class="p p-Indicator">,</span><span class="s">"223"</span><span class="p p-Indicator">,</span><span class="s">"212"</span><span class="p p-Indicator">,</span><span class="s">"122"</span><span class="p p-Indicator">,</span><span class="s">"222"</span><span class="p p-Indicator">,</span><span class="s">"132"</span><span class="p p-Indicator">,</span><span class="s">"322"</span><span class="p p-Indicator">,</span><span class="s">"312"</span><span class="p p-Indicator">,</span><span class="s">"412"</span><span class="p p-Indicator">,</span><span class="s">"123"</span><span class="p p-Indicator">,</span><span class="s">"214"</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Inactive Customer</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"411"</span><span class="p p-Indicator">,</span><span class="s">"111"</span><span class="p p-Indicator">,</span><span class="s">"113"</span><span class="p p-Indicator">,</span><span class="s">"114"</span><span class="p p-Indicator">,</span><span class="s">"112"</span><span class="p p-Indicator">,</span><span class="s">"211"</span><span class="p p-Indicator">,</span><span class="s">"311"</span><span class="p p-Indicator">]</span>
 
 <span class="nt">retail_banking</span><span class="p">:</span>
 <span class="w">  </span><span class="c1"># tuned for retail-banking patterns; same shape, different mapping</span>
-<span class="w">  </span><span class="nt">Premium Customer</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="s">&quot;334&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;443&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;444&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;344&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;434&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;433&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;343&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;333&quot;</span><span class="p p-Indicator">]</span>
-<span class="w">  </span><span class="nt">Repeat Customer</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">[</span><span class="s">&quot;244&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;234&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;232&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;332&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;143&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;233&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;243&quot;</span><span class="p p-Indicator">,</span><span class="s">&quot;242&quot;</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Premium Customer</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">[</span><span class="s">"334"</span><span class="p p-Indicator">,</span><span class="s">"443"</span><span class="p p-Indicator">,</span><span class="s">"444"</span><span class="p p-Indicator">,</span><span class="s">"344"</span><span class="p p-Indicator">,</span><span class="s">"434"</span><span class="p p-Indicator">,</span><span class="s">"433"</span><span class="p p-Indicator">,</span><span class="s">"343"</span><span class="p p-Indicator">,</span><span class="s">"333"</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">Repeat Customer</span><span class="p">:</span><span class="w">   </span><span class="p p-Indicator">[</span><span class="s">"244"</span><span class="p p-Indicator">,</span><span class="s">"234"</span><span class="p p-Indicator">,</span><span class="s">"232"</span><span class="p p-Indicator">,</span><span class="s">"332"</span><span class="p p-Indicator">,</span><span class="s">"143"</span><span class="p p-Indicator">,</span><span class="s">"233"</span><span class="p p-Indicator">,</span><span class="s">"243"</span><span class="p p-Indicator">,</span><span class="s">"242"</span><span class="p p-Indicator">]</span>
 <span class="w">  </span><span class="l l-Scalar l-Scalar-Plain">...</span>
 </code></pre></div>
 <p>The engine ships <code>default</code>, <code>retail_banking</code>, <code>telco</code>, <code>e_commerce</code>. A workspace can override with a literal dict.</p>
@@ -3983,7 +3983,7 @@ R: r_quartile in {1,2,3,4}             # higher = MORE RECENT
 return { chi2_stat: g, chi2_dof: dof, chi2_p_val: p }
 </code></pre></div>
 <p>For a <code>2 × 2</code> table, also compute the sample odds ratio and 95% CI:</p>
-<div class="highlight"><pre><span></span><code>res = scipy.stats.contingency.odds_ratio(table, kind=&quot;sample&quot;)
+<div class="highlight"><pre><span></span><code>res = scipy.stats.contingency.odds_ratio(table, kind="sample")
 return {
     chi2_odds_ratio_stat:  res.statistic,
     chi2_odds_ratio_ci_low,
@@ -3991,7 +3991,7 @@ return {
 }
 </code></pre></div>
 <h3 id="83-g-test-log-likelihood-ratio">8.3 G-test (log-likelihood ratio)<a class="headerlink" href="#83-g-test-log-likelihood-ratio" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>g, p, dof, expected = scipy.stats.chi2_contingency(table, lambda_=&quot;log-likelihood&quot;, correction=False)
+<div class="highlight"><pre><span></span><code>g, p, dof, expected = scipy.stats.chi2_contingency(table, lambda_="log-likelihood", correction=False)
 return { g_stat: g, g_dof: dof, g_p_val: p, g_odds_ratio_*: ... }
 </code></pre></div>
 <h3 id="84-single-degree-of-freedom-g-test-variant-proportion">8.4 Single-degree-of-freedom G-test (variant proportion)<a class="headerlink" href="#84-single-degree-of-freedom-g-test-variant-proportion" title="Permanent link">&para;</a></h3>
