@@ -3045,7 +3045,7 @@ convert or merge different sketch families together.</p>
 </tbody>
 </table>
 <h3 id="business-experiments-test-and-control">Business Experiments: Test and Control<a class="headerlink" href="#business-experiments-test-and-control" title="Permanent link">&para;</a></h3>
-<p>Measure the size of a business effect and the evidence behind it. In FAT,
+<p>Measure the size of a business effect and the evidence behind it. For example,
 <code>ExperimentGroup</code> identifies variants within <code>ExperimentName</code>; <code>Clicked</code> is a
 positive response. Choose the relevant grouping when installing a recipe:
 <code>ExperimentGroup</code>, <code>ModelControlGroup</code>, or <code>DefaultBannerControlGroup</code> when
@@ -3262,22 +3262,19 @@ within each total.</p>
 </table>
 <p>The cost recipes require explicitly configured billing states; the installer
 never substitutes a generic sum or customer count for a billing population.
-In FAT, both cost processors retain <code>Outcome = Impression</code> before deduplication.
+For example, both cost processors may retain <code>Outcome = Impression</code> before deduplication.
 The impression basis deduplicates by customer, interaction, action, placement
 and rank; the interaction basis deduplicates by customer and interaction only.
 The latter assumes the same interaction charge is repeated on each included
 impression row. If your source records the charge on a separate interaction
 event, bind a processor for that event population instead. Deduplication is
 within each chunk: one billed identity must belong to one source chunk.</p>
-<p>Missing <code>Cost</code> stays missing in FAT. Totals and unit costs are available only
+<p>Totals and unit costs are available only
 when every included billing unit has a cost; a recorded zero remains a valid
-zero. Inspect <strong>Marketing cost data coverage</strong> when a total is unavailable.
-FAT uses recorded <code>Revenue</code> where supplied and retains its illustrative 3.5
-fallback only for conversions without a revenue value. Remove that fallback
-or supply real values before using FAT for financial reporting.</p>
+zero. Inspect <strong>Marketing cost data coverage</strong> when a total is unavailable.</p>
 <h3 id="products-and-revenue-mix">Products and Revenue Mix<a class="headerlink" href="#products-and-revenue-mix" title="Permanent link">&para;</a></h3>
 <p>Compare the products or product groups represented in conversion reporting.
-In FAT, <code>ShelfLevel1Name</code> is the product-group dimension. The recipe installer
+For example,, <code>ProductGroup</code> is the product-group dimension. The recipe installer
 also allows another product or action grouping already retained by the
 processor, such as <code>Issue</code> or <code>Group</code>.</p>
 <table>
@@ -3318,9 +3315,9 @@ processor, such as <code>Issue</code> or <code>Group</code>.</p>
 </tr>
 <tr>
 <td>Unique products represented</td>
-<td>Estimates how many different product groups are represented in the selected conversion population. <strong>Example:</strong> 50 conversion opportunities spanning three <code>ShelfLevel1Name</code> values represent three product groups, not 50 products owned.</td>
+<td>Estimates how many different product groups are represented in the selected conversion population. <strong>Example:</strong> 50 conversion opportunities spanning three <code>ProductGroup</code> values represent three product groups, not 50 products owned.</td>
 <td><code>products.unique_products</code></td>
-<td>CPC state over <code>ShelfLevel1Name</code></td>
+<td>CPC state over <code>ProductGroup</code></td>
 <td>Approximate</td>
 <td>KPI card</td>
 </tr>
