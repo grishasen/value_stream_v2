@@ -23,15 +23,16 @@ A recipe contains:
 | `business_questions`, `tags` | Search and interpretation aids |
 | `maturity` | `draft`, `reviewed`, or `certified` governance state |
 | `processor_kinds` | Processor families that may satisfy the recipe |
+| `required_states` | Fixed state names and types required by metric implementations such as Test/Control tests |
 | `parameters` | Optional bounded install-time numbers, including percentages displayed in business units |
-| `inputs` | Required business roles, field/algorithm selection mode, accepted state types, metadata and filtered-state requirements, recipe-authored state templates, pairing/exclusion rules, and preferences |
+| `inputs` | Required business roles, configured grouping dimensions, field/algorithm selection mode, accepted state types, metadata and filtered-state requirements, recipe-authored state templates, pairing/exclusion rules, and preferences |
 | `default_metric_id` | Proposed ID; the installer adds a stable numeric suffix on collision |
 | `metric` | A normal metric definition with exact-value placeholders such as `${processor_id}` |
 | `method` | Calculation, accuracy class, algorithm, and caveat |
 | `report` | Recommended chart, placement, optional KPI comparison defaults, and optional required `x` axis for non-scalar charts |
 
 Template substitution is deliberately closed: a placeholder must occupy the
-whole YAML scalar. Metric-template placeholders must name a declared binding
+whole YAML scalar. Metric and report-axis placeholders must name a declared binding
 or built-in installer value; state-template placeholders must name a declared,
 bounded recipe parameter. Recipes cannot inject Python, SQL, or expression
 strings. Formula recipes and recipe-authored filtered states materialize the
@@ -49,8 +50,10 @@ returns one of four states:
 | `backfill_required` | A required aggregate state or stage is absent from the current processor contract | Configurable sketch inputs and closed recipe-authored state templates can propose a processor state; other non-configurable inputs remain blocked |
 | `incompatible` | Processor kind cannot execute the recipe | Processor is excluded from the selector |
 
-Matching is deterministic. The resolver filters by source (`state` or
-`stage`), state type, required/absent state metadata, required `where`
+Matching is deterministic. Fixed `required_states` must be present with their
+declared types. Dimension inputs select only configured `group_by` fields;
+they never propose a new state. The resolver filters other inputs by source
+(`state` or `stage`), state type, required/absent state metadata, required `where`
 predicates or the exact parameter-resolved state template, and strict semantic
 roles, then applies ordered name/algorithm preferences. A sole remaining
 candidate is safe to map automatically; multiple business fields, algorithms,
@@ -172,30 +175,245 @@ internal state-ID choice.
 
 ## Built-in Recipes
 
-| Recipe ID | Business KPI | Required capability | Accuracy | Default report |
-|---|---|---|---|---|
-| `engagement.engagement_rate` | Engagement rate | Binary positive/negative counts | Exact | KPI card |
-| `engagement.positive_outcomes` | Positive outcomes | Binary positive count | Exact | KPI card |
-| `audience.unique_entities` | Distinct audience/reach | CPC, HLL, or Theta state; CPC preferred | Approximate | KPI card |
-| `distribution.median` | Median numeric/score value | t-digest or KLL state | Approximate | KPI card |
-| `distribution.p95` | High-tail numeric/score value | t-digest or KLL state | Approximate | KPI card |
-| `distribution.boxplot` | Distribution boxplot | t-digest or KLL state | Approximate | Boxplot |
-| `engagement.decision_to_outcome_latency_p95` | Decision-to-outcome latency (P95) | Unconditioned duration t-digest or KLL state | Approximate | KPI card with previous-period comparison |
-| `model_quality.roc_auc` | Ranking discrimination | Matched positive/negative t-digests | Approximate | KPI card |
-| `model_quality.score_calibration` | Observed-to-predicted score calibration | Positive count, score sum, and observation count | Exact | KPI card |
-| `decisioning.material_upward_exploration_rate` | Material upward score-revision rate | Purpose-built relatively filtered upward-revision and total counts on a numeric-distribution processor | Exact | KPI card |
-| `model_quality.implied_evidence_index` | Heuristic implied evidence index | Pooled score-variance and squared-delta means | Statistical | KPI card |
-| `model_quality.relative_exploration_variance` | Relative exploration variance | Pooled squared-delta and score-variance means | Statistical | KPI card |
-| `funnel.conversion_rate` | Funnel completion rate | Start/completion count states | Exact | KPI card |
-| `funnel.dropoff_rate` | Funnel stage loss | Ordered funnel stages | Exact | KPI card |
-| `lifecycle.summary` | Entity lifecycle measures | Entity lifecycle processor | Exact | Table |
-| `category.top_items` | Frequent categories | Frequent-items/Top-K state | Approximate | Table |
-| `contact_policy.frequency_marginal_ctr` | Selected rank-1 action CTR by number of impressions | Exact `Positives` and `Responses` states | Approximate fixed-window interpretation | Line |
-| `contact_policy.frequency_comparable_ctr` | Selected rank-1 action CTR on contacts with a selected rank-2 action | Exact `ComparablePositives` and `ComparableResponses` states | Approximate fixed-window interpretation | Line |
-| `contact_policy.runner_up_expected_ctr` | Mean selected rank-2 action raw Propensity | Exact `RunnerPropensitySum` and `ComparableResponses` states | Approximate fixed-window interpretation | Line |
-| `contact_policy.runner_up_coverage` | Selected rank-2 action coverage of selected rank-1 action contacts | Exact `ComparableResponses` and `Responses` states | Approximate fixed-window interpretation | KPI card |
-| `contact_policy.response_opportunity_margin` | Selected rank-1 action response minus selected rank-2 action expectation | Exact `ComparablePositives`, `RunnerPropensitySum`, and shared `ComparableResponses` states | Approximate fixed-window interpretation | Bar |
-| `contact_policy.priority_opportunity_gap` | Selected rank-1 action minus selected rank-2 action Priority index | Exact comparable Priority sums and `PriorityComparableContacts` | Approximate arbitration diagnostic | Bar |
+Choose a recipe by the business question it answers. The 41 recipes below are
+grouped by business purpose; recipe IDs remain unchanged even when their
+technical domain differs from the group. Examples use Pega Customer Decision
+Hub (CDH) terminology. All numbers and
+action scenarios below are illustrative, not measured industry results or benchmarks.
+
+In CDH, a **customer** is identified by `CustomerID`, and a **unique action** by
+`ActionID`, built from `Issue / Group / Name`. `Propensity` is the model’s raw
+response probability; `FinalPropensity` includes exploration and other
+adjustments. `Priority` is the arbitration ranking score and can include value,
+context and levers, so it must not be read as a probability. `ResponseTime` is
+`OutcomeTime − DecisionTime` in seconds. **CTR** means click-through rate.
+
+- [Audience reach and activity mix](#audience-reach-and-activity-mix)
+- [Engagement and positive responses](#engagement-and-positive-responses)
+- [Business experiments: Test and Control](#business-experiments-test-and-control)
+- [Customer journeys and lifecycle](#customer-journeys-and-lifecycle)
+- [Marketing costs and revenue](#marketing-costs-and-revenue)
+- [Products and revenue mix](#products-and-revenue-mix)
+- [Value distributions and response time](#value-distributions-and-response-time)
+- [Prediction quality](#prediction-quality)
+- [Adaptive learning and exploration](#adaptive-learning-and-exploration)
+- [Contact policy and alternative actions](#contact-policy-and-alternative-actions)
+
+**Accuracy** describes how the result is calculated: **Exact** uses configured
+counts and sums; **Approximate** uses compact statistical summaries or an
+approximate contact-history interpretation; **Statistical** denotes an
+inference test, confidence interval or heuristic diagnostic. Exact arithmetic still depends on the configured
+population and outcome definitions.
+
+### Audience Reach and Activity Mix
+
+Understand how many different customers and actions appear in Interaction
+History and which actions or treatments account for the most activity.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Unique customers or unique actions | Estimates distinct customers reached or distinct actions observed, depending on the selected field; repeat appearances count once. **Example:** 12,000 Interaction History events can represent about 4,500 unique customers (`CustomerID`) and 120 unique actions (`ActionID`). Install the recipe once for each field. | `audience.unique_entities` | CPC, HLL, or Theta state; CPC preferred | Approximate | KPI card |
+| Top actions or treatments | Shows which action names or treatments occur most often in the selected Interaction History population. **Example:** A top-actions table estimates 6,000 events for a credit-card action and 3,000 for a savings action; these are event counts, not impression rates or unique-customer counts. | `category.top_items` | Frequent-items/Top-K state | Approximate | Table |
+
+The unique-entity recipe prefers CPC states created by current processor
+defaults while accepting HLL and Theta states. Theta is useful when the same
+persisted set also supports intersections or differences. The recipe does not
+convert or merge different sketch families together.
+
+### Engagement and Positive Responses
+
+Measure both the success rate and the volume of customer responses.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Engagement rate (CTR)/ Conversion rate | The share of classified action outcomes that are clicks. Count `Clicked` as positive and `Impression` or `Pending` as negative after deduplication. **Example:** 80 clicks plus 920 impression/pending outcomes give 80 / 1,000 = 8% CTR. | `engagement.engagement_rate` | Binary positive/negative counts | Exact | KPI card |
+| Positive outcomes: clicks or conversions | Counts successful action outcomes under the selected processor: clicks for engagement, conversions for conversion reporting. **Example:** 250 `Clicked` outcomes produce 250 clicks; a separate metric with 40 `Conversion` outcomes produces 40 conversions. These are outcome counts, not unique customers. | `engagement.positive_outcomes` | Binary positive count | Exact | KPI card |
+
+### Business Experiments: Test and Control
+
+Measure the size of a business effect and the evidence behind it. In FAT,
+`ExperimentGroup` identifies variants within `ExperimentName`; `Clicked` is a
+positive response. Choose the relevant grouping when installing a recipe:
+`ExperimentGroup`, `ModelControlGroup`, or `DefaultBannerControlGroup` when
+that field is retained by the processor.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Experiment sample size | How many classified action outcomes each experiment arm contains. **Example:** Test has 10,000 click/impression/pending outcomes and Control has 8,000; inspect this balance before comparing CTR. | `experiments.sample_size` | Positive/negative counts and experiment grouping | Exact | Bar by arm |
+| Experiment response rate | The click rate within each arm. **Example:** 400 clicks from 10,000 Test outcomes give 4% CTR; 300 from 10,000 Control outcomes give 3%. | `experiments.response_rate` | Positive/negative counts and experiment grouping | Exact | Bar by arm |
+| Test/control effect and lift | Compares response rates, absolute difference, relative lift and a 95% confidence interval. **Example:** Test CTR of 4% against Control CTR of 3% is +1 percentage point and about +33% relative lift. | `experiments.test_control_comparison` | Exact `Positives`/`Negatives` counts and a grouping with Test/Control labels | Statistical | Table with effect and interval |
+| Z-test: Test versus Control | Tests whether two response rates differ beyond the variation expected from sampling. **Example:** Compare 400 clicks from 10,000 Test outcomes with 300 from 10,000 Control outcomes; the table reports the z-score and two-sided p-value. | `experiments.z_test` | Exact `Positives`/`Negatives` counts and a grouping with Test/Control labels | Statistical | Statistical table |
+| Chi-square test across experiment variants | Checks whether response rates differ across all variants. **Example:** Compare CTR of 4%, 3% and 2% for three action strategies; a small p-value suggests some rates differ, but does not identify the winning strategy. | `experiments.chi_square_test` | Exact `Positives`/`Negatives` counts and experiment grouping | Statistical | Chi-square and G-test table |
+
+Test/Control comparison and Z-test use only the named `Test` and `Control`
+arms. Chi-square and G-test include every retained variant, including `NBA`
+when using `ModelControlGroup`. Filter or group by `ExperimentName` so separate
+experiments are not pooled. Read the effect size, sample counts and confidence
+interval alongside significance; a p-value is not the probability that Test
+is better. Statistical tests assume suitable sample sizes and independent
+observations. Repeated responses from the same customer can violate that
+assumption, and a causal conclusion also requires a valid experimental design.
+
+### Customer Journeys and Lifecycle
+
+Compare impression, click and conversion volumes, and use product holdings
+when available to understand the customer relationship.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Conversions | Counts successful conversion outcomes after the conversion processor’s deduplication. **Example:** 40 `Conversion` outcomes give 40 conversions, even if some belong to the same customer. | `conversion.conversions` | Conversion-positive count | Exact | KPI card |
+| Conversion rate | The share of classified conversion opportunities that convert. **Example:** 40 `Conversion` and 160 `NoConversion` outcomes give a 20% conversion rate; impressions are not this denominator. | `conversion.conversion_rate` | Conversion and NoConversion counts | Exact | KPI card |
+| Funnel completion rate | Compares action outcomes at two selected stages, such as impressions and conversions. **Example:** 50 conversion outcomes divided by 1,000 impression outcomes in the same Web reporting slice give a 5% impression-to-conversion rate. | `funnel.conversion_rate` | Start/completion count states | Exact | KPI card |
+| Funnel drop-off rate | Shows the relative decrease in outcome counts between selected stages. **Example:** 100 click outcomes against 1,000 impression outcomes give 90% impression-to-click drop-off; 40 conversions against those 100 clicks give 60% click-to-conversion drop-off. | `funnel.dropoff_rate` | Ordered funnel stages | Exact | KPI card |
+| Customer lifecycle summary | Summarizes a customer’s recorded product holdings, value and purchase timing to inform CDH retention or cross-sell decisions. **Example:** With a separate holdings source, a customer’s row could show three products held, €600 in recorded value and a last purchase 10 days before the observation end. | `lifecycle.summary` | Entity lifecycle processor with distinct holdings, monetary total, first-purchase and last-purchase states | Exact | Table |
+
+For example, `action_funnel` compares `Impression`, `Clicked` and `Conversion` outcome
+counts for Web and Mobile. These ratios describe stage volumes; they do not
+track individual customers through an ordered path or attribute a conversion
+to a particular impression. Its impression-to-click denominator also differs
+from engagement CTR, which includes clicks and impression/pending outcomes.
+
+The lifecycle recipe requires a separate product-holdings source and an
+`entity_lifecycle` processor; Holdings represent products owned, not actions shown or clicked.
+Its recorded monetary value is not a forecast of future customer value.
+
+### Marketing Costs and Revenue
+
+Choose the cost basis that matches your CDH implementation. A charge per
+impression and a charge per interaction answer different accounting questions;
+these are alternative totals, not amounts to add together. Use one currency
+within each total.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Marketing cost — impressions | Adds `Cost` once for each billable action impression. **Example:** 1,000 impressions charged at €0.02 each cost €20, regardless of how many later generate a click. | `finance.marketing_cost_impressions` | Configured `ImpressionCost`, `CostedImpressions` and `Impressions` on an impression-deduplicated processor | Exact | KPI card |
+| Cost per impression | Average cost for one billable impression. **Example:** €20 spent on 1,000 action impressions gives €0.02 per impression. | `finance.cost_per_impression` | Same impression-cost states and complete cost data | Exact | KPI card |
+| Marketing cost — interactions | Adds `Cost` once per billed customer interaction, even if several actions are shown. **Example:** 100 interactions at €0.10 each cost €10; three actions within each interaction do not triple the cost. | `finance.marketing_cost_interactions` | Configured `InteractionCost`, `CostedInteractions` and `Interactions` on an interaction-deduplicated processor | Exact | KPI card |
+| Cost per interaction | Average cost for one billable interaction. **Example:** €10 spent across 100 customer interactions gives €0.10 per interaction. | `finance.cost_per_interaction` | Same interaction-cost states and complete cost data | Exact | KPI card |
+| Marketing cost data coverage | Shows how much of the billing population has a recorded `Cost`. **Example:** Cost is present on 900 of 1,000 impressions: coverage is 90%, and the total-cost recipe withholds a misleading partial total. | `finance.cost_coverage` | Recorded-cost and total-unit counts from one billing basis | Exact | KPI card |
+| Conversion revenue | Adds the `Revenue` field for conversion outcomes. **Example:** Three conversions with recorded revenue of €20, €30 and €50 produce €100 revenue; impression and click events add nothing. | `finance.revenue` | A `Revenue` sum filtered to `Outcome = Conversion` | Exact | KPI card |
+| Revenue per conversion | Average revenue earned per conversion. **Example:** €1,000 revenue from 40 conversions gives €25 per conversion. | `finance.revenue_per_conversion` | Conversion-filtered revenue and conversion count from the same population | Exact | KPI card |
+| Revenue per conversion opportunity | Revenue per classified conversion opportunity, including those that did not convert. **Example:** €1,000 across 40 conversions and 160 non-conversions gives €5 per opportunity. | `finance.revenue_per_opportunity` | Conversion-filtered revenue and Conversion/NoConversion counts | Exact | KPI card |
+
+The cost recipes require explicitly configured billing states; the installer
+never substitutes a generic sum or customer count for a billing population.
+In FAT, both cost processors retain `Outcome = Impression` before deduplication.
+The impression basis deduplicates by customer, interaction, action, placement
+and rank; the interaction basis deduplicates by customer and interaction only.
+The latter assumes the same interaction charge is repeated on each included
+impression row. If your source records the charge on a separate interaction
+event, bind a processor for that event population instead. Deduplication is
+within each chunk: one billed identity must belong to one source chunk.
+
+Missing `Cost` stays missing in FAT. Totals and unit costs are available only
+when every included billing unit has a cost; a recorded zero remains a valid
+zero. Inspect **Marketing cost data coverage** when a total is unavailable.
+FAT uses recorded `Revenue` where supplied and retains its illustrative 3.5
+fallback only for conversions without a revenue value. Remove that fallback
+or supply real values before using FAT for financial reporting.
+
+### Products and Revenue Mix
+
+Compare the products or product groups represented in conversion reporting.
+In FAT, `ShelfLevel1Name` is the product-group dimension. The recipe installer
+also allows another product or action grouping already retained by the
+processor, such as `Issue` or `Group`.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Revenue mix by product | Shows how each product group contributes to revenue. **Example:** €600 from cards and €400 from savings produce a €1,000 mix, with cards contributing 60%; the default bars show the currency amounts. | `products.revenue_mix` | Conversion-filtered revenue plus a configured product grouping | Exact | Bar by product |
+| Conversion mix by product | Shows conversion volume by product group. **Example:** 30 card conversions and 20 savings conversions give a 60%/40% volume mix; this can differ from the revenue mix. | `products.conversion_mix` | Conversion-positive count plus a configured product grouping | Exact | Bar by product |
+| Product revenue concentration | Ranks product groups by revenue and shows their cumulative contribution. **Example:** If the top two product groups generate €800 of €1,000, their cumulative revenue share is 80%. | `products.revenue_concentration` | Conversion-filtered revenue plus a configured product grouping | Exact | Pareto |
+| Unique products represented | Estimates how many different product groups are represented in the selected conversion population. **Example:** 50 conversion opportunities spanning three `ShelfLevel1Name` values represent three product groups, not 50 products owned. | `products.unique_products` | CPC state over `ShelfLevel1Name` | Approximate | KPI card |
+
+Mix and concentration describe the selected reporting population. Filtering
+out a product changes the displayed total and cumulative shares. They do not
+claim causal attribution from a particular action to a purchase, and product
+coverage is distinct from the customer-holdings lifecycle recipe.
+
+### Value Distributions and Response Time
+
+Understand typical action scores, variation and unusually high values. For
+response time, lower means faster recorded outcomes. Higher `Propensity` means
+a higher predicted response probability; higher `Priority` means a higher
+arbitration score, which does not by itself establish better model quality.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Median propensity, priority or response time | The middle value for the selected CDH field, less influenced by a few extremes than an average. **Example:** Median `Propensity` of 0.03 means roughly half of recorded action scores predict a response probability of 3% or less. | `distribution.median` | Unconditioned t-digest or KLL state | Approximate | KPI card |
+| 95th percentile (P95) value | A high-value threshold that about 95% of observations do not exceed. **Example:** P95 `Priority` of 1.8 means roughly 5% of recorded action priorities exceed 1.8; this helps identify unusually high arbitration scores and is not a response probability. | `distribution.p95` | Unconditioned t-digest or KLL state | Approximate | KPI card |
+| Propensity, priority or response-time distribution | Shows the middle value, the middle half of observations and the tails for a CDH score or duration. **Example:** Web and Mobile can both have median `Propensity` of 3%, while their middle halves span 2–4% and 1–8%, revealing a wider spread of action scores on Mobile. | `distribution.boxplot` | Unconditioned t-digest or KLL state | Approximate | Boxplot |
+| Decision-to-outcome response time (P95) | The duration within which about 95% of recorded action outcomes arrive. **Example:** `ResponseTime`: P95 of 1,800 means roughly 95% of included outcomes were recorded within 30 minutes of the decision and 5% took longer. | `engagement.decision_to_outcome_latency_p95` | Unconditioned duration t-digest or KLL state | Approximate | KPI card with previous-period comparison |
+
+
+### Prediction Quality
+
+Check whether model scores put likely responders ahead of non-responders and
+whether predicted response levels match observed results.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Propensity ranking quality (ROC AUC) | Measures how well `Propensity` ranks clicked actions above non-clicked actions; 0.5 is random ranking and 1.0 is perfect separation. **Example:** AUC near 0.8 means a randomly paired clicked action ranks above a non-clicked action about 80% of the time, counting ties as half. | `model_quality.roc_auc` | Matched positive/negative t-digests for the same score | Approximate | KPI card |
+| Propensity calibration ratio | Compares observed CTR with average `Propensity`: 1 means they match, below 1 means overprediction, above 1 means underprediction. **Example:** In one propensity band and model-control arm, 40 clicks from 1,000 classified outcomes give 4% CTR; against 5% mean propensity, the ratio is 0.8. | `model_quality.score_calibration` | Positive count, score sum, and observation count for the same scored population | Exact | KPI card |
+
+Read calibration within propensity bands as well as overall: an overall
+ratio of 1 can hide overprediction in one band and underprediction in another.
+
+### Adaptive Learning and Exploration
+
+These three **draft diagnostics** describe how adaptive decisioning adjusts
+model scores while learning. They support comparisons within a consistently
+explored population; they do not establish that a policy caused better
+customer outcomes.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Material upward exploration rate | The share of scored decisions where `FinalPropensity` exceeds positive raw `Propensity` by more than the chosen relative threshold. **Example:** At the default 10% threshold, an action moving from 0.02 to 0.023 qualifies; 150 qualifying decisions out of 1,000 Test-arm decisions give 15%. | `decisioning.material_upward_exploration_rate` | Purpose-built relatively filtered upward-revision and total counts on a numeric-distribution processor | Exact; draft diagnostic | KPI card |
+| Implied evidence index | A rough learning-maturity indicator based on how far `FinalPropensity` moves from `Propensity`; larger values suggest narrower relative adjustments. **Example:** For the same action and treatment in the Test arm, an index rising from 9 to 19 suggests narrowing adjustments, not 19 clicks or conversions. | `model_quality.implied_evidence_index` | Pooled means of `p × (1 − p)` and squared score revisions | Statistical; draft diagnostic | KPI card |
+| Relative exploration variance | Compares squared `FinalPropensity` adjustments with the variation implied by raw `Propensity`; smaller ratios indicate narrower relative adjustments. **Example:** For a new action’s treatment in the Test arm, a ratio falling from 0.20 to 0.05 as the treatment ages suggests exploration is narrowing; 0.05 is not a 5% uncertainty probability. | `model_quality.relative_exploration_variance` | Pooled means of squared score revisions and `p × (1 − p)` | Statistical; draft diagnostic | KPI card |
+
+Upward exploration is an adaptive-decisioning policy KPI, not a
+predictive-model-quality metric. It uses a dedicated numeric-distribution
+processor so outcome filtering cannot change the population. **Material
+upward exploration rate** counts a decision in the numerator only when the
+raw score is positive and
+`FinalPropensity - Propensity > Propensity × threshold`. The threshold defaults
+to 10% and is editable during installation; equality at the boundary and
+zero/negative raw scores are excluded from the numerator, while the
+denominator remains all scored decisions in the configured population.
+
+For the other two diagnostics, `p` is the raw response probability and the
+score revision is the final score minus `p`. The implied evidence index is
+`mean(p × (1 − p)) / mean(revision²) − 1`; it can be negative and is not a
+response count or fitted posterior parameter. Relative exploration variance
+is `mean(revision²) / mean(p × (1 − p))`, an unbounded ratio rather than an
+uncertainty probability. Other score adjustments can affect both diagnostics.
+Randomised control arms must be excluded from all three.
+
+### Contact Policy and Alternative Actions
+
+Assess response at different contact frequencies and compare the selected
+action with a recorded alternative. **CTR** means click-through rate. Below,
+the **chosen action** is the selected rank-1 action; the **alternative** is
+the selected rank-2 action, or the next recorded rank greater than 1 when
+rank 2 is absent, within the configured comparison group. **Comparable
+contacts** have a recorded alternative response probability. An **impression**
+here is a configured exposure record, not proof that a customer viewed it.
+
+Count contacts for the same `CustomerID + ActionID + Placement` within a
+trailing 168-hour window, including the current contact; the final bucket is
+`7+`. Alternatives are compared within the same customer, interaction and
+placement. A `Clicked` record takes precedence over an `Impression` record for
+the same contact, so the frequency examples count that contact once.
+
+| Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
+|---|---|---|---|---|---|
+| Chosen action CTR by impression count | The chosen action’s observed click rate at each impression-frequency level. **Example:** For one action in the Web Hero placement, 30 clicks among 1,000 contacts in the three-impression bucket give 3% CTR; each contact is that customer’s third for the same action and placement within 168 hours. | `contact_policy.frequency_marginal_ctr` | Exact `Positives` and `Responses` states | Approximate fixed-window interpretation | Line |
+| Chosen action CTR on comparable contacts | The chosen action’s click rate restricted to contacts with an alternative action’s usable `Propensity`. **Example:** Of 1,000 rank-1 action contacts, 600 have a comparable alternative and 24 of those are clicked: comparable CTR is 4%, even if all-contact CTR is 3%. | `contact_policy.frequency_comparable_ctr` | Exact `ComparablePositives` and `ComparableResponses` states | Approximate fixed-window interpretation | Line |
+| Alternative action expected CTR | The alternative action’s mean raw `Propensity` on the same comparable contacts. **Example:** If the alternatives average 0.05 propensity across 600 contacts, their expected CTR is 5%, equivalent to 30 predicted clicks; those clicks were not observed for the alternatives. | `contact_policy.runner_up_expected_ctr` | Exact `RunnerPropensitySum` and `ComparableResponses` states | Approximate fixed-window interpretation | Line |
+| Alternative action coverage | The share of chosen-action contacts with a usable response prediction for an alternative action. **Example:** If 600 of 1,000 Web Hero rank-1 contacts have a comparable alternative in the same customer decision and placement, coverage is 60%. | `contact_policy.runner_up_coverage` | Exact `ComparableResponses` and `Responses` states | Approximate fixed-window interpretation | KPI card |
+| Response opportunity margin | The chosen action’s observed CTR minus the alternative action’s expected CTR on the same contacts. **Example:** 24 clicks from 600 comparable contacts give 4%; alternatives with 5% mean `Propensity` give a −1 percentage-point margin, identifying an action-choice opportunity to investigate rather than proven uplift. | `contact_policy.response_opportunity_margin` | Exact `ComparablePositives`, `RunnerPropensitySum`, and shared `ComparableResponses` states | Approximate fixed-window interpretation | Bar |
+| Priority opportunity gap | The average difference between chosen and alternative action `Priority`, the score used for arbitration. **Example:** Mean priorities of 1.4 for chosen actions and 1.1 for alternatives on the same comparable contacts give a +0.3 index gap; it measures ranking advantage, not extra clicks or conversions. | `contact_policy.priority_opportunity_gap` | Exact `FocalPriorityComparableSum`, `RunnerPriorityComparableSum`, and shared `PriorityComparableContacts` states | Approximate arbitration diagnostic | Bar |
 
 The six **Contact policy** recipes target only the `frequency_response`
 processor and require the exact state names shown above. They never propose a
@@ -216,28 +434,6 @@ placement. Comparable selected rank-1 action CTR, selected
 rank-2 action expected CTR, and response opportunity margin use the same
 `ComparableResponses` denominator. `Priority` is retained only for the separate,
 neutral arbitration index; it is never treated as CTR or probability.
-
-The unique-entity recipe prefers CPC states created by current processor
-defaults while accepting HLL and Theta states. Theta is useful when the same
-persisted set also supports intersections or differences. The recipe does not
-convert or merge different sketch families together.
-
-The decision-to-outcome recipe is unit-neutral: it inherits the selected
-duration field's unit and must not be labelled as seconds unless the source
-contract establishes seconds. It measures the time until an outcome is
-recorded, not request-serving latency.
-
-The three exploration recipes are draft diagnostics. Upward exploration is an
-adaptive-decisioning policy KPI, not a predictive-model-quality metric. It uses
-a dedicated numeric-distribution processor so outcome filtering cannot change
-the population. **Material upward exploration rate** counts a decision only
-when the raw score is positive and
-`FinalPropensity - Propensity > Propensity × threshold`. The threshold defaults
-to 10% and is editable during installation; equality at the boundary and
-zero/negative raw scores are excluded. The implied evidence value is a
-heuristic index, not a response count or fitted posterior parameter. Relative
-exploration variance is an unbounded ratio, not an uncertainty probability.
-Randomised control arms must be excluded from all three.
 
 ## Versioning and Governance
 

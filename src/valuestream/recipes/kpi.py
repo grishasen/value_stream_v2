@@ -86,7 +86,7 @@ class RecipeInput(_RecipeModel):
     role: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     label: str
     description: str = ""
-    source: Literal["state", "stage"] = "state"
+    source: Literal["state", "stage", "dimension"] = "state"
     state_types: tuple[RecipeStateType, ...] = ()
     state_attributes: dict[str, str] = Field(default_factory=dict)
     absent_state_attributes: tuple[str, ...] = ()
@@ -103,6 +103,15 @@ class RecipeInput(_RecipeModel):
 
     @model_validator(mode="after")
     def _paired_input_is_complete(self) -> RecipeInput:
+        if self.source == "dimension" and (
+            self.state_types
+            or self.state_attributes
+            or self.absent_state_attributes
+            or self.requires_where
+            or self.state_template
+            or self.selection == "field_algorithm"
+        ):
+            raise ValueError("dimension inputs select configured group-by fields, not states")
         if bool(self.same_attribute_as) != bool(self.match_attribute):
             raise ValueError("same_attribute_as and match_attribute must be configured together")
         if self.source == "stage" and self.selection == "field_algorithm":
@@ -148,6 +157,7 @@ class KpiRecipe(_RecipeModel):
     tags: tuple[str, ...] = ()
     maturity: Literal["draft", "reviewed", "certified"] = "reviewed"
     processor_kinds: tuple[RecipeProcessorKind, ...]
+    required_states: dict[str, RecipeStateType] = Field(default_factory=dict)
     parameters: tuple[RecipeParameter, ...] = ()
     inputs: tuple[RecipeInput, ...] = ()
     default_metric_id: str
@@ -193,7 +203,9 @@ class KpiRecipe(_RecipeModel):
                         f"input {item.role!r} state template requires a where predicate"
                     )
         template = _metric_template(self)
-        placeholders = _placeholder_names(template)
+        placeholders = _placeholder_names(template) | _placeholder_names(
+            self.report.model_dump(mode="json")
+        )
         allowed = {"processor_id", "metric_id", "entity_column", *role_set}
         if unknown := placeholders - allowed:
             raise ValueError(
@@ -277,14 +289,12 @@ def resolve_recipe_parameters(
         if not math.isfinite(value):
             raise ValueError(f"{item.label} must be finite")
         if not item.minimum <= value <= item.maximum:
-            raise ValueError(
-                f"{item.label} must be between {item.minimum:g} and {item.maximum:g}"
-            )
+            raise ValueError(f"{item.label} must be between {item.minimum:g} and {item.maximum:g}")
         resolved[item.name] = value
     return resolved
 
 
-def recipe_readiness(
+def recipe_readiness(  # noqa: PLR0912 - explicit compatibility and binding decisions
     recipe: KpiRecipe,
     processor: model.Processor,
     *,
@@ -301,6 +311,32 @@ def recipe_readiness(
                 f"Requires {', '.join(recipe.processor_kinds)}; {processor.id} is "
                 f"{processor.kind}.",
             ),
+        )
+
+    if _requires_unconfigured_frequency_priority(recipe, processor):
+        return RecipeReadiness(
+            recipe_id=recipe.id,
+            processor_id=processor.id,
+            status="incompatible",
+            messages=(
+                f"{recipe.title} requires {processor.id} to configure columns.priority "
+                "with a numeric arbitration-priority source field. Configure the binding "
+                "and backfill aggregates before installing this recipe.",
+            ),
+        )
+
+    states = model.effective_processor_states(processor)
+    missing_states = [
+        name
+        for name, state_type in recipe.required_states.items()
+        if name not in states or states[name].type != state_type
+    ]
+    if missing_states:
+        return RecipeReadiness(
+            recipe_id=recipe.id,
+            processor_id=processor.id,
+            status="incompatible",
+            messages=(f"Requires configured aggregate states: {', '.join(missing_states)}.",),
         )
 
     resolved_parameters = resolve_recipe_parameters(recipe, parameter_values)
@@ -346,6 +382,29 @@ def recipe_readiness(
     )
 
 
+def _requires_unconfigured_frequency_priority(
+    recipe: KpiRecipe,
+    processor: model.Processor,
+) -> bool:
+    """Return whether a recipe requires priority-only canonical frequency states."""
+
+    if processor.kind != "frequency_response":
+        return False
+    columns = getattr(processor, "columns", None)
+    if getattr(columns, "priority", None) is not None:
+        return False
+    return any(
+        item.require_preferred
+        and bool(item.preferred_names)
+        and all(
+            (state := model.FREQUENCY_RESPONSE_STATES.get(name)) is not None
+            and state.requires_priority
+            for name in item.preferred_names
+        )
+        for item in recipe.inputs
+    )
+
+
 def _missing_input_message(item: RecipeInput) -> str:
     if item.require_preferred and item.preferred_names:
         names = " or ".join(repr(name) for name in item.preferred_names)
@@ -386,9 +445,7 @@ def instantiate_metric(
     _validate_paired_bindings(recipe, processor, bindings)
 
     entity_column = (
-        processor.keys.customer_id
-        if isinstance(processor, model.EntityLifecycleProcessor)
-        else ""
+        processor.keys.customer_id if isinstance(processor, model.EntityLifecycleProcessor) else ""
     )
     values = {
         "processor_id": processor.id,
@@ -427,7 +484,7 @@ def instantiate_tile(
 ) -> dict[str, Any]:
     """Materialize and validate a recommended report tile for a recipe metric."""
 
-    del processor, bindings
+    values = {"processor_id": processor.id, "metric_id": metric_id, **(bindings or {})}
     value_format = recipe.metric.display.value_format if recipe.metric.display else None
     raw: dict[str, Any] = {
         "id": tile_id,
@@ -442,7 +499,9 @@ def instantiate_tile(
     if recipe.report.kpi:
         raw["kpi"] = recipe.report.kpi
     if recipe.report.x:
-        raw["x"] = recipe.report.x
+        raw["x"] = _substitute(recipe.report.x, values)
+        if _placeholder_names(recipe.report.x) and raw["x"] not in processor.group_by:
+            raise ValueError(f"Report dimension {raw['x']!r} is not a configured group-by field")
     return _TILE_ADAPTER.validate_python(raw).model_dump(
         mode="json", exclude_none=True, exclude_defaults=True
     )
@@ -470,7 +529,7 @@ def _metric_label_from_id(metric_id: str) -> str:
     return label[:1].upper() + label[1:] if label else metric_id
 
 
-def recipe_binding_options(
+def recipe_binding_options(  # noqa: PLR0912 - dimensions, stages, and state proposals
     item: RecipeInput,
     processor: model.Processor,
     values: tuple[str, ...] | list[str] | None = None,
@@ -482,10 +541,19 @@ def recipe_binding_options(
 
     resolved_parameters = dict(parameter_values or {})
     choices = (
-        list(values)
-        if values is not None
-        else _input_options(item, processor, resolved_parameters)
+        list(values) if values is not None else _input_options(item, processor, resolved_parameters)
     )
+    if item.source == "dimension":
+        return [
+            RecipeBindingOption(
+                value=choice,
+                label=_state_business_label(choice),
+                field=choice,
+                algorithm="Report grouping",
+                technical_detail=f"Configured group-by field: {choice}",
+            )
+            for choice in choices
+        ]
     if item.source == "stage":
         return [
             RecipeBindingOption(
@@ -716,6 +784,8 @@ def _input_options(
     processor: model.Processor,
     parameter_values: Mapping[str, float] | None = None,
 ) -> list[str]:
+    if item.source == "dimension":
+        return _dedupe_strings(processor.group_by)
     if item.source == "stage":
         if not isinstance(processor, model.FunnelProcessor):
             return []
@@ -724,11 +794,7 @@ def _input_options(
             for name, state in processor.states.items()
             if isinstance(state, model.CountState) and state.stage
         }
-        return [
-            by_stage[stage.name]
-            for stage in processor.stages
-            if stage.name in by_stage
-        ]
+        return [by_stage[stage.name] for stage in processor.stages if stage.name in by_stage]
 
     target_definition = (
         _state_template_definition(item, dict(parameter_values or {}))
@@ -905,11 +971,7 @@ def _state_parameter_summary(spec: model.StateSpec) -> str:
         for key in ("lg_k", "k", "lg_max_map_size")
         if getattr(spec, key, None) is not None
     }
-    parts = [
-        f"{key}={values[key]}"
-        for key in ("lg_k", "k", "lg_max_map_size")
-        if key in values
-    ]
+    parts = [f"{key}={values[key]}" for key in ("lg_k", "k", "lg_max_map_size") if key in values]
     where = getattr(spec, "where", None)
     if where is not None:
         rendered = yaml.safe_dump(

@@ -1520,8 +1520,7 @@ def automatic_distribution_metric_definitions(
     existing_distribution_states = {
         metric.state
         for metric in metrics.values()
-        if isinstance(metric, model.DistributionMetric)
-        and metric.processor == processor.id
+        if isinstance(metric, model.DistributionMetric) and metric.processor == processor.id
     }
     digest_property_counts: dict[str, int] = {}
     for state in model.effective_processor_states(processor).values():
@@ -2011,6 +2010,34 @@ def with_frequency_column(
     return dimensions
 
 
+def group_by_for_kind_transition(
+    group_by: list[str],
+    *,
+    previous_kind: str,
+    kind: str,
+    configured_frequency_column: str = "",
+    frequency_column: str = "",
+) -> list[str]:
+    """Return group-by dimensions normalized for a processor-kind edit.
+
+    Entering or remaining on ``frequency_response`` carries the live derived
+    frequency column. Leaving that kind removes the previously derived column,
+    which is not a raw source field and must not leak into another processor
+    kind's authored dimensions.
+    """
+
+    if kind == "frequency_response":
+        return with_frequency_column(
+            group_by,
+            configured=configured_frequency_column,
+            frequency_column=frequency_column,
+        )
+    if previous_kind == "frequency_response":
+        previous_frequency_column = configured_frequency_column or "ExposureBucket"
+        return [dimension for dimension in group_by if dimension != previous_frequency_column]
+    return list(group_by)
+
+
 def frequency_response_has_priority(processor_def: dict[str, Any]) -> bool:
     """Return whether a frequency-response definition binds the priority column."""
 
@@ -2020,7 +2047,119 @@ def frequency_response_has_priority(processor_def: dict[str, Any]) -> bool:
     return bool(str(raw_columns.get("priority", "") or "").strip())
 
 
-def frequency_response_state_rows(processor_def: dict[str, Any]) -> list[dict[str, Any]]:
+def frequency_response_states_for_edit(  # noqa: PLR0911 - explicit fallback guards
+    existing_definition: Mapping[str, Any] | None,
+    *,
+    priority: bool,
+) -> dict[str, dict[str, Any]]:
+    """Resolve the canonical states to write during a frequency-response edit.
+
+    New processors and existing processors that publish the whole contract get
+    the whole currently available contract. A valid authored subset remains a
+    subset, so an unrelated UI edit cannot silently expand persisted outputs.
+    When priority is removed, unavailable priority-only states are dropped.
+    """
+
+    available = model.frequency_response_state_definitions(priority=priority)
+    if not isinstance(existing_definition, Mapping):
+        return available
+    if str(existing_definition.get("kind", "")) != "frequency_response":
+        return available
+    raw_states = existing_definition.get("states")
+    if not isinstance(raw_states, Mapping) or not raw_states:
+        return available
+
+    previous_priority = frequency_response_has_priority(dict(existing_definition))
+    previous_available = model.frequency_response_state_definitions(priority=previous_priority)
+    state_names: list[str] = []
+    for raw_name, raw_definition in raw_states.items():
+        name = str(raw_name)
+        expected = previous_available.get(name)
+        if expected is None or not isinstance(raw_definition, Mapping):
+            return available
+        normalized = dict(raw_definition)
+        if normalized.get("distinct") is False:
+            normalized.pop("distinct")
+        if normalized != expected:
+            return available
+        state_names.append(name)
+
+    if set(state_names) == set(previous_available):
+        return available
+    preserved = {name: available[name] for name in state_names if name in available}
+    # ``states`` is non-empty in the catalog model. A priority-only subset
+    # therefore falls back to the available contract when priority is cleared.
+    return preserved or available
+
+
+def default_processor_state_definitions(
+    kind: str,
+    kind_settings: Mapping[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return fresh state definitions for a newly authored processor kind."""
+
+    settings = kind_settings or {}
+    if kind == "frequency_response":
+        return model.frequency_response_state_definitions(
+            priority=frequency_response_has_priority(dict(settings))
+        )
+    if kind == "binary_outcome":
+        return {
+            "Count": {"type": "count"},
+            "Positives": {"type": "count", "outcome": "positive"},
+            "Negatives": {"type": "count", "outcome": "negative"},
+        }
+    if kind != "numeric_distribution":
+        return {"Count": {"type": "count"}}
+
+    engine = str(settings.get("quantile_engine") or "tdigest")
+    if engine not in {"tdigest", "kll"}:
+        engine = "tdigest"
+    definitions: dict[str, dict[str, Any]] = {}
+    for property_name in dedupe(
+        [
+            str(value).strip()
+            for value in string_list(settings.get("properties"))
+            if str(value).strip()
+        ]
+    ):
+        count = f"{property_name}_Count"
+        mean = f"{property_name}_Mean"
+        definitions.update(
+            {
+                count: {"type": "count", "source_column": property_name},
+                mean: {
+                    "type": "pooled_mean",
+                    "source_column": property_name,
+                    "weight": count,
+                },
+                f"{property_name}_Var": {
+                    "type": "pooled_variance",
+                    "source_column": property_name,
+                    "mean": mean,
+                    "weight": count,
+                },
+                f"{property_name}_Min": {
+                    "type": "min",
+                    "source_column": property_name,
+                },
+                f"{property_name}_Max": {
+                    "type": "max",
+                    "source_column": property_name,
+                },
+                f"{property_name}_{engine}": {
+                    "type": engine,
+                    "source_column": property_name,
+                },
+            }
+        )
+    return definitions or {"Count": {"type": "count"}}
+
+
+def frequency_response_state_rows(
+    processor_def: dict[str, Any],
+    state_names: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
     """Return read-only grid rows for the kind's canonical states.
 
     The three arbitration-priority states appear only when the definition binds
@@ -2028,8 +2167,11 @@ def frequency_response_state_rows(processor_def: dict[str, Any]) -> list[dict[st
     """
 
     priority = frequency_response_has_priority(processor_def)
+    selected = None if state_names is None else {str(name) for name in state_names}
     rows: list[dict[str, Any]] = []
     for name, state in model.frequency_response_states(priority=priority).items():
+        if selected is not None and name not in selected:
+            continue
         source_column = state.source_column or ""
         if state.type == "value_sum":
             derived = f"sum of {source_column}"
@@ -2050,19 +2192,23 @@ def frequency_response_state_rows(processor_def: dict[str, Any]) -> list[dict[st
 
 
 FREQUENCY_STATE_PANEL_CAPTION = (
-    "These states are fixed by the processor kind: it derives a known set of virtual "
-    "columns, so the published contract is the same for every catalog and cannot be "
-    "edited here. Ratios stay meaningful only inside one family — Responses, "
+    "These available state definitions and bindings are fixed by the processor kind; "
+    "a catalog may publish a subset, which this editor preserves. They cannot be authored "
+    "or rebound here. Ratios stay meaningful only inside one family — Responses, "
     "ComparableResponses, and PriorityComparableContacts are three different "
-    "denominators. Binding a priority column adds the three arbitration diagnostics."
+    "denominators. Binding a priority column makes the three arbitration diagnostics "
+    "available."
 )
 
 
-def frequency_response_state_frame(processor_def: dict[str, Any]) -> pl.DataFrame:
+def frequency_response_state_frame(
+    processor_def: dict[str, Any],
+    state_names: Iterable[str] | None = None,
+) -> pl.DataFrame:
     """Return the read-only grid frame for the canonical states."""
 
     return editor_frame(
-        frequency_response_state_rows(processor_def),
+        frequency_response_state_rows(processor_def, state_names),
         FREQUENCY_STATE_EDITOR_COLUMNS,
         dict,
     )
@@ -2166,7 +2312,11 @@ def processor_for_metric(catalog: model.Catalog, metric_name: str) -> model.Proc
     if metric is None:
         return None
     return next(
-        (processor for processor in catalog.processors.processors if processor.id == metric.processor),
+        (
+            processor
+            for processor in catalog.processors.processors
+            if processor.id == metric.processor
+        ),
         None,
     )
 
@@ -2413,12 +2563,10 @@ def default_tile_fields(  # noqa: PLR0912, PLR0915
         for field in group_by
         if field not in {"Hour", "Day", "Week", "Month", "Quarter", "Year"}
     ]
-    first_dim = business_dimensions[0] if business_dimensions else (group_by[0] if group_by else None)
-    second_dim = (
-        business_dimensions[1]
-        if len(business_dimensions) > 1
-        else first_dim
+    first_dim = (
+        business_dimensions[0] if business_dimensions else (group_by[0] if group_by else None)
     )
+    second_dim = business_dimensions[1] if len(business_dimensions) > 1 else first_dim
     first_output = outputs[0]
     second_output = outputs[1] if len(outputs) > 1 else first_output
 
@@ -2963,7 +3111,9 @@ def source_cascade_plan(catalog: model.Catalog, source_id: str) -> SourceCascade
         if processor.source == normalized_source_id
     }
     metric_ids = {
-        name for name, metric in catalog.metrics.metrics.items() if metric.processor in processor_ids
+        name
+        for name, metric in catalog.metrics.metrics.items()
+        if metric.processor in processor_ids
     }
     metric_ids = _transitive_metric_dependants(catalog, metric_ids)
     tile_locations, page_filter_locations = _dashboard_dependency_locations(
@@ -4472,6 +4622,7 @@ __all__ = [
     "default_curve_digest_states",
     "default_metric_kind",
     "default_metric_name",
+    "default_processor_state_definitions",
     "default_rows_from_values",
     "default_rows_with_fields",
     "default_tile_fields",
@@ -4494,8 +4645,10 @@ __all__ = [
     "filter_rows_from_expression",
     "first_filter_expression",
     "float_in_range",
+    "frequency_response_states_for_edit",
     "funnel_stage_names",
     "generated_catalog_id",
+    "group_by_for_kind_transition",
     "label_condition_rows",
     "merge_stage_definitions",
     "metric_kind_help",

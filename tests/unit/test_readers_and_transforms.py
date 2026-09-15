@@ -229,3 +229,19 @@ def test_parse_datetime_skips_columns_the_reader_already_typed() -> None:
     assert out.get_column("OutcomeTime").dtype.is_temporal()
     assert out.get_column("DecisionTime").dtype.is_temporal()
     assert out.get_column("ResponseSeconds").to_list() == [60]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("location", ["source", "transform"])
+def test_null_defaults_preserve_known_values_and_missing_cost(location: str) -> None:
+    defaults = {"Cost": None, "Revenue": None, "Currency": "EUR"}
+    source = _source([{"kind": "defaults", "values": defaults}] if location == "transform" else [])
+    if location == "source":
+        source = source.model_copy(update={"defaults": defaults})
+    frame = pl.DataFrame({"Cost": [0.0, None, 0.25], "Currency": [None, "USD", "EUR"]})
+
+    result = apply_transforms(frame.lazy(), source).collect()
+
+    assert result["Cost"].to_list() == [0.0, None, 0.25]
+    assert result["Revenue"].to_list() == [None, None, None]
+    assert result["Currency"].to_list() == ["EUR", "USD", "EUR"]

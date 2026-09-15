@@ -2239,7 +2239,11 @@ def _generate_visual_case_expression(
     )
 
 
-def _canonical_kind_states(kind: str, kind_settings: dict[str, Any]) -> dict[str, Any] | None:
+def _canonical_kind_states(
+    kind: str,
+    kind_settings: dict[str, Any],
+    existing_definition: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Return the fixed state contract for a kind that owns one, else ``None``.
 
     The bindings come from the live kind widgets rather than the stored
@@ -2250,12 +2254,17 @@ def _canonical_kind_states(kind: str, kind_settings: dict[str, Any]) -> dict[str
         return None
     raw_columns = kind_settings.get("columns")
     definition = {"columns": raw_columns if isinstance(raw_columns, dict) else {}}
-    return model.frequency_response_state_definitions(
-        priority=builder.frequency_response_has_priority(definition)
+    return builder.frequency_response_states_for_edit(
+        existing_definition,
+        priority=builder.frequency_response_has_priority(definition),
     )
 
 
-def _render_canonical_states_panel(kind_settings: dict[str, Any], editor_key: str) -> None:
+def _render_canonical_states_panel(
+    kind_settings: dict[str, Any],
+    canonical_states: Mapping[str, Any],
+    editor_key: str,
+) -> None:
     """Render a canonical state contract in place of the editable grid."""
 
     raw_columns = kind_settings.get("columns")
@@ -2267,15 +2276,18 @@ def _render_canonical_states_panel(kind_settings: dict[str, Any], editor_key: st
         "Processor Sketches",
         "Aggregate states this processor materializes — canonical for this kind.",
     ):
-        _render_canonical_state_grid(builder.frequency_response_state_frame(definition))
+        _render_canonical_state_grid(
+            builder.frequency_response_state_frame(definition, canonical_states)
+        )
         st.caption(builder.FREQUENCY_STATE_PANEL_CAPTION)
 
 
 def _render_canonical_state_grid(state_frame: Any) -> None:
     """Show a kind's fixed state contract with its definitions, read-only.
 
-    Kinds whose states are canonical publish the same contract for every
-    catalog, so the grid explains each state instead of offering edits.
+    Canonical kinds fix every available state's name, type, and binding while
+    allowing a catalog to publish a subset, so the grid explains the selected
+    contract instead of offering edits.
     """
 
     st.dataframe(
@@ -4130,14 +4142,17 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
         )
         calendar_dimensions = builder.calendar_dimensions_for_grain(base_grain)
         group_options = builder.dedupe([*field_options, *calendar_dimensions])
+        configured_frequency_column = str(processor_def.get("frequency_column") or "")
+        seeded_group_by = builder.group_by_for_kind_transition(
+            field_remap.remap_field_list(processor.group_by, field_mapping),
+            previous_kind=processor.kind,
+            kind=kind,
+            configured_frequency_column=configured_frequency_column,
+        )
         group_by = st.multiselect(
             "Group By",
             group_options,
-            default=[
-                field
-                for field in field_remap.remap_field_list(processor.group_by, field_mapping)
-                if field in group_options
-            ],
+            default=[field for field in seeded_group_by if field in group_options],
             accept_new_options=True,
             key=f"builder_proc_group_{processor.id}",
             help=(
@@ -4188,11 +4203,24 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
 
     state_key = f"builder_proc_states_{processor.id}"
     state_editor_key = f"builder_proc_state_editor_{processor.id}"
-    canonical_states = _canonical_kind_states(kind, kind_settings)
+    editor_kind_key = f"{state_key}_selected_kind"
+    previous_editor_kind = str(st.session_state.get(editor_kind_key, processor.kind))
+    st.session_state[editor_kind_key] = kind
+    leaving_frequency = (
+        previous_editor_kind == "frequency_response" and kind != "frequency_response"
+    )
+    canonical_states = _canonical_kind_states(kind, kind_settings, processor_def)
     if canonical_states is not None:
-        _render_canonical_states_panel(kind_settings, state_editor_key)
+        _render_canonical_states_panel(kind_settings, canonical_states, state_editor_key)
     states_baseline: model.Processor = processor
-    if creating and canonical_states is None:
+    if leaving_frequency:
+        st.session_state[state_key] = _state_rows_from_definitions(
+            builder.default_processor_state_definitions(kind, kind_settings)
+        )
+        st.session_state.pop(f"{state_key}_kind_signature", None)
+        st.session_state.pop(f"{state_key}_kind_defaults", None)
+        components.clear_pinned_editor(state_editor_key)
+    elif creating and canonical_states is None:
         states_baseline = _kind_candidate_processor(processor, kind, kind_settings)
         _reseed_state_rows_for_kind(states_baseline, state_key, processor.id, field_mapping)
     if canonical_states is None and state_key not in st.session_state:
@@ -4321,12 +4349,15 @@ def _processor_builder(  # noqa: PLR0912, PLR0915
     for managed_key in forms.PROCESSOR_KIND_MANAGED_FIELDS:
         processor_def.pop(managed_key, None)
     processor_def.update(kind_settings)
-    if kind == "frequency_response":
-        processor_def["group_by"] = builder.with_frequency_column(
-            group_by,
-            configured=str(builder.processor_to_dict(processor).get("frequency_column") or ""),
-            frequency_column=str(kind_settings.get("frequency_column") or ""),
-        )
+    processor_def["group_by"] = builder.group_by_for_kind_transition(
+        group_by,
+        previous_kind=processor.kind,
+        kind=kind,
+        configured_frequency_column=str(
+            builder.processor_to_dict(processor).get("frequency_column") or ""
+        ),
+        frequency_column=str(kind_settings.get("frequency_column") or ""),
+    )
     state_rows_valid = True
     if canonical_states is not None:
         processor_def["states"] = canonical_states
@@ -4487,22 +4518,20 @@ def _kind_candidate_processor(
     candidate_def.update(kind_settings)
     candidate_def["kind"] = kind
     canonical_states = _canonical_kind_states(kind, kind_settings)
-    if kind == "numeric_distribution":
-        candidate_def["states"] = _numeric_property_state_definitions(
-            builder.string_list(kind_settings.get("properties")),
-            str(kind_settings.get("quantile_engine") or "tdigest"),
-        )
-    elif canonical_states is not None:
+    candidate_def["states"] = builder.default_processor_state_definitions(kind, kind_settings)
+    if canonical_states is not None:
         # States are required by the model, so a kind that owns its contract has
         # to seed it here or the reshape below can never validate.
         candidate_def["states"] = canonical_states
-        candidate_def["group_by"] = builder.with_frequency_column(
+        candidate_def["group_by"] = builder.group_by_for_kind_transition(
             builder.string_list(candidate_def.get("group_by")),
-            configured=str(builder.processor_to_dict(processor).get("frequency_column") or ""),
+            previous_kind=processor.kind,
+            kind=kind,
+            configured_frequency_column=str(
+                builder.processor_to_dict(processor).get("frequency_column") or ""
+            ),
             frequency_column=str(kind_settings.get("frequency_column") or ""),
         )
-    else:
-        candidate_def.pop("states", None)
     try:
         return model.Processors.model_validate(
             {"catalog_version": 2, "processors": [candidate_def]}
@@ -9894,23 +9923,52 @@ def _numeric_property_state_definitions(
 ) -> dict[str, dict[str, Any]]:
     """Return strict catalog definitions for automatic numeric state rows."""
 
-    definitions: dict[str, dict[str, Any]] = {}
-    for row in _numeric_property_state_rows(properties, quantile_engine):
-        state_name = str(row["State"])
-        state_type = str(row["Type"])
-        definition: dict[str, Any] = {
-            "type": state_type,
-            "source_column": str(row["Source Column"]),
-        }
-        definition.update(
-            _parse_state_parameters(
-                row.get("Parameters"),
-                state_name=state_name,
-                state_type=state_type,
-            )
+    return builder.default_processor_state_definitions(
+        "numeric_distribution",
+        {"properties": properties, "quantile_engine": quantile_engine},
+    )
+
+
+def _state_rows_from_definitions(
+    definitions: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return editable rows for fresh state definitions after a kind change."""
+
+    rows: list[dict[str, Any]] = []
+    for name, raw_definition in definitions.items():
+        definition = dict(raw_definition)
+        state_type = str(definition.pop("type", "count") or "count")
+        source_column = str(definition.pop("source_column", "") or "")
+        outcome = str(definition.get("outcome", "") or "")
+        if outcome:
+            derived_from = f"{outcome} outcomes"
+        elif state_type == "count":
+            derived_from = f"non-null {source_column}" if source_column else "included rows"
+        elif state_type == "value_sum":
+            derived_from = f"sum of {source_column or name}"
+        elif state_type == "min":
+            derived_from = f"minimum of {source_column or name}"
+        elif state_type == "max":
+            derived_from = f"maximum of {source_column or name}"
+        elif state_type == "pooled_mean":
+            derived_from = f"weighted mean of {source_column or name}"
+        elif state_type == "pooled_variance":
+            derived_from = f"pooled variance of {source_column or name}"
+        elif state_type in {"tdigest", "kll"}:
+            derived_from = f"distribution of {source_column or name}"
+        else:
+            derived_from = "included rows"
+        rows.append(
+            {
+                "State": str(name),
+                "Type": state_type,
+                "Source Column": source_column,
+                "Parameters": _state_parameters_yaml(definition),
+                "Derived From": derived_from,
+                "Enabled": True,
+            }
         )
-        definitions[state_name] = definition
-    return definitions
+    return rows
 
 
 def _state_rows(

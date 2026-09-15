@@ -90,7 +90,8 @@ def _apply_defaults(frame: pl.LazyFrame, defaults: dict[str, object]) -> pl.Lazy
     expressions: list[pl.Expr] = []
     for column, value in defaults.items():
         if column in names:
-            expressions.append(pl.col(column).fill_null(value).alias(column))
+            if value is not None:
+                expressions.append(pl.col(column).fill_null(value).alias(column))
         else:
             expressions.append(pl.lit(value).alias(column))
     return frame.with_columns(expressions)

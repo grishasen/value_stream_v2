@@ -1211,6 +1211,27 @@
         "report": {
           "$ref": "#/$defs/RecipeReport"
         },
+        "required_states": {
+          "additionalProperties": {
+            "enum": [
+              "count",
+              "value_sum",
+              "min",
+              "max",
+              "pooled_mean",
+              "pooled_variance",
+              "tdigest",
+              "kll",
+              "cpc",
+              "hll",
+              "theta",
+              "topk"
+            ],
+            "type": "string"
+          },
+          "title": "Required States",
+          "type": "object"
+        },
         "summary": {
           "title": "Summary",
           "type": "string"
@@ -4250,7 +4271,8 @@
           "default": "state",
           "enum": [
             "state",
-            "stage"
+            "stage",
+            "dimension"
           ],
           "title": "Source",
           "type": "string"

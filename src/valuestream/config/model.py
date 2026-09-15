@@ -531,9 +531,7 @@ FREQUENCY_RESPONSE_STATES: Mapping[str, FrequencyResponseState] = MappingProxyTy
         "FocalPriorityComparableSum": FrequencyResponseState(
             type="value_sum",
             source_column="FocalPriorityComparable",
-            explanation=(
-                "Sum of the selected rank-1 action's priority over those rows."
-            ),
+            explanation=("Sum of the selected rank-1 action's priority over those rows."),
             requires_priority=True,
         ),
         "RunnerPriorityComparableSum": FrequencyResponseState(
@@ -609,6 +607,8 @@ def _frequency_unknown_state_message(name: str, priority_column: str | None) -> 
         f"frequency_response state {name!r} is not part of the kind's canonical contract; "
         f"available states are: {available}"
     )
+
+
 _FREQUENCY_RESPONSE_RESERVED_COLUMNS = frozenset(
     {
         "Day",

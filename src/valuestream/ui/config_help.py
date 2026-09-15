@@ -222,8 +222,7 @@ FIELD_HELP: dict[str, str] = {
         "InteractionID",
     ),
     "processor.frequency_action": _tip(
-        "Field identifying the offered action, used for contact identity and impression "
-        "counting.",
+        "Field identifying the offered action, used for contact identity and impression counting.",
         "ActionID",
     ),
     "processor.frequency_placement": _tip(
@@ -250,18 +249,20 @@ FIELD_HELP: dict[str, str] = {
     ),
     "processor.frequency_positive_values": _tip(
         "Outcome values that count as a positive response. A positive always counts as an "
-        "exposure too. Matching is exact and case-sensitive.",
-        "Clicked",
+        "exposure too. Enter a YAML list so quoted strings, numbers, and booleans remain "
+        "distinct; matching is exact and case-sensitive.",
+        '["Clicked", 1, true]',
     ),
     "processor.frequency_exposure_values": _tip(
         "Outcome values that mean the action was shown. Repeated rows for one contact "
-        "collapse, and a positive outcome wins.",
-        "Impression, Clicked",
+        "collapse, and a positive outcome wins. Use YAML list syntax and quote values that "
+        "contain commas or significant whitespace.",
+        '["Impression", "Clicked"]',
     ),
     "processor.frequency_candidate_values": _tip(
         "Outcome values kept as eligible ranked alternatives, including actions that were "
-        "arbitrated but never shown.",
-        "Pending, Impression, Clicked",
+        "arbitrated but never shown. Use YAML list syntax to preserve each value's type.",
+        '["Pending", "Impression", "Clicked"]',
     ),
     "processor.frequency_window_hours": _tip(
         "Length of the trailing window that counts prior impressions of the same action, "

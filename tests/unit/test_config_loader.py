@@ -208,6 +208,7 @@ class TestFatWorkspace:
                 "unit_economics",
                 "outcome_funnel",
             ],
+            "fat_marketing_costs": ["cost_by_impressions", "cost_by_interactions"],
         }
 
     def test_adaptive_diagnostics_are_fixed_to_valid_populations(self) -> None:

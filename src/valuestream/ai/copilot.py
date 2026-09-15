@@ -582,9 +582,7 @@ def _remap_processor_column_row(row: dict[str, Any], mapping: Mapping[str, str])
     return updated
 
 
-def _remap_tile_fields(
-    tile: dict[str, Any], mapping: Mapping[str, str]
-) -> dict[str, Any]:
+def _remap_tile_fields(tile: dict[str, Any], mapping: Mapping[str, str]) -> dict[str, Any]:
     updated = copy.deepcopy(tile)
     for key in _TILE_SINGLE_FIELD_KEYS:
         if key in updated:
@@ -1560,17 +1558,26 @@ def validate_draft_field_contract(  # noqa: PLR0912
                 and baseline_processors.get(processor_id) == processor
             ):
                 continue
-            processor_fields = set(source_outputs)
-            processor_fields.update(
+            processor_input_fields = set(source_outputs)
+            processor_input_fields.update(
                 source_input_fields
                 if baseline_processors.get(processor_id) == processor
                 else allowed_fields
             )
+            raw_references = _processor_raw_field_references(processor)
+            issues.extend(
+                _field_reference_issues(
+                    f"processor {processor_id!r}",
+                    raw_references,
+                    processor_input_fields,
+                )
+            )
+            processor_fields = set(processor_input_fields)
             processor_fields.update(_processor_calendar_fields(processor))
             issues.extend(
                 _field_reference_issues(
                     f"processor {processor_id!r}",
-                    _processor_field_references(processor),
+                    _processor_field_references(processor) - raw_references,
                     processor_fields,
                 )
             )
@@ -1579,7 +1586,10 @@ def validate_draft_field_contract(  # noqa: PLR0912
     baseline_metrics = _metric_definitions_by_name(baseline_draft)
     if isinstance(metrics, dict):
         for metric_name, metric in metrics.items():
-            if not isinstance(metric, dict) or str(metric.get("processor") or "") not in processor_ids:
+            if (
+                not isinstance(metric, dict)
+                or str(metric.get("processor") or "") not in processor_ids
+            ):
                 continue
             if (
                 carry_unmodified_active_artifacts
@@ -1953,9 +1963,6 @@ def _processor_field_references(processor: dict[str, Any]) -> set[str]:  # noqa:
     for key in ("variant_column", "entity", "as_of_property"):
         references.update(_string_field_values(processor.get(key)))
 
-    time_spec = processor.get("time")
-    if isinstance(time_spec, dict):
-        references.update(_string_field_values(time_spec.get("property")))
     outcome = processor.get("outcome")
     if isinstance(outcome, dict):
         references.update(_string_field_values(outcome.get("column")))
@@ -2000,7 +2007,83 @@ def _processor_field_references(processor: dict[str, Any]) -> set[str]:  # noqa:
         typed = None
     if typed is not None:
         references.update(_processor_state_source_fields(typed))
-    return references - _processor_derived_fields(processor, typed)
+    raw_references = _processor_raw_field_references(processor, typed=typed)
+    references.update(raw_references)
+    return raw_references | (references - _processor_derived_fields(processor, typed))
+
+
+def _processor_raw_field_references(  # noqa: PLR0912
+    processor: dict[str, Any],
+    *,
+    typed: model.Processor | None = None,
+) -> set[str]:
+    """Return pre-enrichment processor bindings that must exist in source output."""
+
+    produced_group_fields = _processor_calendar_fields(processor)
+    if str(processor.get("kind") or "") == "frequency_response":
+        produced_group_fields.update(
+            {
+                "Day",
+                str(processor.get("frequency_column") or "ExposureBucket"),
+            }
+        )
+    references = {
+        field
+        for field in _string_field_values(processor.get("group_by"))
+        if field not in produced_group_fields
+    }
+    for key in ("dedup_keys", "properties", "alternative_group_by"):
+        references.update(_string_field_values(processor.get(key)))
+    for key in ("variant_column", "entity", "as_of_property"):
+        references.update(_string_field_values(processor.get(key)))
+    columns = processor.get("columns")
+    if isinstance(columns, dict):
+        for value in columns.values():
+            references.update(_string_field_values(value))
+    time_spec = processor.get("time")
+    if isinstance(time_spec, dict):
+        references.update(_string_field_values(time_spec.get("property")))
+    outcome = processor.get("outcome")
+    if isinstance(outcome, dict):
+        references.update(_string_field_values(outcome.get("column")))
+    entities = processor.get("entities")
+    if isinstance(entities, dict):
+        references.update(_string_field_values(entities.get("subject")))
+    lifecycle_keys = processor.get("keys")
+    if isinstance(lifecycle_keys, dict):
+        for value in lifecycle_keys.values():
+            references.update(_string_field_values(value))
+    score_properties = processor.get("score_properties")
+    if isinstance(score_properties, list):
+        for value in score_properties:
+            if isinstance(value, dict):
+                references.update(_string_field_values(value.get("column")))
+    milestones = processor.get("milestones")
+    if isinstance(milestones, list):
+        for milestone in milestones:
+            if isinstance(milestone, dict):
+                references.update(_string_field_values(milestone.get("property")))
+                references.update(_string_field_values(milestone.get("column")))
+    references.update(_expression_field_references(processor.get("filter")))
+    stages = processor.get("stages")
+    if isinstance(stages, list):
+        for stage in stages:
+            if isinstance(stage, dict):
+                references.update(_expression_field_references(stage.get("when")))
+    states = processor.get("states")
+    state_specs = list(states.values()) if isinstance(states, dict) else states
+    if isinstance(state_specs, list):
+        for spec in state_specs:
+            if not isinstance(spec, dict):
+                continue
+            source_column = _string_field_values(spec.get("source_column"))
+            if str(processor.get("kind") or "") == "frequency_response":
+                source_column -= model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS
+            references.update(source_column)
+            references.update(_expression_field_references(spec.get("where")))
+    if typed is not None:
+        references.update(_processor_state_source_fields(typed))
+    return references
 
 
 def _processor_derived_fields(
@@ -2016,11 +2099,18 @@ def _processor_derived_fields(
     also collect phantom field-reference issues.
     """
 
+    derived = _processor_calendar_fields(processor)
     if isinstance(typed, model.FrequencyResponseProcessor):
-        return {*model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS, "Day", typed.frequency_column}
+        return {
+            *derived,
+            *model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
+            "Day",
+            typed.frequency_column,
+        }
     if str(processor.get("kind") or "") != "frequency_response":
-        return set()
+        return derived
     return {
+        *derived,
         *model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
         "Day",
         *_string_field_values(processor.get("frequency_column")),

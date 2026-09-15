@@ -39,7 +39,7 @@ def test_builtin_recipe_library_is_versioned_and_unique() -> None:
     Draft202012Validator(generate_schema()).validate(payload)
 
     assert library.schema_version == 1
-    assert len(library.recipes) == 22
+    assert len(library.recipes) == 41
     assert len({recipe.id for recipe in library.recipes}) == len(library.recipes)
     assert {recipe.domain for recipe in library.recipes} >= {
         "Audience",
@@ -145,9 +145,9 @@ def test_contact_policy_recipes_require_exact_frequency_response_states() -> Non
         assert recipe.metric.kind == "formula"
         assert readiness.status == "ready"
         assert readiness.resolved_inputs == bindings
-        assert {
-            item.role: item.preferred_names for item in recipe.inputs
-        } == {role: (state,) for role, state in bindings.items()}
+        assert {item.role: item.preferred_names for item in recipe.inputs} == {
+            role: (state,) for role, state in bindings.items()
+        }
         assert all(item.require_preferred for item in recipe.inputs)
         assert all(item.selection == "automatic" for item in recipe.inputs)
         assert all(not item.state_template and not item.proposed_name for item in recipe.inputs)
@@ -220,21 +220,67 @@ def test_contact_policy_recipes_do_not_propose_generic_replacement_states() -> N
     processor = SimpleNamespace(
         id="frequency",
         kind="frequency_response",
-        states={
-            "GenericCount": TypeAdapter(model.StateSpec).validate_python({"type": "count"})
-        },
+        states={"GenericCount": TypeAdapter(model.StateSpec).validate_python({"type": "count"})},
     )
     readiness = recipe_readiness(recipe, processor)
 
     assert readiness.status == "backfill_required"
     assert readiness.input_options == {"clicks": (), "contacts": ()}
     for item in recipe.inputs:
-        assert recipe_binding_options(
-            item,
-            processor,
-            readiness.input_options[item.role],
-            proposal_fields=["AnyField"],
-        ) == []
+        assert (
+            recipe_binding_options(
+                item,
+                processor,
+                readiness.input_options[item.role],
+                proposal_fields=["AnyField"],
+            )
+            == []
+        )
+
+
+@pytest.mark.unit
+def test_priority_opportunity_gap_requires_priority_column_binding() -> None:
+    recipe = _recipe("contact_policy.priority_opportunity_gap")
+    processor = model.FrequencyResponseProcessor.model_validate(
+        {
+            "id": "frequency",
+            "source": "interaction_history",
+            "kind": "frequency_response",
+            "group_by": ["Day", "ExposureBucket"],
+            "time": {"property": "DecisionTime", "grain": "daily"},
+            "columns": {
+                "customer": "CustomerID",
+                "interaction": "InteractionID",
+                "action": "ActionID",
+                "placement": "Placement",
+                "rank": "Rank",
+                "outcome": "Outcome",
+                "propensity": "Propensity",
+            },
+            "alternative_group_by": ["Placement"],
+            "positive_values": ["Clicked"],
+            "exposure_values": ["Impression"],
+            "candidate_values": ["Pending"],
+            "states": model.frequency_response_state_definitions(priority=False),
+        }
+    )
+
+    readiness = recipe_readiness(recipe, processor)
+
+    assert readiness.status == "incompatible"
+    assert readiness.input_options == {}
+    assert readiness.resolved_inputs == {}
+    assert readiness.messages == (
+        "Priority opportunity gap requires frequency to configure columns.priority with "
+        "a numeric arbitration-priority source field. Configure the binding and backfill "
+        "aggregates before installing this recipe.",
+    )
+
+    marginal = recipe_readiness(
+        _recipe("contact_policy.frequency_marginal_ctr"),
+        processor,
+    )
+    assert marginal.status == "ready"
 
 
 @pytest.mark.unit
@@ -635,19 +681,19 @@ def test_exact_outcome_recipe_does_not_offer_arbitrary_count_states() -> None:
 
 @pytest.mark.unit
 def test_recipe_binding_ui_uses_field_and_algorithm_not_state_id() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.config import model as config_model  # noqa: PLC0415
-        from valuestream.recipes import (  # noqa: PLC0415
+        from valuestream.config import model as config_model
+        from valuestream.recipes import (
             load_builtin_kpi_recipes as load_recipes,
         )
-        from valuestream.recipes import (  # noqa: PLC0415
+        from valuestream.recipes import (
             recipe_readiness as resolve_readiness,
         )
-        from valuestream.ui.recipe_library import _render_recipe_bindings  # noqa: PLC0415
+        from valuestream.ui.recipe_library import _render_recipe_bindings
 
         recipe = next(
             item for item in load_recipes().recipes if item.id == "audience.unique_entities"
@@ -655,11 +701,11 @@ def test_recipe_binding_ui_uses_field_and_algorithm_not_state_id() -> None:
         processor = config_model.BinaryOutcomeProcessor.model_validate(
             {
                 "id": "engagement",
-                    "source": "events",
-                    "kind": "binary_outcome",
-                    "group_by": ["Channel", "Placement"],
-                    "time": {"property": "OutcomeTime", "grain": "daily"},
-                    "states": {
+                "source": "events",
+                "kind": "binary_outcome",
+                "group_by": ["Channel", "Placement"],
+                "time": {"property": "OutcomeTime", "grain": "daily"},
+                "states": {
                     "UniqueSubjects_hll": {
                         "type": "hll",
                         "source_column": "SubjectID",
@@ -669,14 +715,14 @@ def test_recipe_binding_ui_uses_field_and_algorithm_not_state_id() -> None:
                         "type": "hll",
                         "source_column": "InteractionID",
                         "lg_k": 12,
-                        },
                     },
-                    "outcome": {
-                        "column": "Outcome",
-                        "positive_values": ["Clicked"],
-                        "negative_values": ["Impression"],
-                    },
-                }
+                },
+                "outcome": {
+                    "column": "Outcome",
+                    "positive_values": ["Clicked"],
+                    "negative_values": ["Impression"],
+                },
+            }
         )
         st.session_state["bindings"] = _render_recipe_bindings(
             recipe,
@@ -713,13 +759,13 @@ def test_recipe_binding_ui_uses_field_and_algorithm_not_state_id() -> None:
 
 @pytest.mark.unit
 def test_recipe_library_requires_preview_before_returning_install_request() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.config import model as config_model  # noqa: PLC0415
-        from valuestream.ui.recipe_library import (  # noqa: PLC0415
+        from valuestream.config import model as config_model
+        from valuestream.ui.recipe_library import (
             render_recipe_library as render_library,
         )
 
@@ -755,7 +801,7 @@ def test_recipe_library_requires_preview_before_returning_install_request() -> N
                                 "negative_values": ["Impression"],
                             },
                         }
-                    ]
+                    ],
                 },
                 "metrics": {"catalog_version": 2, "metrics": {}},
                 "dashboards": {
@@ -772,7 +818,7 @@ def test_recipe_library_requires_preview_before_returning_install_request() -> N
                                 }
                             ],
                         }
-                    ]
+                    ],
                 },
             }
         )
@@ -857,35 +903,35 @@ def test_install_preview_contains_exact_yaml_patch_and_materialization_plan() ->
                         "schema": {"natural_key": ["CustomerID"]},
                     }
                 ],
-        },
-        "processors": {
-            "catalog_version": 2,
+            },
+            "processors": {
+                "catalog_version": 2,
                 "processors": [
                     {
                         "id": "engagement",
-                    "source": "events",
-                    "kind": "binary_outcome",
-                    "group_by": ["Channel"],
-                    "time": {"property": "OutcomeTime", "grain": "daily"},
-                    "states": {"Count": {"type": "count"}},
-                    "outcome": {
-                        "column": "Outcome",
-                        "positive_values": ["Clicked"],
-                        "negative_values": ["Impression"],
-                    },
-                }
-            ]
-        },
-        "metrics": {"catalog_version": 2, "metrics": {}},
-        "dashboards": {
-            "catalog_version": 2,
+                        "source": "events",
+                        "kind": "binary_outcome",
+                        "group_by": ["Channel"],
+                        "time": {"property": "OutcomeTime", "grain": "daily"},
+                        "states": {"Count": {"type": "count"}},
+                        "outcome": {
+                            "column": "Outcome",
+                            "positive_values": ["Clicked"],
+                            "negative_values": ["Impression"],
+                        },
+                    }
+                ],
+            },
+            "metrics": {"catalog_version": 2, "metrics": {}},
+            "dashboards": {
+                "catalog_version": 2,
                 "dashboards": [
                     {
                         "id": "overview",
                         "title": "Overview",
                         "pages": [{"id": "audience", "title": "Audience", "tiles": []}],
                     }
-                ]
+                ],
             },
         }
     )
@@ -1136,6 +1182,7 @@ def _frequency_response_processor() -> SimpleNamespace:
     return SimpleNamespace(
         id="frequency",
         kind="frequency_response",
+        columns=SimpleNamespace(priority="Priority"),
         states={
             name: state_adapter.validate_python(definition)
             for name, definition in definitions.items()

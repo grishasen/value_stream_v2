@@ -10,6 +10,12 @@ This doc specifies the closed expression language used everywhere Value Stream n
 
 The DSL is a small AST encoded as JSON / YAML dicts. It is **never** Python and is **never** `eval`-ed. The evaluator translates each AST node into a `polars.Expr` at load time.
 
+Use `{lit: null}` for an unavailable value, for example a marketing-cost total
+with incomplete cost data. Serialization preserves the `lit` key even when
+optional null fields are omitted elsewhere in the catalog, so this expression
+remains valid after saving and reloading. An explicit null differs from a
+recorded zero; `safe_div` returns zero for a zero denominator.
+
 ---
 
 ## 1. Design goals

@@ -1078,8 +1078,9 @@ number-of-impressions buckets, or virtual state columns are derived. It may
 reference only raw/transformed source fields—not `Day`, the configured
 number-of-impressions column,
 `ClickedContact`, `RunnerPropensity`, or another processor-created field.
-State-level `where` expressions run after enrichment and may use the documented
-virtual fields.
+Canonical frequency-response states do not accept state-level `where`
+expressions or any other extra settings. Use the processor-level `filter` when
+the entire published contract should share an additional source-row predicate.
 
 ### 10.3 Contact and number-of-impressions semantics
 
@@ -1101,8 +1102,8 @@ id and logical shard, plus a transactional fingerprint journal.
 Both modes canonicalize the configured decision-time field to timezone-naive
 UTC `Datetime(us)` truncated to whole seconds before contact normalization.
 `Day` then attaches UTC and converts to the configured calendar timezone. A raw
-decision-time field used in `group_by` or a state predicate therefore has the
-same type and value in both modes; the strict `(t − window, t]` boundary is
+decision-time field used in `group_by` therefore has the same type and value in
+both modes; the strict `(t − window, t]` boundary is
 evaluated at second precision, which both engines compute identically.
 Dictionary-backed projected fields are likewise represented as strings in the
 source-scan relational tail, matching DuckDB `VARCHAR`; customer sharding still
@@ -1113,9 +1114,9 @@ logical shard, one native SQL plan combines temporary current candidates with
 rolling history, performs cross-partition contact normalization, the exact
 timestamp window, and selected rank-2 action resolution, then streams only
 enriched target rank-1 rows to Polars. Polars applies virtual state columns,
-state-level `where`, configured count/value-sum aggregation, grouping, and
-provenance. Appending the target's narrow history, recording its fingerprint,
-and pruning expired state is one DuckDB transaction. Candidate rows remain
+canonical count/value-sum aggregation, grouping, and provenance. Appending the
+target's narrow history, recording its fingerprint, and pruning expired state
+is one DuckDB transaction. Candidate rows remain
 uncollapsed until current and history are combined, preserving cross-partition
 duplicate precedence. The connection remains open across the complete source
 run and closes once at the source-run boundary.

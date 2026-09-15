@@ -255,6 +255,7 @@ Defaults run after the reader, before transforms (or as the first transform — 
 |---|---|
 | Column doesn't exist in the LazyFrame | add it as a literal with the default value |
 | Column exists but has nulls | `fill_null(default)` |
+| Default is `null` | Preserve an existing column unchanged; create an all-null column if absent. This keeps missing Cost distinct from a recorded zero. |
 
 Type promotion: if the default value parses as a float, it becomes Float64; otherwise it stays a string.
 

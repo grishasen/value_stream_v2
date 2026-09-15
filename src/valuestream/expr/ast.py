@@ -18,7 +18,15 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    field_validator,
+    model_serializer,
+)
 
 # ---------------------------------------------------------------------------
 # Scalar values for ``lit`` atoms and predicate ``value(s)`` slots.
@@ -110,6 +118,11 @@ class Lit(_Node):
     """``{lit: <scalar>}`` — literal value."""
 
     lit: ScalarValue
+
+    @model_serializer
+    def _serialize(self) -> dict[str, ScalarValue]:
+        # The literal's value is required syntax, even when a parent omits optional nulls.
+        return {"lit": self.lit}
 
     @field_validator("lit", mode="after")
     @classmethod

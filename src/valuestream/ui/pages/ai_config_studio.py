@@ -1107,7 +1107,7 @@ def _draft_from_catalog(ctx: ValueStreamContext) -> dict[str, Any]:
             "processors": [
                 builder.processor_to_dict(processor)
                 for processor in ctx.catalog.processors.processors
-            ]
+            ],
         },
         "metrics": {
             "catalog_version": ctx.catalog.metrics.catalog_version,
@@ -1117,7 +1117,7 @@ def _draft_from_catalog(ctx: ValueStreamContext) -> dict[str, Any]:
                     ctx.catalog.metrics.metrics.items(),
                     key=lambda item: item[0].casefold(),
                 )
-            }
+            },
         },
         "dashboards": ctx.catalog.dashboards.model_dump(
             mode="json",
@@ -1332,9 +1332,7 @@ def _fields_from_catalog_processor(processor: dict[str, Any]) -> list[str]:
     score_properties = processor.get("score_properties")
     if isinstance(score_properties, list):
         fields.extend(
-            str(item.get("column", "") or "")
-            for item in score_properties
-            if isinstance(item, dict)
+            str(item.get("column", "") or "") for item in score_properties if isinstance(item, dict)
         )
     states = processor.get("states") if isinstance(processor.get("states"), dict) else {}
     for spec in states.values():
@@ -3686,6 +3684,20 @@ def _processor_choice_label(draft: dict[str, Any], processor_id: str) -> str:
     return f"{title} · {kind} · {source} — {processor_id}"
 
 
+def _processor_editor_key_prefix(processor_id: str, processor_def: dict[str, Any]) -> str:
+    """Scope processor widgets to the backing draft definition revision.
+
+    Streamlit keeps a keyed widget's value even when its ``value`` or ``index``
+    argument changes. Including the definition revision makes an AI repair or
+    raw-YAML update seed a fresh set of controls from the updated draft while
+    ordinary reruns of an in-progress edit retain their current values.
+    """
+
+    processor_key = builder.widget_key_fragment(processor_id)
+    revision = _draft_signature(processor_def)[:12]
+    return f"ai_studio_processor_editor_{processor_key}_{revision}"
+
+
 def _render_processor_parameter_editor(
     draft: dict[str, Any],
     working: pl.DataFrame,
@@ -3717,7 +3729,7 @@ def _render_processor_parameter_editor(
             help=config_help.field_help("processor.selector"),
         )
         processor_def = dict(processors_by_id.get(processor_id, {}))
-        key_prefix = f"ai_studio_processor_editor_{builder.widget_key_fragment(processor_id)}"
+        key_prefix = _processor_editor_key_prefix(processor_id, processor_def)
 
         source_ids = _draft_source_ids(draft)
         current_source = str(processor_def.get("source", "") or "")
@@ -3937,17 +3949,17 @@ def _processor_group_by_fields(
 ) -> list[str]:
     """Return published dimensions, keeping a kind's derived column in step."""
 
-    fields = [str(field) for field in group_by]
-    if kind != "frequency_response":
-        return fields
-    return builder.with_frequency_column(
-        fields,
-        configured=str(processor_def.get("frequency_column") or ""),
+    return builder.group_by_for_kind_transition(
+        [str(field) for field in group_by],
+        previous_kind=str(processor_def.get("kind") or ""),
+        kind=kind,
+        configured_frequency_column=str(processor_def.get("frequency_column") or ""),
         frequency_column=str(kind_fields.get("frequency_column") or ""),
     )
 
 
 def _canonical_frequency_states(
+    processor_def: dict[str, Any],
     kind_fields: dict[str, Any],
     *,
     editor_key: str,
@@ -3961,6 +3973,12 @@ def _canonical_frequency_states(
 
     raw_columns = kind_fields.get("columns")
     definition = {"columns": raw_columns if isinstance(raw_columns, dict) else {}}
+    priority = builder.frequency_response_has_priority(definition)
+    states = builder.frequency_response_states_for_edit(
+        processor_def,
+        priority=priority,
+    )
+    state_frame = builder.frequency_response_state_frame(definition, states)
     # Nothing may stay pinned for this kind: the editable grid must come back
     # clean if the user switches to an authored kind.
     components.clear_pinned_editor(editor_key)
@@ -3968,16 +3986,9 @@ def _canonical_frequency_states(
         "Processor Sketches",
         "Aggregate states this processor materializes — canonical for this kind.",
     ):
-        config_builder._render_canonical_state_grid(
-            builder.frequency_response_state_frame(definition)
-        )
+        config_builder._render_canonical_state_grid(state_frame)
         st.caption(builder.FREQUENCY_STATE_PANEL_CAPTION)
-    return (
-        model.frequency_response_state_definitions(
-            priority=builder.frequency_response_has_priority(definition)
-        ),
-        True,
-    )
+    return states, True
 
 
 def _processor_state_editor(
@@ -3992,14 +4003,28 @@ def _processor_state_editor(
     state_key = f"{key_prefix}_state_rows"
     editor_key = f"{key_prefix}_states"
     if kind == "frequency_response":
-        return _canonical_frequency_states(kind_fields, editor_key=editor_key)
+        return _canonical_frequency_states(
+            processor_def,
+            kind_fields,
+            editor_key=editor_key,
+        )
+    state_definition = _processor_state_definition_for_kind(
+        processor_def,
+        kind,
+        kind_fields,
+    )
     # Session rows survive reruns so the Add state popover and numeric sync can
     # append rows; a draft-definition change (apply, AI repair, accepted patch)
     # reseeds the grid from the updated states contract.
-    signature = _draft_signature({"states": builder.state_spec_definitions(processor_def)})
+    signature = _draft_signature(
+        {
+            "kind": kind,
+            "states": builder.state_spec_definitions(state_definition),
+        }
+    )
     signature_key = f"{state_key}_signature"
     if st.session_state.get(signature_key) != signature:
-        st.session_state[state_key] = _processor_state_rows(processor_def)
+        st.session_state[state_key] = _processor_state_rows(state_definition)
         st.session_state[signature_key] = signature
         components.clear_pinned_editor(editor_key)
     if kind == "numeric_distribution":
@@ -4039,12 +4064,29 @@ def _processor_state_editor(
         try:
             states = _processor_states_from_rows(
                 builder.normalize_editor_rows(st.session_state[state_key]),
-                _processor_state_specs(processor_def),
+                _processor_state_specs(state_definition),
             )
         except ValueError as exc:
             st.warning(str(exc))
-            return _processor_state_specs(processor_def), False
+            return _processor_state_specs(state_definition), False
     return states, True
+
+
+def _processor_state_definition_for_kind(
+    processor_def: dict[str, Any],
+    kind: str,
+    kind_fields: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the definition that should seed an authored-kind state grid."""
+
+    if str(processor_def.get("kind") or "") == kind:
+        return processor_def
+    return {
+        **processor_def,
+        **kind_fields,
+        "kind": kind,
+        "states": builder.default_processor_state_definitions(kind, kind_fields),
+    }
 
 
 def _processor_filter_editor(
@@ -4131,9 +4173,7 @@ def _processor_filter_editor(
         )
         st.session_state[raw_key] = raw_filter
         try:
-            return (
-                builder.parse_expression_yaml(raw_filter) if raw_filter.strip() else None
-            ), True
+            return (builder.parse_expression_yaml(raw_filter) if raw_filter.strip() else None), True
         except ValueError as exc:
             st.error(f"Filter AST YAML is invalid: {exc}")
             return filter_value, False
@@ -4229,8 +4269,7 @@ def _draft_state_derivation(  # noqa: PLR0911
 def _processor_state_specs(processor_def: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Return only the processor's explicit state output contract."""
     return {
-        name: dict(spec)
-        for name, spec in builder.state_spec_definitions(processor_def).items()
+        name: dict(spec) for name, spec in builder.state_spec_definitions(processor_def).items()
     }
 
 
@@ -4658,8 +4697,7 @@ def _render_metric_parameter_editor(draft: dict[str, Any]) -> None:  # noqa: PLR
             value=", ".join(metric_outputs),
             disabled=True,
             key=(
-                f"{key_prefix}_outputs_"
-                f"{builder.widget_key_fragment('|'.join(metric_outputs))}"
+                f"{key_prefix}_outputs_" f"{builder.widget_key_fragment('|'.join(metric_outputs))}"
             ),
             help=(
                 "Read-only columns produced by this metric. Report controls that consume "
@@ -4796,14 +4834,10 @@ def _draft_default_curve_digest_states(processor: dict[str, Any]) -> tuple[str, 
     if pairs:
         return pairs[0][1], pairs[0][2]
     positives = [
-        name
-        for name in digest_states
-        if str(specs[name].get("outcome", "") or "") == "positive"
+        name for name in digest_states if str(specs[name].get("outcome", "") or "") == "positive"
     ]
     negatives = [
-        name
-        for name in digest_states
-        if str(specs[name].get("outcome", "") or "") == "negative"
+        name for name in digest_states if str(specs[name].get("outcome", "") or "") == "negative"
     ]
     if positives and negatives:
         return positives[0], negatives[0]
@@ -5563,8 +5597,7 @@ def _render_report_tile_editor(  # noqa: PLR0912, PLR0915
                                 tile
                                 for tile in page.get("tiles", []) or []
                                 if not (
-                                    isinstance(tile, dict)
-                                    and tile.get("id") == seed_tile.get("id")
+                                    isinstance(tile, dict) and tile.get("id") == seed_tile.get("id")
                                 )
                             ]
                 st.session_state.pop("ai_studio_tile_pending_delete", None)
@@ -5618,9 +5651,7 @@ def _render_report_tile_editor(  # noqa: PLR0912, PLR0915
             mode_kwargs["default"] = "Visual"
         mode = st.segmented_control("Editing Mode", ["Visual", "Raw YAML"], **mode_kwargs)
 
-        seed_metric = (
-            seed_tile.get("metric") if seed_tile.get("metric") in metric_names else None
-        )
+        seed_metric = seed_tile.get("metric") if seed_tile.get("metric") in metric_names else None
         if seed_metric is None and not is_new:
             seed_metric = metric_names[0]
         metric_name = st.selectbox(
@@ -5644,9 +5675,7 @@ def _render_report_tile_editor(  # noqa: PLR0912, PLR0915
             and seed_chart_value in builder.CHART_DISPLAY_LABELS
         ):
             chart_choices = [*chart_choices, seed_chart_value]
-        seed_chart = (
-            seed_tile.get("chart") if seed_tile.get("chart") in chart_choices else None
-        )
+        seed_chart = seed_tile.get("chart") if seed_tile.get("chart") in chart_choices else None
         if seed_chart is None and chart_choices and not is_new:
             seed_chart = chart_choices[0]
         library_pick = st.session_state.get("ai_studio_tile_library_pick")
@@ -5822,15 +5851,13 @@ def _render_report_tile_editor(  # noqa: PLR0912, PLR0915
             if page_choice == config_builder.NEW_PAGE_KEY
             else f"{token}_{page_context_key}_{builder.widget_key_fragment(page_id)}"
         )
-        page_filters, page_time_filter, page_settings_ready = (
-            config_builder._page_settings_editor(
-                dashboard_id=dashboard_id,
-                dashboard_title=dashboard_title,
-                page_id=page_id,
-                page_title=page_title,
-                page=pages_by_id.get(str(page_choice)),
-                key_suffix=page_settings_suffix,
-            )
+        page_filters, page_time_filter, page_settings_ready = config_builder._page_settings_editor(
+            dashboard_id=dashboard_id,
+            dashboard_title=dashboard_title,
+            page_id=page_id,
+            page_title=page_title,
+            page=pages_by_id.get(str(page_choice)),
+            key_suffix=page_settings_suffix,
         )
         existing_page_model = pages_by_id.get(str(page_choice))
 
@@ -5854,9 +5881,7 @@ def _render_report_tile_editor(  # noqa: PLR0912, PLR0915
                 fallback="tile",
                 parent_id=page_id,
                 existing_ids=(
-                    [tile.id for tile in existing_page_model.tiles]
-                    if existing_page_model
-                    else []
+                    [tile.id for tile in existing_page_model.tiles] if existing_page_model else []
                 ),
             )
         )
@@ -6039,7 +6064,9 @@ def _render_draft_dashboard_manager(draft: dict[str, Any]) -> None:
             if isinstance(page, dict) and page.get("id")
         ]
         page_ids = [str(page.get("id")) for page in pages]
-        page_titles = {str(page.get("id")): str(page.get("title") or page.get("id")) for page in pages}
+        page_titles = {
+            str(page.get("id")): str(page.get("title") or page.get("id")) for page in pages
+        }
         tile_counts = {str(page.get("id")): len(page.get("tiles", []) or []) for page in pages}
         selected_page = page_col.selectbox(
             "Page to manage",
@@ -6131,7 +6158,9 @@ def _chat_review() -> None:
             {
                 "Metric": name,
                 "Kind": metric_def.get("kind", "") if isinstance(metric_def, dict) else "",
-                "Processor": metric_def.get("processor", "") if isinstance(metric_def, dict) else "",
+                "Processor": metric_def.get("processor", "")
+                if isinstance(metric_def, dict)
+                else "",
                 "Group By": ", ".join(processor.get("group_by", []))
                 if isinstance(processor, dict)
                 else "",
@@ -8871,9 +8900,7 @@ def _preview_timestamp_format(frame: pl.DataFrame, columns: list[str]) -> str:
     if configured or not any(frame.schema.get(column) == pl.String for column in columns):
         return configured
     plan = st.session_state.get("ai_studio_sample_source_plan")
-    planned = (
-        str(plan.timestamp_format or "").strip() if isinstance(plan, SampleSourcePlan) else ""
-    )
+    planned = str(plan.timestamp_format or "").strip() if isinstance(plan, SampleSourcePlan) else ""
     if planned:
         st.session_state["ai_studio_timestamp_format"] = planned
     return planned
@@ -8886,9 +8913,7 @@ def _prepare_preview_time_columns(
     """Ensure preview time columns are temporal before date expressions run."""
 
     present = [column for column in columns if column in frame.columns]
-    string_columns = [
-        column for column in present if frame.schema.get(column) == pl.String
-    ]
+    string_columns = [column for column in present if frame.schema.get(column) == pl.String]
     fmt = _preview_timestamp_format(frame, present)
     if string_columns and not fmt:
         fields = ", ".join(string_columns)
@@ -8916,9 +8941,7 @@ def _prepare_preview_time_columns(
         }
         failures = {column: count for column, count in failures.items() if count}
         if failures:
-            details = ", ".join(
-                f"{column}: {count}" for column, count in sorted(failures.items())
-            )
+            details = ", ".join(f"{column}: {count}" for column, count in sorted(failures.items()))
             raise ValueError(
                 f"Timestamp Format {fmt!r} could not parse sample values ({details}). "
                 "Update Timestamp Format in the Sample step before continuing."
@@ -9411,7 +9434,7 @@ def _build_draft_catalog(working: pl.DataFrame, approved_fields: list[str]) -> d
                         },
                     }
                 )
-            ]
+            ],
         },
         "metrics": {
             "catalog_version": 2,
@@ -9448,7 +9471,7 @@ def _build_draft_catalog(working: pl.DataFrame, approved_fields: list[str]) -> d
                     "expression": {"col": "Negatives"},
                     "display": {"label": "Negative outcomes", "value_format": "integer"},
                 },
-            }
+            },
         },
         "dashboards": dashboards,
     }

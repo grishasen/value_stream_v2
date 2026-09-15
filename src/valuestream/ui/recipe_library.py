@@ -124,8 +124,7 @@ def render_recipe_library(  # noqa: PLR0911, PLR0915
         recipes = sorted(
             recipes,
             key=lambda item: (
-                *_text_sort_key(item.title),
-                *_text_sort_key(item.domain),
+                *_text_sort_key(f"{item.title} · {item.domain}"),
                 *_text_sort_key(item.id),
             ),
         )
@@ -559,11 +558,7 @@ def _render_recipe_parameters(
         st.write("**Recipe parameters**")
         for parameter in recipe.parameters:
             scale = 100.0 if parameter.unit == "percent" else 1.0
-            label = (
-                f"{parameter.label} (%)"
-                if parameter.unit == "percent"
-                else parameter.label
-            )
+            label = f"{parameter.label} (%)" if parameter.unit == "percent" else parameter.label
             selected = st.number_input(
                 label,
                 min_value=float(parameter.minimum * scale),

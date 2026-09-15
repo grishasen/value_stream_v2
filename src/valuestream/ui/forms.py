@@ -291,6 +291,41 @@ def csv_list_field(label: str, value: Any, *, key: str, help_key: str) -> list[s
     return builder.csv_text_to_list(raw)
 
 
+def typed_yaml_list_field(
+    label: str,
+    value: Any,
+    *,
+    key: str,
+    help_key: str,
+) -> list[Any]:
+    """Render a typed YAML list without flattening values to CSV text."""
+
+    configured = value if isinstance(value, list) else []
+    raw = st.text_input(
+        label,
+        value=yaml.safe_dump(
+            configured,
+            default_flow_style=True,
+            sort_keys=False,
+            allow_unicode=True,
+            width=4096,
+        ).strip(),
+        key=key,
+        help=config_help.field_help(help_key),
+    )
+    try:
+        parsed = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        st.error(f"{label} must be a valid YAML list: {exc}")
+        return []
+    if parsed is None and not raw.strip():
+        return []
+    if not isinstance(parsed, list):
+        st.error(f"{label} must use YAML list syntax, for example [Clicked, 1, true].")
+        return []
+    return parsed
+
+
 def first_preferred_field(fields: list[str], targets: list[str]) -> str:
     """Return the first field that case-insensitively matches a preferred name."""
     for target in targets:
@@ -458,7 +493,7 @@ def _frequency_outcome_values(
     for column, (name, label, help_key) in zip(columns, value_specs, strict=True):
         configured = processor_def.get(name)
         with column:
-            edited = csv_list_field(
+            edited = typed_yaml_list_field(
                 label,
                 configured,
                 key=f"{key_prefix}_frequency_{name}",
@@ -466,25 +501,13 @@ def _frequency_outcome_values(
             )
         if not edited:
             st.warning(f"{label} cannot be empty.")
-        settings[name] = _preserved_value_types(configured, edited)
+        settings[name] = edited
     st.caption(
         "A positive outcome always counts as an exposure. Candidate values additionally keep "
         "never-shown ranked alternatives selectable as the rank-2 action. Values are matched "
         "exactly, so casing must follow the source."
     )
     return settings
-
-
-def _preserved_value_types(configured: Any, edited: list[str]) -> list[Any]:
-    """Return edited values, restoring the configured type of unchanged entries.
-
-    Outcome values are compared against the raw source column, which may hold
-    integers or booleans. The comma-separated editor is text, so a value the
-    user did not touch keeps the type it had in YAML.
-    """
-
-    originals = {str(value): value for value in configured} if isinstance(configured, list) else {}
-    return [originals.get(value, value) for value in edited]
 
 
 def _frequency_window_fields(
@@ -499,7 +522,6 @@ def _frequency_window_fields(
         window_col.number_input(
             "Window Hours",
             min_value=1,
-            max_value=8760,
             value=int(processor_def.get("window_hours") or 168),
             step=1,
             key=f"{key_prefix}_frequency_window_hours",
@@ -510,7 +532,6 @@ def _frequency_window_fields(
         lag_col.number_input(
             "Partition Lag Hours",
             min_value=0,
-            max_value=8760,
             value=int(processor_def.get("partition_lag_hours") or 0),
             step=1,
             key=f"{key_prefix}_frequency_partition_lag_hours",
@@ -521,7 +542,6 @@ def _frequency_window_fields(
         max_col.number_input(
             "Max Frequency Bucket",
             min_value=1,
-            max_value=1000,
             value=int(processor_def.get("max_frequency") or 7),
             step=1,
             key=f"{key_prefix}_frequency_max_frequency",
@@ -847,20 +867,14 @@ def _outcome_fields(
     with positive_col:
         positive_values = csv_list_field(
             "Positive Values",
-            builder.string_list(
-                outcome.get("positive_values")
-            )
-            or positive_defaults,
+            builder.string_list(outcome.get("positive_values")) or positive_defaults,
             key=f"{key_prefix}_positive_values",
             help_key="processor.positive_values",
         )
     with negative_col:
         negative_values = csv_list_field(
             "Negative Values",
-            builder.string_list(
-                outcome.get("negative_values")
-            )
-            or negative_defaults,
+            builder.string_list(outcome.get("negative_values")) or negative_defaults,
             key=f"{key_prefix}_negative_values",
             help_key="processor.negative_values",
         )
@@ -919,9 +933,7 @@ def _score_distribution_fields(
     property_source_options = numeric_options or field_options
     current_properties = _score_properties_for_editor(processor_def, property_source_options)
     property_choices = with_current(property_source_options, current_properties)
-    properties_col, subject_col = st.columns(
-        [2, 1], gap="xsmall", vertical_alignment="bottom"
-    )
+    properties_col, subject_col = st.columns([2, 1], gap="xsmall", vertical_alignment="bottom")
     with properties_col:
         properties = st.multiselect(
             "Score Properties",
@@ -936,13 +948,7 @@ def _score_distribution_fields(
         settings["score_properties"] = [
             {
                 "column": str(item),
-                "role": (
-                    "primary"
-                    if index == 0
-                    else "calibrated"
-                    if index == 1
-                    else "auxiliary"
-                ),
+                "role": ("primary" if index == 0 else "calibrated" if index == 1 else "auxiliary"),
             }
             for index, item in enumerate(builder.dedupe([str(item) for item in properties]))
         ]
@@ -998,9 +1004,7 @@ def _numeric_distribution_fields(
     st.write("### Distribution Processor Settings")
     current = builder.string_list(processor_def.get("properties"))
     choices = with_current(numeric_options, current)
-    properties_col, engine_col = st.columns(
-        [2, 1], gap="xsmall", vertical_alignment="bottom"
-    )
+    properties_col, engine_col = st.columns([2, 1], gap="xsmall", vertical_alignment="bottom")
     properties = properties_col.multiselect(
         "Numeric Properties",
         choices,
@@ -1519,9 +1523,7 @@ def _quantile_fields(
         "Quantile",
         min_value=0.0,
         max_value=1.0,
-        value=builder.float_in_range(
-            seed.get("quantile"), default=0.5, minimum=0.0, maximum=1.0
-        ),
+        value=builder.float_in_range(seed.get("quantile"), default=0.5, minimum=0.0, maximum=1.0),
         step=0.05,
         format="%.2f",
         key=f"{key_prefix}_quantile_value",
@@ -1790,9 +1792,7 @@ def _set_op_fields(
         or default_mode
     )
     if mode == "Time windows":
-        return _windowed_set_op_fields(
-            seed, seed_operands, states, operation, key_prefix
-        )
+        return _windowed_set_op_fields(seed, seed_operands, states, operation, key_prefix)
     if len(states) < 2:
         st.warning(
             "State-vs-state operations need at least two theta states. With a "

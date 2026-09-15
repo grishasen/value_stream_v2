@@ -147,10 +147,10 @@ def test_builder_create_template_stays_clean_until_edited_and_discard_resets_it(
 @pytest.mark.unit
 def test_discarded_create_draft_continues_on_the_first_click() -> None:
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui import builder  # noqa: PLC0415
-        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+        from valuestream.ui import builder
+        from valuestream.ui.pages import config_builder as page
 
         st.session_state.setdefault("builder_step", "Processors")
         st.session_state.setdefault("builder_processor_mode", "Create New Processor")
@@ -496,10 +496,10 @@ def test_builder_ready_review_and_apply_events_are_ordered_and_private(
     caplog.set_level(logging.INFO)
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui import builder  # noqa: PLC0415
-        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+        from valuestream.ui import builder
+        from valuestream.ui.pages import config_builder as page
 
         status = builder.builder_draft_status(
             "source:private",
@@ -649,8 +649,8 @@ def test_builder_navigation_supports_jump_back_and_continue(tmp_path: Path) -> N
     _write_builder_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -689,8 +689,8 @@ def test_new_processor_template_is_clean_and_apply_reopens_clean_object(tmp_path
     _write_builder_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -741,8 +741,8 @@ def test_builder_edit_selectors_lead_with_stable_id_and_keep_human_context(
     _write_builder_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -770,8 +770,8 @@ def test_new_source_is_created_from_configuration_builder(tmp_path: Path) -> Non
     _write_builder_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -823,8 +823,8 @@ def test_empty_workspace_sources_step_opens_create_editor(tmp_path: Path) -> Non
     builder.ensure_minimum_workspace(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -856,8 +856,8 @@ def test_create_source_load_sample_populates_schema_controls(tmp_path: Path) -> 
     ).write_parquet(data_dir / "sample.parquet")
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -948,10 +948,10 @@ def test_workspace_health_can_load_sample_for_schema_aware_validation(tmp_path: 
     ).write_parquet(data_dir / "sample.parquet")
 
     def app(workspace: str) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         st.session_state.setdefault("builder_step", "Workspace Health")
         _builder_steps(load_context(workspace))
@@ -991,10 +991,10 @@ def test_workspace_health_can_load_sample_for_schema_aware_validation(tmp_path: 
 @pytest.mark.unit
 def test_deleted_source_editor_state_is_cleared_before_create_mode() -> None:
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui import builder  # noqa: PLC0415
-        from valuestream.ui.pages import config_builder  # noqa: PLC0415
+        from valuestream.ui import builder
+        from valuestream.ui.pages import config_builder
 
         st.session_state[builder.BUILDER_DRAFTS_KEY] = {
             "source:ih": {"widget_state": {"builder_source_desc_ih": "Deleted"}},
@@ -1026,10 +1026,10 @@ def test_source_raw_ast_mode_has_editable_validated_yaml(tmp_path: Path) -> None
     _write_builder_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         st.session_state.setdefault("builder_step", "Sources")
         _builder_steps(load_context(workspace))
@@ -1064,8 +1064,8 @@ def test_processor_delete_dialog_uses_human_labels_and_cancel_is_read_only(
     before = {path: path.read_bytes() for path in paths}
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -1103,8 +1103,8 @@ def test_metric_delete_dialog_requires_explicit_tile_choice_and_cancel_is_read_o
     before = {path: path.read_bytes() for path in paths}
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -1124,9 +1124,9 @@ def test_metric_delete_dialog_requires_explicit_tile_choice_and_cancel_is_read_o
 
     assert not rendered.exception
     warnings = [str(item.value) for item in rendered.warning]
-    assert any("Engagement · CTR · Formula / state passthrough" in value for value in warnings), (
-        warnings
-    )
+    assert any(
+        "Engagement · CTR · Formula / state passthrough" in value for value in warnings
+    ), warnings
     assert any("overview/portfolio/ctr" in str(item.value) for item in rendered.code)
     delete_action = next(
         button for button in rendered.button if button.label == "Delete metric and tiles"
@@ -1154,8 +1154,8 @@ def test_new_processor_empty_entity_fallback_is_explicit(tmp_path: Path) -> None
     processors_path.write_text(yaml.safe_dump(processors, sort_keys=False), encoding="utf-8")
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -1190,8 +1190,8 @@ def test_builder_metric_mode_switch_can_fill_claimed_fragment_slots(tmp_path: Pa
     )
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -1215,8 +1215,8 @@ def test_metric_from_scratch_template_and_post_apply_editor_are_clean(tmp_path: 
     _write_builder_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -1263,8 +1263,8 @@ def test_invalid_metric_draft_does_not_block_continue(tmp_path: Path) -> None:
     _write_builder_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -1440,6 +1440,101 @@ forms.processor_kind_fields(
 
 
 @pytest.mark.unit
+def test_typed_yaml_list_field_preserves_exact_scalar_types_and_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = '["A,B", " padded ", 1, true, "1", "true", false, 0]'
+    monkeypatch.setattr(forms.st, "text_input", lambda *_args, **_kwargs: raw)
+    errors: list[str] = []
+    monkeypatch.setattr(forms.st, "error", lambda message, **_kwargs: errors.append(message))
+
+    values = forms.typed_yaml_list_field(
+        "Positive Values",
+        [],
+        key="typed_values",
+        help_key="processor.frequency_positive_values",
+    )
+
+    assert errors == []
+    assert [(type(value), value) for value in values] == [
+        (str, "A,B"),
+        (str, " padded "),
+        (int, 1),
+        (bool, True),
+        (str, "1"),
+        (str, "true"),
+        (bool, False),
+        (int, 0),
+    ]
+
+
+@pytest.mark.unit
+def test_typed_yaml_list_field_rejects_csv_or_scalar_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        forms.st,
+        "text_input",
+        lambda *_args, **_kwargs: "Clicked, Impression",
+    )
+    errors: list[str] = []
+    monkeypatch.setattr(forms.st, "error", lambda message, **_kwargs: errors.append(message))
+
+    values = forms.typed_yaml_list_field(
+        "Exposure Values",
+        ["Clicked"],
+        key="typed_values",
+        help_key="processor.frequency_exposure_values",
+    )
+
+    assert values == []
+    assert errors == ["Exposure Values must use YAML list syntax, for example [Clicked, 1, true]."]
+
+
+@pytest.mark.unit
+def test_frequency_response_editor_accepts_model_valid_large_window_values() -> None:
+    app = AppTest.from_string(
+        """
+from valuestream.ui import forms
+
+processor = {
+    "columns": {
+        "customer": "CustomerID",
+        "interaction": "InteractionID",
+        "action": "ActionID",
+        "placement": "Placement",
+        "rank": "Rank",
+        "outcome": "Outcome",
+        "propensity": "Propensity",
+    },
+    "positive_values": ["Clicked"],
+    "exposure_values": ["Impression", "Clicked"],
+    "candidate_values": ["Pending", "Impression", "Clicked"],
+    "window_hours": 9000,
+    "partition_lag_hours": 9001,
+    "max_frequency": 1001,
+    "alternative_group_by": ["Placement"],
+}
+forms.processor_kind_fields(
+    processor,
+    "frequency_response",
+    field_options=[
+        "CustomerID", "InteractionID", "ActionID", "Placement",
+        "Rank", "Outcome", "Propensity",
+    ],
+    key_prefix="frequency_large",
+)
+"""
+    ).run()
+
+    assert not app.exception
+    values = {item.label: item.value for item in app.number_input}
+    assert values["Window Hours"] == 9000
+    assert values["Partition Lag Hours"] == 9001
+    assert values["Max Frequency Bucket"] == 1001
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("priority", "expected_rows"),
     [("Priority", 9), ("", 6)],
@@ -1466,6 +1561,16 @@ config_builder._render_canonical_state_grid(
     assert list(frame.columns) == builder.FREQUENCY_STATE_EDITOR_COLUMNS
     assert list(frame["State"])[:2] == ["Responses", "Positives"]
     assert all(explanation for explanation in frame["Explanation"])
+
+
+@pytest.mark.unit
+def test_canonical_frequency_state_frame_shows_only_the_published_subset() -> None:
+    frame = builder.frequency_response_state_frame(
+        {"columns": {"priority": "Priority"}},
+        ["Responses", "PriorityComparableContacts"],
+    )
+
+    assert list(frame["State"]) == ["Responses", "PriorityComparableContacts"]
 
 
 class _StubColumn:
@@ -1518,9 +1623,7 @@ def _stub_frequency_widgets(
     monkeypatch.setattr(forms.st, "columns", fake_columns)
     monkeypatch.setattr(forms.st, "selectbox", fake_selectbox)
     monkeypatch.setattr(forms.st, "multiselect", fake_multiselect)
-    monkeypatch.setattr(
-        forms.st, "text_input", lambda _label, value="", **_kwargs: str(value)
-    )
+    monkeypatch.setattr(forms.st, "text_input", lambda _label, value="", **_kwargs: str(value))
     monkeypatch.setattr(forms.st, "number_input", lambda _label, **kwargs: kwargs["value"])
     monkeypatch.setattr(forms.st, "checkbox", lambda _label, value=False, **_kwargs: value)
 
@@ -1698,6 +1801,86 @@ def test_frequency_response_editor_clears_optional_priority_and_sampling(
     assert "priority" not in fields["columns"]
     assert "customer_sample" not in fields
     assert "customer_sample" in forms.PROCESSOR_KIND_MANAGED_FIELDS
+
+
+@pytest.mark.unit
+def test_group_by_kind_transition_removes_only_the_derived_frequency_column() -> None:
+    assert builder.group_by_for_kind_transition(
+        ["Channel", "ExposureBucket", "Day"],
+        previous_kind="frequency_response",
+        kind="binary_outcome",
+        configured_frequency_column="ExposureBucket",
+    ) == ["Channel", "Day"]
+    assert builder.group_by_for_kind_transition(
+        ["Channel", "OldBucket"],
+        previous_kind="frequency_response",
+        kind="frequency_response",
+        configured_frequency_column="OldBucket",
+        frequency_column="NewBucket",
+    ) == ["Channel", "NewBucket"]
+    assert builder.group_by_for_kind_transition(
+        ["Day", "ExposureBucket", "Channel"],
+        previous_kind="frequency_response",
+        kind="binary_outcome",
+    ) == ["Day", "Channel"]
+
+
+@pytest.mark.unit
+def test_frequency_state_edit_preserves_subset_and_filters_removed_priority_states() -> None:
+    available_with_priority = model.frequency_response_state_definitions(priority=True)
+    definition = {
+        "kind": "frequency_response",
+        "columns": {"priority": "Priority"},
+        "states": {
+            "Responses": available_with_priority["Responses"],
+            "PriorityComparableContacts": available_with_priority["PriorityComparableContacts"],
+        },
+    }
+
+    unchanged = builder.frequency_response_states_for_edit(definition, priority=True)
+    cleared = builder.frequency_response_states_for_edit(definition, priority=False)
+
+    assert list(unchanged) == ["Responses", "PriorityComparableContacts"]
+    assert cleared == {"Responses": {"type": "count"}}
+
+
+@pytest.mark.unit
+def test_frequency_state_edit_keeps_full_contract_full_across_priority_change() -> None:
+    without_priority = model.frequency_response_state_definitions(priority=False)
+    definition = {
+        "kind": "frequency_response",
+        "columns": {},
+        "states": without_priority,
+    }
+
+    assert builder.frequency_response_states_for_edit(
+        definition,
+        priority=True,
+    ) == model.frequency_response_state_definitions(priority=True)
+
+
+@pytest.mark.unit
+def test_default_authored_states_do_not_reuse_frequency_contract() -> None:
+    binary = builder.default_processor_state_definitions("binary_outcome")
+    numeric = builder.default_processor_state_definitions(
+        "numeric_distribution",
+        {"properties": ["Value"], "quantile_engine": "kll"},
+    )
+    rows = config_builder._state_rows_from_definitions(binary)
+
+    assert list(binary) == ["Count", "Positives", "Negatives"]
+    assert list(numeric) == [
+        "Value_Count",
+        "Value_Mean",
+        "Value_Var",
+        "Value_Min",
+        "Value_Max",
+        "Value_kll",
+    ]
+    assert [row["State"] for row in rows] == ["Count", "Positives", "Negatives"]
+    assert binary["Positives"] == {"type": "count", "outcome": "positive"}
+    assert "Responses" not in binary
+    assert "ComparableResponses" not in binary
 
 
 @pytest.mark.unit
@@ -4583,11 +4766,11 @@ def test_dimension_pack_and_promotion_summaries_keep_exact_profile_values() -> N
 @pytest.mark.unit
 def test_dimension_badges_render_as_chips_with_collapsed_json_details() -> None:
     def app() -> None:
-        import json  # noqa: PLC0415
+        import json
 
-        import streamlit as st  # noqa: PLC0415
+        import streamlit as st
 
-        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+        from valuestream.ui.pages import config_builder as page
 
         summary = page._dimension_pack_summary(
             ["Channel", "Campaign"],
@@ -4990,8 +5173,8 @@ def test_existing_report_tile_opens_clean_in_visual_editor(tmp_path: Path) -> No
     _write_source_cascade_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -5018,10 +5201,10 @@ def test_dashboard_manager_confirmation_is_scoped_to_the_exact_target(
     builder.require_valid_workspace(tmp_path)
 
     def app(workspace: str) -> None:
-        from pathlib import Path  # noqa: PLC0415 - isolated AppTest source
+        from pathlib import Path
 
-        from valuestream.config.loader import load  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import (  # noqa: PLC0415
+        from valuestream.config.loader import load
+        from valuestream.ui.pages.config_builder import (
             _render_dashboard_manager,
         )
 
@@ -5065,10 +5248,10 @@ def test_demo_advanced_tiles_open_clean_in_visual_editor(selected: str) -> None:
     workspace = Path(__file__).resolve().parents[2] / "examples" / "demo"
 
     def app(workspace_path: str, selected_tile: str) -> None:
-        import streamlit as st  # noqa: PLC0415
+        import streamlit as st
 
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         st.session_state.setdefault("builder_step", "Reports / Tiles")
         st.session_state.setdefault("builder_selected_tile_key", selected_tile)
@@ -5091,8 +5274,8 @@ def test_new_report_tile_template_is_clean_until_edited(tmp_path: Path) -> None:
     _write_source_cascade_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -5110,10 +5293,10 @@ def test_new_report_tile_template_is_clean_until_edited(tmp_path: Path) -> None:
 
 
 def _render_reports_step(workspace: str) -> None:
-    import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+    import streamlit as st
 
-    from valuestream.ui.context import load_context  # noqa: PLC0415
-    from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+    from valuestream.ui.context import load_context
+    from valuestream.ui.pages.config_builder import _builder_steps
 
     st.session_state.setdefault("builder_step", "Reports / Tiles")
     _builder_steps(load_context(workspace))
@@ -5205,8 +5388,8 @@ def test_new_report_tile_apply_reopens_the_written_tile_clean(tmp_path: Path) ->
     _write_source_cascade_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -5296,8 +5479,8 @@ def test_tile_delete_button_names_and_stages_the_exact_library_target(tmp_path: 
     _write_source_cascade_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -5325,8 +5508,8 @@ def test_visual_report_library_replaces_inventory_dataframe(tmp_path: Path) -> N
     _write_source_cascade_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.config.loader import load  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import (  # noqa: PLC0415
+        from valuestream.config.loader import load
+        from valuestream.ui.pages.config_builder import (
             _render_report_library_browser,
         )
 
@@ -5410,8 +5593,8 @@ def test_large_report_type_group_uses_compact_selector() -> None:
     ]
 
     def app(options: list[tuple[str, str, str, dict]]) -> None:
-        from valuestream.config import model as config_model  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import (  # noqa: PLC0415
+        from valuestream.config import model as config_model
+        from valuestream.ui.pages.config_builder import (
             _render_report_library_chart_group,
             _tile_option_key,
         )
@@ -5983,10 +6166,10 @@ def test_processor_kind_guide_covers_every_kind() -> None:
 
 
 def _render_processors_create_step(workspace: str) -> None:
-    import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+    import streamlit as st
 
-    from valuestream.ui.context import load_context  # noqa: PLC0415
-    from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+    from valuestream.ui.context import load_context
+    from valuestream.ui.pages.config_builder import _builder_steps
 
     st.session_state.setdefault("builder_step", "Processors")
     st.session_state.setdefault("builder_processor_mode", "Create New Processor")
@@ -6104,10 +6287,10 @@ def test_write_workspace_dimensions_round_trip(tmp_path: Path) -> None:
 
 
 def _render_dimensions_step(workspace: str) -> None:
-    import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+    import streamlit as st
 
-    from valuestream.ui.context import load_context  # noqa: PLC0415
-    from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+    from valuestream.ui.context import load_context
+    from valuestream.ui.pages.config_builder import _builder_steps
 
     st.session_state.setdefault("builder_step", "Dimensions")
     _builder_steps(load_context(workspace))
@@ -6466,10 +6649,10 @@ processors:
     )
 
     def app(workspace: str) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         st.session_state.setdefault("builder_step", "Processors")
         st.session_state.setdefault("builder_processor_mode", "Edit Existing Processor")
@@ -7249,8 +7432,8 @@ def test_settings_editor_keeps_an_explicit_empty_calendar_draft_clean(tmp_path: 
     pipelines_path.write_text(yaml.safe_dump(pipelines, sort_keys=False), encoding="utf-8")
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -7637,10 +7820,10 @@ def test_calculated_expression_validation_covers_yaml_and_guarded_polars() -> No
 @pytest.mark.unit
 def test_calculated_expression_editor_requires_explicit_apply_and_cancel() -> None:
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui import builder  # noqa: PLC0415
-        from valuestream.ui.pages import config_builder as page  # noqa: PLC0415
+        from valuestream.ui import builder
+        from valuestream.ui.pages import config_builder as page
 
         calc_key = "builder_source_calcs_test"
         editor_key = "builder_source_calcs_editor_test"
@@ -7727,10 +7910,10 @@ def test_pending_expression_blocks_source_apply_until_explicit_expression_apply(
     _write_builder_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         if "qa_expression_seeded" not in st.session_state:
             st.session_state["qa_expression_seeded"] = True
@@ -7779,10 +7962,10 @@ def test_visual_case_builder_generates_yaml_into_focused_editor(tmp_path: Path) 
     visual_base = "builder_source_calcs_editor_ih_expression_draft_0_visual"
 
     def app(workspace: str, base: str) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         if "qa_visual_seeded" not in st.session_state:
             st.session_state["qa_visual_seeded"] = True
@@ -8499,8 +8682,8 @@ def test_builder_continue_escalates_to_full_app_rerun() -> None:
     set only the plain step key and escalate with ``st.rerun(scope="app")``.
     """
 
-    import inspect  # noqa: PLC0415 - focused source guard
-    import textwrap  # noqa: PLC0415 - focused source guard
+    import inspect
+    import textwrap
 
     source = textwrap.dedent(inspect.getsource(config_builder._render_continue_primary))
     tree = ast.parse(source)
@@ -8813,9 +8996,12 @@ def test_fat_example_catalog_rows_surface_recognized_modes() -> None:
     assert rows["ResponseTime"]["Mode"] == "Date Diff Seconds"
     assert rows["ResponseTime"]["Left"] == "OutcomeTime"
     assert rows["ResponseTime"]["Right"] == "DecisionTime"
-    for name in ("CustomerType", "Placement", "Revenue"):
+    for name in ("CustomerType", "Placement"):
         assert rows[name]["Mode"] == "AST YAML"
         assert builder.visual_case_state_from_expression(rows[name]["Expression"]) is not None
+    # Revenue preserves supplied values with a coalesce fallback, which needs the AST editor.
+    assert rows["Revenue"]["Mode"] == "AST YAML"
+    assert "coalesce" in rows["Revenue"]["Expression"]
 
 
 @pytest.mark.unit
@@ -9375,8 +9561,8 @@ def test_sketch_helper_appends_states_to_processor_sketches_grid(tmp_path: Path)
     _write_entity_set_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         _builder_steps(load_context(workspace))
 
@@ -9434,7 +9620,7 @@ class _PolicyWarningCapture(logging.Handler):
         self.messages.append(record.getMessage())
 
     def __enter__(self) -> _PolicyWarningCapture:
-        from streamlit.elements.lib import policies  # noqa: PLC0415 - test-only reset
+        from streamlit.elements.lib import policies
 
         # Streamlit emits this warning once per process; reset the flag so the
         # capture observes it regardless of which tests ran earlier.
@@ -9472,10 +9658,10 @@ def test_processor_mode_seeded_by_post_apply_renders_without_policy_warning(
     _write_builder_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         st.session_state.setdefault("builder_step", "Processors")
         # What _consume_builder_post_apply_cleanup does after a processor apply.
@@ -9503,10 +9689,10 @@ def test_report_mode_seeded_by_post_apply_renders_without_policy_warning(
     _write_source_cascade_catalog(tmp_path)
 
     def app(workspace: str) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.pages.config_builder import _builder_steps  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.pages.config_builder import _builder_steps
 
         st.session_state.setdefault("builder_step", "Reports / Tiles")
         st.session_state.setdefault("builder_tile_editing_mode", "Visual")

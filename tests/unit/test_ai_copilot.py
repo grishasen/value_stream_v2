@@ -69,7 +69,7 @@ def _base_draft() -> dict:
                         "negative_values": ["Impression"],
                     },
                 }
-            ]
+            ],
         },
         "metrics": {
             "catalog_version": 2,
@@ -83,7 +83,7 @@ def _base_draft() -> dict:
                         "den": {"col": "Count"},
                     },
                 }
-            }
+            },
         },
         "dashboards": {
             "catalog_version": 2,
@@ -107,7 +107,7 @@ def _base_draft() -> dict:
                         }
                     ],
                 }
-            ]
+            ],
         },
     }
 
@@ -139,6 +139,39 @@ def _binary_processor(channel_field: str) -> dict:
             "column": "Outcome",
             "positive_values": ["Clicked"],
             "negative_values": ["Impression"],
+        },
+    }
+
+
+def _frequency_response_processor(
+    *,
+    customer_field: str = "CustomerID",
+    alternative_group_by: list[str] | None = None,
+) -> dict:
+    return {
+        "id": "engagement",
+        "source": "ih",
+        "kind": "frequency_response",
+        "group_by": ["Day", "ExposureBucket"],
+        "time": {"property": "DecisionTime", "grain": "daily"},
+        "columns": {
+            "customer": customer_field,
+            "interaction": "InteractionID",
+            "action": "ActionID",
+            "placement": "Placement",
+            "rank": "Rank",
+            "outcome": "Outcome",
+            "propensity": "Propensity",
+        },
+        "alternative_group_by": (
+            ["Placement"] if alternative_group_by is None else alternative_group_by
+        ),
+        "positive_values": ["Clicked"],
+        "exposure_values": ["Impression", "Clicked"],
+        "candidate_values": ["Pending", "Impression", "Clicked"],
+        "states": {
+            "Responses": {"type": "count"},
+            "Positives": {"type": "count", "source_column": "ClickedContact"},
         },
     }
 
@@ -1070,11 +1103,11 @@ def test_operation_field_normalization_covers_schema_slots_without_changing_valu
         {
             "op": "set_processor",
             "processor": {
-                    "id": "engagement",
-                    "source": "ih",
-                    "kind": "binary_outcome",
-                    "group_by": ["pyChannel"],
-                    "time": {"property": "pxOutcomeTime", "grain": "summary"},
+                "id": "engagement",
+                "source": "ih",
+                "kind": "binary_outcome",
+                "group_by": ["pyChannel"],
+                "time": {"property": "pxOutcomeTime", "grain": "summary"},
                 "outcome": {
                     "column": "pyOutcome",
                     "positive_values": ["pyChannel"],
@@ -1086,9 +1119,9 @@ def test_operation_field_normalization_covers_schema_slots_without_changing_valu
         },
         {
             "op": "set_metric",
-                "name": "ChannelLift",
-                "metric": {
-                    "processor": "engagement",
+            "name": "ChannelLift",
+            "metric": {
+                "processor": "engagement",
                 "kind": "variant_compare",
                 "variant_column": "pyChannel",
                 "expression": {"col": "pyChannel"},
@@ -1745,6 +1778,143 @@ def test_draft_field_contract_rejects_stale_processor_and_accepts_effective_fiel
 
 
 @pytest.mark.unit
+def test_draft_field_contract_rejects_unapproved_frequency_raw_bindings() -> None:
+    draft = _rename_capitalize_draft()
+    draft["processors"]["processors"] = [
+        _frequency_response_processor(
+            customer_field="SecretCustomer",
+            alternative_group_by=["SecretSegment"],
+        )
+    ]
+
+    ok, issues = validate_draft_field_contract(
+        draft,
+        [
+            "ActionID",
+            "DecisionTime",
+            "InteractionID",
+            "Outcome",
+            "Placement",
+            "Propensity",
+            "Rank",
+        ],
+        source_id="ih",
+    )
+
+    assert not ok
+    assert any("SecretCustomer" in issue for issue in issues)
+    assert any("SecretSegment" in issue for issue in issues)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("customer_field", ["ClickedContact", "Day"])
+def test_frequency_raw_binding_is_not_exempt_when_named_like_a_derived_column(
+    customer_field: str,
+) -> None:
+    draft = _rename_capitalize_draft()
+    draft["processors"]["processors"] = [
+        _frequency_response_processor(customer_field=customer_field)
+    ]
+
+    ok, issues = validate_draft_field_contract(
+        draft,
+        [
+            "ActionID",
+            "DecisionTime",
+            "InteractionID",
+            "Outcome",
+            "Placement",
+            "Propensity",
+            "Rank",
+        ],
+        source_id="ih",
+    )
+
+    assert not ok
+    assert any(customer_field in issue for issue in issues)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("time_property", ["ClickedContact", "Day"])
+def test_frequency_raw_time_binding_is_not_exempt_as_a_derived_field(
+    time_property: str,
+) -> None:
+    draft = _rename_capitalize_draft()
+    processor = _frequency_response_processor()
+    processor["time"]["property"] = time_property
+    draft["processors"]["processors"] = [processor]
+
+    ok, issues = validate_draft_field_contract(
+        draft,
+        [
+            "ActionID",
+            "CustomerID",
+            "InteractionID",
+            "Outcome",
+            "Placement",
+            "Propensity",
+            "Rank",
+        ],
+        source_id="ih",
+    )
+
+    assert not ok
+    assert any(time_property in issue for issue in issues)
+
+
+@pytest.mark.unit
+def test_processor_calendar_output_does_not_exempt_a_raw_binding_with_the_same_name() -> None:
+    draft = _rename_capitalize_draft()
+    processor = _binary_processor("Channel")
+    processor["group_by"] = ["Day", "Channel"]
+    draft["processors"]["processors"] = [processor]
+    approved = ["Channel", "Outcome", "OutcomeTime"]
+
+    ok, issues = validate_draft_field_contract(draft, approved, source_id="ih")
+
+    assert ok, issues
+
+    processor["outcome"]["column"] = "Day"
+    ok, issues = validate_draft_field_contract(draft, approved, source_id="ih")
+
+    assert not ok
+    assert any("Day" in issue for issue in issues)
+
+
+@pytest.mark.unit
+def test_copilot_frequency_processor_accepts_only_approved_raw_and_derived_fields() -> None:
+    draft = _rename_capitalize_draft()
+    draft["metrics"]["metrics"] = {}
+    draft["dashboards"]["dashboards"] = []
+    processor = _frequency_response_processor()
+
+    result = run_copilot_tool_loop(
+        prompt="Configure frequency response.",
+        draft=draft,
+        call_model=lambda _prompt: _operation_response(
+            "Configuring frequency response.",
+            {"op": "set_processor", "processor": processor},
+        ),
+        validate=ai_config_studio_page.validate_draft_catalog,
+        approved_fields=[
+            "ActionID",
+            "CustomerID",
+            "DecisionTime",
+            "InteractionID",
+            "Outcome",
+            "Placement",
+            "Propensity",
+            "Rank",
+        ],
+        field_contract_source_id="ih",
+    )
+
+    assert result.validation_issues == ()
+    assert result.pending_draft is not None
+    assert result.pending_draft["processors"]["processors"][0] == processor
+
+
+@pytest.mark.unit
 def test_draft_field_contract_revalidates_baseline_objects_when_rename_changes() -> None:
     processor_baseline = _rename_capitalize_draft()
     processor_baseline["pipelines"]["sources"][0]["transforms"] = []
@@ -2262,7 +2432,7 @@ def test_copilot_set_dashboards_repairs_stale_filter_and_tile_field() -> None:
                         }
                     ],
                 }
-            ]
+            ],
         }
 
     responses = iter(
@@ -2643,7 +2813,7 @@ def test_copilot_heading_names_step_without_repeating_ai(step: str, heading: str
 def test_copilot_panel_holds_operations_in_pending_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def fake_call_litellm(settings: object, prompt: str, **kwargs: object) -> str:
         if prompt == "Reply with READY.":
@@ -2659,10 +2829,10 @@ def test_copilot_panel_holds_operations_in_pending_review(
     monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call_litellm)
 
     def app(draft: dict) -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
@@ -2692,7 +2862,7 @@ def test_copilot_panel_holds_operations_in_pending_review(
 
 @pytest.mark.unit
 def test_pending_copilot_details_include_change_table_and_yaml() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     base = _base_draft()
     pending, _ = apply_draft_operations(
@@ -2711,9 +2881,9 @@ def test_pending_copilot_details_include_change_table_and_yaml() -> None:
     )
 
     def app(base_draft: dict, pending_draft: dict) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_draft"] = base_draft
@@ -2752,7 +2922,7 @@ def test_pending_copilot_details_include_change_table_and_yaml() -> None:
 def test_copilot_accepts_effective_filter_after_rename_capitalize(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     calls: list[str] = []
 
@@ -2769,10 +2939,10 @@ def test_copilot_accepts_effective_filter_after_rename_capitalize(
     monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call_litellm)
 
     def app(draft: dict) -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         raw_fields = ["pyChannel", "pyCustomerID", "pxOutcomeTime", "pyOutcome"]
         effective_fields = ["Channel", "CustomerID", "OutcomeTime", "Outcome"]
@@ -2815,7 +2985,7 @@ def test_copilot_accepts_effective_filter_after_rename_capitalize(
 def test_copilot_blocks_provider_call_for_stale_source_naming_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     calls: list[str] = []
 
@@ -2826,10 +2996,10 @@ def test_copilot_blocks_provider_call_for_stale_source_naming_contract(
     monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call)
 
     def app(draft: dict) -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state[page.AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = True
@@ -2859,7 +3029,7 @@ def test_copilot_blocks_provider_call_for_stale_source_naming_contract(
 def test_copilot_permission_error_names_model_and_preserves_last_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def denied_call(*args: object, **kwargs: object) -> str:
         raise RuntimeError("OpenAIException - You have insufficient permissions for this operation")
@@ -2867,10 +3037,10 @@ def test_copilot_permission_error_names_model_and_preserves_last_prompt(
     monkeypatch.setattr(ai_config_studio_page, "call_litellm", denied_call)
 
     def app(draft: dict) -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "gpt-unavailable"
@@ -2896,7 +3066,7 @@ def test_copilot_permission_error_names_model_and_preserves_last_prompt(
 
 @pytest.mark.unit
 def test_accepting_preprocessing_patches_syncs_all_source_editors() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     base = _base_draft()
     pending, _ = apply_draft_operations(
@@ -2923,9 +3093,9 @@ def test_accepting_preprocessing_patches_syncs_all_source_editors() -> None:
     )
 
     def app(base_draft: dict, pending_draft: dict) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state.setdefault("ai_studio_source_id", "ih")
@@ -2975,7 +3145,7 @@ def test_accepting_preprocessing_patches_syncs_all_source_editors() -> None:
 
 @pytest.mark.unit
 def test_accepting_source_naming_bundle_syncs_all_preprocessing_editors() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     base = _base_draft()
     pending = copy.deepcopy(base)
@@ -2995,9 +3165,9 @@ def test_accepting_source_naming_bundle_syncs_all_preprocessing_editors() -> Non
     ]
 
     def app(base_draft: dict, pending_draft: dict) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state[page.AI_STUDIO_RENAME_CAPITALIZE_STATE_KEY] = True
@@ -3045,7 +3215,7 @@ def test_accepting_source_naming_bundle_syncs_all_preprocessing_editors() -> Non
 def test_copilot_panel_renders_clarifying_question_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def fake_call_litellm(settings: object, prompt: str, **kwargs: object) -> str:
         if prompt == "Reply with READY.":
@@ -3058,10 +3228,10 @@ def test_copilot_panel_renders_clarifying_question_options(
     monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call_litellm)
 
     def app(draft: dict) -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
@@ -3091,7 +3261,7 @@ def test_copilot_panel_renders_clarifying_question_options(
 def test_copilot_question_before_first_draft_does_not_accept_baseline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     monkeypatch.setattr(
         ai_config_studio_page,
@@ -3107,10 +3277,10 @@ def test_copilot_question_before_first_draft_does_not_accept_baseline(
     )
 
     def app() -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
@@ -3135,7 +3305,7 @@ def test_copilot_question_before_first_draft_does_not_accept_baseline(
 def test_pending_review_allows_read_only_copilot_and_preserves_pending(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     prompts: list[str] = []
 
@@ -3163,10 +3333,10 @@ def test_pending_review_allows_read_only_copilot_and_preserves_pending(
     )
 
     def app(base_draft: dict, pending_draft: dict) -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
@@ -3202,13 +3372,13 @@ def test_pending_review_allows_read_only_copilot_and_preserves_pending(
 
 @pytest.mark.unit
 def test_new_sample_identity_resets_draft_and_copilot_with_same_columns() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app(draft: dict) -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         frame = pl.DataFrame({"Channel": ["Web"]})
         st.session_state.setdefault("ai_studio_sample_identity", "first-file")
@@ -3233,12 +3403,12 @@ def test_new_sample_identity_resets_draft_and_copilot_with_same_columns() -> Non
 
 @pytest.mark.unit
 def test_phase_statuses_require_explicit_review_before_publish() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app(draft: dict, reviewed: bool, published: bool) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state["ai_studio_draft"] = draft
         st.session_state["ai_studio_pending_draft"] = None

@@ -51,6 +51,8 @@ class TestAtoms:
 
     def test_lit_null(self) -> None:
         assert parse({"lit": None}).lit is None  # type: ignore[union-attr]
+        assert to_dict(parse({"lit": None})) == {"lit": None}
+        assert parse({"lit": None}).model_dump(exclude_none=True) == {"lit": None}
 
     def test_lit_array(self) -> None:
         assert parse({"lit": [1, 2, 3]}).lit == [1, 2, 3]  # type: ignore[union-attr]

@@ -1061,3 +1061,1258 @@ recipes:
       algorithm: Difference of matched arbitration sums over one mergeable denominator.
       caveat: FocalPriorityComparableSum and RunnerPriorityComparableSum must use the same PriorityComparableContacts denominator. ExposureBucket is an upstream fixed-window number-of-impressions approximation and report filters do not recompute it. Responses count configured Impression proxies, not measured viewability, and no dismiss telemetry is inferred. Within the processor's configured alternative group, the selected rank-2 action is exact rank 2 when present; otherwise the next recorded rank greater than 1 is used; raw Propensity is the response probability. Priority is only an arbitration diagnostic and never CTR.
     report: { chart: bar, placement: content, x: ExposureBucket }
+
+  - id: finance.marketing_cost_impressions
+    version: 1
+    title: Marketing cost — impressions
+    domain: Marketing costs and revenue
+    summary: Total Cost charged for the selected impressions.
+    business_questions:
+    - Total Cost charged for the selected impressions.
+    tags:
+    - marketing costs and revenue
+    - finance
+    - marketing_cost_impressions
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: cost
+      label: Recorded marketing cost
+      source: state
+      state_types:
+      - value_sum
+      preferred_names:
+      - ImpressionCost
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        source_column: Cost
+    - role: known
+      label: Billing units with recorded cost
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - CostedImpressions
+      selection: automatic
+      require_preferred: true
+    - role: units
+      label: Billable impressions
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Impressions
+      selection: automatic
+      require_preferred: true
+    default_metric_id: VS_MarketingCostImpressions
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: when_then
+        cond:
+          op: and
+          args:
+          - op: gt
+            args:
+            - col: ${units}
+            - lit: 0
+          - op: eq
+            args:
+            - col: ${known}
+            - col: ${units}
+        then:
+          col: ${cost}
+        else:
+          lit: null
+      description: Total Cost charged for the selected impressions.
+      display:
+        label: Marketing cost — impressions
+        unit: currency
+        value_format: currency
+        direction: neutral
+    method:
+      calculation: sum(Cost), only when every billing unit has a recorded cost
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Use a processor with one retained row per billable impression. The Cost field must use one currency.
+        Missing Cost on any billing unit returns no value, not zero. Impression and interaction costs are alternative
+        accounting bases; do not add them. Deduplication is within each source chunk; the source must keep each billing
+        identity in one chunk.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: finance.cost_per_impression
+    version: 1
+    title: Cost per impression
+    domain: Marketing costs and revenue
+    summary: Average recorded cost for one billable impression.
+    business_questions:
+    - Average recorded cost for one billable impression.
+    tags:
+    - marketing costs and revenue
+    - finance
+    - cost_per_impression
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: cost
+      label: Recorded marketing cost
+      source: state
+      state_types:
+      - value_sum
+      preferred_names:
+      - ImpressionCost
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        source_column: Cost
+    - role: known
+      label: Billing units with recorded cost
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - CostedImpressions
+      selection: automatic
+      require_preferred: true
+    - role: units
+      label: Billable impressions
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Impressions
+      selection: automatic
+      require_preferred: true
+    default_metric_id: VS_CostPerImpression
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: when_then
+        cond:
+          op: and
+          args:
+          - op: gt
+            args:
+            - col: ${units}
+            - lit: 0
+          - op: eq
+            args:
+            - col: ${known}
+            - col: ${units}
+        then:
+          op: safe_div
+          num:
+            col: ${cost}
+          den:
+            col: ${units}
+        else:
+          lit: null
+      description: Average recorded cost for one billable impression.
+      display:
+        label: Cost per impression
+        unit: currency/impression
+        value_format: currency
+        direction: neutral
+    method:
+      calculation: sum(Cost) / billable impressions
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Use a processor with one retained row per billable impression. The Cost field must use one currency.
+        Missing Cost on any billing unit returns no value, not zero. Impression and interaction costs are alternative
+        accounting bases; do not add them. Deduplication is within each source chunk; the source must keep each billing
+        identity in one chunk.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: finance.marketing_cost_interactions
+    version: 1
+    title: Marketing cost — interactions
+    domain: Marketing costs and revenue
+    summary: Total Cost charged for the selected interactions.
+    business_questions:
+    - Total Cost charged for the selected interactions.
+    tags:
+    - marketing costs and revenue
+    - finance
+    - marketing_cost_interactions
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: cost
+      label: Recorded marketing cost
+      source: state
+      state_types:
+      - value_sum
+      preferred_names:
+      - InteractionCost
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        source_column: Cost
+    - role: known
+      label: Billing units with recorded cost
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - CostedInteractions
+      selection: automatic
+      require_preferred: true
+    - role: units
+      label: Billable interactions
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Interactions
+      selection: automatic
+      require_preferred: true
+    default_metric_id: VS_MarketingCostInteractions
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: when_then
+        cond:
+          op: and
+          args:
+          - op: gt
+            args:
+            - col: ${units}
+            - lit: 0
+          - op: eq
+            args:
+            - col: ${known}
+            - col: ${units}
+        then:
+          col: ${cost}
+        else:
+          lit: null
+      description: Total Cost charged for the selected interactions.
+      display:
+        label: Marketing cost — interactions
+        unit: currency
+        value_format: currency
+        direction: neutral
+    method:
+      calculation: sum(Cost), only when every billing unit has a recorded cost
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Use a processor with one retained row per billable interaction. The Cost field must use one currency.
+        Missing Cost on any billing unit returns no value, not zero. Impression and interaction costs are alternative
+        accounting bases; do not add them. Deduplication is within each source chunk; the source must keep each billing
+        identity in one chunk.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: finance.cost_per_interaction
+    version: 1
+    title: Cost per interaction
+    domain: Marketing costs and revenue
+    summary: Average recorded cost for one billable interaction.
+    business_questions:
+    - Average recorded cost for one billable interaction.
+    tags:
+    - marketing costs and revenue
+    - finance
+    - cost_per_interaction
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: cost
+      label: Recorded marketing cost
+      source: state
+      state_types:
+      - value_sum
+      preferred_names:
+      - InteractionCost
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        source_column: Cost
+    - role: known
+      label: Billing units with recorded cost
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - CostedInteractions
+      selection: automatic
+      require_preferred: true
+    - role: units
+      label: Billable interactions
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Interactions
+      selection: automatic
+      require_preferred: true
+    default_metric_id: VS_CostPerInteraction
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: when_then
+        cond:
+          op: and
+          args:
+          - op: gt
+            args:
+            - col: ${units}
+            - lit: 0
+          - op: eq
+            args:
+            - col: ${known}
+            - col: ${units}
+        then:
+          op: safe_div
+          num:
+            col: ${cost}
+          den:
+            col: ${units}
+        else:
+          lit: null
+      description: Average recorded cost for one billable interaction.
+      display:
+        label: Cost per interaction
+        unit: currency/interaction
+        value_format: currency
+        direction: neutral
+    method:
+      calculation: sum(Cost) / billable interactions
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Use a processor with one retained row per billable interaction. The Cost field must use one currency.
+        Missing Cost on any billing unit returns no value, not zero. Impression and interaction costs are alternative
+        accounting bases; do not add them. Deduplication is within each source chunk; the source must keep each billing
+        identity in one chunk.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: finance.cost_coverage
+    version: 1
+    title: Marketing cost data coverage
+    domain: Marketing costs and revenue
+    summary: Share of billable impressions or interactions with a recorded Cost.
+    business_questions:
+    - Share of billable impressions or interactions with a recorded Cost.
+    tags:
+    - marketing costs and revenue
+    - finance
+    - cost_coverage
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: known
+      label: Billing units with recorded Cost
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - CostedImpressions
+      - CostedInteractions
+      require_preferred: true
+    - role: units
+      label: All billing units on the same cost processor
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Impressions
+      - Interactions
+      require_preferred: true
+      different_from: known
+    default_metric_id: VS_CostCoverage
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: safe_div
+        num:
+          col: ${known}
+        den:
+          col: ${units}
+      description: Share of billable impressions or interactions with a recorded Cost.
+      display:
+        label: Marketing cost data coverage
+        unit: percent
+        value_format: percent
+        direction: higher_is_better
+    method:
+      calculation: billing units with Cost / all billing units
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Use counts from the same billing basis. A known zero cost is complete data; a missing cost is not.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: finance.revenue
+    version: 1
+    title: Conversion revenue
+    domain: Marketing costs and revenue
+    summary: Revenue generated by recorded conversion outcomes. For example, 100 conversions at 3.5 each produce 350
+      revenue.
+    business_questions:
+    - Revenue generated by recorded conversion outcomes.
+    tags:
+    - marketing costs and revenue
+    - finance
+    - revenue
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: revenue
+      label: Revenue from conversion outcomes
+      source: state
+      state_types:
+      - value_sum
+      selection: automatic
+      state_template:
+        type: value_sum
+        source_column: Revenue
+        where:
+          op: eq
+          column: Outcome
+          value: Conversion
+      proposed_name: ConversionRevenue
+    default_metric_id: VS_Revenue
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        col: ${revenue}
+      description: Revenue generated by recorded conversion outcomes.
+      display:
+        label: Conversion revenue
+        unit: currency
+        value_format: currency
+        direction: higher_is_better
+    method:
+      calculation: sum(Revenue where Outcome = Conversion)
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Sum Revenue only on Conversion outcomes after processor deduplication. Use a conversion processor whose
+        positive outcome is Conversion and keep the currency and eligible population consistent. FAT retains a 3.5
+        demonstration fallback only where Revenue is absent; replace it with real business values for financial use.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: finance.revenue_per_conversion
+    version: 1
+    title: Revenue per conversion
+    domain: Marketing costs and revenue
+    summary: Average revenue for each recorded conversion.
+    business_questions:
+    - Average revenue for each recorded conversion.
+    tags:
+    - marketing costs and revenue
+    - finance
+    - revenue_per_conversion
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: revenue
+      label: Revenue from conversion outcomes
+      source: state
+      state_types:
+      - value_sum
+      selection: automatic
+      state_template:
+        type: value_sum
+        source_column: Revenue
+        where:
+          op: eq
+          column: Outcome
+          value: Conversion
+      proposed_name: ConversionRevenue
+    - role: conversions
+      label: Conversion count
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Positives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: positive
+    default_metric_id: VS_RevenuePerConversion
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: safe_div
+        num:
+          col: ${revenue}
+        den:
+          col: ${conversions}
+      description: Average revenue for each recorded conversion.
+      display:
+        label: Revenue per conversion
+        unit: currency/conversion
+        value_format: currency
+        direction: higher_is_better
+    method:
+      calculation: conversion revenue / conversions
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Sum Revenue only on Conversion outcomes after processor deduplication. Use a conversion processor whose
+        positive outcome is Conversion and keep the currency and eligible population consistent. FAT retains a 3.5
+        demonstration fallback only where Revenue is absent; replace it with real business values for financial use.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: finance.revenue_per_opportunity
+    version: 1
+    title: Revenue per conversion opportunity
+    domain: Marketing costs and revenue
+    summary: Revenue earned per classified Conversion or NoConversion outcome.
+    business_questions:
+    - Revenue earned per classified Conversion or NoConversion outcome.
+    tags:
+    - marketing costs and revenue
+    - finance
+    - revenue_per_opportunity
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: revenue
+      label: Revenue from conversion outcomes
+      source: state
+      state_types:
+      - value_sum
+      selection: automatic
+      state_template:
+        type: value_sum
+        source_column: Revenue
+        where:
+          op: eq
+          column: Outcome
+          value: Conversion
+      proposed_name: ConversionRevenue
+    - role: conversions
+      label: Conversion count
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Positives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: positive
+    - role: nonconversions
+      label: Non-conversion count
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Negatives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: negative
+    default_metric_id: VS_RevenuePerOpportunity
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: safe_div
+        num:
+          col: ${revenue}
+        den:
+          op: add
+          args:
+          - col: ${conversions}
+          - col: ${nonconversions}
+      description: Revenue earned per classified Conversion or NoConversion outcome.
+      display:
+        label: Revenue per conversion opportunity
+        unit: currency/opportunity
+        value_format: currency
+        direction: higher_is_better
+    method:
+      calculation: conversion revenue / (conversions + non-conversions)
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Sum Revenue only on Conversion outcomes after processor deduplication. Use a conversion processor whose
+        positive outcome is Conversion and keep the currency and eligible population consistent. FAT retains a 3.5
+        demonstration fallback only where Revenue is absent; replace it with real business values for financial use.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: conversion.conversions
+    version: 1
+    title: Conversions
+    domain: Conversions
+    summary: Count successful conversion outcomes.
+    business_questions:
+    - Count successful conversion outcomes.
+    tags:
+    - conversions
+    - conversion
+    - conversions
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: conversions
+      label: Conversion count
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Positives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: positive
+    default_metric_id: VS_Conversions
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        col: ${conversions}
+      description: Count successful conversion outcomes.
+      display:
+        label: Conversions
+        unit: conversions
+        value_format: integer
+        direction: higher_is_better
+    method:
+      calculation: positive conversion outcome count
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: 'Select a conversion processor with positive_values: [Conversion] and negative_values: [NoConversion].
+        This rate uses classified conversion opportunities, not the impression-stage denominator.'
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: conversion.conversion_rate
+    version: 1
+    title: Conversion rate
+    domain: Conversions
+    summary: Share of classified conversion opportunities that convert.
+    business_questions:
+    - Share of classified conversion opportunities that convert.
+    tags:
+    - conversions
+    - conversion
+    - conversion_rate
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: conversions
+      label: Conversion count
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Positives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: positive
+    - role: nonconversions
+      label: Non-conversion count
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Negatives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: negative
+    default_metric_id: VS_ConversionRate
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: safe_div
+        num:
+          col: ${conversions}
+        den:
+          op: add
+          args:
+          - col: ${conversions}
+          - col: ${nonconversions}
+      description: Share of classified conversion opportunities that convert.
+      display:
+        label: Conversion rate
+        unit: percent
+        value_format: percent
+        direction: higher_is_better
+    method:
+      calculation: conversions / (conversions + non-conversions)
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: 'Select a conversion processor with positive_values: [Conversion] and negative_values: [NoConversion].
+        This rate uses classified conversion opportunities, not the impression-stage denominator.'
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: products.revenue_mix
+    version: 1
+    title: Revenue mix by product
+    domain: Products and revenue mix
+    summary: Compare conversion revenue across the selected product groups.
+    business_questions:
+    - Compare conversion revenue across the selected product groups.
+    tags:
+    - products and revenue mix
+    - products
+    - revenue_mix
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: revenue
+      label: Revenue from conversion outcomes
+      source: state
+      state_types:
+      - value_sum
+      selection: automatic
+      state_template:
+        type: value_sum
+        source_column: Revenue
+        where:
+          op: eq
+          column: Outcome
+          value: Conversion
+      proposed_name: ConversionRevenue
+    - role: product
+      label: Product or action grouping
+      source: dimension
+      preferred_names:
+      - ShelfLevel1Name
+      - Group
+      - Issue
+      - Name
+    default_metric_id: VS_RevenueMix
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        col: ${revenue}
+      description: Compare conversion revenue across the selected product groups.
+      display:
+        label: Revenue mix by product
+        unit: currency
+        value_format: currency
+        direction: neutral
+    method:
+      calculation: conversion revenue by product
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Group the same conversion population by the chosen product dimension. Mix shows absolute contributions;
+        the Pareto chart adds cumulative share. Current filters define the displayed total. Sum Revenue only on Conversion
+        outcomes after processor deduplication. Use a conversion processor whose positive outcome is Conversion and
+        keep the currency and eligible population consistent. FAT retains a 3.5 demonstration fallback only where
+        Revenue is absent; replace it with real business values for financial use.
+    report:
+      chart: bar
+      placement: content
+      x: ${product}
+  - id: products.conversion_mix
+    version: 1
+    title: Conversion mix by product
+    domain: Products and revenue mix
+    summary: Compare conversion volume across the selected product groups.
+    business_questions:
+    - Compare conversion volume across the selected product groups.
+    tags:
+    - products and revenue mix
+    - products
+    - conversion_mix
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: conversions
+      label: Conversion count
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Positives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: positive
+    - role: product
+      label: Product or action grouping
+      source: dimension
+      preferred_names:
+      - ShelfLevel1Name
+      - Group
+      - Issue
+      - Name
+    default_metric_id: VS_ConversionMix
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        col: ${conversions}
+      description: Compare conversion volume across the selected product groups.
+      display:
+        label: Conversion mix by product
+        unit: conversions
+        value_format: integer
+        direction: neutral
+    method:
+      calculation: conversion count by product
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Group the same conversion population by the chosen product dimension. Mix shows absolute contributions;
+        the Pareto chart adds cumulative share. Current filters define the displayed total. Sum Revenue only on Conversion
+        outcomes after processor deduplication. Use a conversion processor whose positive outcome is Conversion and
+        keep the currency and eligible population consistent. FAT retains a 3.5 demonstration fallback only where
+        Revenue is absent; replace it with real business values for financial use.
+    report:
+      chart: bar
+      placement: content
+      x: ${product}
+  - id: products.revenue_concentration
+    version: 1
+    title: Product revenue concentration
+    domain: Products and revenue mix
+    summary: Compare conversion revenue across the selected product groups.
+    business_questions:
+    - Compare conversion revenue across the selected product groups.
+    tags:
+    - products and revenue mix
+    - products
+    - revenue_concentration
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: revenue
+      label: Revenue from conversion outcomes
+      source: state
+      state_types:
+      - value_sum
+      selection: automatic
+      state_template:
+        type: value_sum
+        source_column: Revenue
+        where:
+          op: eq
+          column: Outcome
+          value: Conversion
+      proposed_name: ConversionRevenue
+    - role: product
+      label: Product or action grouping
+      source: dimension
+      preferred_names:
+      - ShelfLevel1Name
+      - Group
+      - Issue
+      - Name
+    default_metric_id: VS_RevenueConcentration
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        col: ${revenue}
+      description: Compare conversion revenue across the selected product groups.
+      display:
+        label: Product revenue concentration
+        unit: currency
+        value_format: currency
+        direction: neutral
+    method:
+      calculation: conversion revenue by product
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Group the same conversion population by the chosen product dimension. Mix shows absolute contributions;
+        the Pareto chart adds cumulative share. Current filters define the displayed total. Sum Revenue only on Conversion
+        outcomes after processor deduplication. Use a conversion processor whose positive outcome is Conversion and
+        keep the currency and eligible population consistent. FAT retains a 3.5 demonstration fallback only where
+        Revenue is absent; replace it with real business values for financial use.
+    report:
+      chart: pareto
+      placement: content
+      x: ${product}
+  - id: products.unique_products
+    version: 1
+    title: Unique products represented
+    domain: Products and revenue mix
+    summary: Estimate how many distinct products are represented in the selected conversion population.
+    business_questions:
+    - Estimate how many distinct products are represented in the selected conversion population.
+    tags:
+    - products and revenue mix
+    - products
+    - unique_products
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: products
+      label: Product groups (ShelfLevel1Name)
+      source: state
+      state_types:
+      - cpc
+      selection: automatic
+      state_template:
+        type: cpc
+        source_column: ShelfLevel1Name
+        lg_k: 11
+      proposed_name: UniqueProducts_cpc
+    default_metric_id: VS_UniqueProducts
+    metric:
+      processor: ${processor_id}
+      kind: approx_distinct_count
+      state: ${products}
+      description: Estimate how many distinct products are represented in the selected conversion population.
+      display:
+        label: Unique products represented
+        unit: products
+        value_format: integer
+        direction: neutral
+    method:
+      calculation: estimated distinct product identifiers
+      accuracy: approximate
+      algorithm: Existing aggregate statistical or sketch implementation.
+      caveat: Select a product identifier such as ShelfLevel1Name. This counts represented product groups, not units
+        sold, holdings or unique customers.
+    report:
+      chart: kpi_card
+      placement: kpi_strip
+  - id: experiments.sample_size
+    version: 1
+    title: Experiment sample size
+    domain: Business experiments
+    summary: Count classified positive and negative outcomes in each experiment arm.
+    business_questions:
+    - Count classified positive and negative outcomes in each experiment arm.
+    tags:
+    - business experiments
+    - experiments
+    - sample_size
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: positives
+      label: Positive responses
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Positives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: positive
+    - role: negatives
+      label: Negative responses
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Negatives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: negative
+    - role: variant
+      label: Test/control or experiment grouping
+      source: dimension
+      preferred_names:
+      - ExperimentGroup
+      - ModelControlGroup
+      - DefaultBannerControlGroup
+    default_metric_id: VS_SampleSize
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: add
+        args:
+        - col: ${positives}
+        - col: ${negatives}
+      description: Count classified positive and negative outcomes in each experiment arm.
+      display:
+        label: Experiment sample size
+        unit: outcomes
+        value_format: integer
+        direction: neutral
+    method:
+      calculation: positive + negative outcomes by arm
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Compare the same outcome definition and business population. Group by or filter to one ExperimentName
+        so unrelated experiments are not pooled. Test and Control identify arms; other labels are excluded by two-arm
+        tests. A causal interpretation requires valid random assignment and comparable exposure.
+    report:
+      chart: bar
+      placement: content
+      x: ${variant}
+  - id: experiments.response_rate
+    version: 1
+    title: Experiment response rate
+    domain: Business experiments
+    summary: Compare the share of positive responses in each experiment arm.
+    business_questions:
+    - Compare the share of positive responses in each experiment arm.
+    tags:
+    - business experiments
+    - experiments
+    - response_rate
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: positives
+      label: Positive responses
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Positives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: positive
+    - role: negatives
+      label: Negative responses
+      source: state
+      state_types:
+      - count
+      preferred_names:
+      - Negatives
+      selection: automatic
+      require_preferred: true
+      state_attributes:
+        outcome: negative
+    - role: variant
+      label: Test/control or experiment grouping
+      source: dimension
+      preferred_names:
+      - ExperimentGroup
+      - ModelControlGroup
+      - DefaultBannerControlGroup
+    default_metric_id: VS_ResponseRate
+    metric:
+      processor: ${processor_id}
+      kind: formula
+      expression:
+        op: safe_div
+        num:
+          col: ${positives}
+        den:
+          op: add
+          args:
+          - col: ${positives}
+          - col: ${negatives}
+      description: Compare the share of positive responses in each experiment arm.
+      display:
+        label: Experiment response rate
+        unit: percent
+        value_format: percent
+        direction: neutral
+    method:
+      calculation: positives / (positives + negatives) by arm
+      accuracy: exact
+      algorithm: Calculation over persisted mergeable aggregates.
+      caveat: Compare the same outcome definition and business population. Group by or filter to one ExperimentName
+        so unrelated experiments are not pooled. Test and Control identify arms; other labels are excluded by two-arm
+        tests. A causal interpretation requires valid random assignment and comparable exposure.
+    report:
+      chart: bar
+      placement: content
+      x: ${variant}
+  - id: experiments.test_control_comparison
+    version: 1
+    title: Test/control effect and lift
+    domain: Business experiments
+    summary: Compare Test and Control response rates, absolute percentage-point difference, relative lift and a 95%
+      confidence interval.
+    business_questions:
+    - Compare Test and Control response rates, absolute percentage-point difference, relative lift and a 95% confidence
+      interval.
+    tags:
+    - business experiments
+    - experiments
+    - test_control_comparison
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: variant
+      label: Test/control or experiment grouping
+      source: dimension
+      preferred_names:
+      - ExperimentGroup
+      - ModelControlGroup
+      - DefaultBannerControlGroup
+    default_metric_id: VS_TestControlComparison
+    metric:
+      processor: ${processor_id}
+      kind: variant_compare
+      variant_column: ${variant}
+      test_role: Test
+      control_role: Control
+      confidence_level: 0.95
+      outputs:
+      - TestCTR
+      - ControlCTR
+      - TestSampleSize
+      - ControlSampleSize
+      - AbsoluteRateDifference
+      - AbsoluteRateDifference_CI_Low
+      - AbsoluteRateDifference_CI_High
+      - Lift
+      - Lift_P_Val
+      description: Compare Test and Control response rates, absolute percentage-point difference, relative lift and
+        a 95% confidence interval.
+      display:
+        label: Test/control effect and lift
+        unit: percent
+        value_format: percent
+        direction: neutral
+    method:
+      calculation: TestCTR - ControlCTR; TestCTR / ControlCTR - 1; 95% interval
+      accuracy: statistical
+      algorithm: Existing aggregate statistical or sketch implementation.
+      caveat: Compare the same outcome definition and business population. Group by or filter to one ExperimentName
+        so unrelated experiments are not pooled. Test and Control identify arms; other labels are excluded by two-arm
+        tests. A causal interpretation requires valid random assignment and comparable exposure. Relative lift requires
+        a non-zero control rate. Read sample sizes and interval alongside the effect.
+    report:
+      chart: table
+      placement: content
+    required_states:
+      Positives: count
+      Negatives: count
+  - id: experiments.z_test
+    version: 1
+    title: 'Z-test: Test versus Control'
+    domain: Business experiments
+    summary: Assess whether two experiment response rates differ using a two-sided two-proportion z-test. For example,
+      compare 400 clicks from 10,000 Test outcomes with 300 from 10,000 Control outcomes.
+    business_questions:
+    - Assess whether two experiment response rates differ using a two-sided two-proportion z-test.
+    tags:
+    - business experiments
+    - experiments
+    - z_test
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: variant
+      label: Test/control or experiment grouping
+      source: dimension
+      preferred_names:
+      - ExperimentGroup
+      - ModelControlGroup
+      - DefaultBannerControlGroup
+    default_metric_id: VS_ZTest
+    metric:
+      processor: ${processor_id}
+      kind: proportion_test
+      variant_column: ${variant}
+      test_role: Test
+      control_role: Control
+      outputs:
+      - Count
+      - Positives
+      - Negatives
+      - z_score
+      - z_p_val
+      description: Assess whether two experiment response rates differ using a two-sided two-proportion z-test.
+      display:
+        label: 'Z-test: Test versus Control'
+        unit: probability
+        value_format: number
+        direction: neutral
+    method:
+      calculation: two-proportion z statistic and two-sided p-value
+      accuracy: statistical
+      algorithm: Existing aggregate statistical or sketch implementation.
+      caveat: Compare the same outcome definition and business population. Group by or filter to one ExperimentName
+        so unrelated experiments are not pooled. Test and Control identify arms; other labels are excluded by two-arm
+        tests. A causal interpretation requires valid random assignment and comparable exposure. A p-value is not
+        the probability that Test is better. Check sample adequacy, effect size and multiple-testing policy.
+    report:
+      chart: table
+      placement: content
+    required_states:
+      Positives: count
+      Negatives: count
+  - id: experiments.chi_square_test
+    version: 1
+    title: Chi-square test across experiment variants
+    domain: Business experiments
+    summary: Assess whether response rates differ across all recorded experiment variants.
+    business_questions:
+    - Assess whether response rates differ across all recorded experiment variants.
+    tags:
+    - business experiments
+    - experiments
+    - chi_square_test
+    maturity: reviewed
+    processor_kinds:
+    - binary_outcome
+    inputs:
+    - role: variant
+      label: Test/control or experiment grouping
+      source: dimension
+      preferred_names:
+      - ExperimentGroup
+      - ModelControlGroup
+      - DefaultBannerControlGroup
+    default_metric_id: VS_ChiSquareTest
+    metric:
+      processor: ${processor_id}
+      kind: contingency_test
+      variant_column: ${variant}
+      tests:
+      - chi2
+      - g
+      outputs:
+      - Count
+      - Positives
+      - Negatives
+      - chi2_stat
+      - chi2_dof
+      - chi2_p_val
+      - g_stat
+      - g_p_val
+      description: Assess whether response rates differ across all recorded experiment variants.
+      display:
+        label: Chi-square test across experiment variants
+        unit: probability
+        value_format: number
+        direction: neutral
+    method:
+      calculation: chi-square and likelihood-ratio G tests over the variant/outcome contingency table
+      accuracy: statistical
+      algorithm: Existing aggregate statistical or sketch implementation.
+      caveat: Includes all variants, including NBA when grouping by ModelControlGroup. Use one experiment and adequate
+        expected cell counts. A significant result indicates some rates differ; it does not identify a winning variant
+        or prove a causal effect.
+    report:
+      chart: table
+      placement: content
+    required_states:
+      Positives: count
+      Negatives: count

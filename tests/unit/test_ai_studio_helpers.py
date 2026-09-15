@@ -67,7 +67,9 @@ from valuestream.ui.pages.ai_config_studio import (
     _install_recipe_in_draft,
     _load_ai_settings_config,
     _normalize_studio_step,
+    _processor_editor_key_prefix,
     _processor_group_by_fields,
+    _processor_state_definition_for_kind,
     _processor_state_rows,
     _processor_states_from_rows,
     _rename_capitalize_mapping,
@@ -81,6 +83,17 @@ from valuestream.ui.pages.ai_config_studio import (
     _with_generated_report_ids,
     _working_sample,
 )
+
+
+@pytest.mark.unit
+def test_processor_editor_widgets_are_scoped_to_the_draft_definition_revision() -> None:
+    original = {"id": "frequency", "kind": "frequency_response", "window_hours": 168}
+    repaired = {**original, "window_hours": 336}
+
+    original_key = _processor_editor_key_prefix("frequency", original)
+
+    assert _processor_editor_key_prefix("frequency", copy.deepcopy(original)) == original_key
+    assert _processor_editor_key_prefix("frequency", repaired) != original_key
 
 
 @pytest.mark.unit
@@ -330,12 +343,12 @@ def test_observed_outcome_groups_cover_every_fixture_value_without_pending() -> 
 
 @pytest.mark.unit
 def test_studio_continue_queues_step_before_jump_widget_renders() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import (  # noqa: PLC0415 - isolated AppTest source
+        from valuestream.ui.pages import (
             ai_config_studio as page,
         )
 
@@ -361,12 +374,12 @@ def test_studio_continue_queues_step_before_jump_widget_renders() -> None:
 
 @pytest.mark.unit
 def test_schema_contract_review_queues_navigation_without_mutating_rendered_widget() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         steps = page.STEPS
         st.session_state[page.AI_STUDIO_SCHEMA_CONTRACT_STALE_KEY] = True
@@ -397,12 +410,12 @@ def test_schema_contract_review_queues_navigation_without_mutating_rendered_widg
 
 @pytest.mark.unit
 def test_phase_rail_migrates_legacy_step_and_preserves_committed_state_on_jump() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         steps = page._studio_steps(ai_calls_enabled=False)
         if "qa_phase_seeded" not in st.session_state:
@@ -456,10 +469,10 @@ def test_phase_rail_migrates_legacy_step_and_preserves_committed_state_on_jump()
 
 @pytest.mark.unit
 def test_required_field_mapping_renders_with_targeted_optional_help() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        from valuestream.ui.pages import (  # noqa: PLC0415 - isolated AppTest source
+        from valuestream.ui.pages import (
             ai_config_studio as page,
         )
 
@@ -836,8 +849,7 @@ def test_generate_validated_candidate_never_returns_invalid_output(
         base_draft=accepted,
         prompt="first",
         call=lambda _prompt: (
-            "metrics: {catalog_version: 2, "
-            "metrics: {bad: {processor: missing, kind: formula}}}"
+            "metrics: {catalog_version: 2, " "metrics: {bad: {processor: missing, kind: formula}}}"
         ),
         repair_prompt=lambda _draft, _issues, _trace: "repair",
         max_repairs=2,
@@ -966,7 +978,7 @@ def test_invalid_schema_snapshot_clears_matching_review_on_cache_miss_and_hit() 
 def test_validated_candidate_records_timeout_when_preflight_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     events: list[tuple[object, object]] = []
 
@@ -982,10 +994,10 @@ def test_validated_candidate_records_timeout_when_preflight_fails(
     )
 
     def app(draft: dict) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ai import AICallSettings  # noqa: PLC0415
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ai import AICallSettings
+        from valuestream.ui.pages import ai_config_studio as page
 
         try:
             with st.status("operation") as status:
@@ -1533,7 +1545,7 @@ def test_config_draft_prompt_lists_metric_kind_requirements() -> None:
 
 @pytest.mark.unit
 def test_analytics_opportunity_playbook_covers_fat_workspace_patterns() -> None:
-    from typing import get_args  # noqa: PLC0415 - test-only introspection
+    from typing import get_args
 
     dictionaries = ai_studio.catalog_prompt_dictionaries()
     playbook = dictionaries["analytics_opportunities"]
@@ -1640,9 +1652,9 @@ def test_expression_prompt_dictionary_covers_the_closed_dsl() -> None:
 
 @pytest.mark.unit
 def test_chart_prompt_dictionary_matches_tile_validation_contract() -> None:
-    from typing import get_args  # noqa: PLC0415 - test-only introspection
+    from typing import get_args
 
-    from valuestream.charts.recipes import (  # noqa: PLC0415 - shared contract under test
+    from valuestream.charts.recipes import (
         TILE_REQUIRED_ALTERNATIVES,
     )
 
@@ -2015,7 +2027,7 @@ def test_processor_editor_state_rows_preserve_kind_specific_extras() -> None:
 
 @pytest.mark.unit
 def test_frequency_response_state_editor_returns_the_canonical_contract() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     app = AppTest.from_string(
         """
@@ -2041,6 +2053,40 @@ st.session_state["result"] = (states, valid)
 
 
 @pytest.mark.unit
+def test_frequency_response_state_editor_preserves_a_valid_subset() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    subset = {
+        "Responses": {"type": "count"},
+        "Positives": {"type": "count", "source_column": "ClickedContact"},
+    }
+    app = AppTest.from_string(
+        f"""
+from valuestream.ui.pages import ai_config_studio
+
+states, valid = ai_config_studio._processor_state_editor(
+    {{
+        "kind": "frequency_response",
+        "columns": {{"priority": "Priority"}},
+        "states": {subset!r},
+    }},
+    "frequency_response",
+    {{"columns": {{"customer": "CustomerID", "priority": "Priority"}}}},
+    key_prefix="studio_frequency_subset",
+)
+import streamlit as st
+st.session_state["result"] = (states, valid)
+"""
+    ).run()
+
+    assert not app.exception
+    states, valid = app.session_state["result"]
+    assert valid is True
+    assert states == subset
+    assert not app.get("data_editor")
+
+
+@pytest.mark.unit
 def test_frequency_response_group_by_follows_the_derived_column() -> None:
     renamed = _processor_group_by_fields(
         {"frequency_column": "ExposureBucket"},
@@ -2049,16 +2095,43 @@ def test_frequency_response_group_by_follows_the_derived_column() -> None:
         ["Day", "ExposureBucket", "Channel"],
     )
     other_kind = _processor_group_by_fields(
-        {"frequency_column": "ExposureBucket"},
+        {"kind": "frequency_response"},
         "binary_outcome",
         {},
-        ["Day", "Channel"],
+        ["Day", "ExposureBucket", "Channel"],
     )
 
     # The model requires the derived column in group_by, and Group By is edited
     # before the kind form can rename it.
     assert renamed == ["Day", "Channel", "Impressions"]
     assert other_kind == ["Day", "Channel"]
+
+
+@pytest.mark.unit
+def test_processor_kind_switch_reseeds_authored_states() -> None:
+    frequency = {
+        "kind": "frequency_response",
+        "states": model.frequency_response_state_definitions(priority=True),
+    }
+
+    binary = _processor_state_definition_for_kind(
+        frequency,
+        "binary_outcome",
+        {
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            }
+        },
+    )
+
+    assert binary["states"] == {
+        "Count": {"type": "count"},
+        "Positives": {"type": "count", "outcome": "positive"},
+        "Negatives": {"type": "count", "outcome": "negative"},
+    }
+    assert "Responses" not in binary["states"]
 
 
 @pytest.mark.unit
@@ -2184,13 +2257,13 @@ def test_field_approval_editor_rows_include_approval_examples_and_schema() -> No
 
 @pytest.mark.unit
 def test_new_sample_defaults_example_sharing_off_and_prompt_preview_has_no_values() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         frame = pl.DataFrame(
             {
@@ -2230,12 +2303,12 @@ def test_new_sample_defaults_example_sharing_off_and_prompt_preview_has_no_value
 
 @pytest.mark.unit
 def test_field_scope_change_immediately_invalidates_ai_sharing_confirmation() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_SHARING_CONFIRMATION_STATE_KEY] = "confirmed"
         stale_widget_key = f"{page.AI_SHARING_CONFIRMATION_WIDGET_PREFIX}old-scope"
@@ -2283,7 +2356,7 @@ def test_field_scope_change_immediately_invalidates_ai_sharing_confirmation() ->
 def test_ai_calls_require_sample_scoped_data_sharing_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     calls: list[str] = []
 
@@ -2294,10 +2367,10 @@ def test_ai_calls_require_sample_scoped_data_sharing_confirmation(
     monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call_litellm)
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ai import AICallSettings  # noqa: PLC0415
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ai import AICallSettings
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state.setdefault("ai_studio_sample_identity", "sample-one")
         st.session_state.setdefault("ai_studio_sample_name", "sample.csv")
@@ -2393,8 +2466,8 @@ def test_ai_calls_require_sample_scoped_data_sharing_confirmation(
 
 @pytest.mark.unit
 def test_ai_studio_routes_every_litellm_call_through_sample_consent_guard() -> None:
-    import ast  # noqa: PLC0415 - focused source guard
-    import inspect  # noqa: PLC0415 - focused source guard
+    import ast
+    import inspect
 
     class CallVisitor(ast.NodeVisitor):
         def __init__(self) -> None:
@@ -2453,12 +2526,12 @@ def test_apply_field_approval_edits_accepts_legacy_share_column() -> None:
 
 @pytest.mark.unit
 def test_field_approval_editor_commits_one_checkbox_event_on_first_click() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         editor_key = "test_field_approval_editor"
         stale_widget_key = f"{page.AI_SHARING_CONFIRMATION_WIDGET_PREFIX}confirmed"
@@ -2750,12 +2823,12 @@ def test_tile_inventory_rows_stay_parallel_to_tile_keys() -> None:
 
 @pytest.mark.unit
 def test_tile_keep_table_selects_all_tiles_by_default_in_editor_state() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         # A stale selection from an earlier session must not uncheck rows:
         # the keep table starts fully checked for every draft revision.
@@ -2800,7 +2873,7 @@ def test_tile_keep_table_selects_all_tiles_by_default_in_editor_state() -> None:
                             }
                         ],
                     }
-                ]
+                ],
             },
         }
         page._render_tile_keep_table(draft, revision="rev-1")
@@ -2867,16 +2940,16 @@ def test_schema_sample_applies_rename_capitalize_before_later_steps() -> None:
 
 @pytest.mark.unit
 def test_rename_capitalize_toggle_updates_effective_schema_on_same_rerun() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        from pathlib import Path  # noqa: PLC0415 - isolated AppTest source
-        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+        from pathlib import Path
+        from types import SimpleNamespace
 
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import (  # noqa: PLC0415 - isolated AppTest source
+        from valuestream.ui.pages import (
             ai_config_studio as page,
         )
 
@@ -2926,13 +2999,13 @@ def test_rename_capitalize_toggle_updates_effective_schema_on_same_rerun() -> No
 
 @pytest.mark.unit
 def test_rename_capitalize_state_survives_when_sample_widget_is_not_rendered() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import (  # noqa: PLC0415 - isolated AppTest source
+        from valuestream.ui.pages import (
             ai_config_studio as page,
         )
 
@@ -3162,12 +3235,12 @@ def test_rename_capitalize_rejects_raw_names_in_free_form_preprocessing() -> Non
 
 @pytest.mark.unit
 def test_ai_sharing_confirmation_is_not_requested_again_across_unchanged_steps() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state.setdefault("ai_studio_sample_identity", "sample-one")
         st.session_state.setdefault("ai_studio_sample_name", "sample.parquet")
@@ -3379,7 +3452,7 @@ def test_call_litellm_logs_failure_without_prompt_or_exception_message(
 def test_ai_refine_panel_holds_revision_in_pending_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     responses = iter(
         [
@@ -3409,9 +3482,9 @@ metrics:
     monkeypatch.setattr(ai_config_studio_page, "call_litellm", fake_call_litellm)
 
     def app(draft: dict) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_ai_model"] = "openai/gpt-test"
@@ -3437,14 +3510,14 @@ metrics:
 
 @pytest.mark.unit
 def test_workspace_save_bar_exposes_ready_and_published_states() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app(draft: dict, published: bool) -> None:
-        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+        from types import SimpleNamespace
 
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state["ai_studio_draft"] = draft
         st.session_state["ai_studio_pending_draft"] = None
@@ -3483,7 +3556,7 @@ def test_workspace_save_bar_exposes_ready_and_published_states() -> None:
 def test_workspace_apply_exception_records_bounded_apply_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     events: list[dict[str, object]] = []
 
@@ -3499,11 +3572,11 @@ def test_workspace_apply_exception_records_bounded_apply_failure(
     monkeypatch.setattr(ai_config_studio_page, "_apply_draft", fail_apply)
 
     def app(draft: dict) -> None:
-        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+        from types import SimpleNamespace
 
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state["ai_studio_draft"] = draft
         st.session_state["ai_studio_pending_draft"] = None
@@ -3534,15 +3607,15 @@ def test_workspace_apply_exception_records_bounded_apply_failure(
 
 @pytest.mark.unit
 def test_studio_status_panel_does_not_repeat_apply_action_on_early_steps() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app(draft: dict) -> None:
-        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+        from types import SimpleNamespace
 
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = True
         st.session_state["ai_studio_draft"] = draft
@@ -3598,7 +3671,7 @@ def _base_draft() -> dict:
                         "negative_values": ["Impression"],
                     },
                 }
-            ]
+            ],
         },
         "metrics": {
             "catalog_version": 2,
@@ -3612,7 +3685,7 @@ def _base_draft() -> dict:
                         "den": {"col": "Count"},
                     },
                 }
-            }
+            },
         },
         "dashboards": {
             "catalog_version": 2,
@@ -3637,7 +3710,7 @@ def _base_draft() -> dict:
                         }
                     ],
                 }
-            ]
+            ],
         },
     }
 
@@ -3719,7 +3792,7 @@ def test_invalid_schema_snapshot_is_not_reported_as_reviewed_or_published() -> N
 def test_status_bar_keeps_invalid_review_and_workspace_pending(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     badges: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -3729,12 +3802,12 @@ def test_status_bar_keeps_invalid_review_and_workspace_pending(
     )
 
     def app(draft: dict) -> None:
-        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+        from types import SimpleNamespace
 
-        import polars as pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         approved = ["Channel", "CustomerID", "Outcome", "OutcomeTime"]
         signature = page._draft_signature(draft)
@@ -3778,18 +3851,18 @@ def test_status_bar_keeps_invalid_review_and_workspace_pending(
 
 @pytest.mark.unit
 def test_provider_readiness_groups_blockers_and_jump_preserves_committed_state() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     invalid_draft = _base_draft()
     invalid_draft["dashboards"]["dashboards"][0]["pages"][0]["tiles"][0]["metric"] = "MissingMetric"
 
     def app(draft: dict, catalog_payload: dict) -> None:
-        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+        from types import SimpleNamespace
 
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.config import model as config_model  # noqa: PLC0415
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.config import model as config_model
+        from valuestream.ui.pages import ai_config_studio as page
 
         if "qa_readiness_seeded" not in st.session_state:
             st.session_state["qa_readiness_seeded"] = True
@@ -3832,16 +3905,16 @@ def test_provider_readiness_groups_blockers_and_jump_preserves_committed_state()
 
 @pytest.mark.unit
 def test_apply_and_export_disabled_reasons_are_adjacent_when_no_draft() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app(catalog_payload: dict) -> None:
-        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+        from types import SimpleNamespace
 
-        import polars as pl  # noqa: PLC0415
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as pl
+        import streamlit as st
 
-        from valuestream.config import model as config_model  # noqa: PLC0415
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.config import model as config_model
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state[page.AI_CALLS_ENABLED_STATE_KEY] = False
         st.session_state["ai_studio_draft"] = None
@@ -3938,7 +4011,7 @@ def test_builder_source_addition_rejects_duplicate_source_without_mutating_candi
 def test_builder_source_handoff_is_deterministic_sample_first_and_preserves_journey(
     tmp_path: Path,
 ) -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     draft = _base_draft()
     builder.write_pipelines_definition(tmp_path, draft["pipelines"])
@@ -3947,14 +4020,14 @@ def test_builder_source_handoff_is_deterministic_sample_first_and_preserves_jour
     builder.write_dashboards_definition(tmp_path, draft["dashboards"])
 
     def app(workspace: str) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.context import load_context  # noqa: PLC0415
-        from valuestream.ui.instrumentation import (  # noqa: PLC0415
+        from valuestream.ui.context import load_context
+        from valuestream.ui.instrumentation import (
             AuthoringWorkflow,
             start_journey,
         )
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.query_params["mode"] = "deterministic"
         st.query_params["from"] = "configuration_builder"
@@ -3983,12 +4056,12 @@ def test_builder_source_handoff_is_deterministic_sample_first_and_preserves_jour
 
 @pytest.mark.unit
 def test_builder_source_receipt_returns_explicitly_after_apply() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.query_params["mode"] = "deterministic"
         st.query_params["from"] = "configuration_builder"
@@ -4027,15 +4100,15 @@ def test_workspace_replacement_impact_lists_objects_the_draft_would_remove() -> 
 
 @pytest.mark.unit
 def test_workspace_apply_requires_explicit_replacement_consent() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app(draft: dict, catalog_payload: dict, confirm: bool) -> None:
-        from types import SimpleNamespace  # noqa: PLC0415 - isolated AppTest source
+        from types import SimpleNamespace
 
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.config import model as config_model  # noqa: PLC0415
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.config import model as config_model
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state["ai_studio_draft"] = draft
         st.session_state["ai_studio_pending_draft"] = None
@@ -4090,11 +4163,11 @@ def test_workspace_apply_requires_explicit_replacement_consent() -> None:
 
 @pytest.mark.unit
 def test_sync_source_filter_editor_keeps_or_logic_editable_as_rules() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        from valuestream.config import model as config_model  # noqa: PLC0415
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.config import model as config_model
+        from valuestream.ui.pages import ai_config_studio as page
 
         source = config_model.Source.model_validate(
             {
@@ -4130,12 +4203,12 @@ def test_sync_source_filter_editor_keeps_or_logic_editable_as_rules() -> None:
 
 @pytest.mark.unit
 def test_current_filter_expression_honors_combine_and_formula() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app(logic_mode: str, combine: str, formula: str) -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state["ai_studio_filter_mode"] = "Rules"
         st.session_state["ai_studio_filter_rows"] = [
@@ -4203,13 +4276,13 @@ def test_processor_states_from_rows_rejects_mismatched_sketch_parameter() -> Non
 
 @pytest.mark.unit
 def test_processor_parameter_editor_renders_builder_parity_controls() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import polars as inner_pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as inner_pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         draft = {
             "pipelines": {
@@ -4292,12 +4365,12 @@ def test_processor_parameter_editor_renders_builder_parity_controls() -> None:
 
 @pytest.mark.unit
 def test_metric_parameter_editor_shows_outputs_and_preserves_untouched_metric() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         draft = {
             "pipelines": {
@@ -4361,13 +4434,13 @@ def test_metric_parameter_editor_shows_outputs_and_preserves_untouched_metric() 
 
 @pytest.mark.unit
 def test_draft_catalog_emits_defaults_transform_without_rename_capitalize() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import polars as inner_pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as inner_pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state["ai_studio_defaults"] = [
             {"Field": "Channel", "Default Value": "Unknown", "Enabled": True}
@@ -4395,12 +4468,12 @@ def test_draft_catalog_emits_defaults_transform_without_rename_capitalize() -> N
 
 @pytest.mark.unit
 def test_chat_review_edits_draft_chat_settings() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app() -> None:
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state.setdefault(
             "ai_studio_draft",
@@ -4528,13 +4601,13 @@ def _report_editor_draft() -> dict:
 
 @pytest.mark.unit
 def test_report_tile_editor_updates_existing_tile_in_draft() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app(draft: dict) -> None:
-        import polars as inner_pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as inner_pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state.setdefault("ai_studio_draft", draft)
         st.session_state.setdefault(
@@ -4557,16 +4630,14 @@ def test_report_tile_editor_updates_existing_tile_in_draft() -> None:
 
     title = next(widget for widget in at.text_input if widget.label == "Tile Title")
     at = title.set_value("Volume Over Time").run()
-    apply_button = next(
-        button for button in at.button if button.label == "Update Report In Draft"
-    )
+    apply_button = next(button for button in at.button if button.label == "Update Report In Draft")
     assert not apply_button.disabled
     at = apply_button.click().run()
 
     assert not at.exception
-    tile = at.session_state["ai_studio_draft"]["dashboards"]["dashboards"][0]["pages"][0][
-        "tiles"
-    ][0]
+    tile = at.session_state["ai_studio_draft"]["dashboards"]["dashboards"][0]["pages"][0]["tiles"][
+        0
+    ]
     assert tile["title"] == "Volume Over Time"
     assert tile["metric"] == "Volume"
     assert tile["chart"] == "line"
@@ -4574,13 +4645,13 @@ def test_report_tile_editor_updates_existing_tile_in_draft() -> None:
 
 @pytest.mark.unit
 def test_report_tile_editor_deletes_tile_but_keeps_containers() -> None:
-    from streamlit.testing.v1 import AppTest  # noqa: PLC0415 - test-only dependency
+    from streamlit.testing.v1 import AppTest
 
     def app(draft: dict) -> None:
-        import polars as inner_pl  # noqa: PLC0415 - isolated AppTest source
-        import streamlit as st  # noqa: PLC0415 - isolated AppTest source
+        import polars as inner_pl
+        import streamlit as st
 
-        from valuestream.ui.pages import ai_config_studio as page  # noqa: PLC0415
+        from valuestream.ui.pages import ai_config_studio as page
 
         st.session_state.setdefault("ai_studio_draft", draft)
         st.session_state.setdefault(
