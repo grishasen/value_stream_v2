@@ -231,7 +231,7 @@ Measure both the success rate and the volume of customer responses.
 
 ### Business Experiments: Test and Control
 
-Measure the size of a business effect and the evidence behind it. In FAT,
+Measure the size of a business effect and the evidence behind it. For example,
 `ExperimentGroup` identifies variants within `ExperimentName`; `Clicked` is a
 positive response. Choose the relevant grouping when installing a recipe:
 `ExperimentGroup`, `ModelControlGroup`, or `DefaultBannerControlGroup` when
@@ -297,7 +297,7 @@ within each total.
 
 The cost recipes require explicitly configured billing states; the installer
 never substitutes a generic sum or customer count for a billing population.
-In FAT, both cost processors retain `Outcome = Impression` before deduplication.
+For example, both cost processors may retain `Outcome = Impression` before deduplication.
 The impression basis deduplicates by customer, interaction, action, placement
 and rank; the interaction basis deduplicates by customer and interaction only.
 The latter assumes the same interaction charge is repeated on each included
@@ -305,17 +305,14 @@ impression row. If your source records the charge on a separate interaction
 event, bind a processor for that event population instead. Deduplication is
 within each chunk: one billed identity must belong to one source chunk.
 
-Missing `Cost` stays missing in FAT. Totals and unit costs are available only
+Totals and unit costs are available only
 when every included billing unit has a cost; a recorded zero remains a valid
 zero. Inspect **Marketing cost data coverage** when a total is unavailable.
-FAT uses recorded `Revenue` where supplied and retains its illustrative 3.5
-fallback only for conversions without a revenue value. Remove that fallback
-or supply real values before using FAT for financial reporting.
 
 ### Products and Revenue Mix
 
 Compare the products or product groups represented in conversion reporting.
-In FAT, `ShelfLevel1Name` is the product-group dimension. The recipe installer
+For example,, `ProductGroup` is the product-group dimension. The recipe installer
 also allows another product or action grouping already retained by the
 processor, such as `Issue` or `Group`.
 
@@ -324,7 +321,7 @@ processor, such as `Issue` or `Group`.
 | Revenue mix by product | Shows how each product group contributes to revenue. **Example:** €600 from cards and €400 from savings produce a €1,000 mix, with cards contributing 60%; the default bars show the currency amounts. | `products.revenue_mix` | Conversion-filtered revenue plus a configured product grouping | Exact | Bar by product |
 | Conversion mix by product | Shows conversion volume by product group. **Example:** 30 card conversions and 20 savings conversions give a 60%/40% volume mix; this can differ from the revenue mix. | `products.conversion_mix` | Conversion-positive count plus a configured product grouping | Exact | Bar by product |
 | Product revenue concentration | Ranks product groups by revenue and shows their cumulative contribution. **Example:** If the top two product groups generate €800 of €1,000, their cumulative revenue share is 80%. | `products.revenue_concentration` | Conversion-filtered revenue plus a configured product grouping | Exact | Pareto |
-| Unique products represented | Estimates how many different product groups are represented in the selected conversion population. **Example:** 50 conversion opportunities spanning three `ShelfLevel1Name` values represent three product groups, not 50 products owned. | `products.unique_products` | CPC state over `ShelfLevel1Name` | Approximate | KPI card |
+| Unique products represented | Estimates how many different product groups are represented in the selected conversion population. **Example:** 50 conversion opportunities spanning three `ProductGroup` values represent three product groups, not 50 products owned. | `products.unique_products` | CPC state over `ProductGroup` | Approximate | KPI card |
 
 Mix and concentration describe the selected reporting population. Filtering
 out a product changes the displayed total and cumulative shares. They do not
