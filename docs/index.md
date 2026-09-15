@@ -46,6 +46,11 @@ than through per-role copies of the same content.
 | Headless access | Local read-only stdio MCP and read-only FastAPI HTTP API; governed SQL is opt-in |
 | Deferred | Remote HTTP MCP and multi-user/OIDC service deployment |
 
+## Articles
+
+- [From Streams to Decisions, Part 1: Don’t Store Every Event](articles/from-streams-to-decisions-part-1/index.md)
+- [From Streams to Decisions, Part 2: Build the Metric Before the Dashboard](articles/from-streams-to-decisions-part-2/index.md)
+
 ## The Docs Are the Spec
 
 These documents are the source of truth for Value Stream's behavior. Every

@@ -145,7 +145,7 @@ Those boundaries are useful. They make the architecture legible: business questi
 
 This first article described the storage and processing principle. The next two parts should move upward through the model.
 
-1. **Next: Metrics.** How to turn business definitions into exact or approximate calculations; choose dimensions and time grains; define safe ratios; expose sketch accuracy; and test metric behavior.
+1. **[Part 2: Metrics](../from-streams-to-decisions-part-2/index.md).** How business KPIs become recipes, aggregate states, and exact or approximate calculations; choose dimensions and time grains; define safe ratios; interpret sketch accuracy; and test metric behavior.
 2. **Then: Reports.** How filters, rollups, time comparison, KPI cards, tables, and charts query the aggregate layer without leaking computation into the UI.
 
 Later articles can cover dashboard composition, deterministic ingestion and recovery, provenance, performance measurement, and the boundary between aggregate-first reporting and systems that must retain raw events.

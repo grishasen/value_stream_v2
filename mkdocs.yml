@@ -119,6 +119,7 @@ nav:
       - FAQ: reference/faq.md
   - Articles:
       - From streams to decisions — Part 1: articles/from-streams-to-decisions-part-1/index.md
+      - From streams to decisions — Part 2: articles/from-streams-to-decisions-part-2/index.md
   - Design docs:
       - Replacement design: design/replacement-design.md
       - Documentation guide: meta/documentation-guide.md
