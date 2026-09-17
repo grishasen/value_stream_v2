@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from valuestream.ai.chat import (
     catalog_chat_manifest,
     chart_intent_from_parameters,
+    chart_spec_warnings,
     dimension_values,
     execute_chat_intent,
     narrate_chat_result,
@@ -60,6 +61,9 @@ class MetricQueryRequest(BaseModel):
     top_n_by: str | None = None
     compare: str | None = None
     include_quantile_suite: bool = False
+    # Curve point arrays are large and only a curve chart needs them, so they
+    # are opt-in here exactly as they are on the MCP tool.
+    include_curves: bool = False
     limit: int = 100
 
 
@@ -80,6 +84,9 @@ class MetricChartRequest(BaseModel):
     top_n_by: str | None = None
     compare: str | None = None
     value_format: str | None = None
+    # Kind-specific chart inputs: a funnel's stages, a combo's secondary
+    # metric, an interval's bounds, a treemap or Sankey path, and so on.
+    chart_fields: dict[str, Any] = Field(default_factory=dict)
     limit: int = 100
 
 
@@ -157,7 +164,7 @@ def create_app(  # noqa: PLR0915
                 top_n_by=request.top_n_by,
                 compare=request.compare,
                 include_quantile_suite=request.include_quantile_suite,
-                include_curve_columns=True,
+                include_curve_columns=request.include_curves,
             )
             frame = result.rows
         clipped = frame.head(max(1, min(int(request.limit), 500)))
@@ -193,7 +200,21 @@ def create_app(  # noqa: PLR0915
                 top_n_by=request.top_n_by,
                 compare=request.compare,
                 value_format=request.value_format,
+                chart_fields=request.chart_fields,
                 limit=request.limit,
+            )
+            warnings = chart_spec_warnings(
+                intent,
+                catalog,
+                chart_kind=request.chart_kind,
+                x=request.x,
+                y=request.y,
+                group_by=request.group_by,
+                color=request.color,
+                facet_col=request.facet_col,
+                value_format=request.value_format,
+                grain=request.grain,
+                compare=request.compare,
             )
             result = execute_chat_intent(workspace, catalog, intent)
         chart = result.intent.chart
@@ -210,6 +231,7 @@ def create_app(  # noqa: PLR0915
                 "facet_col": chart.facet_col if chart else request.facet_col,
                 "value_format": chart.value_format if chart else request.value_format,
             },
+            "warnings": warnings,
             "query": result.query_summary,
             "freshness": result.freshness,
             "rows": result.rows.to_dicts(),

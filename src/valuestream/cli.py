@@ -414,11 +414,17 @@ def serve(workspace_dir: str, *, port: int, browser: bool) -> None:
     is_flag=True,
     help="Expose governed aggregate SQL tools. Disabled by default.",
 )
-def serve_mcp(workspace_dir: str, *, enable_sql: bool) -> None:
+@click.option(
+    "--render-dir",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Where rendered chart HTML is written. Defaults to a temp directory.",
+)
+def serve_mcp(workspace_dir: str, *, enable_sql: bool, render_dir: str | None) -> None:
     """Start the read-only MCP server over stdio for a workspace."""
 
     try:
-        run_mcp_stdio(workspace_dir, enable_sql=enable_sql)
+        run_mcp_stdio(workspace_dir, enable_sql=enable_sql, render_dir=render_dir)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 

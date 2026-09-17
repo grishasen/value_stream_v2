@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -14,7 +14,11 @@ import polars as pl
 
 from valuestream.ai.studio import AICallSettings, call_litellm
 from valuestream.config import model
+from valuestream.config.report_fields import (
+    metric_output_columns as report_output_columns,
+)
 from valuestream.query import query_metric
+from valuestream.reporting.tiles import join_secondary_metric
 from valuestream.ui.builder import chart_choices_for_metric
 from valuestream.ui.freshness import freshness_label, metric_freshness
 from valuestream.utils.logger import get_logger
@@ -33,6 +37,21 @@ ChartKind = Literal[
     "roc_curve",
     "precision_recall_curve",
     "calibration_curve",
+    "combo",
+    "funnel",
+    "interval",
+    "treemap",
+    "boxplot",
+    "histogram",
+    "pareto",
+    "waterfall",
+    "gauge",
+    "bar_polar",
+    "sankey",
+    "gain_curve",
+    "lift_curve",
+    "experiment_z_score",
+    "experiment_odds_ratio",
 ]
 # Chart kinds the chat intent shape (x / y / color / facet) can express and the
 # shared dashboard chart factory can render.
@@ -49,10 +68,54 @@ CHAT_CHART_KINDS: tuple[str, ...] = (
     "precision_recall_curve",
     "calibration_curve",
 )
+# Chart kinds an explicit caller (the MCP/HTTP chart tools) may request. These
+# need kind-specific fields the LLM planner is not asked to produce, so they are
+# kept out of CHAT_CHART_KINDS: the planner keeps its always-renderable subset,
+# and a tool caller that names one of these must supply the fields it needs.
+TOOL_CHART_KINDS: tuple[str, ...] = (
+    *CHAT_CHART_KINDS,
+    "combo",
+    "funnel",
+    "interval",
+    "treemap",
+    "boxplot",
+    "histogram",
+    "pareto",
+    "waterfall",
+    "gauge",
+    "bar_polar",
+    "sankey",
+    "gain_curve",
+    "lift_curve",
+    "experiment_z_score",
+    "experiment_odds_ratio",
+)
+# Fields each extended kind cannot be rendered without. A strict caller that
+# omits one gets an error naming it rather than a silently substituted chart.
+_CHART_KIND_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "combo": ("x", "y", "secondary_metric"),
+    "funnel": ("stages",),
+    "interval": ("x", "y", "lower_output", "upper_output"),
+    "treemap": ("path",),
+    "sankey": ("path",),
+    "boxplot": ("property_name",),
+    "histogram": ("property_name",),
+    "pareto": ("x", "y"),
+    "waterfall": ("x", "y"),
+    "bar_polar": ("theta",),
+    "experiment_z_score": ("x", "y"),
+    "experiment_odds_ratio": ("x", "y"),
+}
 # Always offered regardless of the processor's chart recipes.
 _BASE_CHART_KINDS = ("line", "bar", "table", "kpi_card")
 _CURVE_CHART_KINDS = frozenset({"roc_curve", "precision_recall_curve", "calibration_curve"})
+# Curve-shaped kinds read fixed columns; only an optional colour split applies.
+_CURVE_LIKE_KINDS = frozenset({*_CURVE_CHART_KINDS, "gain_curve", "lift_curve"})
+# Kinds rendered from sketch/state columns rather than from metric outputs.
+_STATEFUL_CHART_KINDS = frozenset({"funnel", "boxplot", "histogram"})
 _VALUE_FORMATS = ("percent", "integer", "number", "currency")
+_PRIMARY_MARKS = ("line", "bar")
+_MIN_PATH_STEPS = 2
 _COMPARE_ALIASES = {
     "prior_period": "prior_period",
     "previous_period": "prior_period",
@@ -122,7 +185,13 @@ _PROCESSOR_KIND_EXPLANATIONS = {
 
 @dataclass(frozen=True)
 class ChartIntent:
-    """Validated chart request over aggregate query output."""
+    """Validated chart request over aggregate query output.
+
+    ``kind``/``x``/``y``/``color``/``facet_col`` are what the LLM planner
+    produces. The remaining fields exist for explicit tool callers asking for a
+    kind that needs more than a generic x/y pair, such as a funnel's stages or
+    an interval's confidence bounds.
+    """
 
     kind: ChartKind
     x: str | None = None
@@ -130,6 +199,20 @@ class ChartIntent:
     color: str | None = None
     facet_col: str | None = None
     value_format: str | None = None
+    facet_row: str | None = None
+    line_dash: str | None = None
+    stages: tuple[str, ...] = ()
+    path: tuple[str, ...] = ()
+    secondary_metric: str | None = None
+    primary_mark: str | None = None
+    shared_y_axis: bool = False
+    lower_output: str | None = None
+    upper_output: str | None = None
+    property_name: str | None = None
+    theta: str | None = None
+    goal_line: float | None = None
+    x_axis_title: str | None = None
+    y_axis_title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -175,19 +258,88 @@ class DeterministicChatStarter:
     intent: ChatIntent
 
 
+_QUERY_FEATURES = {
+    "filter_operators": [
+        "eq",
+        "ne",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "in",
+        "not_in",
+        "contains",
+        "starts_with",
+        "ends_with",
+        "is_null",
+        "not_null",
+    ],
+    "filter_spec": 'scalar, list, or {"op": ">=", "value": 3} / {"op": "in", "values": [..]}',
+    "having": "same operator specs applied to metric output columns after aggregation",
+    "order_by": 'column names, "-" prefix for descending',
+    "top_n": "keep the N largest rows by top_n_by (a metric output column)",
+    "compare": 'set "prior_period" to add *_prev, *_delta, *_pct_change columns over the time axis',
+    "quantiles": "set true to include Median/p25/p75/p90/p95 columns for digest metrics",
+}
+
+_CHART_CONTRACT = {
+    "required_fields": ["kind", "x", "y"],
+    "optional_fields": ["color", "facet_col", "value_format"],
+    "time_axes": ["Day", "Month", "Quarter", "Year"],
+    "value_formats": list(_VALUE_FORMATS),
+    "axis_rules": [
+        "Choose chart.kind only from the metric's own chart_kinds list.",
+        "Metric output columns belong in chart.y only.",
+        "chart.x may be a time column or business dimension present in the query result.",
+        "For time-trend charts, use Day/Month/Quarter/Year as chart.x.",
+        "For dimension comparisons, use a business dimension such as Issue or Channel as chart.x.",
+        "Business dimensions may be used for group_by, chart.x, chart.color, and chart.facet_col.",
+        "For heatmap use chart.x and chart.color as the two dimensions and chart.y as the metric value.",
+        "For donut use chart.x as the category and chart.y as the metric value.",
+        "roc_curve, precision_recall_curve, and calibration_curve need only the metric and an optional chart.color.",
+        "Set chart.value_format to percent for rates, integer for counts, or currency for money.",
+    ],
+}
+
+
+_COMPACT_METRIC_FIELDS = (
+    "name",
+    "description",
+    "kind",
+    "processor",
+    "dataset",
+    "dimensions",
+    "time_axes",
+    "outputs",
+    "chart_kinds",
+    "tool_chart_kinds",
+)
+
+
 def catalog_chat_manifest(
     catalog: model.Catalog,
     *,
     chat_config: Mapping[str, Any] | None = None,
+    detail: str = "full",
+    metric_names: Collection[str] | None = None,
 ) -> dict[str, Any]:
-    """Return compact catalog metadata for LLM prompts and MCP clients."""
+    """Return catalog metadata for LLM prompts and MCP clients.
+
+    ``detail="compact"`` drops the per-metric prose and configuration blocks,
+    which are most of the payload on a large catalog; ``metric_names`` limits
+    the manifest to a selected subset. Both default to the full manifest the
+    LLM planner prompt expects.
+    """
 
     dataset_descriptions = _description_map(chat_config, "dataset_descriptions")
     metric_descriptions = _description_map(chat_config, "metric_descriptions")
     processors = {processor.id: processor for processor in catalog.processors.processors}
     sources = {source.id: source for source in catalog.pipelines.sources}
     metrics: list[dict[str, Any]] = []
+    selected = None if metric_names is None else set(metric_names)
     for metric_name, metric in sorted(catalog.metrics.metrics.items()):
+        if selected is not None and metric_name not in selected:
+            continue
         processor = processors.get(metric.processor)
         source = sources.get(processor.source) if processor is not None else None
         metric_chat_description = _first_description(
@@ -219,9 +371,23 @@ def catalog_chat_manifest(
                 "time_axes": _query_time_axes(processor) if processor is not None else [],
                 "outputs": metric_output_columns(metric_name, metric),
                 "chart_kinds": allowed_chart_kinds(catalog, metric_name),
+                "tool_chart_kinds": allowed_tool_chart_kinds(catalog, metric_name),
                 "configuration": _metric_configuration(metric),
             }
         )
+    if str(detail).strip().lower() == "compact":
+        return {
+            "workspace": catalog.pipelines.workspace,
+            "detail": "compact",
+            "metric_count": len(catalog.metrics.metrics),
+            "metrics": [
+                {field: entry[field] for field in _COMPACT_METRIC_FIELDS} for entry in metrics
+            ],
+            "supported_charts": list(CHAT_CHART_KINDS),
+            "tool_supported_charts": list(TOOL_CHART_KINDS),
+            "query_features": _QUERY_FEATURES,
+            "chart_contract": _CHART_CONTRACT,
+        }
     return {
         "workspace": catalog.pipelines.workspace,
         "datasets": [
@@ -239,47 +405,9 @@ def catalog_chat_manifest(
         ],
         "metrics": metrics,
         "supported_charts": list(CHAT_CHART_KINDS),
-        "query_features": {
-            "filter_operators": [
-                "eq",
-                "ne",
-                "gt",
-                "gte",
-                "lt",
-                "lte",
-                "in",
-                "not_in",
-                "contains",
-                "starts_with",
-                "ends_with",
-                "is_null",
-                "not_null",
-            ],
-            "filter_spec": 'scalar, list, or {"op": ">=", "value": 3} / {"op": "in", "values": [..]}',
-            "having": "same operator specs applied to metric output columns after aggregation",
-            "order_by": 'column names, "-" prefix for descending',
-            "top_n": "keep the N largest rows by top_n_by (a metric output column)",
-            "compare": 'set "prior_period" to add *_prev, *_delta, *_pct_change columns over the time axis',
-            "quantiles": "set true to include Median/p25/p75/p90/p95 columns for digest metrics",
-        },
-        "chart_contract": {
-            "required_fields": ["kind", "x", "y"],
-            "optional_fields": ["color", "facet_col", "value_format"],
-            "time_axes": ["Day", "Month", "Quarter", "Year"],
-            "value_formats": list(_VALUE_FORMATS),
-            "axis_rules": [
-                "Choose chart.kind only from the metric's own chart_kinds list.",
-                "Metric output columns belong in chart.y only.",
-                "chart.x may be a time column or business dimension present in the query result.",
-                "For time-trend charts, use Day/Month/Quarter/Year as chart.x.",
-                "For dimension comparisons, use a business dimension such as Issue or Channel as chart.x.",
-                "Business dimensions may be used for group_by, chart.x, chart.color, and chart.facet_col.",
-                "For heatmap use chart.x and chart.color as the two dimensions and chart.y as the metric value.",
-                "For donut use chart.x as the category and chart.y as the metric value.",
-                "roc_curve, precision_recall_curve, and calibration_curve need only the metric and an optional chart.color.",
-                "Set chart.value_format to percent for rates, integer for counts, or currency for money.",
-            ],
-        },
+        "tool_supported_charts": list(TOOL_CHART_KINDS),
+        "query_features": _QUERY_FEATURES,
+        "chart_contract": _CHART_CONTRACT,
     }
 
 
@@ -525,6 +653,21 @@ def allowed_chart_kinds(catalog: model.Catalog, metric_name: str) -> list[str]:
     return kinds or list(_BASE_CHART_KINDS)
 
 
+def allowed_tool_chart_kinds(catalog: model.Catalog, metric_name: str) -> list[str]:
+    """Return every chart kind an explicit tool caller may request for a metric.
+
+    Wider than :func:`allowed_chart_kinds`, which is the subset the LLM planner
+    is asked to choose from. The extra kinds need kind-specific fields, so they
+    are only offered where the caller can supply them.
+    """
+
+    if metric_name not in catalog.metrics.metrics:
+        return list(_BASE_CHART_KINDS)
+    compatible = set(chart_choices_for_metric(catalog, metric_name))
+    kinds = [kind for kind in TOOL_CHART_KINDS if kind in compatible or kind in _BASE_CHART_KINDS]
+    return kinds or list(_BASE_CHART_KINDS)
+
+
 def chart_tile_from_intent(intent: ChatIntent) -> dict[str, Any]:  # noqa: PLR0911, PLR0912
     """Map a validated chart intent to a chart-factory tile spec.
 
@@ -545,12 +688,19 @@ def chart_tile_from_intent(intent: ChatIntent) -> dict[str, Any]:  # noqa: PLR09
         return tile
     if chart.value_format:
         tile["value_format"] = chart.value_format
-    if kind in _CURVE_CHART_KINDS:
+    tile.update(_extended_tile_fields(chart))
+    if kind in _CURVE_LIKE_KINDS:
         if chart.color:
             tile["color"] = chart.color
         return tile
+    # The selected output has to be set before the kind-specific mapping
+    # returns: an interval or pareto tile reads its value from metric_output
+    # just as a line tile does.
     if chart.y and chart.y != intent.metric:
         tile["metric_output"] = chart.y
+    extended = _extended_kind_tile(intent, chart, tile)
+    if extended is not None:
+        return extended
     if kind == "kpi_card":
         return tile
     if kind == "donut":
@@ -587,6 +737,84 @@ def chart_tile_from_intent(intent: ChatIntent) -> dict[str, Any]:  # noqa: PLR09
         if chart.facet_col:
             tile["facet_col"] = chart.facet_col
     return tile
+
+
+def _extended_tile_fields(chart: ChartIntent) -> dict[str, Any]:
+    """Map the kind-agnostic extended fields onto chart-factory tile keys."""
+
+    fields: dict[str, Any] = {}
+    for intent_field, tile_key in (
+        ("facet_row", "facet_row"),
+        ("line_dash", "line_dash"),
+        ("x_axis_title", "x_axis_title"),
+        ("y_axis_title", "y_axis_title"),
+    ):
+        value = getattr(chart, intent_field)
+        if value:
+            fields[tile_key] = value
+    if chart.goal_line is not None:
+        fields["goal_line"] = {"value": chart.goal_line, "label": "Target"}
+    return fields
+
+
+_GENERIC_XY_KINDS = frozenset(
+    {"pareto", "waterfall", "experiment_z_score", "experiment_odds_ratio"}
+)
+
+
+def _extended_kind_tile(
+    intent: ChatIntent,
+    chart: ChartIntent,
+    tile: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Return the tile spec for a kind only an explicit caller can request.
+
+    Returns None for the kinds the generic x/y/color mapping below handles.
+    """
+
+    kind = chart.kind
+    if kind == "gauge":
+        if intent.group_by:
+            tile["group_by"] = list(intent.group_by)
+        return tile
+    if kind in _GENERIC_XY_KINDS:
+        tile["x"] = chart.x
+        tile["y"] = chart.y
+        return _with_chart_color(tile, chart)
+    specific = _KIND_TILE_FIELDS.get(kind)
+    if specific is None:
+        return None
+    tile.update(specific(chart))
+    return _with_chart_color(tile, chart)
+
+
+def _with_chart_color(tile: dict[str, Any], chart: ChartIntent) -> dict[str, Any]:
+    if chart.color:
+        tile["color"] = chart.color
+    return tile
+
+
+_KIND_TILE_FIELDS: dict[str, Callable[[ChartIntent], dict[str, Any]]] = {
+    "funnel": lambda chart: (
+        {"stages": list(chart.stages), **({"x": chart.x} if chart.x else {})}
+    ),
+    "combo": lambda chart: {
+        "x": chart.x,
+        "secondary_metric": chart.secondary_metric,
+        **({"primary_mark": chart.primary_mark} if chart.primary_mark else {}),
+        **({"shared_y_axis": True} if chart.shared_y_axis else {}),
+    },
+    "interval": lambda chart: {
+        "x": chart.x,
+        "lower_output": chart.lower_output,
+        "upper_output": chart.upper_output,
+    },
+    "treemap": lambda chart: {"path": list(chart.path)},
+    "sankey": lambda chart: {"path": list(chart.path)},
+    "boxplot": lambda chart: {"property": chart.property_name},
+    "histogram": lambda chart: {"property": chart.property_name},
+    "bar_polar": lambda chart: {"theta": chart.theta},
+}
 
 
 def _chart_title(intent: ChatIntent) -> str:
@@ -1070,8 +1298,14 @@ def parse_chat_intent(
     question: str = "",
     allow_payload_grain: bool = False,
     allow_sql: bool = False,
+    strict_chart: bool = False,
 ) -> ChatIntent:
-    """Parse and validate model-produced chat intent JSON."""
+    """Parse and validate model-produced chat intent JSON.
+
+    ``strict_chart`` is for explicit tool callers: it widens the chart kinds on
+    offer to :data:`TOOL_CHART_KINDS` and rejects an unavailable kind or a
+    missing kind-specific field instead of substituting a renderable chart.
+    """
 
     payload = _extract_json_payload(text)
     logger.debug(
@@ -1117,8 +1351,13 @@ def parse_chat_intent(
         time_axis,
         group_by,
         processor,
-        outputs,
-        allowed_chart_kinds(catalog, metric_name),
+        report_output_columns(metric_name, metric) if strict_chart else outputs,
+        (
+            allowed_tool_chart_kinds(catalog, metric_name)
+            if strict_chart
+            else allowed_chart_kinds(catalog, metric_name)
+        ),
+        strict=strict_chart,
     )
     group_by = _with_chart_group_by(group_by, chart, processor)
     filters = _normalize_filters(payload.get("filters"), processor)
@@ -1215,8 +1454,17 @@ def chart_intent_from_parameters(
     value_format: str | None = None,
     limit: int = 100,
     question: str = "MCP chart request",
+    chart_fields: Mapping[str, Any] | None = None,
+    strict: bool = True,
 ) -> ChatIntent:
-    """Build a validated chart intent from explicit tool parameters."""
+    """Build a validated chart intent from explicit tool parameters.
+
+    ``chart_fields`` carries the kind-specific extras — a funnel's ``stages``,
+    a combo's ``secondary_metric``, an interval's ``lower_output`` and
+    ``upper_output``, a treemap or Sankey ``path``, ``facet_row`` and so on.
+    With ``strict`` the caller gets an error naming what is missing rather than
+    a substituted chart.
+    """
 
     payload = {
         "metric": metric,
@@ -1233,6 +1481,11 @@ def chart_intent_from_parameters(
         "start": start,
         "end": end,
         "chart": {
+            **{
+                key: item
+                for key, item in dict(chart_fields or {}).items()
+                if item not in (None, "", [], {})
+            },
             "kind": chart_kind,
             "x": x,
             "y": y,
@@ -1255,7 +1508,71 @@ def chart_intent_from_parameters(
         catalog,
         question=question,
         allow_payload_grain=True,
+        strict_chart=strict,
     )
+
+
+def chart_spec_warnings(
+    intent: ChatIntent,
+    catalog: model.Catalog,
+    *,
+    chart_kind: str,
+    x: str,
+    y: str,
+    group_by: list[str],
+    color: str | None = None,
+    facet_col: str | None = None,
+    value_format: str | None = None,
+    grain: str | None = None,
+    compare: str | None = None,
+) -> list[str]:
+    """Report every chart parameter the planner substituted or dropped.
+
+    The intent normalizers fall back silently so an LLM-planned chart always
+    renders something. A programmatic caller names its chart explicitly, so
+    the substitution has to reach the client instead of only the server log.
+    """
+
+    warnings: list[str] = []
+    chart = intent.chart
+    if chart is None:
+        if chart_kind:
+            warnings.append(
+                f"chart kind {chart_kind!r} produced no chart spec; rows are returned unplotted"
+            )
+        return warnings
+
+    requested_kind = str(chart_kind or "").strip().lower()
+    if requested_kind and chart.kind != requested_kind:
+        allowed = ", ".join(allowed_chart_kinds(catalog, intent.metric)) or "none"
+        warnings.append(
+            f"chart kind {requested_kind!r} is not available for metric "
+            f"{intent.metric!r}; substituted {chart.kind!r} (available: {allowed})"
+        )
+    for label, requested, resolved in (
+        ("x", x, chart.x),
+        ("y", y, chart.y),
+        ("color", color, chart.color),
+        ("facet_col", facet_col, chart.facet_col),
+        ("value_format", value_format, chart.value_format),
+    ):
+        if requested and resolved != requested:
+            warnings.append(
+                f"chart {label} {requested!r} is not valid here; substituted {resolved!r}"
+            )
+    dropped = [column for column in group_by if column not in intent.group_by]
+    if dropped:
+        warnings.append(
+            f"group_by columns not available on this metric were dropped: {', '.join(dropped)}"
+        )
+    if grain and intent.grain != grain:
+        warnings.append(f"grain {grain!r} is not available; used {intent.grain!r}")
+    if compare and intent.compare != _COMPARE_ALIASES.get(str(compare).strip().lower()):
+        warnings.append(
+            f"compare {compare!r} was dropped; it needs a time grain, and this query uses "
+            f"{intent.grain!r}"
+        )
+    return warnings
 
 
 def execute_chat_intent(
@@ -1285,6 +1602,7 @@ def execute_chat_intent(
         intent.compare,
         intent.limit,
     )
+    chart_kind = intent.chart.kind if intent.chart is not None else ""
     rows = query_metric(
         workspace_path,
         intent.metric,
@@ -1298,9 +1616,25 @@ def execute_chat_intent(
         top_n=intent.top_n,
         top_n_by=intent.top_n_by,
         compare=intent.compare,
-        include_quantile_suite=intent.quantiles,
-        include_curve_columns=True,
+        include_state_columns=chart_kind in _STATEFUL_CHART_KINDS,
+        include_quantile_suite=intent.quantiles or chart_kind == "boxplot",
+        # Curve point arrays are only readable as a curve; a table or text
+        # answer keeps them so the chat page's behaviour is unchanged.
+        include_curve_columns=chart_kind in _CURVE_LIKE_KINDS or intent.chart is None,
     )
+    if chart_kind == "combo" and intent.chart is not None and intent.chart.secondary_metric:
+        rows = join_secondary_metric(
+            workspace_path,
+            catalog,
+            primary_metric=intent.metric,
+            secondary_metric=intent.chart.secondary_metric,
+            primary_rows=rows,
+            group_by=intent.group_by,
+            filters=intent.filters,
+            grain=intent.grain,
+            start=_as_optional_date(intent.start),
+            end=_as_optional_date(intent.end),
+        )
     if rows.height > intent.limit:
         rows = rows.head(intent.limit)
     fresh = metric_freshness(workspace_path, catalog, intent.metric, grain=intent.grain)
@@ -1542,41 +1876,203 @@ def _normalize_chart(
     processor: model.Processor,
     outputs: list[str],
     allowed_kinds: list[str],
+    *,
+    strict: bool = False,
 ) -> ChartIntent | None:
     if response != "chart":
         return None
-    kind = _normalize_chart_kind(value.get("kind"), allowed_kinds, time_axis, grain)
+    if strict:
+        kind = _strict_chart_kind(value.get("kind"), allowed_kinds)
+    else:
+        kind = _normalize_chart_kind(value.get("kind"), allowed_kinds, time_axis, grain)
     value_format = _normalize_value_format(value.get("value_format"))
-    if kind in _CURVE_CHART_KINDS:
+    extras = _normalize_chart_extras(value, kind, processor, outputs)
+    if kind in _CURVE_LIKE_KINDS:
         # Curves read fixed columns (fpr/tpr, predicted/observed); only an
         # optional color dimension is meaningful.
         color = _normalize_dimension_chart_column(value.get("color"), processor)
-        return ChartIntent(kind=kind, color=color, value_format=value_format)  # type: ignore[arg-type]
-    requested_x = _normalize_chart_x_value(value.get("x"), processor)
-    x = _normalize_chart_x(
-        requested_x,
-        kind=kind,
-        grain=grain,
-        time_axis=time_axis,
-        group_by=group_by,
-    )
-    y = _normalize_output_column(value.get("y"), outputs)
-    color = _normalize_dimension_chart_column(value.get("color"), processor)
-    facet_col = _normalize_dimension_chart_column(value.get("facet_col"), processor)
-    color = _default_chart_color(
-        color,
-        x=x,
-        group_by=group_by,
-        facet_col=facet_col,
-    )
-    return ChartIntent(
-        kind=kind,  # type: ignore[arg-type]
-        x=x,
-        y=y,
-        color=color,
-        facet_col=facet_col,
-        value_format=value_format,
-    )
+        chart = ChartIntent(
+            kind=kind,  # type: ignore[arg-type]
+            color=color,
+            value_format=value_format,
+            **extras,
+        )
+    else:
+        requested_x = _normalize_chart_x_value(value.get("x"), processor)
+        x = _normalize_chart_x(
+            requested_x,
+            kind=kind,
+            grain=grain,
+            time_axis=time_axis,
+            group_by=group_by,
+        )
+        y = _normalize_output_column(value.get("y"), outputs)
+        color = _normalize_dimension_chart_column(value.get("color"), processor)
+        facet_col = _normalize_dimension_chart_column(value.get("facet_col"), processor)
+        color = _default_chart_color(
+            color,
+            x=x,
+            group_by=group_by,
+            facet_col=facet_col,
+        )
+        chart = ChartIntent(
+            kind=kind,  # type: ignore[arg-type]
+            x=x,
+            y=y,
+            color=color,
+            facet_col=facet_col,
+            value_format=value_format,
+            **extras,
+        )
+    if strict:
+        _require_chart_fields(chart)
+    return chart
+
+
+def _strict_chart_kind(value: object, allowed_kinds: list[str]) -> str:
+    """Return the requested kind, or explain why it is not available."""
+
+    requested = str(value or "").strip().lower()
+    if not requested:
+        raise ValueError(f"chart_kind is required; available: {', '.join(allowed_kinds)}")
+    if requested not in allowed_kinds:
+        raise ValueError(
+            f"chart kind {requested!r} is not available for this metric; "
+            f"available: {', '.join(allowed_kinds)}"
+        )
+    return requested
+
+
+def _require_chart_fields(chart: ChartIntent) -> None:
+    """Reject an extended chart kind that is missing a field it needs."""
+
+    required = _CHART_KIND_REQUIREMENTS.get(chart.kind, ())
+    missing = [field_name for field_name in required if not getattr(chart, field_name, None)]
+    if missing:
+        raise ValueError(
+            f"chart kind {chart.kind!r} requires {', '.join(missing)}; "
+            "see the metric's chart_fields in dashboard_list for a worked example"
+        )
+    if chart.kind in {"treemap", "sankey"} and len(chart.path) < _MIN_PATH_STEPS:
+        raise ValueError(f"chart kind {chart.kind!r} requires a path of at least two dimensions")
+
+
+def _normalize_chart_extras(
+    value: Mapping[str, Any],
+    kind: str,
+    processor: model.Processor,
+    outputs: list[str],
+) -> dict[str, Any]:
+    """Validate the kind-specific chart fields an explicit caller may supply."""
+
+    extras = _collect_chart_extras(value, processor, outputs)
+    return _extras_for_kind(extras, kind)
+
+
+def _collect_chart_extras(
+    value: Mapping[str, Any],
+    processor: model.Processor,
+    outputs: list[str],
+) -> dict[str, Any]:
+    """Read every extended chart field the caller supplied, validating each."""
+
+    return {
+        **_chart_dimension_extras(value, processor),
+        **_chart_sequence_extras(value),
+        **_chart_output_extras(value, outputs),
+        **_chart_scalar_extras(value),
+    }
+
+
+def _chart_dimension_extras(
+    value: Mapping[str, Any],
+    processor: model.Processor,
+) -> dict[str, Any]:
+    """Resolve the extended fields that name a processor dimension."""
+
+    extras: dict[str, Any] = {}
+    for field_name in ("facet_row", "line_dash", "theta"):
+        if not value.get(field_name):
+            continue
+        column = _normalize_dimension_chart_column(value.get(field_name), processor)
+        if column:
+            extras[field_name] = column
+    return extras
+
+
+def _chart_sequence_extras(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Read the list-shaped fields: a funnel's stages, a treemap or Sankey path."""
+
+    extras: dict[str, Any] = {}
+    for field_name in ("stages", "path"):
+        raw = value.get(field_name)
+        if isinstance(raw, list | tuple) and raw:
+            cleaned = tuple(str(item) for item in raw if str(item or "").strip())
+            if cleaned:
+                extras[field_name] = cleaned
+    return extras
+
+
+def _chart_output_extras(value: Mapping[str, Any], outputs: list[str]) -> dict[str, Any]:
+    """Resolve the extended fields that name a metric output column.
+
+    Confidence bounds are matched against ``outputs``, which is what the query
+    emits — wider than a metric's declared ``outputs`` list, because a
+    variant-compare metric produces its CI columns whether or not the catalog
+    names them, and the authored interval tiles reference exactly those.
+    """
+
+    extras: dict[str, Any] = {}
+    for field_name in ("lower_output", "upper_output"):
+        column = _optional_text(value.get(field_name))
+        if column:
+            extras[field_name] = _resolve_column_name(column, outputs)
+    return extras
+
+
+def _chart_scalar_extras(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Read the remaining scalar and flag fields."""
+
+    extras: dict[str, Any] = {}
+    for field_name, key in (
+        ("secondary_metric", "secondary_metric"),
+        ("property_name", "property"),
+        ("x_axis_title", "x_axis_title"),
+        ("y_axis_title", "y_axis_title"),
+    ):
+        text = _optional_text(value.get(key))
+        if text:
+            extras[field_name] = text
+    primary_mark = _optional_text(value.get("primary_mark"))
+    if primary_mark:
+        if primary_mark not in _PRIMARY_MARKS:
+            raise ValueError(
+                f"primary_mark must be one of {', '.join(_PRIMARY_MARKS)}, got {primary_mark!r}"
+            )
+        extras["primary_mark"] = primary_mark
+    if value.get("shared_y_axis"):
+        extras["shared_y_axis"] = True
+    goal_line = value.get("goal_line")
+    if isinstance(goal_line, int | float) and not isinstance(goal_line, bool):
+        extras["goal_line"] = float(goal_line)
+    return extras
+
+
+def _extras_for_kind(extras: dict[str, Any], kind: str) -> dict[str, Any]:
+    """Drop extended fields a kind ignores, so the echoed spec stays honest."""
+
+    extras = dict(extras)
+    if kind not in {"treemap", "sankey"}:
+        extras.pop("path", None)
+    if kind != "funnel":
+        extras.pop("stages", None)
+    if kind != "combo":
+        for field_name in ("secondary_metric", "primary_mark", "shared_y_axis"):
+            extras.pop(field_name, None)
+    if kind != "interval":
+        for field_name in ("lower_output", "upper_output"):
+            extras.pop(field_name, None)
+    return extras
 
 
 def _normalize_chart_kind(
@@ -1872,6 +2368,17 @@ def _compact_history(history: list[Mapping[str, Any]]) -> str:
     return "\n".join(lines) if lines else "No previous conversation."
 
 
+def _as_optional_date(value: str | None) -> dt.date | None:
+    """Parse an intent date bound for helpers that expect a date object."""
+
+    if not value:
+        return None
+    try:
+        return dt.date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
 def _query_summary(intent: ChatIntent) -> str:
     parts = [
         f"query_metric(workspace, {intent.metric!r}",
@@ -2007,13 +2514,16 @@ def _safe_chat_error_type(exc: Exception) -> str:
 
 __all__ = [
     "CHAT_CHART_KINDS",
+    "TOOL_CHART_KINDS",
     "ChartIntent",
     "ChatIntent",
     "ChatIntentPlanningError",
     "ChatQueryResult",
     "allowed_chart_kinds",
+    "allowed_tool_chart_kinds",
     "catalog_chat_manifest",
     "chart_intent_from_parameters",
+    "chart_spec_warnings",
     "chart_tile_from_intent",
     "chat_pin_tile",
     "chat_starter_questions",

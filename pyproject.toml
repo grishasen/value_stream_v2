@@ -33,11 +33,18 @@ dependencies = [
 
 [project.optional-dependencies]
 ai = [
-    "mcp>=1.0",
+    # 2.0 renamed FastMCP to MCPServer; the server supports both, but the lock
+    # resolves 2.x and 1.x is no longer exercised.
+    "mcp>=2.0",
 ]
 api = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+]
+viz = [
+    # Static chart images for the report page's PNG export and the tool
+    # surfaces' render="png". Needs a Chrome/Chromium the first time it runs.
+    "kaleido>=1",
 ]
 dev = [
     "pytest>=8.3",

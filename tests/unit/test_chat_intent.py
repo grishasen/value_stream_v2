@@ -15,6 +15,7 @@ from valuestream.ai.chat import (
     allowed_chart_kinds,
     catalog_chat_manifest,
     chart_intent_from_parameters,
+    chart_spec_warnings,
     chart_tile_from_intent,
     chat_pin_tile,
     chat_starter_questions,
@@ -268,6 +269,117 @@ def test_chart_intent_from_parameters_validates_explicit_mcp_chart_fields() -> N
     assert intent.chart.x == "Day"
     assert intent.chart.y == "VS_Engagement_Rate"
     assert intent.group_by == ["Channel", "PropensitySource"]
+
+
+@pytest.mark.unit
+def test_chart_spec_warnings_are_empty_when_nothing_was_substituted() -> None:
+    catalog = load(Path("examples/demo"))
+    intent = chart_intent_from_parameters(
+        catalog,
+        metric="VS_Engagement_Rate",
+        chart_kind="line",
+        x="Day",
+        y="VS_Engagement_Rate",
+        group_by=["Channel"],
+        grain="daily",
+        color="Channel",
+    )
+
+    warnings = chart_spec_warnings(
+        intent,
+        catalog,
+        chart_kind="line",
+        x="Day",
+        y="VS_Engagement_Rate",
+        group_by=["Channel"],
+        color="Channel",
+        grain="daily",
+    )
+
+    assert warnings == []
+
+
+@pytest.mark.unit
+def test_strict_chart_rejects_a_kind_the_metric_cannot_render() -> None:
+    # An explicit tool caller named the kind, so a silent substitution would
+    # have them describe a funnel while looking at a bar chart.
+    catalog = load(Path("examples/demo"))
+
+    with pytest.raises(ValueError, match="not available for this metric"):
+        chart_intent_from_parameters(
+            catalog,
+            metric="VS_Engagement_Rate",
+            chart_kind="funnel",
+            x="Channel",
+            y="VS_Engagement_Rate",
+            group_by=["Channel"],
+            grain="summary",
+        )
+
+
+@pytest.mark.unit
+def test_chart_spec_warnings_report_a_substituted_chart_kind() -> None:
+    # The LLM planner path still falls back so an answer always renders; the
+    # substitution has to be reported rather than hidden.
+    catalog = load(Path("examples/demo"))
+    intent = chart_intent_from_parameters(
+        catalog,
+        metric="VS_Engagement_Rate",
+        chart_kind="funnel",
+        x="Channel",
+        y="VS_Engagement_Rate",
+        group_by=["Channel"],
+        grain="summary",
+        strict=False,
+    )
+
+    assert intent.chart is not None
+    assert intent.chart.kind != "funnel"
+
+    warnings = chart_spec_warnings(
+        intent,
+        catalog,
+        chart_kind="funnel",
+        x="Channel",
+        y="VS_Engagement_Rate",
+        group_by=["Channel"],
+        grain="summary",
+    )
+
+    assert len(warnings) == 1
+    assert "funnel" in warnings[0]
+    assert intent.chart.kind in warnings[0]
+
+
+@pytest.mark.unit
+def test_chart_spec_warnings_report_dropped_group_by_columns() -> None:
+    catalog = load(Path("examples/demo"))
+    # Time columns are carried by the grain, not by group_by, so the planner
+    # drops them silently. An unknown dimension raises instead of being dropped.
+    group_by = ["Channel", "Day"]
+    intent = chart_intent_from_parameters(
+        catalog,
+        metric="VS_Engagement_Rate",
+        chart_kind="bar",
+        x="Channel",
+        y="VS_Engagement_Rate",
+        group_by=group_by,
+        grain="summary",
+    )
+
+    assert intent.group_by == ["Channel"]
+
+    warnings = chart_spec_warnings(
+        intent,
+        catalog,
+        chart_kind="bar",
+        x="Channel",
+        y="VS_Engagement_Rate",
+        group_by=group_by,
+        grain="summary",
+    )
+
+    assert any("Day" in warning for warning in warnings)
 
 
 @pytest.mark.unit

@@ -76,9 +76,10 @@ def test_serve_mcp_command_invokes_stdio_server(
     workspace.mkdir()
     captured: dict[str, Any] = {}
 
-    def fake_run_stdio(path: str, *, enable_sql: bool) -> None:
+    def fake_run_stdio(path: str, *, enable_sql: bool, render_dir: str | None) -> None:
         captured["path"] = path
         captured["enable_sql"] = enable_sql
+        captured["render_dir"] = render_dir
 
     monkeypatch.setattr("valuestream.cli.run_mcp_stdio", fake_run_stdio)
 
@@ -87,6 +88,15 @@ def test_serve_mcp_command_invokes_stdio_server(
     assert result.exit_code == 0, result.output
     assert captured["path"] == str(workspace)
     assert captured["enable_sql"] is False
+    # Rendered charts default to a temp directory, never the workspace.
+    assert captured["render_dir"] is None
+
+    result = CliRunner().invoke(
+        main, ["serve-mcp", str(workspace), "--render-dir", str(tmp_path / "renders")]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["render_dir"] == str(tmp_path / "renders")
 
 
 @pytest.mark.unit

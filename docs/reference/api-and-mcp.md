@@ -56,6 +56,9 @@ Interactive OpenAPI docs are served at `/docs`.
 | `POST /sql` | One governed read-only SELECT (only with `--enable-sql`) |
 | `POST /chat` | Plan and answer a natural-language question (requires a configured model) |
 
+`POST /metrics/{name}/chart` also returns `warnings` describing any chart
+parameter the planner substituted.
+
 Error mapping: invalid requests return 400, missing aggregates 409, SQL
 timeouts 504.
 
@@ -70,13 +73,128 @@ non-loopback bind.
 
 | Tool | Purpose |
 |---|---|
-| `metric_list` | List metrics, dimensions, query time axes, and supported charts |
+| `metric_list` | List metrics, dimensions, query time axes, and supported charts. Narrow with `search`, `processor`, or `dashboard`; `detail="full"` adds prose and configuration |
 | `metric_query` | Query metric rows through `query_metric` (operator filters, having, order_by, top_n, compare, quantile suite) |
-| `metric_chart_query` | Query metric rows and return an explicit validated chart spec |
+| `metric_chart_query` | Query metric rows and return an explicit validated chart spec, plus `requested` and `warnings` |
+| `dashboard_list` | List authored dashboards, pages, page filters, and tiles with their chart specs |
+| `tile_query` | Run one authored tile exactly as the report page runs it |
+| `kpi_query` | Return a KPI card's value, comparison delta, period, and sparkline |
+| `chat` | Plan and answer a natural-language question (requires a configured model) |
 | `dimension_values_tool` | Return aggregate-backed dimension values |
+| `workspace_status_tool` | Per-processor aggregate readiness, recent runs, and unfinished runs |
+| `freshness_get` | Return metric freshness metadata |
 | `sql_schema` | List governed DuckDB tables/views and their non-masked columns (only with `--enable-sql`) |
 | `sql_query` | Run one governed read-only SELECT over aggregate views and metric exports (only with `--enable-sql`) |
-| `freshness_get` | Return metric freshness metadata |
+
+The server also publishes two resources — `valuestream://catalog` (the
+catalog YAML) and `valuestream://dashboards` (the dashboard manifest as
+JSON) — and two prompts, `explore_workspace` and `starter_questions`.
+
+## Reading a Dashboard Through the Tools
+
+`dashboard_list` returns the ids that `tile_query` and `kpi_query` take.
+A tile is not just a metric query: the tile tools apply its authored filters,
+infer its grain and group-by from the chart, join a combo's secondary metric,
+and remap a histogram's property to its distribution metric, so the numbers
+match the report. This is also the only way to reach chart kinds the ad-hoc
+chart contract cannot express, such as funnel, combo, interval, or treemap.
+
+Authored tile filters define the metric's valid population, so they take
+precedence over filters passed to the tool. Filters a tile cannot apply come
+back in `ignored_filters` rather than being silently dropped, and sketch/state
+blob columns are removed from tile rows and listed in `masked_columns`.
+
+## Errors and Substitutions
+
+Tools return a structured payload rather than raising, so the diagnosis
+reaches the client:
+
+```json
+{"error": {"kind": "aggregate_not_ready", "type": "AggregateNotReadyError",
+           "message": "...", "remediation": "Run ingestion for this workspace..."}}
+```
+
+`kind` is one of `invalid_request`, `aggregate_not_ready`, `aggregate_missing`,
+`sql_rejected`, or `timeout`. When a metric or tile fails with an aggregate
+error, `workspace_status_tool` reports which processors are `ready`, `stale`,
+`unpublished`, or `missing`, using the same load a query performs.
+
+`metric_chart_query` rejects a chart kind a metric cannot render, naming the
+kinds that are available, rather than substituting one silently. When a valid
+kind needs an axis or colour adjusted, it echoes what was asked in `requested`
+and explains the change in `warnings`; compare `chart` with `requested` before
+describing the result to a user.
+
+## Chart Kinds
+
+Each metric carries two lists. `chart_kinds` is what the LLM planner may
+choose: kinds that render from a plain x/y/colour/facet spec.
+`tool_chart_kinds` is the wider set an explicit caller may request, where the
+kind's own inputs go in `chart_fields`:
+
+| Kind | Required `chart_fields` |
+|---|---|
+| `funnel` | `stages` |
+| `combo` | `secondary_metric` (optional `primary_mark`, `shared_y_axis`) |
+| `interval` | `lower_output`, `upper_output` |
+| `treemap`, `sankey` | `path` (two or more dimensions) |
+| `boxplot`, `histogram` | `property` |
+| `bar_polar` | `theta` |
+| `pareto`, `waterfall`, `experiment_z_score`, `experiment_odds_ratio` | none beyond `x` and `y` |
+| `gauge`, `gain_curve`, `lift_curve` | none |
+
+`facet_row`, `line_dash`, `goal_line`, `x_axis_title`, and `y_axis_title` work
+with any kind. A missing required field is named in the error. Fields a kind
+does not use are dropped rather than echoed back, so the returned spec is
+exactly what the chart factory will draw. A combo's secondary metric is
+queried over the same dimensions and joined onto the rows, the same join the
+dashboard tile path performs.
+
+## Rendered Charts
+
+`tile_query` and `metric_chart_query` take a `render` option, so a client can
+see the chart rather than only its rows. The figure comes from the same chart
+factory the report page uses.
+
+| `render` | Result |
+|---|---|
+| `none` (default) | Rows only |
+| `png` | The rendered image, attached as an image content block |
+| `html` | A self-contained interactive page written to disk; the payload carries its `path` |
+| `html_cdn` | The same page with Plotly loaded from its CDN — about 13 KB instead of 4 MB, but it needs a network |
+| `spec` | The Plotly figure spec, for clients that draw Plotly themselves |
+
+HTML is written rather than inlined: it is only useful in a browser, and the
+markup would otherwise spend the response on something the caller cannot
+render. Files go to `--render-dir`, defaulting to `valuestream-renders` under
+the system temp directory — never into the workspace.
+
+Because the page is a file and only its path is returned, embedding Plotly's
+JavaScript costs file size rather than response size, so `html` embeds it by
+default: the page opens offline and keeps working after the CDN's current
+version moves on. Use `html_cdn` when a small file matters more.
+
+PNG needs the optional `viz` extra:
+
+```sh
+uv sync --extra viz    # installs kaleido
+```
+
+Without it, `render="png"` returns a `dependency_missing` error naming the
+install command and pointing at `render="html"`. Kaleido drives a headless
+Chrome, so the first render in a process pays a browser start-up cost.
+
+## Response Size
+
+Two options keep responses small on a large catalog:
+
+- `metric_list` defaults to `detail="compact"` and reports `matched_metrics`,
+  `returned_metrics`, and `truncated`.
+- `metric_query` defaults to `provenance="summary"`, which replaces the
+  contributing chunk and run id lists with counts, and to
+  `include_curves=false`, which omits the roc/pr point arrays. Set
+  `provenance="full"` or `include_curves=true` when you need them. The HTTP
+  API takes the same `include_curves` flag on `POST /metrics/{name}/query`.
 
 ## Query Criteria Semantics
 

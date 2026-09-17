@@ -8,6 +8,16 @@ import pytest
 from valuestream.config import model
 from valuestream.query import executor
 
+_CURVE_VALUE = {
+    "roc_auc": 0.8,
+    "average_precision": 0.5,
+    "tpr": [0.1, 0.9],
+    "fpr": [0.2, 0.8],
+    "precision": [0.3, 0.7],
+    "recall": [0.4, 0.6],
+    "pos_fraction": 0.25,
+}
+
 
 def _frame() -> pl.DataFrame:
     return pl.DataFrame(
@@ -232,3 +242,78 @@ def test_set_op_lookback_days_covers_every_operand_window() -> None:
     assert executor._set_op_lookback_days(metric({"last": "1d"}, {"between": ["-2w", "-1d"]})) == 14
     assert executor._set_op_lookback_days(metric(None, None)) is None
     assert executor._set_op_lookback_days(metric({"last": "1d"}, None)) is None
+
+
+def _curve_frame() -> pl.DataFrame:
+    return pl.DataFrame({"pos": [b"\x00"], "neg": [b"\x00"]})
+
+
+def _curve_metrics() -> dict[str, model.Metric]:
+    """Two curve metrics plus a formula that subtracts one AUC from the other."""
+
+    return {
+        "BaseAUC": model.CurveFromDigestsMetric(
+            processor="scores",
+            kind="curve_from_digests",
+            positive_state="pos",
+            negative_state="neg",
+            output="roc_auc",
+        ),
+        "FinalAUC": model.CurveFromDigestsMetric(
+            processor="scores",
+            kind="curve_from_digests",
+            positive_state="pos",
+            negative_state="neg",
+            output="roc_auc",
+        ),
+        "AUCUplift": model.FormulaMetric(
+            processor="scores",
+            kind="formula",
+            depends_on=["FinalAUC", "BaseAUC"],
+            expression={"op": "sub", "args": [{"col": "FinalAUC"}, {"col": "BaseAUC"}]},
+        ),
+    }
+
+
+@pytest.mark.unit
+def test_curve_columns_unnest_once_for_a_single_curve_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(executor, "_curve_metric", lambda _row: _CURVE_VALUE)
+    metrics = _curve_metrics()
+
+    out = executor._derive_metric(
+        _curve_frame(),
+        "BaseAUC",
+        metrics["BaseAUC"],
+        metrics,
+        include_curve_columns=True,
+    )
+
+    assert out["BaseAUC"].to_list() == [0.8]
+    assert out["roc_auc"].to_list() == [0.8]
+    assert out["tpr"].to_list() == [[0.1, 0.9]]
+
+
+@pytest.mark.unit
+def test_two_curve_dependencies_do_not_collide_on_generic_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Both curve metrics unnest the same generic column names. Before the fix
+    # the second unnest raised DuplicateError and the uplift was unreachable.
+    monkeypatch.setattr(executor, "_curve_metric", lambda _row: _CURVE_VALUE)
+    metrics = _curve_metrics()
+
+    out = executor._derive_metric(
+        _curve_frame(),
+        "AUCUplift",
+        metrics["AUCUplift"],
+        metrics,
+        include_curve_columns=True,
+    )
+
+    assert out["AUCUplift"].to_list() == [0.0]
+    assert out["BaseAUC"].to_list() == [0.8]
+    assert out["FinalAUC"].to_list() == [0.8]
+    # The generic columns describe the first curve derived and appear once.
+    assert out.columns.count("roc_auc") == 1

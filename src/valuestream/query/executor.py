@@ -387,6 +387,40 @@ def _string_values(frame: pl.DataFrame, column: str) -> tuple[str, ...]:
     return tuple(sorted({str(value) for value in frame[column].drop_nulls().to_list()}))
 
 
+def aggregate_readiness(
+    workspace_path: str | Path,
+    catalog: model.Catalog,
+    processor_config: model.Processor,
+    *,
+    grain: str = "summary",
+) -> str:
+    """Report whether a processor can answer a query right now.
+
+    Returns ``"ready"``, ``"stale"``, ``"unpublished"``, or ``"missing"``.
+    This runs the same load the query path runs, so a status answer can never
+    disagree with what ``query_metric`` will do. The lineage table alone is
+    not enough: a run that registered lineage rows and then died leaves the
+    current config hash recorded with no published rows behind it.
+    """
+
+    processor = _make_processor(
+        processor_config,
+        computation_hash=processor_computation_hash(catalog, processor_config),
+    )
+    try:
+        _load_current_aggregate(
+            workspace_path,
+            processor,
+            grain,
+            metric_name=f"<readiness:{processor_config.id}>",
+        )
+    except AggregateNotReadyError as exc:
+        return "unpublished" if "not been published" in str(exc) else "stale"
+    except FileNotFoundError:
+        return "missing"
+    return "ready"
+
+
 @timed
 def _load_current_aggregate(
     workspace_path: str | Path,
@@ -1054,10 +1088,23 @@ def _derive_metric(  # noqa: PLR0911, PLR0912, PLR0915
             .alias(curve_col)
         )
         if include_curve_columns:
-            out = out.unnest(curve_col)
+            # A formula metric can depend on several curve metrics. The generic
+            # curve columns (roc_auc, tpr, ...) can only describe one of them,
+            # so the first curve derived into the frame keeps them and later
+            # ones contribute their own named output only. Unnesting blindly
+            # raises DuplicateError on the second curve.
+            out = out.with_columns(
+                *[
+                    pl.col(curve_col).struct.field(name).alias(name)
+                    for name in _CURVE_OUTPUT_COLUMNS
+                    if name not in out.columns
+                ]
+            )
             if metric_name not in out.columns:
-                out = out.with_columns(pl.col(metric.output).alias(metric_name))
-            return out
+                out = out.with_columns(
+                    pl.col(curve_col).struct.field(metric.output).alias(metric_name)
+                )
+            return out.drop(curve_col)
         return out.with_columns(
             pl.col(curve_col).struct.field(metric.output).alias(metric_name)
         ).drop(curve_col)
