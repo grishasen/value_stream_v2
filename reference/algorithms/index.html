@@ -3620,11 +3620,18 @@ call per value for non-trivial groups; the scalar path remains for tiny groups,
 where allocating and normalizing an array can cost more than it saves. All
 catalog-v2 distribution processors use the bulk construction plan.</p>
 <p><strong>Merge</strong>:
-<div class="highlight"><pre><span></span><code>merged = tdigest_double.deserialize(blobs[0])
+<div class="highlight"><pre><span></span><code>blobs = sorted(blobs)                  # content-ordered, see below
+merged = tdigest_double.deserialize(blobs[0])
 for b in blobs[1:]:
     merged.merge(tdigest_double.deserialize(b))
 return merged.serialize()
 </code></pre></div></p>
+<p>A t-digest merge is deterministic but <strong>not associative</strong>: folding the same
+payloads in a different order produces a different centroid layout and slightly
+different quantiles. Group members reach the merge in aggregate row order, which
+follows parquet part order and chunk publication order and is therefore
+incidental to the data. The engine sorts payloads by their bytes before merging,
+so a group yields the same digest however its rows happened to be laid out.</p>
 <p><strong>Edge case — empty input</strong>:
 If a group has zero values for a property, the engine writes a serialized empty
 digest so the column dtype stays <code>Binary</code> and downstream merges remain valid.
@@ -3644,10 +3651,28 @@ return edges, masses
 <p><strong>Library</strong>: <code>datasketches.kll_floats_sketch(k=200)</code>.
 <strong>Default</strong>: <code>k = 200</code> (≈ 1.65% normalized rank error two-sided at 0.5).
 KLL is mergeable, has stronger formal error guarantees than t-digest, and serializes to ~1.5 KB.</p>
-<p>Use KLL where SLA-bound percentile errors matter; use t-digest where compactness and per-quantile speed matter.</p>
 <p>Build / merge / quantile mirror t-digest with <code>k=200</code>; the native bulk array is
 contiguous writable <code>float32</code>, and groups below the same 32-value threshold use
 scalar updates.</p>
+<p><strong>KLL is not reproducible.</strong> Its compaction step chooses which half of a buffer
+to keep at random, and the <code>datasketches</code> Python binding exposes no seed, so
+<code>build()</code> and <code>merge()</code> return different bytes for identical values in identical
+order. Repeated queries over unchanged aggregates therefore return different
+quantiles — measured on a real workspace at ~0.4% relative at p25 and ~11% at
+p90, the tail being wider because a small rank error moves the value a long way
+where the density is low. The same applies to <code>req</code> and the classic <code>quantiles</code>
+sketch; <strong>t-digest is the only deterministic quantile state</strong>, which is why
+<code>quantile_engine</code> defaults to <code>tdigest</code>.</p>
+<p>Choose KLL only when its stronger formal rank-error guarantee is worth giving up
+run-to-run reproducibility — never for a metric feeding a fingerprint, a golden
+test, a cached result, or a threshold that triggers an alert. If a metric already
+reads a <code>kll</code> state and its processor also stores a <code>*_tdigest</code> state over the
+same source column, repointing the metric's <code>state</code> is a catalog-only change and
+needs no reprocessing:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">Propensity_Distribution</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">distribution</span>
+<span class="w">  </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Propensity_tdigest</span><span class="w">   </span><span class="c1"># was Propensity_kll</span>
+</code></pre></div>
 <hr />
 <h2 id="3-variant-comparison-and-proportions">3. Variant comparison and proportions<a class="headerlink" href="#3-variant-comparison-and-proportions" title="Permanent link">&para;</a></h2>
 <p>Variant comparison is a derived metric of <code>binary_outcome</code> processors with <code>variant_column</code> set. Inputs per group: <code>Positives_T, Negatives_T, Count_T, Positives_C, Negatives_C, Count_C</code> (T = test, C = control).</p>
@@ -4043,6 +4068,13 @@ return { g_test_stat: G, g_p_val: p }
 <li>All tests are two-sided unless stated otherwise.</li>
 <li>No Yates correction.</li>
 <li>Sample odds ratio (not unconditional MLE) is reported; CI uses Fisher's noncentral hypergeometric (<code>scipy</code>'s <code>kind="sample"</code>).</li>
+<li><strong>Row order is the variant label, ascending.</strong> <code>chi2_stat</code> and <code>g_stat</code> are
+  invariant to how the table's rows are ordered, but the odds ratio and <code>z_score</code>
+  are directional: the first row is read as test and the second as control, so
+  swapping them inverts the odds ratio (<code>OR</code> → <code>1/OR</code>) and flips the sign of <code>z</code>.
+  A <code>contingency_test</code> metric has no <code>test_role</code>/<code>control_role</code> to declare the
+  direction — unlike <code>proportion_test</code> (§3.5) — so the engine sorts variants by
+  the <code>variant_column</code> value and reports the direction relative to that.</li>
 </ul>
 <hr />
 <h2 id="9-calendar-derivations">9. Calendar derivations<a class="headerlink" href="#9-calendar-derivations" title="Permanent link">&para;</a></h2>
@@ -4196,7 +4228,8 @@ return { g_test_stat: G, g_p_val: p }
 - Lift, CTR, conversion rate, revenue are exact.</p>
 <p>Whenever Value Stream claims a number is "approximate":
 - Quantiles via t-digest: error ≤ 0.3% at the median, ≤ 0.05% at p99 with <code>k=500</code>.
-- Quantiles via KLL: error ≤ 1.65% normalized rank with <code>k=200</code>.
+- Quantiles via KLL: error ≤ 1.65% normalized rank with <code>k=200</code>. Randomized, so
+  repeated queries over unchanged data differ (see §2.5); t-digest does not.
 - Distinct counts via CPC: report the sketch's lower/upper bounds; generated states use <code>lg_k=11</code>.
 - Distinct counts via legacy/opt-in HLL: ±1.6% RSE with <code>lg_k=12</code>.
 - Set operations via Theta: as above.

@@ -2121,6 +2121,61 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reading-a-dashboard-through-the-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading a Dashboard Through the Tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors-and-substitutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors and Substitutions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chart-kinds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chart Kinds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rendered-charts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rendered Charts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#response-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response Size
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#query-criteria-semantics" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2498,6 +2553,61 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reading-a-dashboard-through-the-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading a Dashboard Through the Tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors-and-substitutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors and Substitutions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chart-kinds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chart Kinds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rendered-charts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rendered Charts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#response-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Response Size
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#query-criteria-semantics" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2626,6 +2736,8 @@ Claude Code:</p>
 </tr>
 </tbody>
 </table>
+<p><code>POST /metrics/{name}/chart</code> also returns <code>warnings</code> describing any chart
+parameter the planner substituted.</p>
 <p>Error mapping: invalid requests return 400, missing aggregates 409, SQL
 timeouts 504.</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
@@ -2644,7 +2756,7 @@ non-loopback bind.</p>
 <tbody>
 <tr>
 <td><code>metric_list</code></td>
-<td>List metrics, dimensions, query time axes, and supported charts</td>
+<td>List metrics, dimensions, query time axes, and supported charts. Narrow with <code>search</code>, <code>processor</code>, or <code>dashboard</code>; <code>detail="full"</code> adds prose and configuration</td>
 </tr>
 <tr>
 <td><code>metric_query</code></td>
@@ -2652,11 +2764,35 @@ non-loopback bind.</p>
 </tr>
 <tr>
 <td><code>metric_chart_query</code></td>
-<td>Query metric rows and return an explicit validated chart spec</td>
+<td>Query metric rows and return an explicit validated chart spec, plus <code>requested</code> and <code>warnings</code></td>
+</tr>
+<tr>
+<td><code>dashboard_list</code></td>
+<td>List authored dashboards, pages, page filters, and tiles with their chart specs</td>
+</tr>
+<tr>
+<td><code>tile_query</code></td>
+<td>Run one authored tile exactly as the report page runs it</td>
+</tr>
+<tr>
+<td><code>kpi_query</code></td>
+<td>Return a KPI card's value, comparison delta, period, and sparkline</td>
+</tr>
+<tr>
+<td><code>chat</code></td>
+<td>Plan and answer a natural-language question (requires a configured model)</td>
 </tr>
 <tr>
 <td><code>dimension_values_tool</code></td>
 <td>Return aggregate-backed dimension values</td>
+</tr>
+<tr>
+<td><code>workspace_status_tool</code></td>
+<td>Per-processor aggregate readiness, recent runs, and unfinished runs</td>
+</tr>
+<tr>
+<td><code>freshness_get</code></td>
+<td>Return metric freshness metadata</td>
 </tr>
 <tr>
 <td><code>sql_schema</code></td>
@@ -2666,12 +2802,149 @@ non-loopback bind.</p>
 <td><code>sql_query</code></td>
 <td>Run one governed read-only SELECT over aggregate views and metric exports (only with <code>--enable-sql</code>)</td>
 </tr>
+</tbody>
+</table>
+<p>The server also publishes two resources — <code>valuestream://catalog</code> (the
+catalog YAML) and <code>valuestream://dashboards</code> (the dashboard manifest as
+JSON) — and two prompts, <code>explore_workspace</code> and <code>starter_questions</code>.</p>
+<h2 id="reading-a-dashboard-through-the-tools">Reading a Dashboard Through the Tools<a class="headerlink" href="#reading-a-dashboard-through-the-tools" title="Permanent link">&para;</a></h2>
+<p><code>dashboard_list</code> returns the ids that <code>tile_query</code> and <code>kpi_query</code> take.
+A tile is not just a metric query: the tile tools apply its authored filters,
+infer its grain and group-by from the chart, join a combo's secondary metric,
+and remap a histogram's property to its distribution metric, so the numbers
+match the report. This is also the only way to reach chart kinds the ad-hoc
+chart contract cannot express, such as funnel, combo, interval, or treemap.</p>
+<p>Authored tile filters define the metric's valid population, so they take
+precedence over filters passed to the tool. Filters a tile cannot apply come
+back in <code>ignored_filters</code> rather than being silently dropped, and sketch/state
+blob columns are removed from tile rows and listed in <code>masked_columns</code>.</p>
+<h2 id="errors-and-substitutions">Errors and Substitutions<a class="headerlink" href="#errors-and-substitutions" title="Permanent link">&para;</a></h2>
+<p>Tools return a structured payload rather than raising, so the diagnosis
+reaches the client:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"aggregate_not_ready"</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"AggregateNotReadyError"</span><span class="p">,</span>
+<span class="w">           </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"remediation"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Run ingestion for this workspace..."</span><span class="p">}}</span>
+</code></pre></div>
+<p><code>kind</code> is one of <code>invalid_request</code>, <code>aggregate_not_ready</code>, <code>aggregate_missing</code>,
+<code>sql_rejected</code>, or <code>timeout</code>. When a metric or tile fails with an aggregate
+error, <code>workspace_status_tool</code> reports which processors are <code>ready</code>, <code>stale</code>,
+<code>unpublished</code>, or <code>missing</code>, using the same load a query performs.</p>
+<p><code>metric_chart_query</code> rejects a chart kind a metric cannot render, naming the
+kinds that are available, rather than substituting one silently. When a valid
+kind needs an axis or colour adjusted, it echoes what was asked in <code>requested</code>
+and explains the change in <code>warnings</code>; compare <code>chart</code> with <code>requested</code> before
+describing the result to a user.</p>
+<h2 id="chart-kinds">Chart Kinds<a class="headerlink" href="#chart-kinds" title="Permanent link">&para;</a></h2>
+<p>Each metric carries two lists. <code>chart_kinds</code> is what the LLM planner may
+choose: kinds that render from a plain x/y/colour/facet spec.
+<code>tool_chart_kinds</code> is the wider set an explicit caller may request, where the
+kind's own inputs go in <code>chart_fields</code>:</p>
+<table>
+<thead>
 <tr>
-<td><code>freshness_get</code></td>
-<td>Return metric freshness metadata</td>
+<th>Kind</th>
+<th>Required <code>chart_fields</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>funnel</code></td>
+<td><code>stages</code></td>
+</tr>
+<tr>
+<td><code>combo</code></td>
+<td><code>secondary_metric</code> (optional <code>primary_mark</code>, <code>shared_y_axis</code>)</td>
+</tr>
+<tr>
+<td><code>interval</code></td>
+<td><code>lower_output</code>, <code>upper_output</code></td>
+</tr>
+<tr>
+<td><code>treemap</code>, <code>sankey</code></td>
+<td><code>path</code> (two or more dimensions)</td>
+</tr>
+<tr>
+<td><code>boxplot</code>, <code>histogram</code></td>
+<td><code>property</code></td>
+</tr>
+<tr>
+<td><code>bar_polar</code></td>
+<td><code>theta</code></td>
+</tr>
+<tr>
+<td><code>pareto</code>, <code>waterfall</code>, <code>experiment_z_score</code>, <code>experiment_odds_ratio</code></td>
+<td>none beyond <code>x</code> and <code>y</code></td>
+</tr>
+<tr>
+<td><code>gauge</code>, <code>gain_curve</code>, <code>lift_curve</code></td>
+<td>none</td>
 </tr>
 </tbody>
 </table>
+<p><code>facet_row</code>, <code>line_dash</code>, <code>goal_line</code>, <code>x_axis_title</code>, and <code>y_axis_title</code> work
+with any kind. A missing required field is named in the error. Fields a kind
+does not use are dropped rather than echoed back, so the returned spec is
+exactly what the chart factory will draw. A combo's secondary metric is
+queried over the same dimensions and joined onto the rows, the same join the
+dashboard tile path performs.</p>
+<h2 id="rendered-charts">Rendered Charts<a class="headerlink" href="#rendered-charts" title="Permanent link">&para;</a></h2>
+<p><code>tile_query</code> and <code>metric_chart_query</code> take a <code>render</code> option, so a client can
+see the chart rather than only its rows. The figure comes from the same chart
+factory the report page uses.</p>
+<table>
+<thead>
+<tr>
+<th><code>render</code></th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>none</code> (default)</td>
+<td>Rows only</td>
+</tr>
+<tr>
+<td><code>png</code></td>
+<td>The rendered image, attached as an image content block</td>
+</tr>
+<tr>
+<td><code>html</code></td>
+<td>A self-contained interactive page written to disk; the payload carries its <code>path</code></td>
+</tr>
+<tr>
+<td><code>html_cdn</code></td>
+<td>The same page with Plotly loaded from its CDN — about 13 KB instead of 4 MB, but it needs a network</td>
+</tr>
+<tr>
+<td><code>spec</code></td>
+<td>The Plotly figure spec, for clients that draw Plotly themselves</td>
+</tr>
+</tbody>
+</table>
+<p>HTML is written rather than inlined: it is only useful in a browser, and the
+markup would otherwise spend the response on something the caller cannot
+render. Files go to <code>--render-dir</code>, defaulting to <code>valuestream-renders</code> under
+the system temp directory — never into the workspace.</p>
+<p>Because the page is a file and only its path is returned, embedding Plotly's
+JavaScript costs file size rather than response size, so <code>html</code> embeds it by
+default: the page opens offline and keeps working after the CDN's current
+version moves on. Use <code>html_cdn</code> when a small file matters more.</p>
+<p>PNG needs the optional <code>viz</code> extra:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>viz<span class="w">    </span><span class="c1"># installs kaleido</span>
+</code></pre></div>
+<p>Without it, <code>render="png"</code> returns a <code>dependency_missing</code> error naming the
+install command and pointing at <code>render="html"</code>. Kaleido drives a headless
+Chrome, so the first render in a process pays a browser start-up cost.</p>
+<h2 id="response-size">Response Size<a class="headerlink" href="#response-size" title="Permanent link">&para;</a></h2>
+<p>Two options keep responses small on a large catalog:</p>
+<ul>
+<li><code>metric_list</code> defaults to <code>detail="compact"</code> and reports <code>matched_metrics</code>,
+  <code>returned_metrics</code>, and <code>truncated</code>.</li>
+<li><code>metric_query</code> defaults to <code>provenance="summary"</code>, which replaces the
+  contributing chunk and run id lists with counts, and to
+  <code>include_curves=false</code>, which omits the roc/pr point arrays. Set
+  <code>provenance="full"</code> or <code>include_curves=true</code> when you need them. The HTTP
+  API takes the same <code>include_curves</code> flag on <code>POST /metrics/{name}/query</code>.</li>
+</ul>
 <h2 id="query-criteria-semantics">Query Criteria Semantics<a class="headerlink" href="#query-criteria-semantics" title="Permanent link">&para;</a></h2>
 <p>Both <code>metric_query</code>-style tools and <code>POST /metrics/{name}/query</code> accept the
 same intent fields:</p>
