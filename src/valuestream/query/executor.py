@@ -1187,9 +1187,18 @@ def _derive_contingency_test(
     _ensure_columns(frame, [metric.variant_column, "Positives", "Negatives"], "contingency_test")
     out: list[dict[str, Any]] = []
     for groups, rows in _partition_groups(frame, group_columns):
-        variants = rows.group_by(metric.variant_column).agg(
-            pl.col("Positives").sum(),
-            pl.col("Negatives").sum(),
+        # Odds ratio and z-score are directional: contingency_tests reads the
+        # first two valid rows as test and control, so OR inverts and z flips
+        # sign if the variants swap places. Polars' group_by emits groups in
+        # arbitrary order, which made the readout differ between identical
+        # runs; sorting by variant pins the direction to the variant label.
+        variants = (
+            rows.group_by(metric.variant_column)
+            .agg(
+                pl.col("Positives").sum(),
+                pl.col("Negatives").sum(),
+            )
+            .sort(metric.variant_column, nulls_last=True)
         )
         positives = _sum_column(variants, "Positives")
         negatives = _sum_column(variants, "Negatives")

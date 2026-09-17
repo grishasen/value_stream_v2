@@ -133,11 +133,19 @@ catalog-v2 distribution processors use the bulk construction plan.
 
 **Merge**:
 ```text
+blobs = sorted(blobs)                  # content-ordered, see below
 merged = tdigest_double.deserialize(blobs[0])
 for b in blobs[1:]:
     merged.merge(tdigest_double.deserialize(b))
 return merged.serialize()
 ```
+
+A t-digest merge is deterministic but **not associative**: folding the same
+payloads in a different order produces a different centroid layout and slightly
+different quantiles. Group members reach the merge in aggregate row order, which
+follows parquet part order and chunk publication order and is therefore
+incidental to the data. The engine sorts payloads by their bytes before merging,
+so a group yields the same digest however its rows happened to be laid out.
 
 **Edge case — empty input**:
 If a group has zero values for a property, the engine writes a serialized empty
@@ -165,11 +173,32 @@ return edges, masses
 **Default**: `k = 200` (≈ 1.65% normalized rank error two-sided at 0.5).
 KLL is mergeable, has stronger formal error guarantees than t-digest, and serializes to ~1.5 KB.
 
-Use KLL where SLA-bound percentile errors matter; use t-digest where compactness and per-quantile speed matter.
-
 Build / merge / quantile mirror t-digest with `k=200`; the native bulk array is
 contiguous writable `float32`, and groups below the same 32-value threshold use
 scalar updates.
+
+**KLL is not reproducible.** Its compaction step chooses which half of a buffer
+to keep at random, and the `datasketches` Python binding exposes no seed, so
+`build()` and `merge()` return different bytes for identical values in identical
+order. Repeated queries over unchanged aggregates therefore return different
+quantiles — measured on a real workspace at ~0.4% relative at p25 and ~11% at
+p90, the tail being wider because a small rank error moves the value a long way
+where the density is low. The same applies to `req` and the classic `quantiles`
+sketch; **t-digest is the only deterministic quantile state**, which is why
+`quantile_engine` defaults to `tdigest`.
+
+Choose KLL only when its stronger formal rank-error guarantee is worth giving up
+run-to-run reproducibility — never for a metric feeding a fingerprint, a golden
+test, a cached result, or a threshold that triggers an alert. If a metric already
+reads a `kll` state and its processor also stores a `*_tdigest` state over the
+same source column, repointing the metric's `state` is a catalog-only change and
+needs no reprocessing:
+
+```yaml
+Propensity_Distribution:
+  kind: distribution
+  state: Propensity_tdigest   # was Propensity_kll
+```
 
 ---
 
@@ -714,6 +743,13 @@ return { g_test_stat: G, g_p_val: p }
 - All tests are two-sided unless stated otherwise.
 - No Yates correction.
 - Sample odds ratio (not unconditional MLE) is reported; CI uses Fisher's noncentral hypergeometric (`scipy`'s `kind="sample"`).
+- **Row order is the variant label, ascending.** `chi2_stat` and `g_stat` are
+  invariant to how the table's rows are ordered, but the odds ratio and `z_score`
+  are directional: the first row is read as test and the second as control, so
+  swapping them inverts the odds ratio (`OR` → `1/OR`) and flips the sign of `z`.
+  A `contingency_test` metric has no `test_role`/`control_role` to declare the
+  direction — unlike `proportion_test` (§3.5) — so the engine sorts variants by
+  the `variant_column` value and reports the direction relative to that.
 
 ---
 
@@ -790,7 +826,8 @@ Whenever Value Stream claims a number is "exact":
 
 Whenever Value Stream claims a number is "approximate":
 - Quantiles via t-digest: error ≤ 0.3% at the median, ≤ 0.05% at p99 with `k=500`.
-- Quantiles via KLL: error ≤ 1.65% normalized rank with `k=200`.
+- Quantiles via KLL: error ≤ 1.65% normalized rank with `k=200`. Randomized, so
+  repeated queries over unchanged data differ (see §2.5); t-digest does not.
 - Distinct counts via CPC: report the sketch's lower/upper bounds; generated states use `lg_k=11`.
 - Distinct counts via legacy/opt-in HLL: ±1.6% RSE with `lg_k=12`.
 - Set operations via Theta: as above.

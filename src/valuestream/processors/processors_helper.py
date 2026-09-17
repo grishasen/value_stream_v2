@@ -512,11 +512,25 @@ def _merge_sketch_column(
     return frame.with_columns(
         pl.col(helper)
         .map_elements(
-            lambda values: merge_fn(series_or_list(values), **{kwarg: k}),
+            lambda values: merge_fn(_stable_merge_order(values), **{kwarg: k}),
             return_dtype=pl.Binary,
         )
         .alias(name)
     ).drop(helper)
+
+
+def _stable_merge_order(values: Any) -> list[bytes]:
+    """Order a group's serialized sketches by content before merging.
+
+    Sketch merges are not associative: t-digest centroid layout, and therefore
+    the quantiles read back out, depend on the order payloads are folded in.
+    Group members arrive in aggregate row order, which is incidental — it
+    follows parquet part order and chunk publication order, so the same data
+    re-partitioned yields different estimates. Sorting by the payload bytes is
+    a content-derived key, so a group merges identically however its rows were
+    laid out. Nulls drop here rather than inside each state's merge.
+    """
+    return sorted(bytes(value) for value in series_or_list(values) if value)
 
 
 def weighted_mean_expr(value_col: str, weight_col: str) -> pl.Expr:
