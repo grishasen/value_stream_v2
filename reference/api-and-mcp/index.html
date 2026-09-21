@@ -2812,20 +2812,27 @@ JSON) — and two prompts, <code>explore_workspace</code> and <code>starter_ques
 A tile is not just a metric query: the tile tools apply its authored filters,
 infer its grain and group-by from the chart, join a combo's secondary metric,
 and remap a histogram's property to its distribution metric, so the numbers
-match the report. This is also the only way to reach chart kinds the ad-hoc
-chart contract cannot express, such as funnel, combo, interval, or treemap.</p>
+match the report. The ad-hoc chart tool also supports extended kinds through
+<code>chart_fields</code>, described below.</p>
 <p>Authored tile filters define the metric's valid population, so they take
 precedence over filters passed to the tool. Filters a tile cannot apply come
 back in <code>ignored_filters</code> rather than being silently dropped, and sketch/state
 blob columns are removed from tile rows and listed in <code>masked_columns</code>.</p>
+<p><code>applied_filters</code> contains the effective filters after authored overrides,
+including authored filters the caller did not supply. <code>overridden_filters</code>
+contains the caller's original values where they conflict with authored scope.
+For example, authored <code>Channel: Web</code> overrides requested <code>Channel: Email</code>:
+the applied value is <code>Web</code>, and <code>overridden_filters</code> reports <code>Email</code>.
+Both tile and KPI tools use this contract. The report page and MCP use the
+same KPI service for values, comparison windows, deltas, and sparklines.</p>
 <h2 id="errors-and-substitutions">Errors and Substitutions<a class="headerlink" href="#errors-and-substitutions" title="Permanent link">&para;</a></h2>
-<p>Tools return a structured payload rather than raising, so the diagnosis
-reaches the client:</p>
+<p>Tool execution failures return an MCP result with <code>isError: true</code>. The
+diagnosis is included in both text content and <code>structuredContent</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"aggregate_not_ready"</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"AggregateNotReadyError"</span><span class="p">,</span>
 <span class="w">           </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"remediation"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Run ingestion for this workspace..."</span><span class="p">}}</span>
 </code></pre></div>
 <p><code>kind</code> is one of <code>invalid_request</code>, <code>aggregate_not_ready</code>, <code>aggregate_missing</code>,
-<code>sql_rejected</code>, or <code>timeout</code>. When a metric or tile fails with an aggregate
+<code>sql_rejected</code>, <code>timeout</code>, or <code>dependency_missing</code>. When a metric or tile fails with an aggregate
 error, <code>workspace_status_tool</code> reports which processors are <code>ready</code>, <code>stale</code>,
 <code>unpublished</code>, or <code>missing</code>, using the same load a query performs.</p>
 <p><code>metric_chart_query</code> rejects a chart kind a metric cannot render, naming the
@@ -2886,6 +2893,10 @@ does not use are dropped rather than echoed back, so the returned spec is
 exactly what the chart factory will draw. A combo's secondary metric is
 queried over the same dimensions and joined onto the rows, the same join the
 dashboard tile path performs.</p>
+<p>Supported row and column facets are preserved in the chart-factory tile;
+facet dimensions and hierarchy paths are included in the aggregate grouping.
+Rendering uses the original aggregate frame, including sketches where needed.
+Only the response rows have binary sketch columns removed.</p>
 <h2 id="rendered-charts">Rendered Charts<a class="headerlink" href="#rendered-charts" title="Permanent link">&para;</a></h2>
 <p><code>tile_query</code> and <code>metric_chart_query</code> take a <code>render</code> option, so a client can
 see the chart rather than only its rows. The figure comes from the same chart
@@ -2923,7 +2934,13 @@ factory the report page uses.</p>
 <p>HTML is written rather than inlined: it is only useful in a browser, and the
 markup would otherwise spend the response on something the caller cannot
 render. Files go to <code>--render-dir</code>, defaulting to <code>valuestream-renders</code> under
-the system temp directory — never into the workspace.</p>
+the system temp directory. An explicitly supplied <code>--render-dir</code> is used as given.</p>
+<p>Each export has a unique, exclusively created filename, so repeated calls and
+different workspaces cannot overwrite previous charts. The returned path is
+absolute. Files have a seven-day retention period, reported as <code>expires_at</code>;
+subsequent exports remove expired files created by this renderer. Unrelated
+files and symlinks are left untouched. Copy exports elsewhere to keep them.
+PNG responses include an image block and structured query metadata.</p>
 <p>Because the page is a file and only its path is returned, embedding Plotly's
 JavaScript costs file size rather than response size, so <code>html</code> embeds it by
 default: the page opens offline and keeps working after the CDN's current
@@ -2932,8 +2949,12 @@ version moves on. Use <code>html_cdn</code> when a small file matters more.</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>viz<span class="w">    </span><span class="c1"># installs kaleido</span>
 </code></pre></div>
 <p>Without it, <code>render="png"</code> returns a <code>dependency_missing</code> error naming the
-install command and pointing at <code>render="html"</code>. Kaleido drives a headless
-Chrome, so the first render in a process pays a browser start-up cost.</p>
+install command and pointing at <code>render="html"</code>. Chrome/Chromium must also
+be installed; <code>BROWSER_PATH</code> can select its executable. Availability checks
+verify the dependency and executable without launching a browser. Browser
+startup failures return an actionable error with the HTML alternative.
+Kaleido drives a headless Chrome, so the first render in a process pays a
+browser start-up cost.</p>
 <h2 id="response-size">Response Size<a class="headerlink" href="#response-size" title="Permanent link">&para;</a></h2>
 <p>Two options keep responses small on a large catalog:</p>
 <ul>
@@ -2945,6 +2966,18 @@ Chrome, so the first render in a process pays a browser start-up cost.</p>
   <code>provenance="full"</code> or <code>include_curves=true</code> when you need them. The HTTP
   API takes the same <code>include_curves</code> flag on <code>POST /metrics/{name}/query</code>.</li>
 </ul>
+<p><code>metric_list</code>, <code>metric_query</code>, <code>metric_chart_query</code>, and <code>tile_query</code> accept
+<code>offset</code> (default 0) and <code>limit</code> (1–500). Follow <code>next_offset</code> until it is null.
+Catalog pages are ordered by metric name. Query pages follow query ordering;
+keep filters, ordering, and the underlying workspace unchanged between calls.
+Pagination does not pin a snapshot across ingestion or catalog edits.</p>
+<p>Row responses expose the total <code>row_count</code> before pagination, <code>returned_rows</code>,
+<code>offset</code>, <code>next_offset</code>, and <code>truncated</code> (whether more rows remain after this
+page). The chart tool renders its returned page; the authored tile tool renders
+the full tile while limiting response rows. These query tools publish typed
+output schemas, and enum/limit constraints appear in their input schemas.
+Tool annotations identify read-only queries, additive rendering operations,
+and the external LLM call made by <code>chat</code>.</p>
 <h2 id="query-criteria-semantics">Query Criteria Semantics<a class="headerlink" href="#query-criteria-semantics" title="Permanent link">&para;</a></h2>
 <p>Both <code>metric_query</code>-style tools and <code>POST /metrics/{name}/query</code> accept the
 same intent fields:</p>
@@ -2961,13 +2994,19 @@ same intent fields:</p>
 <li><code>quantiles: true</code> adds the Median/p25/p75/p90/p95 suite for digest metrics.</li>
 <li>Grain selection is deterministic inside Value Stream: clients supply query
   criteria (time axis, dimensions, date bounds), never a physical grain.</li>
-<li>Result row counts are capped before rendering or returning.</li>
+<li>Returned rows are capped; authored tile rendering retains the full tile.</li>
 </ul>
 <h2 id="provenance-envelope">Provenance Envelope<a class="headerlink" href="#provenance-envelope" title="Permanent link">&para;</a></h2>
 <p>Metric-query responses include a provenance object: catalog and computation
 hashes, selected physical grain, contributing pipeline run IDs and chunk IDs,
 scanned aggregate-row count, and latest creation time. This is the same
 envelope <code>query_metric_result</code> and the SDK's <code>to_result()</code> return.</p>
+<p>Tile and KPI responses also include freshness and a <code>provenance</code> list, captured
+from the actual queries rather than a second scan. Each entry includes its
+metric, query options (including date bounds), catalog/computation hashes,
+selected grain, and contributing chunk/run counts. A combo includes both
+metrics; a KPI includes the current value, comparison, and sparkline queries
+when applicable.</p>
 <h2 id="governed-sql-rules">Governed SQL Rules<a class="headerlink" href="#governed-sql-rules" title="Permanent link">&para;</a></h2>
 <p>With <code>--enable-sql</code>, SQL runs over <code>meta/aggregate_views.duckdb</code> (config-hash
 and successful-chunk filtered views) plus any <code>meta/metric_export_*.duckdb</code>
