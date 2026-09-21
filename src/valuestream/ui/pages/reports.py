@@ -11,7 +11,6 @@ import importlib.util
 import json
 import time
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from io import StringIO
 from typing import Any
 
@@ -22,6 +21,7 @@ import yaml
 from valuestream.charts import prepare_table_data, render_chart, table_row_colors
 from valuestream.config import model
 from valuestream.query import AggregateNotReadyError
+from valuestream.reporting.kpi import KpiBundle, kpi_bundle
 from valuestream.ui import builder, components, config_help
 from valuestream.ui.context import ValueStreamContext
 from valuestream.ui.data import (
@@ -947,17 +947,6 @@ def _kpi_strip(
     components.metric_strip(items, columns=min(len(items), 5) or None, key=f"reports_{page.id}")
 
 
-@dataclass(frozen=True)
-class KpiBundle:
-    """Display-ready values for one explicitly configured KPI."""
-
-    value: float | int | str
-    delta: float | int | None = None
-    delta_description: str | None = None
-    sparkline: tuple[float, ...] | None = None
-    period_description: str = "All time"
-
-
 def _kpi_bundle(
     ctx: ValueStreamContext,
     tile: model.Tile,
@@ -966,177 +955,15 @@ def _kpi_bundle(
     start: dt.date | None,
     end: dt.date | None,
 ) -> KpiBundle:
-    tile_dict = tile_to_dict(tile)
-    metric = ctx.catalog.metrics.metrics[tile.metric]
-    output_columns = builder.metric_output_columns(tile.metric, metric)
-    selected_output = str(tile_dict.get("metric_output") or "")
-    value_column = (
-        selected_output if selected_output in output_columns else output_columns[0]
-    )
+    """Use shared KPI semantics while keeping the report page's query cache."""
+
     applied, _ = partition_filters_for_tile(ctx.catalog, tile, filters)
-    # Fixed tile filters define the KPI population; interactive page filters
-    # may narrow other fields but cannot replace that authored scope.
-    query_filters = {**applied, **dict(tile_dict.get("filters") or {})}
-    kpi = tile.kpi or model.KpiSpec()
-    series = pl.DataFrame()
-    if kpi.sparkline_grain or kpi.comparison == "previous_period":
-        series = query_metric_cached(
-            ctx.workspace,
-            ctx.catalog,
-            tile.metric,
-            filters=query_filters,
-            grain=kpi.sparkline_grain or "daily",
-        )
-
-    current_start, current_end = start, end
-    period_description = "All time"
-    if start is not None and end is not None:
-        period_description = f"{start.isoformat()} to {end.isoformat()}"
-    elif kpi.comparison == "previous_period":
-        latest = _latest_series_date(series)
-        if latest is not None:
-            current_start, current_end = _calendar_period(latest, kpi.comparison_period)
-            period_description = _period_description(
-                current_start, current_end, kpi.comparison_period
-            )
-
-    current_rows = query_metric_cached(
-        ctx.workspace,
-        ctx.catalog,
-        tile.metric,
-        filters=query_filters,
-        grain="summary",
-        start=current_start,
-        end=current_end,
-    )
-    value = _scalar_value(current_rows, value_column)
-    delta: float | int | None = None
-    delta_description: str | None = None
-    if kpi.comparison == "previous_period" and current_start and current_end:
-        day_count = (current_end - current_start).days + 1
-        previous_end = current_start - dt.timedelta(days=1)
-        previous_start = previous_end - dt.timedelta(days=day_count - 1)
-        previous_rows = query_metric_cached(
-            ctx.workspace,
-            ctx.catalog,
-            tile.metric,
-            filters=query_filters,
-            grain="summary",
-            start=previous_start,
-            end=previous_end,
-        )
-        previous_value = _scalar_value(previous_rows, value_column)
-        if isinstance(value, int | float) and isinstance(previous_value, int | float):
-            delta = value - previous_value
-            delta_description = _comparison_period_label(previous_start, previous_end)
-    elif kpi.target is not None and isinstance(value, int | float):
-        delta = value - kpi.target
-        delta_description = f"Target {kpi.target:g}"
-
-    sparkline = _sparkline_values(series, value_column, kpi.sparkline_points)
-    return KpiBundle(
-        value=value,
-        delta=delta,
-        delta_description=delta_description,
-        sparkline=sparkline,
-        period_description=period_description,
-    )
-
-
-def _scalar_value(rows: pl.DataFrame, column: str) -> float | int | str:
-    if rows.is_empty() or column not in rows.columns:
-        return "n/a"
-    values = rows.get_column(column).drop_nulls()
-    if values.len() != 1:
-        return "n/a"
-    value = values.item()
-    return value if isinstance(value, int | float) else "n/a"
-
-
-def _sparkline_values(
-    rows: pl.DataFrame,
-    column: str,
-    points: int,
-) -> tuple[float, ...] | None:
-    if rows.is_empty() or column not in rows.columns or not rows.schema[column].is_numeric():
-        return None
-    time_column = _series_time_column(rows)
-    ordered = rows.sort(time_column) if time_column else rows
-    values = ordered.get_column(column).drop_nulls().tail(points).to_list()
-    return tuple(float(value) for value in values) if len(values) >= 2 else None
-
-
-def _latest_series_date(rows: pl.DataFrame) -> dt.date | None:
-    column = _series_time_column(rows)
-    if column is None or rows.is_empty():
-        return None
-    values = rows.get_column(column).drop_nulls().cast(pl.String).to_list()
-    parsed = [_parse_period_date(str(value)) for value in values]
-    return max((value for value in parsed if value is not None), default=None)
-
-
-def _series_time_column(rows: pl.DataFrame) -> str | None:
-    return next(
-        (
-            candidate
-            for candidate in ("Day", "day", "as_of_date", "Week", "Month", "month")
-            if candidate in rows.columns
+    return kpi_bundle(
+        ctx.workspace, ctx.catalog, tile, filters=applied, start=start, end=end,
+        query_fn=lambda workspace, metric, **options: query_metric_cached(
+            workspace, ctx.catalog, metric, **options
         ),
-        None,
     )
-
-
-def _parse_period_date(value: str) -> dt.date | None:
-    for pattern in ("%Y-%m-%d", "%Y-%m"):
-        try:
-            parsed = dt.datetime.strptime(value[:10], pattern).date()
-            if pattern == "%Y-%m":
-                return dt.date(parsed.year, parsed.month, 1)
-            return parsed
-        except ValueError:
-            continue
-    return None
-
-
-def _calendar_period(value: dt.date, period: str) -> tuple[dt.date, dt.date]:
-    if period == "day":
-        return value, value
-    if period == "week":
-        start = value - dt.timedelta(days=value.weekday())
-        return start, start + dt.timedelta(days=6)
-    if period == "month":
-        return (
-            dt.date(value.year, value.month, 1),
-            dt.date(value.year, value.month, calendar.monthrange(value.year, value.month)[1]),
-        )
-    if period == "quarter":
-        first_month = 3 * ((value.month - 1) // 3) + 1
-        last_month = first_month + 2
-        return (
-            dt.date(value.year, first_month, 1),
-            dt.date(
-                value.year,
-                last_month,
-                calendar.monthrange(value.year, last_month)[1],
-            ),
-        )
-    return dt.date(value.year, 1, 1), dt.date(value.year, 12, 31)
-
-
-def _period_description(start: dt.date, end: dt.date, period: str) -> str:
-    if period == "month":
-        return start.strftime("%B %Y")
-    if period == "quarter":
-        return f"Q{((start.month - 1) // 3) + 1} {start.year}"
-    if period == "year":
-        return str(start.year)
-    return f"{start.isoformat()} to {end.isoformat()}"
-
-
-def _comparison_period_label(start: dt.date, end: dt.date) -> str:
-    if start.year == end.year and start.month == end.month:
-        return f"vs {start.strftime('%b')} {start.day}-{end.day}, {end.year}"
-    return f"vs {start.strftime('%b')} {start.day}-{end.strftime('%b')} {end.day}, {end.year}"
 
 
 def _kpi_help(tile_dict: Mapping[str, Any], bundle: KpiBundle) -> str:

@@ -13,7 +13,10 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import json
+import os
 import re
+import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -32,19 +35,26 @@ _MAX_SCALE = 3
 DEFAULT_WIDTH = 1000
 DEFAULT_HEIGHT = 600
 DEFAULT_SCALE = 2
+RENDER_RETENTION_SECONDS = 7 * 24 * 60 * 60
 
 RENDER_MODES = ("none", "png", "html", "html_cdn", "spec")
 
 _PNG_HINT = (
     "PNG rendering requires the optional `viz` dependencies (kaleido). Install them with "
-    "`uv sync --extra viz`, or use render=\"html\" for an interactive chart instead."
+    "`uv sync --extra viz` and ensure Chrome/Chromium is installed (or set BROWSER_PATH). "
+    'Use render="html" for an interactive chart instead.'
 )
 
 
 def png_available() -> bool:
-    """Return whether the optional PNG export dependency is installed."""
+    """Check the optional dependency and browser executable without launching it."""
 
-    return importlib.util.find_spec("kaleido") is not None
+    if importlib.util.find_spec("kaleido") is None:
+        return False
+    from choreographer.browsers.chromium import Chromium  # noqa: PLC0415
+
+    browser = os.environ.get("BROWSER_PATH") or Chromium.find_browser(skip_local=False)
+    return bool(browser and Path(browser).is_file() and os.access(browser, os.X_OK))
 
 
 def figure_for_tile(
@@ -69,14 +79,21 @@ def figure_png(
 
     if not png_available():
         raise RuntimeError(_PNG_HINT)
-    return bytes(
-        figure.to_image(
-            format="png",
-            width=_clamp(width, _MIN_PIXELS, _MAX_PIXELS),
-            height=_clamp(height, _MIN_PIXELS, _MAX_PIXELS),
-            scale=_clamp(scale, 1, _MAX_SCALE),
+    try:
+        return bytes(
+            figure.to_image(
+                format="png",
+                width=_clamp(width, _MIN_PIXELS, _MAX_PIXELS),
+                height=_clamp(height, _MIN_PIXELS, _MAX_PIXELS),
+                scale=_clamp(scale, 1, _MAX_SCALE),
+            )
         )
-    )
+    except (RuntimeError, OSError) as exc:
+        raise RuntimeError(
+            "PNG rendering failed. Verify Chrome/Chromium can start in this environment "
+            'and BROWSER_PATH points to its executable, or use render="html". '
+            f"Renderer detail: {exc}"
+        ) from exc
 
 
 def figure_html(figure: Any, *, title: str = "", embed_plotlyjs: bool = True) -> str:
@@ -90,9 +107,7 @@ def figure_html(figure: Any, *, title: str = "", embed_plotlyjs: bool = True) ->
     small file matters more than working without a network.
     """
 
-    html = str(
-        figure.to_html(include_plotlyjs=True if embed_plotlyjs else "cdn", full_html=True)
-    )
+    html = str(figure.to_html(include_plotlyjs=True if embed_plotlyjs else "cdn", full_html=True))
     if title:
         html = html.replace("<head>", f"<head><title>{_escape(title)}</title>", 1)
     return html
@@ -114,14 +129,38 @@ def write_render(
     """Write a rendered chart next to its siblings and return the path."""
 
     directory.mkdir(parents=True, exist_ok=True)
+    cleanup_renders(directory)
     stamp = dt.datetime.now(tz=dt.UTC).strftime("%Y%m%dT%H%M%S")
-    path = directory / f"{_slug(stem)}-{stamp}.{suffix}"
-    if isinstance(content, bytes):
-        path.write_bytes(content)
-    else:
-        path.write_text(content, encoding="utf-8")
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        prefix=f"valuestream-render-{_slug(stem)[:80]}-{stamp}-",
+        suffix=f".{suffix}",
+        dir=directory.resolve(),
+        delete=False,
+    ) as handle:
+        path = Path(handle.name)
+        try:
+            handle.write(content if isinstance(content, bytes) else content.encode("utf-8"))
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
     logger.info("Wrote rendered chart: path=%s bytes=%s", path, path.stat().st_size)
     return path
+
+
+def cleanup_renders(directory: Path) -> None:
+    """Expire only files allocated by this renderer; leave other files untouched."""
+
+    cutoff = time.time() - RENDER_RETENTION_SECONDS
+    pattern = r"valuestream-render-.+-[0-9]{8}T[0-9]{6}-[a-z0-9_]{8}\.(html|png)"
+    for path in directory.glob("valuestream-render-*"):
+        if not re.fullmatch(pattern, path.name) or path.is_symlink():
+            continue
+        try:
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning("Could not expire rendered chart %s: %s", path, exc)
 
 
 def _clamp(value: int, low: int, high: int) -> int:

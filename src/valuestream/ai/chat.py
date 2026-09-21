@@ -247,6 +247,7 @@ class ChatQueryResult:
     rows: pl.DataFrame
     query_summary: str
     freshness: str
+    row_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -745,6 +746,7 @@ def _extended_tile_fields(chart: ChartIntent) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     for intent_field, tile_key in (
         ("facet_row", "facet_row"),
+        ("facet_col", "facet_col"),
         ("line_dash", "line_dash"),
         ("x_axis_title", "x_axis_title"),
         ("y_axis_title", "y_axis_title"),
@@ -811,7 +813,7 @@ _KIND_TILE_FIELDS: dict[str, Callable[[ChartIntent], dict[str, Any]]] = {
     },
     "treemap": lambda chart: {"path": list(chart.path)},
     "sankey": lambda chart: {"path": list(chart.path)},
-    "boxplot": lambda chart: {"property": chart.property_name},
+    "boxplot": lambda chart: {"property": chart.property_name, "x": chart.x},
     "histogram": lambda chart: {"property": chart.property_name},
     "bar_polar": lambda chart: {"theta": chart.theta},
 }
@@ -1579,6 +1581,8 @@ def execute_chat_intent(
     workspace_path: str | Path,
     catalog: model.Catalog,
     intent: ChatIntent,
+    *,
+    offset: int = 0,
 ) -> ChatQueryResult:
     """Execute a validated chat intent through the aggregate query layer."""
 
@@ -1635,8 +1639,8 @@ def execute_chat_intent(
             start=_as_optional_date(intent.start),
             end=_as_optional_date(intent.end),
         )
-    if rows.height > intent.limit:
-        rows = rows.head(intent.limit)
+    row_count = rows.height
+    rows = rows.slice(offset, intent.limit)
     fresh = metric_freshness(workspace_path, catalog, intent.metric, grain=intent.grain)
     logger.info(
         "Executed chat aggregate query: metric=%s grain=%s rows=%s column_count=%s freshness=%s",
@@ -1651,6 +1655,7 @@ def execute_chat_intent(
         rows=rows,
         query_summary=_query_summary(intent),
         freshness=freshness_label(fresh),
+        row_count=row_count,
     )
 
 
@@ -2118,7 +2123,7 @@ def _with_chart_group_by(
     if chart is None:
         return group_by
     out = list(group_by)
-    for candidate in (chart.x, chart.color, chart.facet_col):
+    for candidate in (chart.x, chart.color, chart.facet_col, chart.facet_row, chart.line_dash, chart.theta, *chart.path):
         if candidate is None or _is_time_column(candidate):
             continue
         try:

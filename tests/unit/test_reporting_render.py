@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
 import polars as pl
@@ -120,3 +122,39 @@ def test_png_dimensions_are_clamped_to_something_a_client_can_show() -> None:
     image = figure_png(figure_for_tile(ROWS, TILE), width=99_999, height=1, scale=99)
 
     assert image.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+@pytest.mark.unit
+def test_repeated_renders_keep_distinct_paths_and_original_contents(tmp_path: Path) -> None:
+    paths = [
+        write_render(str(i), directory=tmp_path, stem="same", suffix="html") for i in range(20)
+    ]
+    assert len(set(paths)) == len(paths)
+    assert [path.read_text() for path in paths] == [str(i) for i in range(20)]
+
+
+@pytest.mark.unit
+def test_retention_only_removes_expired_renderer_owned_files(tmp_path: Path) -> None:
+    expired = write_render("old", directory=tmp_path, stem="same", suffix="html")
+    retained = write_render("new", directory=tmp_path, stem="same", suffix="html")
+    unrelated = tmp_path / "valuestream-render-user-document.html"
+    unrelated.write_text("keep")
+    old = time.time() - render_module.RENDER_RETENTION_SECONDS - 10
+    for path in (expired, unrelated):
+        os.utime(path, (old, old))
+    render_module.cleanup_renders(tmp_path)
+    assert not expired.exists()
+    assert retained.read_text() == "new"
+    assert unrelated.read_text() == "keep"
+
+
+@pytest.mark.unit
+def test_png_browser_failure_points_to_html(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(render_module, "png_available", lambda: True)
+
+    class FailedBrowser:
+        def to_image(self, **kwargs: object) -> bytes:
+            raise RuntimeError("Chrome closed immediately")
+
+    with pytest.raises(RuntimeError, match=r'BROWSER_PATH.*render="html"'):
+        figure_png(FailedBrowser())

@@ -96,18 +96,26 @@ JSON) — and two prompts, `explore_workspace` and `starter_questions`.
 A tile is not just a metric query: the tile tools apply its authored filters,
 infer its grain and group-by from the chart, join a combo's secondary metric,
 and remap a histogram's property to its distribution metric, so the numbers
-match the report. This is also the only way to reach chart kinds the ad-hoc
-chart contract cannot express, such as funnel, combo, interval, or treemap.
+match the report. The ad-hoc chart tool also supports extended kinds through
+`chart_fields`, described below.
 
 Authored tile filters define the metric's valid population, so they take
 precedence over filters passed to the tool. Filters a tile cannot apply come
 back in `ignored_filters` rather than being silently dropped, and sketch/state
 blob columns are removed from tile rows and listed in `masked_columns`.
 
+`applied_filters` contains the effective filters after authored overrides,
+including authored filters the caller did not supply. `overridden_filters`
+contains the caller's original values where they conflict with authored scope.
+For example, authored `Channel: Web` overrides requested `Channel: Email`:
+the applied value is `Web`, and `overridden_filters` reports `Email`.
+Both tile and KPI tools use this contract. The report page and MCP use the
+same KPI service for values, comparison windows, deltas, and sparklines.
+
 ## Errors and Substitutions
 
-Tools return a structured payload rather than raising, so the diagnosis
-reaches the client:
+Tool execution failures return an MCP result with `isError: true`. The
+diagnosis is included in both text content and `structuredContent`:
 
 ```json
 {"error": {"kind": "aggregate_not_ready", "type": "AggregateNotReadyError",
@@ -115,7 +123,7 @@ reaches the client:
 ```
 
 `kind` is one of `invalid_request`, `aggregate_not_ready`, `aggregate_missing`,
-`sql_rejected`, or `timeout`. When a metric or tile fails with an aggregate
+`sql_rejected`, `timeout`, or `dependency_missing`. When a metric or tile fails with an aggregate
 error, `workspace_status_tool` reports which processors are `ready`, `stale`,
 `unpublished`, or `missing`, using the same load a query performs.
 
@@ -150,6 +158,11 @@ exactly what the chart factory will draw. A combo's secondary metric is
 queried over the same dimensions and joined onto the rows, the same join the
 dashboard tile path performs.
 
+Supported row and column facets are preserved in the chart-factory tile;
+facet dimensions and hierarchy paths are included in the aggregate grouping.
+Rendering uses the original aggregate frame, including sketches where needed.
+Only the response rows have binary sketch columns removed.
+
 ## Rendered Charts
 
 `tile_query` and `metric_chart_query` take a `render` option, so a client can
@@ -167,7 +180,14 @@ factory the report page uses.
 HTML is written rather than inlined: it is only useful in a browser, and the
 markup would otherwise spend the response on something the caller cannot
 render. Files go to `--render-dir`, defaulting to `valuestream-renders` under
-the system temp directory — never into the workspace.
+the system temp directory. An explicitly supplied `--render-dir` is used as given.
+
+Each export has a unique, exclusively created filename, so repeated calls and
+different workspaces cannot overwrite previous charts. The returned path is
+absolute. Files have a seven-day retention period, reported as `expires_at`;
+subsequent exports remove expired files created by this renderer. Unrelated
+files and symlinks are left untouched. Copy exports elsewhere to keep them.
+PNG responses include an image block and structured query metadata.
 
 Because the page is a file and only its path is returned, embedding Plotly's
 JavaScript costs file size rather than response size, so `html` embeds it by
@@ -181,8 +201,12 @@ uv sync --extra viz    # installs kaleido
 ```
 
 Without it, `render="png"` returns a `dependency_missing` error naming the
-install command and pointing at `render="html"`. Kaleido drives a headless
-Chrome, so the first render in a process pays a browser start-up cost.
+install command and pointing at `render="html"`. Chrome/Chromium must also
+be installed; `BROWSER_PATH` can select its executable. Availability checks
+verify the dependency and executable without launching a browser. Browser
+startup failures return an actionable error with the HTML alternative.
+Kaleido drives a headless Chrome, so the first render in a process pays a
+browser start-up cost.
 
 ## Response Size
 
@@ -195,6 +219,20 @@ Two options keep responses small on a large catalog:
   `include_curves=false`, which omits the roc/pr point arrays. Set
   `provenance="full"` or `include_curves=true` when you need them. The HTTP
   API takes the same `include_curves` flag on `POST /metrics/{name}/query`.
+
+`metric_list`, `metric_query`, `metric_chart_query`, and `tile_query` accept
+`offset` (default 0) and `limit` (1–500). Follow `next_offset` until it is null.
+Catalog pages are ordered by metric name. Query pages follow query ordering;
+keep filters, ordering, and the underlying workspace unchanged between calls.
+Pagination does not pin a snapshot across ingestion or catalog edits.
+
+Row responses expose the total `row_count` before pagination, `returned_rows`,
+`offset`, `next_offset`, and `truncated` (whether more rows remain after this
+page). The chart tool renders its returned page; the authored tile tool renders
+the full tile while limiting response rows. These query tools publish typed
+output schemas, and enum/limit constraints appear in their input schemas.
+Tool annotations identify read-only queries, additive rendering operations,
+and the external LLM call made by `chat`.
 
 ## Query Criteria Semantics
 
@@ -213,7 +251,7 @@ same intent fields:
 - `quantiles: true` adds the Median/p25/p75/p90/p95 suite for digest metrics.
 - Grain selection is deterministic inside Value Stream: clients supply query
   criteria (time axis, dimensions, date bounds), never a physical grain.
-- Result row counts are capped before rendering or returning.
+- Returned rows are capped; authored tile rendering retains the full tile.
 
 ## Provenance Envelope
 
@@ -221,6 +259,13 @@ Metric-query responses include a provenance object: catalog and computation
 hashes, selected physical grain, contributing pipeline run IDs and chunk IDs,
 scanned aggregate-row count, and latest creation time. This is the same
 envelope `query_metric_result` and the SDK's `to_result()` return.
+
+Tile and KPI responses also include freshness and a `provenance` list, captured
+from the actual queries rather than a second scan. Each entry includes its
+metric, query options (including date bounds), catalog/computation hashes,
+selected grain, and contributing chunk/run counts. A combo includes both
+metrics; a KPI includes the current value, comparison, and sparkline queries
+when applicable.
 
 ## Governed SQL Rules
 

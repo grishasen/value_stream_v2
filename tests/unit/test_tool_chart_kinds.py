@@ -101,9 +101,7 @@ EXTENDED_CASES: list[tuple[str, dict[str, Any]]] = [
 
 @pytest.mark.parametrize(("label", "kwargs"), EXTENDED_CASES, ids=[c[0] for c in EXTENDED_CASES])
 @pytest.mark.unit
-def test_tool_chart_kinds_render(
-    demo_workspace: Path, label: str, kwargs: dict[str, Any]
-) -> None:
+def test_tool_chart_kinds_render(demo_workspace: Path, label: str, kwargs: dict[str, Any]) -> None:
     catalog = load(demo_workspace)
     assert kwargs["chart_kind"] in allowed_tool_chart_kinds(catalog, METRIC), label
 
@@ -196,3 +194,34 @@ def test_fields_a_kind_ignores_do_not_reach_its_tile() -> None:
     assert intent.chart is not None
     assert intent.chart.stages == ()
     assert intent.chart.secondary_metric is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("facet", ["facet_col", "facet_row"])
+def test_combo_facets_are_preserved_and_included_in_query_dimensions(
+    demo_workspace: Path,
+    facet: str,
+) -> None:
+    catalog = load(demo_workspace)
+    fields: dict[str, Any] = {"secondary_metric": "VS_Interactions"}
+    params: dict[str, Any] = {}
+    if facet == "facet_col":
+        params[facet] = "Issue"
+    else:
+        fields[facet] = "Issue"
+    intent = chart_intent_from_parameters(
+        catalog,
+        metric=METRIC,
+        chart_kind="combo",
+        x="Channel",
+        y=METRIC,
+        group_by=["Channel"],
+        chart_fields=fields,
+        **params,
+    )
+    assert "Issue" in intent.group_by
+    tile = chart_tile_from_intent(intent)
+    assert tile[facet] == "Issue"
+    result = execute_chat_intent(demo_workspace, catalog, intent)
+    figure = render_chart(result.rows, tile)
+    assert len({trace.xaxis for trace in figure.data}) == 2

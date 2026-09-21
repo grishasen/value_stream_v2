@@ -16,6 +16,7 @@ from typing import Any
 import polars as pl
 import pytest
 
+from valuestream.ai.chat import TOOL_CHART_KINDS
 from valuestream.mcp import server as mcp_server
 from valuestream.query import AggregateNotReadyError
 from valuestream.reporting import render as render_module
@@ -55,6 +56,12 @@ def _build(workspace: Path, *, enable_sql: bool = False, render_dir: Path | None
     finally:
         mcp_server._server_class = original  # type: ignore[assignment]
     return captured["server"]
+
+
+def _error(result: Any) -> dict[str, Any]:
+    wire = result.model_dump(by_alias=True)
+    assert wire["isError"] is True
+    return wire["structuredContent"]["error"]
 
 
 def _first_tile_ids(server: Any) -> tuple[str, str, str]:
@@ -110,9 +117,9 @@ def test_invalid_metric_returns_structured_error_not_exception() -> None:
 
     result = tool.fn(metric="NoSuchMetric")
 
-    assert result["error"]["kind"] == "invalid_request"
-    assert "NoSuchMetric" in result["error"]["message"]
-    assert result["error"]["remediation"]
+    assert _error(result)["kind"] == "invalid_request"
+    assert "NoSuchMetric" in _error(result)["message"]
+    assert _error(result)["remediation"]
 
 
 @pytest.mark.unit
@@ -129,8 +136,8 @@ def test_stale_aggregates_are_reported_with_backfill_remediation(tmp_path: Path)
         patch.setattr(mcp_server, "query_metric_result", raise_stale)
         result = tool.fn(metric="CTR")
 
-    assert result["error"]["kind"] == "aggregate_not_ready"
-    assert "backfill" in result["error"]["remediation"].lower()
+    assert _error(result)["kind"] == "aggregate_not_ready"
+    assert "backfill" in _error(result)["remediation"].lower()
 
 
 @pytest.mark.unit
@@ -226,8 +233,8 @@ def test_unknown_tile_error_lists_the_valid_tile_ids() -> None:
         tile_id="nope",
     )
 
-    assert result["error"]["kind"] == "invalid_request"
-    assert page["tiles"][0]["id"] in result["error"]["message"]
+    assert _error(result)["kind"] == "invalid_request"
+    assert page["tiles"][0]["id"] in _error(result)["message"]
 
 
 @pytest.mark.unit
@@ -310,18 +317,14 @@ def test_metric_list_restricts_to_one_dashboard_or_processor() -> None:
     tool = server._tool_manager.get_tool("metric_list")
     manifest = server._tool_manager.get_tool("dashboard_list").fn()
     dashboard_id = manifest["dashboards"][0]["id"]
-    used = {
-        tile["metric"]
-        for page in manifest["dashboards"][0]["pages"]
-        for tile in page["tiles"]
-    }
+    used = {tile["metric"] for page in manifest["dashboards"][0]["pages"] for tile in page["tiles"]}
 
     by_dashboard = tool.fn(dashboard=dashboard_id)
 
     assert {entry["name"] for entry in by_dashboard["metrics"]} <= used
 
     unknown = tool.fn(dashboard="nope")
-    assert unknown["error"]["kind"] == "invalid_request"
+    assert _error(unknown)["kind"] == "invalid_request"
 
 
 @pytest.mark.unit
@@ -345,8 +348,8 @@ def test_chat_explains_itself_when_no_model_is_configured(tmp_path: Path) -> Non
 
     result = server._tool_manager.get_tool("chat").fn(question="what is the click rate?")
 
-    assert result["error"]["kind"] == "invalid_request"
-    assert "ai.yaml" in result["error"]["message"]
+    assert _error(result)["kind"] == "invalid_request"
+    assert "ai.yaml" in _error(result)["message"]
 
 
 @pytest.mark.unit
@@ -399,14 +402,12 @@ def test_tile_query_rejects_an_unknown_render_mode(demo_workspace: Path) -> None
         dashboard_id=dashboard, page_id=page, tile_id=tile, render="gif"
     )
 
-    assert result["error"]["kind"] == "invalid_request"
-    assert "none, png, html, html_cdn, spec" in result["error"]["message"]
+    assert _error(result)["kind"] == "invalid_request"
+    assert "none, png, html, html_cdn, spec" in _error(result)["message"]
 
 
 @pytest.mark.unit
-def test_tile_query_html_writes_a_self_contained_file(
-    demo_workspace: Path, tmp_path: Path
-) -> None:
+def test_tile_query_html_writes_a_self_contained_file(demo_workspace: Path, tmp_path: Path) -> None:
     # Interactive HTML only helps in a browser, so the response carries a path
     # rather than spending itself on markup the model cannot render. Because it
     # is a file, Plotly is embedded and the page opens offline.
@@ -503,6 +504,211 @@ def test_png_without_the_viz_extra_is_a_readable_dependency_error(
         dashboard_id=dashboard, page_id=page, tile_id=tile, render="png"
     )
 
-    assert result["error"]["kind"] == "dependency_missing"
-    assert "uv sync --extra viz" in result["error"]["remediation"]
-    assert 'render="html"' in result["error"]["message"]
+    assert _error(result)["kind"] == "dependency_missing"
+    assert "uv sync --extra viz" in _error(result)["remediation"]
+    assert 'render="html"' in _error(result)["message"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sdk_error_results_preserve_remediation_and_error_flag() -> None:
+    server = _build(DEMO_WS)
+    result = await server.call_tool("metric_query", {"metric": "NoSuchMetric"})
+    error = _error(result)
+    assert error["kind"] == "invalid_request"
+    assert "metric_list" in error["remediation"]
+    assert json.loads(result.content[0].text)["error"] == error
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_histogram_renders_before_sketch_columns_are_masked(demo_workspace: Path) -> None:
+    server = _build(demo_workspace)
+    result = await server.call_tool(
+        "metric_chart_query",
+        {
+            "metric": "VS_ResponseTime_Distribution",
+            "chart_kind": "histogram",
+            "x": "Outcome",
+            "y": "VS_ResponseTime_Distribution",
+            "group_by": ["Outcome"],
+            "chart_fields": {"property": "ResponseTime"},
+            "render": "spec",
+        },
+    )
+    wire = result.model_dump(by_alias=True)
+    assert wire["isError"] is False
+    payload = wire["structuredContent"]
+    assert payload["render"]["spec"]["data"]
+    assert "ResponseTime_tdigest" in payload["masked_columns"]
+    assert "ResponseTime_tdigest" not in payload["columns"]
+    json.dumps(payload)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_png_has_image_and_structured_metadata(
+    demo_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_server, "figure_png", lambda figure: b"\x89PNG\r\n\x1a\n")
+    server = _build(demo_workspace)
+    dashboard, page, tile = _first_tile_ids(server)
+    result = await server.call_tool(
+        "tile_query",
+        {
+            "dashboard_id": dashboard,
+            "page_id": page,
+            "tile_id": tile,
+            "render": "png",
+        },
+    )
+    wire = result.model_dump(by_alias=True)
+    assert wire["isError"] is False
+    assert [block["type"] for block in wire["content"]] == ["text", "image"]
+    assert wire["content"][1]["mimeType"] == "image/png"
+    assert wire["structuredContent"]["render"]["attached"] is True
+    assert wire["structuredContent"]["provenance"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tool_name", ["tile_query", "kpi_query"])
+def test_authored_filters_are_reported_as_effective_with_provenance(
+    demo_workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+) -> None:
+    server = _build(demo_workspace)
+    dashboard, page, tile_id = _first_tile_ids(server)
+    resolve = mcp_server.resolve_tile
+
+    def scoped_tile(*args: Any, **kwargs: Any) -> Any:
+        d, p, tile = resolve(*args, **kwargs)
+        return d, p, tile.model_copy(update={"filters": {"Channel": "Web"}})
+
+    monkeypatch.setattr(mcp_server, "resolve_tile", scoped_tile)
+    result = server._tool_manager.get_tool(tool_name).fn(
+        dashboard_id=dashboard,
+        page_id=page,
+        tile_id=tile_id,
+        filters={"Channel": "Email", "NotAColumn": "x"},
+    )
+    assert result["applied_filters"] == {"Channel": "Web"}
+    assert result["overridden_filters"] == {"Channel": "Email"}
+    assert result["ignored_filters"] == ["NotAColumn"]
+    assert result["freshness"]
+    assert result["provenance"]
+    for query in result["provenance"]:
+        assert query["query"]["filters"] == {"Channel": "Web"}
+        assert query["catalog_hash"]
+        assert query["computation_hash"]
+        assert query["chunk_ids_count"] > 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_metric_pages_have_no_overlap_and_signal_the_end(demo_workspace: Path) -> None:
+    server = _build(demo_workspace)
+    names: list[str] = []
+    offset = 0
+    while True:
+        result = await server.call_tool("metric_list", {"limit": 5, "offset": offset})
+        page = result.model_dump(by_alias=True)["structuredContent"]
+        names.extend(metric["name"] for metric in page["metrics"])
+        if page["next_offset"] is None:
+            assert not page["truncated"]
+            break
+        assert page["next_offset"] > offset
+        offset = page["next_offset"]
+    assert len(names) == len(set(names)) == page["matched_metrics"]
+    assert names == sorted(names)
+    empty = await server.call_tool("metric_list", {"offset": len(names)})
+    assert empty.model_dump(by_alias=True)["structuredContent"]["metrics"] == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chart", [False, True])
+async def test_query_pagination_preserves_total_count(demo_workspace: Path, chart: bool) -> None:
+    server = _build(demo_workspace)
+    arguments: dict[str, Any] = {"metric": "VS_Engagement_Rate", "group_by": ["Channel"]}
+    tool = "metric_query"
+    if chart:
+        tool = "metric_chart_query"
+        arguments.update(chart_kind="bar", x="Channel", y="VS_Engagement_Rate")
+    whole = (await server.call_tool(tool, arguments)).model_dump(by_alias=True)["structuredContent"]
+    rows = []
+    for offset in range(whole["row_count"]):
+        page = (
+            await server.call_tool(tool, {**arguments, "limit": 1, "offset": offset})
+        ).model_dump(by_alias=True)["structuredContent"]
+        assert page["row_count"] == whole["row_count"]
+        assert page["returned_rows"] == 1
+        assert page["truncated"] == (offset + 1 < whole["row_count"])
+        rows.extend(page["rows"])
+    assert rows == whole["rows"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_tool_schemas_describe_results_constraints_and_side_effects() -> None:
+    tools = {
+        tool.name: tool.model_dump(by_alias=True) for tool in await _build(DEMO_WS).list_tools()
+    }
+    for name in ("metric_query", "metric_chart_query", "tile_query"):
+        assert {"rows", "row_count", "truncated"} <= set(tools[name]["outputSchema"]["properties"])
+        assert tools[name]["inputSchema"]["properties"]["offset"]["minimum"] == 0
+    assert tools["metric_query"]["annotations"]["readOnlyHint"] is True
+    assert tools["tile_query"]["annotations"]["destructiveHint"] is False
+    assert tools["tile_query"]["annotations"]["readOnlyHint"] is False
+    assert tools["chat"]["annotations"]["openWorldHint"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", TOOL_CHART_KINDS)
+async def test_each_advertised_chart_kind_crosses_the_sdk_boundary(
+    demo_workspace: Path,
+    kind: str,
+) -> None:
+    """Cover serialization and rendering, including the sketch/curve branches."""
+    metric = "VS_Engagement_Rate"
+    args: dict[str, Any] = {
+        "chart_kind": kind,
+        "x": "Channel",
+        "group_by": ["Channel"],
+        "render": "spec",
+    }
+    fields: dict[str, Any] = {}
+    if kind in {"roc_curve", "precision_recall_curve", "gain_curve", "lift_curve"}:
+        metric = "ih_propensity_scores_roc_auc"
+    elif kind == "calibration_curve":
+        metric = "VS_FinalPropensity_Calibration"
+    elif kind in {"histogram", "boxplot"}:
+        metric = "VS_ResponseTime_Distribution"
+        fields["property"] = "ResponseTime"
+    elif kind == "funnel":
+        metric = "VS_Impression_to_Click_Dropoff"
+        args.update(x="", group_by=[])
+        fields["stages"] = ["Impression_Count", "Clicked_Count", "Conversion_Count"]
+    elif kind == "interval":
+        metric = "VS_ModelControl_Engagement_Compare"
+        fields.update(lower_output="Lift_CI_Low", upper_output="Lift_CI_High")
+        args["y"] = "Lift"
+    elif kind == "combo":
+        fields["secondary_metric"] = "VS_Interactions"
+    elif kind in {"treemap", "sankey"}:
+        fields["path"] = ["Channel", "Issue"]
+    elif kind == "bar_polar":
+        fields["theta"] = "Channel"
+    elif kind in {"heatmap", "stacked_area"}:
+        args["color"] = "Issue"
+    elif kind == "kpi_card":
+        args.update(x="", group_by=[])
+    args.update(metric=metric, chart_fields=fields)
+    args.setdefault("y", metric)
+    result = (await _build(demo_workspace).call_tool("metric_chart_query", args)).model_dump(
+        by_alias=True
+    )
+    assert result["isError"] is False, result
+    assert result["structuredContent"]["render"]["spec"]["data"], kind

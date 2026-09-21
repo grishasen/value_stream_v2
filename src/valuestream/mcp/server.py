@@ -8,10 +8,12 @@ import tempfile
 from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Annotated, Any, Literal, cast
 
 import duckdb
 import polars as pl
+from pydantic import Field
+from pydantic_core import to_jsonable_python
 
 from valuestream.ai.chat import (
     catalog_chat_manifest,
@@ -32,11 +34,19 @@ from valuestream.ai.settings import (
 from valuestream.ai.sql_tool import list_sql_tables, run_sql_query
 from valuestream.ai.studio import AICallSettings
 from valuestream.config.watch import CatalogCache
+from valuestream.mcp.contracts import (
+    ChartPayload,
+    KpiPayload,
+    MetricListPayload,
+    MetricPayload,
+    TilePayload,
+)
 from valuestream.query import AggregateNotReadyError, query_metric_result
 from valuestream.reporting.kpi import kpi_bundle
 from valuestream.reporting.manifest import dashboard_manifest, resolve_tile
 from valuestream.reporting.render import (
     RENDER_MODES,
+    RENDER_RETENTION_SECONDS,
     figure_for_tile,
     figure_html,
     figure_png,
@@ -55,8 +65,6 @@ from valuestream.ui.freshness import freshness_label, metric_freshness
 from valuestream.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-T = TypeVar("T")
 
 _MISSING_SDK_HINT = (
     "The MCP server requires the optional `ai` dependencies. "
@@ -146,19 +154,27 @@ def _error_payload(tool: str, exc: Exception) -> dict[str, Any]:
     }
 
 
-def _guarded(tool: str, call: Callable[[], T]) -> T | dict[str, Any]:
-    """Return a tool result, or a structured error the client can read.
-
-    Letting the exception escape gives MCP clients a bare "Error executing
-    tool <name>" and drops the actionable message, so every tool answers with
-    a payload instead.
-    """
+# Registered return annotations describe success schemas; the SDK also accepts
+# explicit error results, which bypass success-schema validation. Cast at that boundary.
+def _guarded(tool: str, call: Callable[[], Any]) -> Any:
+    """Preserve actionable details and mark failures as MCP execution errors."""
 
     try:
         return call()
     except (ValueError, FileNotFoundError, TimeoutError, RuntimeError, duckdb.Error) as exc:
         logger.warning("MCP %s failed: %s: %s", tool, type(exc).__name__, exc)
-        return _error_payload(tool, exc)
+        return _mcp_result(_error_payload(tool, exc), is_error=True)
+
+
+def _mcp_result(payload: dict[str, Any], *, is_error: bool = False, image: Any = None) -> Any:
+    """Build a protocol result lazily so importing the CLI needs no MCP extra."""
+
+    types = import_module("mcp.types")
+    data = to_jsonable_python(payload)
+    content = [types.TextContent(type="text", text=json.dumps(data))]
+    if image is not None:
+        content.append(image.to_image_content())
+    return types.CallToolResult(content=content, structuredContent=data, isError=is_error)
 
 
 def run_stdio(  # noqa: PLR0915 - one function body per registered tool
@@ -177,10 +193,16 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
     server_cls = _server_class()
 
     workspace = Path(workspace_path).resolve()
-    renders = Path(render_dir) if render_dir else Path(tempfile.gettempdir()) / "valuestream-renders"
+    renders = (
+        Path(render_dir) if render_dir else Path(tempfile.gettempdir()) / "valuestream-renders"
+    )
     catalog_cache = CatalogCache(workspace)
     catalog_cache.get()  # fail fast if the catalog is invalid at startup
     mcp = server_cls("Value Stream")
+    annotations = import_module("mcp.types").ToolAnnotations
+    read_only = annotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+    rendering = annotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
+    llm_call = annotations(readOnlyHint=True, openWorldHint=True)
     logger.info(
         "Starting Value Stream MCP server: workspace=%s render_dir=%s png=%s",
         workspace,
@@ -188,14 +210,16 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         png_available(),
     )
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only)
     def metric_list(
         search: str | None = None,
         processor: str | None = None,
         dashboard: str | None = None,
-        detail: str = "compact",
-        limit: int = 60,
-    ) -> dict[str, Any]:
+        detail: Literal["compact", "full"] = "compact",
+        limit: Annotated[int, Field(ge=1, le=500)] = 60,
+        *,
+        offset: Annotated[int, Field(ge=0)] = 0,
+    ) -> MetricListPayload:
         """List metrics, dimensions, query time axes, and supported chart kinds.
 
         A large catalog has hundreds of metrics, so narrow the list: `search`
@@ -222,7 +246,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 processor=processor,
                 dashboard=dashboard,
             )
-            capped = names[: max(1, min(int(limit), 500))]
+            capped = names[offset : offset + max(1, min(int(limit), 500))]
             manifest = catalog_chat_manifest(
                 catalog,
                 detail=detail,
@@ -230,15 +254,17 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
             )
             manifest["matched_metrics"] = len(names)
             manifest["returned_metrics"] = len(capped)
-            if len(capped) < len(names):
-                manifest["truncated"] = True
+            manifest["offset"] = offset
+            manifest["truncated"] = offset + len(capped) < len(names)
+            manifest["next_offset"] = offset + len(capped) if manifest["truncated"] else None
             return manifest
 
-        return _guarded("metric_list", run)
+        return cast(MetricListPayload, _guarded("metric_list", run))
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only)
     def metric_query(
         metric: str,
+        *,
         group_by: list[str] | None = None,
         filters: dict[str, Any] | None = None,
         grain: str = "summary",
@@ -251,9 +277,10 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         compare: str | None = None,
         include_quantile_suite: bool = False,
         include_curves: bool = False,
-        provenance: str = "summary",
-        limit: int = 100,
-    ) -> dict[str, Any]:
+        provenance: Literal["summary", "full"] = "summary",
+        limit: Annotated[int, Field(ge=1, le=500)] = 100,
+        offset: Annotated[int, Field(ge=0)] = 0,
+    ) -> MetricPayload:
         """Query metric rows through the governed aggregate query layer.
 
         Filter values may be scalars, lists, or operator objects such as
@@ -303,7 +330,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 include_curve_columns=include_curves,
             )
             frame = result.rows
-            clipped = frame.head(max(1, min(int(limit), 500)))
+            clipped = frame.slice(offset, max(1, min(int(limit), 500)))
             logger.info(
                 "MCP metric_query completed: metric=%s grain=%s rows=%s returned=%s columns=%s",
                 metric,
@@ -321,21 +348,22 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 "order_by": order_by or [],
                 "top_n": top_n,
                 "compare": compare,
-                "row_count": frame.height,
+                **_page_metadata(frame.height, clipped.height, offset),
                 "columns": clipped.columns,
                 "provenance": _provenance_payload(result.provenance, provenance),
                 "rows": clipped.to_dicts(),
             }
 
-        return _guarded("metric_query", run)
+        return cast(MetricPayload, _guarded("metric_query", run))
 
-    @mcp.tool()
+    @mcp.tool(annotations=rendering)
     def metric_chart_query(
         metric: str,
         chart_kind: str,
         x: str,
         y: str,
         group_by: list[str],
+        *,
         filters: dict[str, Any] | None = None,
         grain: str = "summary",
         start: str | None = None,
@@ -349,9 +377,10 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         compare: str | None = None,
         value_format: str | None = None,
         chart_fields: dict[str, Any] | None = None,
-        render: str = "none",
-        limit: int = 100,
-    ) -> Any:
+        render: Literal["none", "png", "html", "html_cdn", "spec"] = "none",
+        limit: Annotated[int, Field(ge=1, le=500)] = 100,
+        offset: Annotated[int, Field(ge=0)] = 0,
+    ) -> ChartPayload:
         """Query metric rows and return an explicit validated chart spec.
 
         The model must provide chart_kind, x, y, group_by, color, and facet_col
@@ -378,7 +407,6 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         the Plotly figure spec.
         """
 
-        catalog = catalog_cache.get()
         logger.info(
             "MCP metric_chart_query: metric=%s kind=%s x=%s y=%s color=%s facet_col=%s grain=%s "
             "group_by=%s filters=%s having=%s order_by=%s top_n=%s compare=%s limit=%s",
@@ -399,6 +427,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         )
 
         def run() -> Any:
+            catalog = catalog_cache.get()
             intent = chart_intent_from_parameters(
                 catalog,
                 metric=metric,
@@ -434,7 +463,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 grain=grain,
                 compare=compare,
             )
-            result = execute_chat_intent(workspace, catalog, intent)
+            result = execute_chat_intent(workspace, catalog, intent, offset=offset)
             rows, masked = _without_state_blobs(result.rows)
             chart = result.intent.chart
             chart_spec: dict[str, Any] = {
@@ -460,7 +489,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 "grain": result.intent.grain,
                 "group_by": result.intent.group_by,
                 "filters": result.intent.filters,
-                "row_count": result.rows.height,
+                **_page_metadata(result.row_count, rows.height, offset),
                 "columns": rows.columns,
                 "masked_columns": masked,
                 "chart": chart_spec,
@@ -485,16 +514,16 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
             }
             return _with_render(
                 payload,
-                rows=rows,
+                rows=result.rows,
                 tile=chart_tile_from_intent(result.intent),
                 render=render,
                 stem=f"{result.intent.metric}-{chart_spec['kind']}",
                 renders=renders,
             )
 
-        return _guarded("metric_chart_query", run)
+        return cast(ChartPayload, _guarded("metric_chart_query", run))
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only)
     def dashboard_list(
         dashboard_id: str | None = None,
         include_tiles: bool = True,
@@ -511,16 +540,19 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         logger.info(
             "MCP dashboard_list: dashboard_id=%s include_tiles=%s", dashboard_id, include_tiles
         )
-        return _guarded(
-            "dashboard_list",
-            lambda: dashboard_manifest(
-                catalog_cache.get(),
-                dashboard_id=dashboard_id,
-                include_tiles=include_tiles,
+        return cast(
+            dict[str, Any],
+            _guarded(
+                "dashboard_list",
+                lambda: dashboard_manifest(
+                    catalog_cache.get(),
+                    dashboard_id=dashboard_id,
+                    include_tiles=include_tiles,
+                ),
             ),
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=rendering)
     def tile_query(
         dashboard_id: str,
         page_id: str,
@@ -529,9 +561,10 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         filters: dict[str, Any] | None = None,
         start: str | None = None,
         end: str | None = None,
-        render: str = "none",
-        limit: int = 100,
-    ) -> Any:
+        render: Literal["none", "png", "html", "html_cdn", "spec"] = "none",
+        limit: Annotated[int, Field(ge=1, le=500)] = 100,
+        offset: Annotated[int, Field(ge=0)] = 0,
+    ) -> TilePayload:
         """Return the rows behind one authored dashboard tile.
 
         This runs the tile exactly as the report page runs it, including its
@@ -566,7 +599,8 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 page_id=page_id,
                 tile_id=tile_id,
             )
-            applied, ignored = _partition_tile_filters(catalog, tile, filters)
+            applied, ignored, overridden = _partition_tile_filters(catalog, tile, filters)
+            provenance_records: list[dict[str, Any]] = []
             rows = query_tile(
                 workspace,
                 catalog,
@@ -574,8 +608,9 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 filters=applied,
                 start=_as_date(start, "start"),
                 end=_as_date(end, "end"),
+                query_fn=_recording_query(provenance_records),
             )
-            clipped, masked = _without_state_blobs(rows.head(max(1, min(int(limit), 500))))
+            clipped, masked = _without_state_blobs(rows.slice(offset, max(1, min(int(limit), 500))))
             tile_dict = tile_to_dict(tile)
             payload = {
                 "dashboard_id": dashboard_id,
@@ -607,7 +642,9 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 "grain": grain_for_tile(tile_dict),
                 "applied_filters": applied,
                 "ignored_filters": list(ignored),
-                "row_count": rows.height,
+                "overridden_filters": overridden,
+                **_page_metadata(rows.height, clipped.height, offset),
+                "provenance": provenance_records,
                 "columns": clipped.columns,
                 "masked_columns": masked,
                 "rows": clipped.to_dicts(),
@@ -626,9 +663,9 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 renders=renders,
             )
 
-        return _guarded("tile_query", run)
+        return cast(TilePayload, _guarded("tile_query", run))
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only)
     def kpi_query(
         dashboard_id: str,
         page_id: str,
@@ -637,7 +674,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         filters: dict[str, Any] | None = None,
         start: str | None = None,
         end: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> KpiPayload:
         """Return a KPI card's value, comparison delta, and sparkline.
 
         A KPI tile is more than a metric query: it resolves the tile's output
@@ -646,9 +683,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         shows, so the period and delta match the report.
         """
 
-        logger.info(
-            "MCP kpi_query: dashboard=%s page=%s tile=%s", dashboard_id, page_id, tile_id
-        )
+        logger.info("MCP kpi_query: dashboard=%s page=%s tile=%s", dashboard_id, page_id, tile_id)
 
         def run() -> dict[str, Any]:
             catalog = catalog_cache.get()
@@ -658,7 +693,8 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 page_id=page_id,
                 tile_id=tile_id,
             )
-            applied, ignored = _partition_tile_filters(catalog, tile, filters)
+            applied, ignored, overridden = _partition_tile_filters(catalog, tile, filters)
+            provenance_records: list[dict[str, Any]] = []
             bundle = kpi_bundle(
                 workspace,
                 catalog,
@@ -666,6 +702,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 filters=applied,
                 start=_as_date(start, "start"),
                 end=_as_date(end, "end"),
+                query_fn=_recording_query(provenance_records),
             )
             return {
                 "dashboard_id": dashboard_id,
@@ -673,6 +710,10 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 "tile_id": tile_id,
                 "title": tile.title,
                 "metric": tile.metric,
+                "provenance": provenance_records,
+                "freshness": freshness_label(
+                    metric_freshness(workspace, catalog, tile.metric, grain="summary")
+                ),
                 "value_column": bundle.value_column,
                 "value": bundle.value,
                 "delta": bundle.delta,
@@ -681,11 +722,12 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 "sparkline": list(bundle.sparkline) if bundle.sparkline else None,
                 "applied_filters": applied,
                 "ignored_filters": list(ignored),
+                "overridden_filters": overridden,
             }
 
-        return _guarded("kpi_query", run)
+        return cast(KpiPayload, _guarded("kpi_query", run))
 
-    @mcp.tool()
+    @mcp.tool(annotations=llm_call)
     def chat(question: str, narrate: bool = False) -> dict[str, Any]:
         """Answer a natural-language question by planning a governed query.
 
@@ -729,7 +771,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 "filters": intent.filters,
                 "query": result.query_summary,
                 "freshness": result.freshness,
-                "row_count": result.rows.height,
+                **_page_metadata(result.row_count, rows.height, 0),
                 "columns": rows.columns,
                 "masked_columns": masked,
                 "rows": rows.to_dicts(),
@@ -747,9 +789,9 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 payload["narrative"] = narrate_chat_result(settings, result)
             return payload
 
-        return _guarded("chat", run)
+        return cast(dict[str, Any], _guarded("chat", run))
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only)
     def dimension_values_tool(
         metric: str,
         column: str,
@@ -765,25 +807,28 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
             grain,
             limit,
         )
-        return _guarded(
-            "dimension_values_tool",
-            lambda: {
-                "metric": metric,
-                "column": column,
-                "values": dimension_values(
-                    workspace,
-                    catalog_cache.get(),
-                    metric,
-                    column,
-                    grain=grain,
-                    limit=limit,
-                ),
-            },
+        return cast(
+            dict[str, Any],
+            _guarded(
+                "dimension_values_tool",
+                lambda: {
+                    "metric": metric,
+                    "column": column,
+                    "values": dimension_values(
+                        workspace,
+                        catalog_cache.get(),
+                        metric,
+                        column,
+                        grain=grain,
+                        limit=limit,
+                    ),
+                },
+            ),
         )
 
     if enable_sql:
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only)
         def sql_schema() -> dict[str, Any]:
             """List governed DuckDB tables/views available to sql_query.
 
@@ -813,9 +858,9 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                     ],
                 }
 
-            return _guarded("sql_schema", run)
+            return cast(dict[str, Any], _guarded("sql_schema", run))
 
-        @mcp.tool()
+        @mcp.tool(annotations=read_only)
         def sql_query(sql: str, limit: int = 200) -> dict[str, Any]:
             """Run one governed read-only SELECT over the aggregate DuckDB views.
 
@@ -836,9 +881,9 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                     "rows": result.rows.to_dicts(),
                 }
 
-            return _guarded("sql_query", run)
+            return cast(dict[str, Any], _guarded("sql_query", run))
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only)
     def workspace_status_tool(run_limit: int = 5) -> dict[str, Any]:
         """Report which processors can answer a query, and why others cannot.
 
@@ -850,16 +895,19 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
         """
 
         logger.info("MCP workspace_status: workspace=%s run_limit=%s", workspace, run_limit)
-        return _guarded(
-            "workspace_status",
-            lambda: workspace_status(
-                workspace,
-                catalog_cache.get(),
-                run_limit=max(1, min(int(run_limit), 50)),
+        return cast(
+            dict[str, Any],
+            _guarded(
+                "workspace_status",
+                lambda: workspace_status(
+                    workspace,
+                    catalog_cache.get(),
+                    run_limit=max(1, min(int(run_limit), 50)),
+                ),
             ),
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only)
     def freshness_get(metric: str, grain: str = "summary") -> dict[str, Any]:
         """Return freshness metadata for a metric and grain."""
 
@@ -881,7 +929,7 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
                 "label": freshness_label(fresh),
             }
 
-        return _guarded("freshness_get", run)
+        return cast(dict[str, Any], _guarded("freshness_get", run))
 
     @mcp.resource(
         "valuestream://catalog",
@@ -1007,9 +1055,11 @@ def _with_render(
             "path": str(path),
             "bytes": path.stat().st_size,
             "self_contained": embed,
+            "expires_at": dt.datetime.fromtimestamp(
+                path.stat().st_mtime + RENDER_RETENTION_SECONDS, tz=dt.UTC
+            ).isoformat(),
             "note": (
-                "Open this file in a browser. Plotly's JavaScript is embedded, so it works "
-                "offline."
+                "Open this file in a browser. Plotly's JavaScript is embedded, so it works offline."
                 if embed
                 else "Open this file in a browser; Plotly's JavaScript loads from its CDN, so "
                 "it needs a network connection."
@@ -1019,7 +1069,7 @@ def _with_render(
 
     image = figure_png(figure)
     payload["render"] = {"mode": "png", "bytes": len(image), "attached": True}
-    return [payload, _image_class()(data=image, format="png")]
+    return _mcp_result(payload, image=_image_class()(data=image, format="png"))
 
 
 def _resolved_chart_fields(chart: Any) -> dict[str, Any]:
@@ -1028,7 +1078,7 @@ def _resolved_chart_fields(chart: Any) -> dict[str, Any]:
     resolved: dict[str, Any] = {}
     for name in _EXTENDED_CHART_FIELDS:
         value = getattr(chart, name, None)
-        if value in (None, "", (), [], False):
+        if value is None or value in ("", (), []):
             continue
         resolved["property" if name == "property_name" else name] = (
             list(value) if isinstance(value, tuple) else value
@@ -1056,9 +1106,7 @@ def _select_metric_names(
         used = {tile.metric for page in matched.pages for tile in page.tiles}
         names = [name for name in names if name in used]
     if processor is not None:
-        names = [
-            name for name in names if catalog.metrics.metrics[name].processor == processor
-        ]
+        names = [name for name in names if catalog.metrics.metrics[name].processor == processor]
     if search:
         needle = search.casefold()
         names = [
@@ -1125,7 +1173,7 @@ def _partition_tile_filters(
     catalog: Any,
     tile: Any,
     filters: dict[str, Any] | None,
-) -> tuple[dict[str, Any], tuple[str, ...]]:
+) -> tuple[dict[str, Any], tuple[str, ...], dict[str, Any]]:
     """Split requested filters into ones this tile supports and ones it cannot."""
 
     supported = available_filter_columns_for_tile(catalog, tile)
@@ -1136,7 +1184,40 @@ def _partition_tile_filters(
             ignored.append(str(key))
         elif value not in (None, "", []):
             applied[str(key)] = value
-    return applied, tuple(ignored)
+    authored = dict(tile.filters or {})
+    overridden = {
+        key: value for key, value in applied.items() if key in authored and value != authored[key]
+    }
+    return {**applied, **authored}, tuple(ignored), overridden
+
+
+def _page_metadata(total: int, returned: int, offset: int) -> dict[str, Any]:
+    """Describe a bounded slice without presenting it as the complete result."""
+
+    more = offset + returned < total
+    return {
+        "row_count": total,
+        "returned_rows": returned,
+        "offset": offset,
+        "truncated": more,
+        "next_offset": offset + returned if more else None,
+    }
+
+
+def _recording_query(records: list[dict[str, Any]]) -> Callable[..., pl.DataFrame]:
+    """Capture provenance from each actual tile/KPI query without querying twice."""
+
+    def query(workspace: str | Path, metric: str, **options: Any) -> pl.DataFrame:
+        result = query_metric_result(workspace, metric, **options)
+        records.append(
+            {
+                "query": to_jsonable_python(options),
+                **_provenance_payload(result.provenance, "summary"),
+            }
+        )
+        return result.rows
+
+    return query
 
 
 def _provenance_payload(provenance: Any, mode: str) -> dict[str, Any]:
