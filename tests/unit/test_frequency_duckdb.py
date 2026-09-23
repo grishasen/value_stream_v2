@@ -28,6 +28,42 @@ _SEGMENT_COLUMN = 'Comparison "Group'
 _SORT = ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket", "ScopeRank", "PriorPositive"]
 
 
+@pytest.mark.unit
+def test_daily_sql_without_optional_frequency_dimensions_counts_prior_day() -> None:
+    config = _config(
+        group_by=["Day", "ExposureBucket"],
+        window_granularity="daily",
+        window_hours=48,
+    )
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+    history = _prepared_history(
+        processor,
+        [_row("customer", "first", dt.datetime(2024, 1, 1, 12, tzinfo=dt.UTC), outcome="Clicked")],
+    )
+    current = _prepared_current(
+        processor,
+        [_row("customer", "second", dt.datetime(2024, 1, 2, 12, tzinfo=dt.UTC))],
+    )
+    with duckdb.connect(":memory:") as connection:
+        _create_rolling_tables(
+            connection,
+            history=[("2024-01-01", history)],
+            current=[("2024-01-02", current)],
+            empty_history=history.head(0),
+        )
+        with DuckDBFrequencySession(
+            config=config,
+            connection=connection,
+            current_chunk_id="2024-01-02",
+        ) as session:
+            result = processor.aggregate_focal_lazy(
+                session.focal_lazy(0), _ctx("2024-01-02")
+            ).collect()
+    assert result["ExposureBucket"].to_list() == [2]
+    assert result["Positives"].to_list() == [0]
+    assert result["Negatives"].to_list() == [1]
+
+
 def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
     payload: dict[str, Any] = {
         "id": "frequency",

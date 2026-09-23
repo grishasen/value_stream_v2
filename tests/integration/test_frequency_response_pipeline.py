@@ -87,6 +87,14 @@ metrics:
       den:
         op: add
         args: [{col: Positives}, {col: Negatives}]
+  RepeatShare:
+    processor: frequency_response
+    kind: frequency_threshold_share
+    threshold: 1
+  HistoricalCapCost:
+    processor: frequency_response
+    kind: frequency_threshold_share
+    threshold: 3
 """,
         encoding="utf-8",
     )
@@ -240,6 +248,16 @@ def test_frequency_response_pipeline_replays_bounded_dependencies_and_hides_empt
         6: (1, 0, 0.0),
         7: (3, 2, pytest.approx(2 / 3)),
     }
+    repeat = query_metric_result(tmp_path, "RepeatShare", grain="summary")
+    assert repeat.rows["RepeatShare"].item() == pytest.approx(8 / 9)
+    cap = query_metric_result(tmp_path, "HistoricalCapCost", grain="summary")
+    assert cap.rows["HistoricalCapCost"].item() == pytest.approx(6 / 9)
+    assert cap.rows["PositiveShareAboveThreshold"].item() == pytest.approx(3 / 4)
+    assert cap.provenance.chunk_ids == repeat.provenance.chunk_ids
+    with pytest.raises(ValueError, match="needs all frequency buckets"):
+        query_metric_result(
+            tmp_path, "HistoricalCapCost", group_by=["ExposureBucket"], grain="summary"
+        )
 
     # Day 1 no longer contains a focal exposure. Its replacement processor
     # output is empty, while its dependency fingerprint changes for targets

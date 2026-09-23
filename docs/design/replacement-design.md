@@ -208,15 +208,15 @@ The aggregate store is rooted at a configurable workspace path:
 
 The processor-state namespace is deliberately separate from aggregate and
 metadata publication. It is never scanned by query planning or DuckDB views.
-Persistent frequency response uses checkpoint schema revision 8, the default
+Persistent frequency response uses checkpoint schema revision 9, the default
 and only supported revision, at one stable source/processor path. Schema,
 hashing, Polars-version, processor-config, and layout values do not create path
 levels. Schema and hashing revisions, Polars version, processor computation
 hash, logical shard count, history projection, and customer dtype remain inside
 the database as compatibility metadata; DuckDB version is audit-only. Its
 transactional journal records ISO-date chunks and authoritative raw
-fingerprints; its history relation retains only exposed rank-1 rows needed by
-later targets. The complete current candidate payload is temporary. State is
+fingerprints; its history relation retains normalized impressions at every
+rank needed by later targets. The complete current impression payload is temporary. State is
 reconciled and rebuilt from IH on fingerprint/order mismatch or correction and
 has an independent bounded-retention lifecycle. Valid incompatible state is
 reinitialized at the same path; corrupt or identity-invalid state fails closed,
@@ -875,18 +875,13 @@ This is the same recipe the current app uses, but parameterized by config rather
 
 #### frequency_response
 
-Daily count and sum states indexed by a fixed trailing
+Daily positive and negative count states indexed by a fixed trailing
 number-of-impressions bucket. The target day is evaluated from either an
 ephemeral bounded history frame or an exact persistent customer-sharded
-checkpoint; counting keys are customer + action + placement, while the
-selected rank-2 action is resolved by implicit customer + interaction keys plus
-the physical source fields in processor-level `alternative_group_by`. The
-default `[Placement]` therefore compares within customer + interaction +
-placement, and zero or multiple additional scope fields are supported. Exact
-rank 2 is selected when present, otherwise the smallest rank greater than 1 in
-that complete group. Its raw propensity is
-retained as an expected-response sum. Priority, when configured, remains a
-separate arbitration diagnostic and is never treated as a probability. See
+checkpoint. Counting keys are customer, action, and the configured `scope_by`
+fields. Every classified impression counts at its recorded rank. Optional
+`ScopeRank` and `PriorPositive` dimensions describe the action's rank within
+the decision scope and whether a prior impression in the window was positive. See
 the complete contract in [Processor Specifications §10](../reference/processors.md#10-frequency_response-processor).
 
 #### numeric_distribution

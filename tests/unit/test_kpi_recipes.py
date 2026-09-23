@@ -39,7 +39,7 @@ def test_builtin_recipe_library_is_versioned_and_unique() -> None:
     Draft202012Validator(generate_schema()).validate(payload)
 
     assert library.schema_version == 1
-    assert len(library.recipes) == 36
+    assert len(library.recipes) == 38
     assert len({recipe.id for recipe in library.recipes}) == len(library.recipes)
     assert {recipe.domain for recipe in library.recipes} >= {
         "Audience",
@@ -94,11 +94,46 @@ def test_contact_policy_recipe_binds_exact_frequency_response_states() -> None:
     assert "priorpositive" in caveat
     assert "report filters do not recompute it" in caveat
     assert "not a causal estimate" in caveat
-    assert not any(
-        candidate.id.startswith("contact_policy.")
-        and candidate.id != "contact_policy.engagement_rate_by_impressions"
+    assert {
+        candidate.id
         for candidate in load_builtin_kpi_recipes().recipes
+        if candidate.id.startswith("contact_policy.")
+    } == {
+        "contact_policy.engagement_rate_by_impressions",
+        "contact_policy.repeat_impression_share",
+        "contact_policy.historical_cap_cost",
+    }
+
+
+@pytest.mark.unit
+def test_frequency_threshold_recipes_bind_canonical_counts_and_cap() -> None:
+    processor = _frequency_response_processor()
+    repeat = _recipe("contact_policy.repeat_impression_share")
+    cap = _recipe("contact_policy.historical_cap_cost")
+    for recipe in (repeat, cap):
+        readiness = recipe_readiness(recipe, processor)
+        assert readiness.status == "ready"
+        assert readiness.resolved_inputs == {"positives": "Positives", "negatives": "Negatives"}
+    repeat_metric = instantiate_metric(
+        repeat,
+        processor,
+        repeat.default_metric_id,
+        {"positives": "Positives", "negatives": "Negatives"},
     )
+    assert repeat_metric["kind"] == "frequency_threshold_share"
+    assert repeat_metric["threshold"] == 1
+    cap_metric = instantiate_metric(
+        cap,
+        processor,
+        cap.default_metric_id,
+        {"positives": "Positives", "negatives": "Negatives"},
+        parameter_values={"cap": 4},
+    )
+    assert cap_metric["threshold"] == 4
+    assert cap_metric["recipe"]["parameters"] == {"cap": 4.0}
+    assert recipe_readiness(cap, processor, parameter_values={"cap": 7}).status == "incompatible"
+    tile = instantiate_tile(cap, processor, cap.default_metric_id, "cap_cost")
+    assert tile["chart"] == "table"
 
 
 @pytest.mark.unit
@@ -1048,18 +1083,28 @@ def _material_upward_state(threshold: float) -> dict[str, object]:
     }
 
 
-def _frequency_response_processor() -> SimpleNamespace:
-    state_adapter = TypeAdapter(model.StateSpec)
-    # The kind's states are canonical, so the recipes must bind against exactly
-    # what the model publishes rather than a hand-copied list.
-    definitions = model.frequency_response_state_definitions()
-    return SimpleNamespace(
-        id="frequency",
-        kind="frequency_response",
-        states={
-            name: state_adapter.validate_python(definition)
-            for name, definition in definitions.items()
-        },
+def _frequency_response_processor() -> model.FrequencyResponseProcessor:
+    return model.FrequencyResponseProcessor.model_validate(
+        {
+            "id": "frequency",
+            "source": "ih",
+            "kind": "frequency_response",
+            "group_by": ["Day", "ExposureBucket"],
+            "time": {"property": "DecisionTime", "grain": "daily"},
+            "columns": {
+                "customer": "CustomerID",
+                "interaction": "InteractionID",
+                "action": "ActionID",
+                "rank": "Rank",
+            },
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
+            "scope_by": ["Placement"],
+            "states": model.frequency_response_state_definitions(),
+        }
     )
 
 

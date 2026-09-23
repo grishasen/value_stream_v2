@@ -27,9 +27,13 @@ unambiguous rebuild path from authoritative Interaction History.
 ## Decision
 
 `frequency_response.checkpoint.mode: persistent_sharded` remains the catalog
-spelling for compatibility. The current and only supported checkpoint schema
-is revision 8. It selects **bounded rolling DuckDB state**, not immutable
+spelling for compatibility. The initial checkpoint schema in this decision
+was revision 8. It selects **bounded rolling DuckDB state**, not immutable
 per-day shard files.
+
+This ADR records the original revision-8 decision. The current checkpoint
+schema is revision 9; see [Processor Specifications §10](../../reference/processors.md#10-frequency_response-processor)
+for its supported contract.
 
 There is one stable database path for each source and processor:
 

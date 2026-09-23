@@ -409,12 +409,26 @@ record for the same contact, so each contact counts once.
 | Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
 |---|---|---|---|---|---|
 | Engagement rate by number of impressions | The share of impressions with a positive outcome after the 1st, 2nd, 3rd, ... impression of the same action to the same customer. **Example:** In the Web Hero placement, 1,000 fifth impressions to customers who have not clicked yet produce 12 clicks: a 1.2% engagement rate, against 1.6% on first impressions, so the action has lost a quarter of its response by the fifth impression. | `contact_policy.engagement_rate_by_impressions` | Exact `Positives` and `Negatives` states | Approximate fixed-window interpretation | Line |
+| Repeat impression share | The fraction of classified impressions at frequency 2 or higher. **Example:** If 800 of 1,000 impressions are in repeat buckets, the share is 80%. | `contact_policy.repeat_impression_share` | `Positives`, `Negatives`, and a terminal bucket above 1 | Approximate fixed-window interpretation | KPI card |
+| Historical frequency-cap cost | For a chosen cap `k`, the fraction of historical impressions above `k`; the query also returns `PositiveShareAboveThreshold`, the fraction of positive outcomes above `k`. **Example:** If 200 of 1,000 impressions and 5 of 50 positive outcomes occurred above cap 3, the two shares are 20% and 10%. | `contact_policy.historical_cap_cost` | `Positives`, `Negatives`, and `k < max_frequency` | Approximate fixed-window interpretation | Table |
 
-The **Contact policy** recipe targets only the `frequency_response` processor
-and requires its exact `Positives` and `Negatives` states; it never proposes a
-generic count as a substitute. Its line recommendation uses `ExposureBucket`,
+The **Contact policy** recipes target only the `frequency_response` processor
+and require its exact `Positives` and `Negatives` states; they never propose a
+generic count as a substitute. The engagement-rate line uses `ExposureBucket`,
 whose value is an upstream fixed-window approximation; changing a report date
 filter does not recompute customer contact history.
+
+The two share recipes use `frequency_threshold_share`. For each requested
+report group, the query first merges stored counts by frequency bucket, then
+divides the counts above the threshold by all counts in the group. A zero
+denominator yields zero. The repeat-share threshold is 1. The cap-cost recipe
+accepts a whole-number `cap` parameter (default 3), which must be below the
+processor's terminal `max_frequency` bucket. Its primary output is the
+historical impression share; `PositiveShareAboveThreshold` is a companion
+output with positive outcomes as both numerator and denominator. Queries may
+group or filter by other stored dimensions, but cannot group or filter by the
+frequency column because that would remove buckets from the denominator.
+Both values describe observed data, not the outcomes a new cap would cause.
 
 Customers who already responded are shown the same action again more often,
 so an all-customer curve can rise with repeated impressions even when every

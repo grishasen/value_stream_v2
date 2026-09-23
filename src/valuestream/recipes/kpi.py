@@ -294,7 +294,7 @@ def resolve_recipe_parameters(
     return resolved
 
 
-def recipe_readiness(
+def recipe_readiness(  # noqa: PLR0912 - readiness paths for supported recipe kinds
     recipe: KpiRecipe,
     processor: model.Processor,
     *,
@@ -328,6 +328,24 @@ def recipe_readiness(
         )
 
     resolved_parameters = resolve_recipe_parameters(recipe, parameter_values)
+    if isinstance(recipe.metric, model.FrequencyThresholdShareMetric):
+        if not isinstance(processor, model.FrequencyResponseProcessor):
+            return RecipeReadiness(
+                recipe_id=recipe.id,
+                processor_id=processor.id,
+                status="incompatible",
+                messages=("Requires frequency_response.",),
+            )
+        threshold = resolved_parameters.get("cap", recipe.metric.threshold)
+        if threshold != int(threshold) or threshold >= processor.max_frequency:
+            return RecipeReadiness(
+                recipe_id=recipe.id,
+                processor_id=processor.id,
+                status="incompatible",
+                messages=(
+                    f"Threshold must be a whole number below max_frequency={processor.max_frequency}.",
+                ),
+            )
     options: dict[str, tuple[str, ...]] = {}
     resolved: dict[str, str] = {}
     messages: list[str] = []
@@ -421,6 +439,11 @@ def instantiate_metric(
     metric_def = _substitute(_metric_template(recipe), values)
     if not isinstance(metric_def, dict):  # pragma: no cover - schema guards this shape
         raise TypeError("recipe metric template must materialize to a mapping")
+    if isinstance(recipe.metric, model.FrequencyThresholdShareMetric):
+        assert isinstance(processor, model.FrequencyResponseProcessor)
+        metric_def["frequency_column"] = processor.frequency_column
+        if "cap" in resolved_parameters:
+            metric_def["threshold"] = int(resolved_parameters["cap"])
     display = dict(metric_def.get("display") or {})
     authored_label = str(display.get("label") or "").strip()
     if metric_id != recipe.default_metric_id or not authored_label:

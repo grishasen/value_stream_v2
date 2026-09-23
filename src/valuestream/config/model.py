@@ -1161,6 +1161,16 @@ class FormulaMetric(_MetricBase):
     expression: Expr
 
 
+class FrequencyThresholdShareMetric(_MetricBase):
+    """Historical shares above a frequency threshold from published counts."""
+
+    kind: Literal["frequency_threshold_share"]
+    threshold: int = Field(ge=1)
+    frequency_column: str = "ExposureBucket"
+    positive_state: str = "Positives"
+    negative_state: str = "Negatives"
+
+
 class ApproxDistinctCountMetric(_MetricBase):
     kind: Literal["approx_distinct_count"]
     state: str
@@ -1285,6 +1295,7 @@ class FunnelDropoffMetric(_MetricBase):
 
 Metric = Annotated[
     FormulaMetric
+    | FrequencyThresholdShareMetric
     | ApproxDistinctCountMetric
     | TopKItemsMetric
     | DistributionMetric

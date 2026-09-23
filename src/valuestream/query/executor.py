@@ -173,7 +173,7 @@ class AggregateNotReadyError(ValueError):
 
 
 @timed
-def query_metric(
+def query_metric(  # noqa: PLR0912 - metric-specific query contracts
     workspace_path: str | Path,
     metric_name: str,
     *,
@@ -210,16 +210,31 @@ def query_metric(
         raise ValueError(f"unknown metric {metric_name!r}")
 
     processor_config = next(
-        (processor for processor in catalog.processors.processors if processor.id == metric.processor),
+        (
+            processor
+            for processor in catalog.processors.processors
+            if processor.id == metric.processor
+        ),
         None,
     )
     if processor_config is None:
-        raise ValueError(f"metric {metric_name!r} references unknown processor {metric.processor!r}")
+        raise ValueError(
+            f"metric {metric_name!r} references unknown processor {metric.processor!r}"
+        )
 
     processor = _make_processor(
         processor_config,
         computation_hash=processor_computation_hash(catalog, processor_config),
     )
+    if isinstance(metric, model.FrequencyThresholdShareMetric):
+        if not isinstance(processor, FrequencyResponseProcessor):
+            raise ValueError("frequency_threshold_share requires frequency_response")
+        frequency_column = processor.config.frequency_column
+        if frequency_column in (group_by or []) or frequency_column in (filters or {}):
+            raise ValueError(
+                "frequency_threshold_share needs all frequency buckets; "
+                f"do not group or filter by {frequency_column!r}"
+            )
     windowed_set_op = isinstance(metric, model.SetOpMetric) and any(
         operand.time_window for operand in metric.operands
     )
@@ -231,9 +246,7 @@ def query_metric(
         assert isinstance(metric, model.SetOpMetric)
         lookback_days = _set_op_lookback_days(metric)
         load_start = (
-            None
-            if lookback_days is None
-            else _date_bound(start) - dt.timedelta(days=lookback_days)
+            None if lookback_days is None else _date_bound(start) - dt.timedelta(days=lookback_days)
         )
     frame, stored_grain = _load_current_aggregate(
         workspace_path,
@@ -893,6 +906,14 @@ def _metric_group_columns(
     frame: pl.DataFrame,
 ) -> list[str]:
     columns = list(group_columns)
+    if isinstance(metric, model.FrequencyThresholdShareMetric) and isinstance(
+        processor, FrequencyResponseProcessor
+    ):
+        frequency_column = processor.config.frequency_column
+        if frequency_column not in frame.columns:
+            raise ValueError(f"frequency column {frequency_column!r} not present in aggregate")
+        if frequency_column not in columns:
+            columns.append(frequency_column)
     if isinstance(metric, model.LifecycleSummaryMetric) and isinstance(
         processor, EntityLifecycleProcessor
     ):
@@ -920,6 +941,8 @@ def _metric_output_columns(  # noqa: PLR0911
     include_quantile_suite: bool,
     include_curve_columns: bool,
 ) -> list[str]:
+    if isinstance(metric, model.FrequencyThresholdShareMetric):
+        return [metric_name, "PositiveShareAboveThreshold"]
     if isinstance(metric, model.LifecycleSummaryMetric):
         configured = [column for column in metric.outputs if column in frame.columns]
         return configured or [
@@ -970,9 +993,7 @@ def _cardinality_estimator(
     state_specs: dict[str, model.StateSpec] | None,
 ) -> Any:
     if state_specs is None or state not in state_specs:
-        raise ValueError(
-            f"approx_distinct_count requires an explicit state contract for {state!r}"
-        )
+        raise ValueError(f"approx_distinct_count requires an explicit state contract for {state!r}")
     state_type = state_specs[state].type
     if state_type == "cpc":
         return cpc.estimate
@@ -997,6 +1018,8 @@ def _derive_metric(  # noqa: PLR0911, PLR0912, PLR0915
     include_curve_columns: bool = False,
 ) -> pl.DataFrame:
     working = frame
+    if isinstance(metric, model.FrequencyThresholdShareMetric):
+        return _derive_frequency_threshold_share(working, metric_name, metric, group_columns or [])
     if isinstance(metric, model.FormulaMetric):
         for dep in metric.depends_on:
             dep_metric = metrics.get(dep)
@@ -1152,6 +1175,43 @@ def _derive_metric(  # noqa: PLR0911, PLR0912, PLR0915
     if isinstance(metric, model.ProportionTestMetric):
         return _derive_proportion_test(working, metric, group_columns or [])
     raise NotImplementedError(f"query does not support metric kind {metric.kind!r}")
+
+
+def _derive_frequency_threshold_share(
+    frame: pl.DataFrame,
+    metric_name: str,
+    metric: model.FrequencyThresholdShareMetric,
+    group_columns: list[str],
+) -> pl.DataFrame:
+    """Aggregate frequency buckets before dividing historical count shares."""
+
+    frequency_column = metric.frequency_column
+    if frequency_column not in frame.columns:
+        raise ValueError(f"frequency column {frequency_column!r} not present in aggregate")
+    positive = pl.col(metric.positive_state)
+    impressions = positive + pl.col(metric.negative_state)
+    above = pl.col(frequency_column) > metric.threshold
+    expressions = [
+        impressions.sum().alias("TotalImpressions"),
+        pl.when(above).then(impressions).otherwise(0).sum().alias("ImpressionsAboveThreshold"),
+        positive.sum().alias("TotalPositives"),
+        pl.when(above).then(positive).otherwise(0).sum().alias("PositivesAboveThreshold"),
+    ]
+    totals = (
+        frame.group_by(group_columns).agg(expressions)
+        if group_columns
+        else frame.select(expressions)
+    )
+    return totals.with_columns(
+        pl.when(pl.col("TotalImpressions") == 0)
+        .then(0.0)
+        .otherwise(pl.col("ImpressionsAboveThreshold") / pl.col("TotalImpressions"))
+        .alias(metric_name),
+        pl.when(pl.col("TotalPositives") == 0)
+        .then(0.0)
+        .otherwise(pl.col("PositivesAboveThreshold") / pl.col("TotalPositives"))
+        .alias("PositiveShareAboveThreshold"),
+    )
 
 
 def _derive_variant_compare(
@@ -1560,9 +1620,7 @@ def _lifecycle_summary(
         "lifecycle_summary",
     )
     group_columns = [
-        column
-        for column in frame.columns
-        if column not in {*state_specs, "config_hash"}
+        column for column in frame.columns if column not in {*state_specs, "config_hash"}
     ]
     entity_column = metric.entity_column
     if entity_column not in group_columns:

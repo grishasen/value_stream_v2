@@ -233,10 +233,7 @@ def validate_catalog(  # noqa: PLR0915
         bound_source = source_by_id.get(processor.source)
         if bound_source is None:
             continue
-        if (
-            defer_unobserved_source_expressions
-            and bound_source.id not in observed_source_ids
-        ):
+        if defer_unobserved_source_expressions and bound_source.id not in observed_source_ids:
             continue
         schema = dict(source_schemas.get(bound_source.id, {}))
         for column in processor.group_by:
@@ -249,6 +246,23 @@ def validate_catalog(  # noqa: PLR0915
         )
 
     for name, metric in catalog.metrics.metrics.items():
+        if isinstance(metric, model.FrequencyThresholdShareMetric) and metric.depends_on:
+            issues.append(
+                CatalogIssue(
+                    location=f"metrics.{name}.depends_on",
+                    message="frequency_threshold_share cannot depend on other metrics",
+                )
+            )
+        for dependency in metric.depends_on:
+            if isinstance(
+                catalog.metrics.metrics.get(dependency), model.FrequencyThresholdShareMetric
+            ):
+                issues.append(
+                    CatalogIssue(
+                        location=f"metrics.{name}.depends_on",
+                        message="frequency_threshold_share cannot be used as a metric dependency",
+                    )
+                )
         if not isinstance(metric, model.FormulaMetric):
             continue
         bound = processor_by_id.get(metric.processor)
@@ -1068,6 +1082,44 @@ def _validate_metric_state_references(  # noqa: PLR0911
     processor: model.Processor,
     issues: list[CatalogIssue],
 ) -> None:
+    if isinstance(metric, model.FrequencyThresholdShareMetric):
+        if not isinstance(processor, model.FrequencyResponseProcessor):
+            issues.append(
+                CatalogIssue(
+                    location=f"metrics.{metric_name}.processor",
+                    message="frequency_threshold_share requires a frequency_response processor",
+                )
+            )
+            return
+        if metric.threshold >= processor.max_frequency:
+            issues.append(
+                CatalogIssue(
+                    location=f"metrics.{metric_name}.threshold",
+                    message=(
+                        f"threshold must be below max_frequency={processor.max_frequency}; "
+                        "the terminal bucket cannot distinguish later impressions"
+                    ),
+                )
+            )
+        if metric.frequency_column != processor.frequency_column:
+            issues.append(
+                CatalogIssue(
+                    location=f"metrics.{metric_name}.frequency_column",
+                    message=f"must match processor frequency_column {processor.frequency_column!r}",
+                )
+            )
+        frequency_states = model.effective_processor_states(processor)
+        for field_name, outcome in (("positive_state", "positive"), ("negative_state", "negative")):
+            state_name = getattr(metric, field_name)
+            state = frequency_states.get(state_name)
+            if not isinstance(state, model.CountState) or state.outcome != outcome:
+                issues.append(
+                    CatalogIssue(
+                        location=f"metrics.{metric_name}.{field_name}",
+                        message=f"requires a configured {outcome} count state",
+                    )
+                )
+        return
     if isinstance(metric, model.FunnelDropoffMetric):
         states = {
             name
@@ -1175,19 +1227,14 @@ def _validate_metric_state_references(  # noqa: PLR0911
             for field_name, source_column, predicate, label in expected:
                 state_name = getattr(metric, field_name)
                 state = processor.states.get(state_name)
-                if (
-                    state is not None
-                    and (
-                        not predicate(state)
-                        or getattr(state, "source_column", None) != source_column
-                    )
+                if state is not None and (
+                    not predicate(state) or getattr(state, "source_column", None) != source_column
                 ):
                     issues.append(
                         CatalogIssue(
                             location=f"metrics.{metric_name}.{field_name}",
                             message=(
-                                f"must reference {label} state sourced from "
-                                f"{source_column!r}"
+                                f"must reference {label} state sourced from {source_column!r}"
                             ),
                         )
                     )
@@ -1244,10 +1291,7 @@ def _validate_set_time_window(
     if window.last is not None and _is_duration(window.last, positive=True):
         return
     between = window.between
-    if (
-        between is not None
-        and all(_is_duration(value, positive=False) for value in between)
-    ):
+    if between is not None and all(_is_duration(value, positive=False) for value in between):
         return
     issues.append(
         CatalogIssue(
@@ -1347,9 +1391,7 @@ def _validate_processor_config(
             )
 
     variant_column = (
-        processor.variant_column
-        if isinstance(processor, model.BinaryOutcomeProcessor)
-        else None
+        processor.variant_column if isinstance(processor, model.BinaryOutcomeProcessor) else None
     )
     if variant_column and variant_column not in processor.group_by:
         issues.append(

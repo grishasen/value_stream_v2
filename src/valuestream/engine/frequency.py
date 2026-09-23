@@ -239,6 +239,35 @@ def _focal_sql(
     positives = _quote_identifier(POSITIVE_SEQUENCE_COLUMN)
     scope_rank = _quote_identifier(SCOPE_RANK_SEQUENCE_COLUMN)
     positive = _quote_identifier(POSITIVE_COLUMN)
+    need_prior = model.FREQUENCY_PRIOR_POSITIVE_COLUMN in config.group_by
+    need_rank = model.FREQUENCY_SCOPE_RANK_COLUMN in config.group_by
+    boundary_positive = (
+        f",\n        MAX({_qualified_identifier('ordered_contact', POSITIVE_SEQUENCE_COLUMN)})"
+        f" AS {_quote_identifier(BOUNDARY_POSITIVE_COLUMN)}"
+        if need_prior
+        else ""
+    )
+    excluded = [_quote_identifier(WINDOW_START_COLUMN), sequence]
+    if need_prior:
+        excluded.append(positives)
+    if need_rank:
+        excluded.append(scope_rank)
+    derived = [
+        f"CAST(LEAST(windowed_contact.{sequence} - "
+        f"COALESCE(boundary.{_quote_identifier(BOUNDARY_SEQUENCE_COLUMN)}, 0), "
+        f"{config.max_frequency}) AS BIGINT) AS {_quote_identifier(config.frequency_column)}"
+    ]
+    if need_prior:
+        derived.append(
+            f"(windowed_contact.{positives} - CAST(windowed_contact.{positive} AS BIGINT) "
+            f"- COALESCE(boundary.{_quote_identifier(BOUNDARY_POSITIVE_COLUMN)}, 0)) > 0 "
+            f"AS {_quote_identifier(model.FREQUENCY_PRIOR_POSITIVE_COLUMN)}"
+        )
+    if need_rank:
+        derived.append(
+            f"CAST(LEAST(windowed_contact.{scope_rank}, {config.max_rank}) AS BIGINT) "
+            f"AS {_quote_identifier(model.FREQUENCY_SCOPE_RANK_COLUMN)}"
+        )
 
     return f"""
 WITH checkpoint_union AS (
@@ -279,9 +308,7 @@ boundary_points AS (
         {_qualified_identifier("ordered_contact", time_column)}
             AS {_quote_identifier(BOUNDARY_TIME_COLUMN)},
         MAX({_qualified_identifier("ordered_contact", EXPOSURE_SEQUENCE_COLUMN)})
-            AS {_quote_identifier(BOUNDARY_SEQUENCE_COLUMN)},
-        MAX({_qualified_identifier("ordered_contact", POSITIVE_SEQUENCE_COLUMN)})
-            AS {_quote_identifier(BOUNDARY_POSITIVE_COLUMN)}
+            AS {_quote_identifier(BOUNDARY_SEQUENCE_COLUMN)}{boundary_positive}
     FROM ordered_exposures AS ordered_contact
     GROUP BY {_identifier_csv([*exposure_keys, time_column])}
 ),
@@ -295,26 +322,8 @@ windowed_exposures AS (
 ),
 exposures AS (
     SELECT
-        windowed_contact.* EXCLUDE (
-            {_quote_identifier(WINDOW_START_COLUMN)},
-            {sequence},
-            {positives},
-            {scope_rank}
-        ),
-        CAST(
-            LEAST(
-                windowed_contact.{sequence}
-                    - COALESCE(boundary.{_quote_identifier(BOUNDARY_SEQUENCE_COLUMN)}, 0),
-                {config.max_frequency}
-            ) AS BIGINT
-        ) AS {_quote_identifier(config.frequency_column)},
-        (
-            windowed_contact.{positives}
-                - CAST(windowed_contact.{positive} AS BIGINT)
-                - COALESCE(boundary.{_quote_identifier(BOUNDARY_POSITIVE_COLUMN)}, 0)
-        ) > 0 AS {_quote_identifier(model.FREQUENCY_PRIOR_POSITIVE_COLUMN)},
-        CAST(LEAST(windowed_contact.{scope_rank}, {config.max_rank}) AS BIGINT)
-            AS {_quote_identifier(model.FREQUENCY_SCOPE_RANK_COLUMN)}
+        windowed_contact.* EXCLUDE ({", ".join(excluded)}),
+        {", ".join(derived)}
     FROM windowed_exposures AS windowed_contact
     ASOF LEFT JOIN boundary_points AS boundary
         ON {boundary_join}
@@ -399,6 +408,39 @@ def _daily_focal_sql(
             f"CAST({_quote_identifier(time_column)} AS DATE)",
         ]
     )
+    need_prior = model.FREQUENCY_PRIOR_POSITIVE_COLUMN in config.group_by
+    need_rank = model.FREQUENCY_SCOPE_RANK_COLUMN in config.group_by
+    history_positive = f",\n        BOOL_OR({positive}) AS {positive}" if need_prior else ""
+    counter_positive = (
+        f",\n        CAST(count_if({positive}) AS BIGINT) AS {prior_positives}"
+        if need_prior
+        else ""
+    )
+    window_positive = (
+        f",\n        CAST(SUM(counter.{prior_positives}) AS BIGINT) AS {prior_positives}"
+        if need_prior
+        else ""
+    )
+    excluded = [sequence]
+    if need_prior:
+        excluded.append(positives)
+    if need_rank:
+        excluded.append(scope_rank)
+    derived = [
+        f"CAST(LEAST(ordered_contact.{sequence} + COALESCE(prior.{prior_exposures}, 0), "
+        f"{config.max_frequency}) AS BIGINT) AS {_quote_identifier(config.frequency_column)}"
+    ]
+    if need_prior:
+        derived.append(
+            f"(ordered_contact.{positives} - CAST(ordered_contact.{positive} AS BIGINT) "
+            f"+ COALESCE(prior.{prior_positives}, 0)) > 0 "
+            f"AS {_quote_identifier(model.FREQUENCY_PRIOR_POSITIVE_COLUMN)}"
+        )
+    if need_rank:
+        derived.append(
+            f"CAST(LEAST(ordered_contact.{scope_rank}, {config.max_rank}) AS BIGINT) "
+            f"AS {_quote_identifier(model.FREQUENCY_SCOPE_RANK_COLUMN)}"
+        )
 
     return f"""
 WITH checkpoint_union AS (
@@ -435,8 +477,7 @@ ordered_exposures AS MATERIALIZED (
 ),
 history_contacts AS (
     SELECT
-        {history_identity},
-        BOOL_OR({positive}) AS {positive}
+        {history_identity}{history_positive}
     FROM {_quote_identifier(history_table)}
     WHERE {_quote_identifier(shard_column)} = {shard_id}
       AND {_quote_identifier(chunk_id_column)} < {_quote_literal(current_chunk_id)}
@@ -445,8 +486,7 @@ history_contacts AS (
 daily_counters AS (
     SELECT
         {counter_keys},
-        CAST(count(*) AS BIGINT) AS {prior_exposures},
-        CAST(count_if({positive}) AS BIGINT) AS {prior_positives}
+        CAST(count(*) AS BIGINT) AS {prior_exposures}{counter_positive}
     FROM history_contacts
     GROUP BY {counter_keys}
 ),
@@ -460,8 +500,7 @@ window_prior AS (
     SELECT
         {focal_keys},
         focal.{day},
-        CAST(SUM(counter.{prior_exposures}) AS BIGINT) AS {prior_exposures},
-        CAST(SUM(counter.{prior_positives}) AS BIGINT) AS {prior_positives}
+        CAST(SUM(counter.{prior_exposures}) AS BIGINT) AS {prior_exposures}{window_positive}
     FROM focal_days AS focal
     JOIN daily_counters AS counter
         ON {prior_join}
@@ -471,20 +510,8 @@ window_prior AS (
 ),
 exposures AS (
     SELECT
-        ordered_contact.* EXCLUDE ({sequence}, {positives}, {scope_rank}),
-        CAST(
-            LEAST(
-                ordered_contact.{sequence} + COALESCE(prior.{prior_exposures}, 0),
-                {config.max_frequency}
-            ) AS BIGINT
-        ) AS {_quote_identifier(config.frequency_column)},
-        (
-            ordered_contact.{positives}
-                - CAST(ordered_contact.{positive} AS BIGINT)
-                + COALESCE(prior.{prior_positives}, 0)
-        ) > 0 AS {_quote_identifier(model.FREQUENCY_PRIOR_POSITIVE_COLUMN)},
-        CAST(LEAST(ordered_contact.{scope_rank}, {config.max_rank}) AS BIGINT)
-            AS {_quote_identifier(model.FREQUENCY_SCOPE_RANK_COLUMN)}
+        ordered_contact.* EXCLUDE ({", ".join(excluded)}),
+        {", ".join(derived)}
     FROM ordered_exposures AS ordered_contact
     LEFT JOIN window_prior AS prior
         ON {exposure_prior_join}
@@ -498,29 +525,34 @@ WHERE {_quote_identifier(SEEN_CURRENT_COLUMN)}
 
 
 def _running_totals_sql(config: model.FrequencyResponseProcessor, *, partition_by: str) -> str:
-    """Window expressions shared by both plans: sequence, positives, scope rank."""
+    """Window expressions shared by both plans, omitting unpublished dimensions."""
 
     order = ", ".join(
         f"{_qualified_identifier('contact', column)} ASC NULLS FIRST"
         for column in [config.time.property, config.columns.interaction, CONTACT_ORDER_COLUMN]
     )
     running = f"PARTITION BY {partition_by} ORDER BY {order}"
-    rank_partition = _qualified_identifier_csv("contact", config.rank_partition_columns)
-    positive = _qualified_identifier("contact", POSITIVE_COLUMN)
-    return ",\n".join(
-        [
-            f"CAST(ROW_NUMBER() OVER ({running}) AS BIGINT)\n"
-            f"    AS {_quote_identifier(EXPOSURE_SEQUENCE_COLUMN)}",
+    expressions = [
+        f"CAST(ROW_NUMBER() OVER ({running}) AS BIGINT)\n"
+        f"    AS {_quote_identifier(EXPOSURE_SEQUENCE_COLUMN)}"
+    ]
+    if model.FREQUENCY_PRIOR_POSITIVE_COLUMN in config.group_by:
+        positive = _qualified_identifier("contact", POSITIVE_COLUMN)
+        expressions.append(
             f"CAST(SUM(CAST({positive} AS BIGINT)) OVER (\n"
             f"    {running}\n"
             "    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n"
-            f") AS BIGINT) AS {_quote_identifier(POSITIVE_SEQUENCE_COLUMN)}",
+            f") AS BIGINT) AS {_quote_identifier(POSITIVE_SEQUENCE_COLUMN)}"
+        )
+    if model.FREQUENCY_SCOPE_RANK_COLUMN in config.group_by:
+        rank_partition = _qualified_identifier_csv("contact", config.rank_partition_columns)
+        expressions.append(
             f"CAST(DENSE_RANK() OVER (\n"
             f"    PARTITION BY {rank_partition}\n"
             f"    ORDER BY {_qualified_identifier('contact', RANK_COLUMN)}\n"
-            f") AS BIGINT) AS {_quote_identifier(SCOPE_RANK_SEQUENCE_COLUMN)}",
-        ]
-    )
+            f") AS BIGINT) AS {_quote_identifier(SCOPE_RANK_SEQUENCE_COLUMN)}"
+        )
+    return ",\n".join(expressions)
 
 
 def _union_columns(

@@ -1054,6 +1054,13 @@ integer dtype; configure strict source casts when the raw export uses text
 fields. These checks run on the target schema before it is combined with
 history, so relaxed union coercion cannot mask a bad target day.
 
+After classification and filtering, ingestion projects contact identity,
+decision time, the current/history marker, raw report group fields, and the
+internal rank, positive flag, and row-order fields needed for sequencing. The
+exact-window Polars and DuckDB plans, and the daily DuckDB plan, omit the
+`ScopeRank` and `PriorPositive` window calculations when those optional
+dimensions are not published in `group_by`.
+
 A processor-level `filter` runs on transformed source rows before contacts,
 number-of-impressions buckets, or derived columns exist. It may reference only
 raw/transformed source fields—not `Day`, the frequency column, `ScopeRank`, or
@@ -1165,6 +1172,24 @@ impressions     = Positives + Negatives
 
 `contact_policy.engagement_rate_by_impressions` installs the engagement rate as
 a line over the frequency column.
+
+`frequency_threshold_share` derives two query-time values from the same daily
+count states without persisting another aggregate. With threshold `k`, its
+primary output is
+`sum(Positives + Negatives where frequency > k) / sum(Positives + Negatives)`;
+`PositiveShareAboveThreshold` is
+`sum(Positives where frequency > k) / sum(Positives)`. Both use zero for a zero
+denominator. The query retains the frequency bucket while merging states, then
+groups it away before dividing. A metric definition must set `threshold` below
+`max_frequency`; the terminal bucket cannot resolve a cap at or above that
+value. `positive_state` and `negative_state` bind the canonical states, and
+`frequency_column` must match the processor's configured column. Grouping or
+filtering a query by the frequency column is rejected for this metric kind.
+It cannot participate in `depends_on` formulas because those formulas merge
+away the bucket before they evaluate their dependencies.
+The KPI library provides a repeat-share recipe (`k = 1`) and an editable
+historical cap-cost recipe (default `k = 3`). The latter's positive share is
+an observed share, not a causal forecast of conversions lost to a new cap.
 
 ### 10.6 Dependency, idempotency, and limitations
 

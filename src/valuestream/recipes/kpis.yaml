@@ -799,6 +799,99 @@ recipes:
       caveat: ExposureBucket counts every impression of the same action to the same customer inside the processor's scope_by fields over the trailing window, including the current one; report filters do not recompute it. ScopeRank is the action's rank among the decision's shown actions inside that scope. Customers who already responded are re-shown more often, so split by PriorPositive before reading a decline as fatigue. The curve is observational, not a causal estimate of wearout.
     report: { chart: line, placement: content, x: ExposureBucket }
 
+  - id: contact_policy.repeat_impression_share
+    version: 1
+    title: Repeat impression share
+    domain: Contact policy
+    summary: Share of classified impressions in the second or later frequency bucket.
+    business_questions:
+      - What share of observed impressions were repeats within the configured window and scope?
+    tags: [ contact-policy, frequency, repeat-impressions ]
+    maturity: reviewed
+    processor_kinds: [ frequency_response ]
+    inputs:
+      - role: positives
+        label: Positive impression count
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Positives ]
+        selection: automatic
+        require_preferred: true
+      - role: negatives
+        label: Negative impression count
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Negatives ]
+        selection: automatic
+        require_preferred: true
+        different_from: positives
+    default_metric_id: VS_Repeat_Impression_Share
+    metric:
+      processor: ${processor_id}
+      kind: frequency_threshold_share
+      threshold: 1
+      positive_state: ${positives}
+      negative_state: ${negatives}
+      description: Observed share of impressions in buckets above the first.
+      display: { label: Repeat impression share, unit: percent, value_format: percent, direction: neutral }
+    method:
+      calculation: sum(Positives + Negatives where ExposureBucket > 1) / sum(Positives + Negatives)
+      accuracy: approximate
+      algorithm: Aggregate count shares over persisted frequency buckets.
+      caveat: The terminal frequency bucket must exceed one. Frequency uses the processor's fixed window and scope; sampling or daily granularity can approximate the full-population exact-window share.
+    report: { chart: kpi_card, placement: kpi_strip }
+
+  - id: contact_policy.historical_cap_cost
+    version: 1
+    title: Historical frequency-cap cost
+    domain: Contact policy
+    summary: Observed impression share above cap k, with the positive-outcome share shown alongside it.
+    business_questions:
+      - What fraction of historical impressions and positive outcomes occurred after the proposed cap?
+    tags: [ contact-policy, frequency-cap, opportunity ]
+    maturity: reviewed
+    processor_kinds: [ frequency_response ]
+    parameters:
+      - name: cap
+        label: Proposed cap k
+        description: Highest allowed frequency bucket; must be below the processor's terminal bucket.
+        unit: number
+        default: 3
+        minimum: 1
+        maximum: 4095
+        step: 1
+    inputs:
+      - role: positives
+        label: Positive impression count
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Positives ]
+        selection: automatic
+        require_preferred: true
+      - role: negatives
+        label: Negative impression count
+        source: state
+        state_types: [ count ]
+        preferred_names: [ Negatives ]
+        selection: automatic
+        require_preferred: true
+        different_from: positives
+    default_metric_id: VS_Frequency_Cap_Historical_Cost
+    metric:
+      processor: ${processor_id}
+      kind: frequency_threshold_share
+      threshold: 3
+      positive_state: ${positives}
+      negative_state: ${negatives}
+      description: Historical share of impressions above cap k; PositiveShareAboveThreshold is the corresponding positive-outcome share.
+      display: { label: Historical impressions above cap, unit: percent, value_format: percent, direction: neutral }
+    method:
+      calculation: sum(Positives + Negatives where ExposureBucket > k) / sum(Positives + Negatives); companion positive share is sum(Positives where ExposureBucket > k) / sum(Positives)
+      accuracy: approximate
+      algorithm: Aggregate count shares over persisted frequency buckets.
+      caveat: Historical positive outcomes above k are not a causal estimate of outcomes lost under a new cap. The terminal bucket cannot distinguish thresholds at or above max_frequency; sampling or daily granularity adds approximation.
+    report: { chart: table, placement: content }
+
   - id: finance.marketing_cost_impressions
     version: 1
     title: Marketing cost — impressions

@@ -372,7 +372,9 @@ class FrequencyResponseProcessor:
     ) -> pl.LazyFrame:
         """Build daily additive states from current contacts and day counters."""
 
-        exposures = self._with_scope_rank(self._with_daily_exposure_frequency(contacts, counters))
+        exposures = self._with_daily_exposure_frequency(contacts, counters)
+        if SCOPE_RANK_COLUMN in self.config.group_by:
+            exposures = self._with_scope_rank(exposures)
         focal = exposures.filter(pl.col(_SEEN_CURRENT_COLUMN) & ~pl.col(_SEEN_HISTORY_COLUMN))
         return self.aggregate_focal_lazy(focal, ctx)
 
@@ -555,15 +557,14 @@ class FrequencyResponseProcessor:
             )
         source = source.with_row_index(_ROW_ORDER_COLUMN)
 
-        projected = set(required_input_columns(self.config))
-        projected.update(
-            {
-                outcome.column,
-                columns.rank,
-                self.config.time.property,
-                TARGET_CHUNK_COLUMN,
-            }
-        )
+        # Outcome, raw rank, and filter-only columns have already served their
+        # purpose. Keep them only when the published grouping needs them.
+        projected = {
+            *self.config.contact_identity_columns,
+            self.config.time.property,
+            TARGET_CHUNK_COLUMN,
+            *(name for name in self.config.group_by if name not in self.config.derived_columns),
+        }
         return source.select(
             *[name for name in source_schema.names() if name in projected],
             _ROW_ORDER_COLUMN,
@@ -578,7 +579,9 @@ class FrequencyResponseProcessor:
     ) -> pl.LazyFrame:
         """Build daily additive states from normalized current/history contacts."""
 
-        exposures = self._with_scope_rank(self._with_exposure_frequency(contacts))
+        exposures = self._with_exposure_frequency(contacts)
+        if SCOPE_RANK_COLUMN in self.config.group_by:
+            exposures = self._with_scope_rank(exposures)
         focal = exposures.filter(pl.col(_SEEN_CURRENT_COLUMN) & ~pl.col(_SEEN_HISTORY_COLUMN))
         return self.aggregate_focal_lazy(focal, ctx)
 
@@ -726,6 +729,7 @@ class FrequencyResponseProcessor:
         time_dtype = contacts.collect_schema()[time_column]
         time_unit = time_dtype.time_unit if isinstance(time_dtype, pl.Datetime) else None
         exposure_keys = self.config.exposure_key_columns
+        include_prior_positive = PRIOR_POSITIVE_COLUMN in self.config.group_by
         ordered = contacts.sort(
             [*exposure_keys, time_column, columns.interaction, _CONTACT_ORDER_COLUMN]
         ).with_columns(
@@ -734,11 +738,17 @@ class FrequencyResponseProcessor:
             .over(exposure_keys)
             .cast(pl.Int64)
             .alias(_EXPOSURE_SEQUENCE_COLUMN),
-            pl.col(_POSITIVE_COLUMN)
-            .cast(pl.Int64)
-            .cum_sum()
-            .over(exposure_keys)
-            .alias(_POSITIVE_SEQUENCE_COLUMN),
+            *(
+                [
+                    pl.col(_POSITIVE_COLUMN)
+                    .cast(pl.Int64)
+                    .cum_sum()
+                    .over(exposure_keys)
+                    .alias(_POSITIVE_SEQUENCE_COLUMN)
+                ]
+                if include_prior_positive
+                else []
+            ),
         )
         left = ordered.with_columns(
             (
@@ -750,13 +760,32 @@ class FrequencyResponseProcessor:
             *exposure_keys,
             pl.col(time_column).alias(_BOUNDARY_TIME_COLUMN),
             pl.col(_EXPOSURE_SEQUENCE_COLUMN).alias(_BOUNDARY_SEQUENCE_COLUMN),
-            pl.col(_POSITIVE_SEQUENCE_COLUMN).alias(_BOUNDARY_POSITIVE_COLUMN),
+            *(
+                [pl.col(_POSITIVE_SEQUENCE_COLUMN).alias(_BOUNDARY_POSITIVE_COLUMN)]
+                if include_prior_positive
+                else []
+            ),
         ).sort([*exposure_keys, _BOUNDARY_TIME_COLUMN, _BOUNDARY_SEQUENCE_COLUMN])
-        earlier_positives = (
-            pl.col(_POSITIVE_SEQUENCE_COLUMN)
-            - pl.col(_POSITIVE_COLUMN).cast(pl.Int64)
-            - pl.col(_BOUNDARY_POSITIVE_COLUMN).fill_null(0)
-        )
+        derived = [
+            (pl.col(_EXPOSURE_SEQUENCE_COLUMN) - pl.col(_BOUNDARY_SEQUENCE_COLUMN).fill_null(0))
+            .clip(upper_bound=self.config.max_frequency)
+            .cast(pl.Int64)
+            .alias(self.config.frequency_column)
+        ]
+        dropped = [
+            _WINDOW_START_COLUMN,
+            _BOUNDARY_TIME_COLUMN,
+            _BOUNDARY_SEQUENCE_COLUMN,
+            _EXPOSURE_SEQUENCE_COLUMN,
+        ]
+        if include_prior_positive:
+            earlier_positives = (
+                pl.col(_POSITIVE_SEQUENCE_COLUMN)
+                - pl.col(_POSITIVE_COLUMN).cast(pl.Int64)
+                - pl.col(_BOUNDARY_POSITIVE_COLUMN).fill_null(0)
+            )
+            derived.append((earlier_positives > 0).alias(PRIOR_POSITIVE_COLUMN))
+            dropped.extend([_BOUNDARY_POSITIVE_COLUMN, _POSITIVE_SEQUENCE_COLUMN])
         return (
             left.join_asof(
                 right,
@@ -767,21 +796,8 @@ class FrequencyResponseProcessor:
                 allow_exact_matches=True,
                 check_sortedness=False,
             )
-            .with_columns(
-                (pl.col(_EXPOSURE_SEQUENCE_COLUMN) - pl.col(_BOUNDARY_SEQUENCE_COLUMN).fill_null(0))
-                .clip(upper_bound=self.config.max_frequency)
-                .cast(pl.Int64)
-                .alias(self.config.frequency_column),
-                (earlier_positives > 0).alias(PRIOR_POSITIVE_COLUMN),
-            )
-            .drop(
-                _WINDOW_START_COLUMN,
-                _BOUNDARY_TIME_COLUMN,
-                _BOUNDARY_SEQUENCE_COLUMN,
-                _BOUNDARY_POSITIVE_COLUMN,
-                _EXPOSURE_SEQUENCE_COLUMN,
-                _POSITIVE_SEQUENCE_COLUMN,
-            )
+            .with_columns(derived)
+            .drop(dropped)
         )
 
     def _with_scope_rank(self, contacts: pl.LazyFrame) -> pl.LazyFrame:

@@ -250,9 +250,9 @@ processors still consume only the target chunk.
 
 With `checkpoint.mode: source_scan`, the runner transforms that closure into an
 ephemeral current/history frame for the frequency processor. With
-`checkpoint.mode: persistent_sharded`, schema revision 8 opens the one stable
+`checkpoint.mode: persistent_sharded`, schema revision 9 opens the one stable
 `rolling.duckdb` addressed by source and processor and keeps its connection
-alive for the complete source run. Revision 8 is the default and only supported
+alive for the complete source run. Revision 9 is the default and only supported
 checkpoint schema. Targets execute in ascending ISO-date order. Polars streams the
 complete prepared current target through the Arrow C Stream interface into a
 temporary DuckDB relation; it is never persisted. The database retains only

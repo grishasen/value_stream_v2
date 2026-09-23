@@ -1002,6 +1002,82 @@
       "title": "FormulaMetric",
       "type": "object"
     },
+    "FrequencyThresholdShareMetric": {
+      "additionalProperties": false,
+      "description": "Historical shares above a frequency threshold from published counts.",
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricDisplaySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "frequency_column": {
+          "default": "ExposureBucket",
+          "title": "Frequency Column",
+          "type": "string"
+        },
+        "kind": {
+          "const": "frequency_threshold_share",
+          "title": "Kind",
+          "type": "string"
+        },
+        "negative_state": {
+          "default": "Negatives",
+          "title": "Negative State",
+          "type": "string"
+        },
+        "positive_state": {
+          "default": "Positives",
+          "title": "Positive State",
+          "type": "string"
+        },
+        "processor": {
+          "title": "Processor",
+          "type": "string"
+        },
+        "recipe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MetricRecipeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "threshold": {
+          "minimum": 1,
+          "title": "Threshold",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "processor",
+        "kind",
+        "threshold"
+      ],
+      "title": "FrequencyThresholdShareMetric",
+      "type": "object"
+    },
     "FunnelDropoffMetric": {
       "additionalProperties": false,
       "properties": {
@@ -1130,6 +1206,7 @@
               "curve_from_digests": "#/$defs/CurveFromDigestsMetric",
               "distribution": "#/$defs/DistributionMetric",
               "formula": "#/$defs/FormulaMetric",
+              "frequency_threshold_share": "#/$defs/FrequencyThresholdShareMetric",
               "funnel_dropoff": "#/$defs/FunnelDropoffMetric",
               "lifecycle_summary": "#/$defs/LifecycleSummaryMetric",
               "proportion_test": "#/$defs/ProportionTestMetric",
@@ -1143,6 +1220,9 @@
           "oneOf": [
             {
               "$ref": "#/$defs/FormulaMetric"
+            },
+            {
+              "$ref": "#/$defs/FrequencyThresholdShareMetric"
             },
             {
               "$ref": "#/$defs/ApproxDistinctCountMetric"

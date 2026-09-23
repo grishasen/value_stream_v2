@@ -1,9 +1,9 @@
 # ADR 0007 — Bounded Lookback Processors and Rebuildable Checkpoints
 
-**Status:** Accepted (2026-07-31; amended 2026-07-31, 2026-08-01, and 2026-08-02)
+**Status:** Accepted (2026-07-31; amended 2026-07-31, 2026-08-01, 2026-08-02, and 2026-09-23)
 
 The bounded-state and exactness decision remains current. The current and only
-supported schema-revision-8 physical contract is the bounded rolling DuckDB
+supported schema-revision-9 physical contract is the bounded rolling DuckDB
 state defined in
 [ADR 0008](0008-bounded-rolling-duckdb-state.md).
 
@@ -67,11 +67,11 @@ A bounded processor may choose one of two exact execution strategies:
    processor-owned DuckDB writer. The complete current payload arrives through
    the Arrow C Stream interface and is not persisted. Exact SQL combines it
    with bounded rolling history one logical customer shard at a time, then
-   persists only exposed rank-1 identity, time, classification, local order,
-   chunk id, and shard for later targets. Historical alternatives and
-   target-only grouping/state values are excluded. Frequency targets execute
+   persists normalized impression identity at every rank, time, positive flag,
+   local order, chunk id, and shard for later targets. Target-only grouping
+   values are excluded. Frequency targets execute
    oldest-to-newest in one process so the rolling state has one writer. ADR
-   0008 defines the schema-revision-8 physical, reconciliation, maintenance,
+   0008 records the original revision-8 physical, reconciliation, maintenance,
    and WAL contract.
 
 The strategy is operational rather than semantic. Every field under
