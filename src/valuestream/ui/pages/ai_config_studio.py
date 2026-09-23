@@ -3886,8 +3886,8 @@ def _render_processor_parameter_editor(
                 }
             ),
             # The kind form is the sole author of its fields, and an empty value
-            # there is a decision rather than an omission: alternative_group_by
-            # of [] compares placements within one interaction. Emitting them
+            # there is a decision rather than an omission: scope_by of [] counts
+            # impressions across every placement and channel. Emitting them
             # verbatim keeps those choices out of the empty filter below.
             **kind_fields,
             **_without_empty({"states": states, "filter": filter_value}),
@@ -3966,18 +3966,13 @@ def _canonical_frequency_states(
 ) -> tuple[dict[str, Any], bool]:
     """Render the frequency-response state contract read-only and return it.
 
-    The priority binding is read from the live kind widgets, so adding or
-    clearing that column shows the arbitration diagnostics appearing or
-    disappearing on the same rerun that writes them.
+    The outcome values are read from the live kind widgets, so the grid names
+    the values each state counts on the same rerun that writes them.
     """
 
-    raw_columns = kind_fields.get("columns")
-    definition = {"columns": raw_columns if isinstance(raw_columns, dict) else {}}
-    priority = builder.frequency_response_has_priority(definition)
-    states = builder.frequency_response_states_for_edit(
-        processor_def,
-        priority=priority,
-    )
+    raw_outcome = kind_fields.get("outcome")
+    definition = {"outcome": raw_outcome if isinstance(raw_outcome, dict) else {}}
+    states = builder.frequency_response_states_for_edit(processor_def)
     state_frame = builder.frequency_response_state_frame(definition, states)
     # Nothing may stay pinned for this kind: the editable grid must come back
     # clean if the user switches to an authored kind.

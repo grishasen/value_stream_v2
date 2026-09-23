@@ -2246,18 +2246,13 @@ def _canonical_kind_states(
 ) -> dict[str, Any] | None:
     """Return the fixed state contract for a kind that owns one, else ``None``.
 
-    The bindings come from the live kind widgets rather than the stored
-    definition, so the contract follows the settings being edited.
+    An authored canonical subset in the stored definition is preserved.
     """
 
+    del kind_settings  # the canonical contract does not depend on live settings
     if kind != "frequency_response":
         return None
-    raw_columns = kind_settings.get("columns")
-    definition = {"columns": raw_columns if isinstance(raw_columns, dict) else {}}
-    return builder.frequency_response_states_for_edit(
-        existing_definition,
-        priority=builder.frequency_response_has_priority(definition),
-    )
+    return builder.frequency_response_states_for_edit(existing_definition)
 
 
 def _render_canonical_states_panel(
@@ -2267,8 +2262,8 @@ def _render_canonical_states_panel(
 ) -> None:
     """Render a canonical state contract in place of the editable grid."""
 
-    raw_columns = kind_settings.get("columns")
-    definition = {"columns": raw_columns if isinstance(raw_columns, dict) else {}}
+    raw_outcome = kind_settings.get("outcome")
+    definition = {"outcome": raw_outcome if isinstance(raw_outcome, dict) else {}}
     # Leave nothing pinned for this kind, so switching back to an authored kind
     # rebuilds its editable grid from that kind's own rows.
     components.clear_pinned_editor(editor_key)
@@ -4611,7 +4606,7 @@ def _remap_processor_def_fields(
     for key in ("variant_column",):
         if out.get(key):
             out[key] = field_remap.remap_field_name(str(out[key]), field_mapping)
-    for key in ("properties", "alternative_group_by"):
+    for key in ("properties", "scope_by"):
         values = out.get(key)
         if isinstance(values, list):
             out[key] = field_remap.remap_field_list([str(item) for item in values], field_mapping)

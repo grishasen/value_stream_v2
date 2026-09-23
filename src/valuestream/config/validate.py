@@ -931,7 +931,7 @@ def _processor_source_columns(processor: model.Processor) -> set[str]:
 
     derived_group_columns: set[str] = set()
     if isinstance(processor, model.FrequencyResponseProcessor):
-        derived_group_columns = {processor.frequency_column, "Day"}
+        derived_group_columns = set(processor.derived_columns)
     columns = {
         str(column)
         for column in processor.group_by
@@ -941,7 +941,8 @@ def _processor_source_columns(processor: model.Processor) -> set[str]:
         columns.add(processor.time.column)
     if isinstance(processor, model.FrequencyResponseProcessor):
         columns.update(processor.columns.model_dump(exclude_none=True).values())
-        columns.update(processor.alternative_group_by)
+        columns.add(processor.outcome.column)
+        columns.update(processor.scope_by)
     if isinstance(processor, model.BinaryOutcomeProcessor | model.ScoreDistributionProcessor):
         columns.add(processor.outcome.column)
         columns.update(processor.dedup_keys)
@@ -965,11 +966,6 @@ def _processor_source_columns(processor: model.Processor) -> set[str]:
     for state in processor.states.values():
         source_column = state.model_dump().get("source_column")
         if not source_column:
-            continue
-        if (
-            isinstance(processor, model.FrequencyResponseProcessor)
-            and source_column in model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS
-        ):
             continue
         columns.add(source_column)
     return columns
@@ -1330,7 +1326,9 @@ def _validate_processor_config(
             and state.outcome is not None
             and not isinstance(
                 processor,
-                model.BinaryOutcomeProcessor | model.ScoreDistributionProcessor,
+                model.BinaryOutcomeProcessor
+                | model.ScoreDistributionProcessor
+                | model.FrequencyResponseProcessor,
             )
         ):
             issues.append(

@@ -434,17 +434,12 @@ class OutcomeSpec(_StrictModel):
     negative_values: list[Any]
 
 
-FREQUENCY_RESPONSE_VIRTUAL_COLUMNS = frozenset(
-    {
-        "ClickedContact",
-        "ComparableContact",
-        "ComparableClick",
-        "RunnerAvailable",
-        "RunnerPropensity",
-        "PriorityComparableContact",
-        "FocalPriorityComparable",
-        "RunnerPriorityComparable",
-    }
+# Derived dimensions owned by the frequency_response kind. The configurable
+# number-of-impressions column (``frequency_column``) joins them per processor.
+FREQUENCY_SCOPE_RANK_COLUMN = "ScopeRank"
+FREQUENCY_PRIOR_POSITIVE_COLUMN = "PriorPositive"
+FREQUENCY_RESPONSE_DERIVED_COLUMNS = frozenset(
+    {"Day", FREQUENCY_SCOPE_RANK_COLUMN, FREQUENCY_PRIOR_POSITIVE_COLUMN}
 )
 
 
@@ -457,152 +452,102 @@ class FrequencyResponseState:
     without sending the reader to the reference documentation.
     """
 
-    type: Literal["count", "value_sum"]
-    source_column: str | None
+    type: Literal["count"]
+    outcome: Literal["positive", "negative"]
     explanation: str
-    requires_priority: bool = False
 
 
-# The published output contract of the kind. Unlike every other processor kind,
-# these states are not authored per catalog: the processor derives fixed virtual
-# columns, so the state set that can be built from them is fixed too. The
-# editors render this table read-only and write it verbatim.
+# The published output contract of the kind. The processor classifies every
+# contact as positive or negative from the ``outcome`` block, exactly like
+# ``binary_outcome``, so the state set is fixed: the editors render this table
+# read-only and write it verbatim. A catalog may publish a subset.
 FREQUENCY_RESPONSE_STATES: Mapping[str, FrequencyResponseState] = MappingProxyType(
     {
-        "Responses": FrequencyResponseState(
-            type="count",
-            source_column=None,
-            explanation=(
-                "Every selected rank-1 action impression in the bucket. Counts included "
-                "rows and is the denominator of the response curve."
-            ),
-        ),
         "Positives": FrequencyResponseState(
             type="count",
-            source_column="ClickedContact",
+            outcome="positive",
             explanation=(
-                "Impressions whose outcome is one of the configured positive values. "
-                "Positives / Responses is the response rate at that number of impressions."
+                "Contacts in the bucket with one of the configured positive outcomes. "
+                "Positives / (Positives + Negatives) is the engagement rate after that "
+                "number of impressions."
             ),
         ),
-        "ComparableResponses": FrequencyResponseState(
+        "Negatives": FrequencyResponseState(
             type="count",
-            source_column="ComparableContact",
+            outcome="negative",
             explanation=(
-                "Impressions that had a selected rank-2 action with a known propensity — "
-                "the stricter denominator every opportunity comparison must use."
+                "Contacts in the bucket with a configured negative outcome and no positive "
+                "one. Together with Positives they are every counted impression."
             ),
-        ),
-        "ComparablePositives": FrequencyResponseState(
-            type="count",
-            source_column="ComparableClick",
-            explanation=(
-                "Positive outcomes inside that comparable subset. Divide by "
-                "ComparableResponses for the comparable response rate."
-            ),
-        ),
-        "RunnerAvailable": FrequencyResponseState(
-            type="count",
-            source_column="RunnerAvailable",
-            explanation=(
-                "Impressions where any lower-ranked candidate existed, whether or not its "
-                "propensity was usable. The gap to ComparableResponses is the coverage "
-                "lost to a missing propensity."
-            ),
-        ),
-        "RunnerPropensitySum": FrequencyResponseState(
-            type="value_sum",
-            source_column="RunnerPropensity",
-            explanation=(
-                "Sum of the selected rank-2 action's raw propensity over comparable "
-                "impressions: the responses that alternative was expected to produce. "
-                "Divide by ComparableResponses for the opportunity-cost rate."
-            ),
-        ),
-        "PriorityComparableContacts": FrequencyResponseState(
-            type="count",
-            source_column="PriorityComparableContact",
-            explanation=(
-                "Impressions where both the selected rank-1 and rank-2 actions carried a "
-                "priority value. Separate denominator for the arbitration diagnostic."
-            ),
-            requires_priority=True,
-        ),
-        "FocalPriorityComparableSum": FrequencyResponseState(
-            type="value_sum",
-            source_column="FocalPriorityComparable",
-            explanation=("Sum of the selected rank-1 action's priority over those rows."),
-            requires_priority=True,
-        ),
-        "RunnerPriorityComparableSum": FrequencyResponseState(
-            type="value_sum",
-            source_column="RunnerPriorityComparable",
-            explanation=(
-                "Sum of the selected rank-2 action's priority over the same rows. The "
-                "difference over PriorityComparableContacts is the average arbitration "
-                "priority gap; priority is not a probability and never a response rate."
-            ),
-            requires_priority=True,
         ),
     }
 )
 
-# States renamed when the contract became canonical. Kept only to turn a stale
+# States of the retired rank-2 opportunity contract. Kept only to turn a stale
 # catalog into an actionable error instead of an opaque "unknown state".
-FREQUENCY_RESPONSE_RENAMED_STATES: Mapping[str, str] = MappingProxyType(
+FREQUENCY_RESPONSE_RETIRED_STATES = frozenset(
     {
-        "Contacts": "Responses",
-        "Clicks": "Positives",
-        "ComparableContacts": "ComparableResponses",
-        "ComparableClicks": "ComparablePositives",
+        "Responses",
+        "ComparableResponses",
+        "ComparablePositives",
+        "RunnerAvailable",
+        "RunnerPropensitySum",
+        "FreshComparableResponses",
+        "FreshComparablePositives",
+        "FreshRunnerPropensitySum",
+        "PriorityComparableContacts",
+        "FocalPriorityComparableSum",
+        "RunnerPriorityComparableSum",
+    }
+)
+
+# Top-level settings of the retired contract and what replaced each one.
+_FREQUENCY_RESPONSE_RETIRED_FIELDS: Mapping[str, str] = MappingProxyType(
+    {
+        "alternative_group_by": (
+            "replaced by scope_by, the fields inside which impressions are counted and "
+            "actions ranked"
+        ),
+        "positive_values": "replaced by outcome.positive_values",
+        "exposure_values": "replaced by outcome.negative_values",
+        "candidate_values": "replaced by outcome.negative_values",
+    }
+)
+_FREQUENCY_RESPONSE_RETIRED_COLUMNS: Mapping[str, str] = MappingProxyType(
+    {
+        "placement": "list the placement field in scope_by instead",
+        "outcome": "moved to outcome.column",
+        "propensity": "no longer used",
+        "priority": "no longer used",
     }
 )
 
 
-def frequency_response_states(*, priority: bool) -> dict[str, FrequencyResponseState]:
-    """Return the canonical states available for one column binding.
+def frequency_response_states() -> dict[str, FrequencyResponseState]:
+    """Return the canonical states of the kind."""
 
-    The three arbitration-priority states depend on the optional ``priority``
-    binding: without it the processor emits all-null priority columns, so those
-    states would publish constant zeros.
-    """
-
-    return {
-        name: state
-        for name, state in FREQUENCY_RESPONSE_STATES.items()
-        if priority or not state.requires_priority
-    }
+    return dict(FREQUENCY_RESPONSE_STATES)
 
 
-def frequency_response_state_definitions(*, priority: bool) -> dict[str, dict[str, Any]]:
+def frequency_response_state_definitions() -> dict[str, dict[str, Any]]:
     """Return canonical states as catalog definitions ready for ``states:``."""
 
-    definitions: dict[str, dict[str, Any]] = {}
-    for name, state in frequency_response_states(priority=priority).items():
-        definition: dict[str, Any] = {"type": state.type}
-        if state.source_column is not None:
-            definition["source_column"] = state.source_column
-        definitions[name] = definition
-    return definitions
+    return {
+        name: {"type": state.type, "outcome": state.outcome}
+        for name, state in FREQUENCY_RESPONSE_STATES.items()
+    }
 
 
-def _frequency_unknown_state_message(name: str, priority_column: str | None) -> str:
+def _frequency_unknown_state_message(name: str) -> str:
     """Explain why a declared frequency-response state is not canonical."""
 
-    renamed = FREQUENCY_RESPONSE_RENAMED_STATES.get(name)
-    if renamed is not None:
+    available = ", ".join(FREQUENCY_RESPONSE_STATES)
+    if name in FREQUENCY_RESPONSE_RETIRED_STATES:
         return (
-            f"frequency_response state {name!r} was renamed to {renamed!r}; rename it in "
-            "processors.yaml and in every metric expression that reads it, then backfill "
-            "aggregates"
+            f"frequency_response state {name!r} belonged to the retired rank-2 opportunity "
+            f"contract; publish {available} and compute the engagement rate as "
+            "Positives / (Positives + Negatives), then backfill aggregates"
         )
-    state = FREQUENCY_RESPONSE_STATES.get(name)
-    if state is not None and state.requires_priority and priority_column is None:
-        return (
-            f"frequency_response state {name!r} requires the optional columns.priority "
-            "binding; configure it or drop the state"
-        )
-    available = ", ".join(frequency_response_states(priority=priority_column is not None))
     return (
         f"frequency_response state {name!r} is not part of the kind's canonical contract; "
         f"available states are: {available}"
@@ -611,13 +556,12 @@ def _frequency_unknown_state_message(name: str, priority_column: str | None) -> 
 
 _FREQUENCY_RESPONSE_RESERVED_COLUMNS = frozenset(
     {
-        "Day",
         "pipeline_run_id",
         "chunk_id",
         "period",
         "created_at",
         "config_hash",
-        *FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
+        *FREQUENCY_RESPONSE_DERIVED_COLUMNS,
     }
 )
 
@@ -628,11 +572,20 @@ class FrequencyResponseColumns(_StrictModel):
     customer: str = Field(min_length=1)
     interaction: str = Field(min_length=1)
     action: str = Field(min_length=1)
-    placement: str = Field(min_length=1)
     rank: str = Field(min_length=1)
-    outcome: str = Field(min_length=1)
-    propensity: str = Field(min_length=1)
-    priority: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_retired_bindings(cls, data: Any) -> Any:
+        if isinstance(data, Mapping):
+            retired = [
+                f"columns.{name} ({hint})"
+                for name, hint in _FREQUENCY_RESPONSE_RETIRED_COLUMNS.items()
+                if name in data
+            ]
+            if retired:
+                raise ValueError("frequency_response no longer accepts " + "; ".join(retired))
+        return data
 
 
 class EntitiesSpec(_StrictModel):
@@ -795,21 +748,41 @@ class FrequencyResponseCustomerSample(_StrictModel):
 
 
 class FrequencyResponseProcessor(_ProcessorBase):
-    """Frequency-window response states over a marked current chunk plus lookback."""
+    """Engagement by number of impressions over a marked current chunk plus lookback.
+
+    Every contact whose outcome is classified by ``outcome`` is one impression
+    of its action. ``scope_by`` names the fields inside which impressions are
+    counted and actions are ranked, for example ``[Channel, Placement]``.
+    """
 
     kind: Literal["frequency_response"]
     columns: FrequencyResponseColumns
-    alternative_group_by: list[str]
-    positive_values: list[Any] = Field(min_length=1)
-    exposure_values: list[Any] = Field(min_length=1)
-    candidate_values: list[Any] = Field(min_length=1)
+    outcome: OutcomeSpec
+    scope_by: list[str]
     window_hours: int = Field(default=168, gt=0)
     partition_lag_hours: int = Field(default=0, ge=0)
     max_frequency: int = Field(default=7, gt=0)
     frequency_column: str = Field(default="ExposureBucket", min_length=1)
+    max_rank: int = Field(default=3, gt=0)
     window_granularity: Literal["exact", "daily"] = "exact"
     customer_sample: FrequencyResponseCustomerSample | None = None
     checkpoint: FrequencyResponseCheckpoint = Field(default_factory=FrequencyResponseCheckpoint)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_retired_settings(cls, data: Any) -> Any:
+        if isinstance(data, Mapping):
+            retired = [
+                f"{name} ({hint})"
+                for name, hint in _FREQUENCY_RESPONSE_RETIRED_FIELDS.items()
+                if name in data
+            ]
+            if retired:
+                raise ValueError(
+                    "frequency_response no longer accepts the rank-2 opportunity settings: "
+                    + "; ".join(retired)
+                )
+        return data
 
     @model_validator(mode="after")
     def _frequency_contract_is_mergeable(  # noqa: PLR0912
@@ -819,34 +792,53 @@ class FrequencyResponseProcessor(_ProcessorBase):
             raise ValueError("frequency_response requires time.grain 'daily'")
         if self.frequency_column not in self.group_by:
             raise ValueError("frequency_response frequency_column must be present in group_by")
-        if len(self.alternative_group_by) != len(set(self.alternative_group_by)):
-            raise ValueError("frequency_response alternative_group_by columns must be unique")
-        invalid_alternative_columns = sorted(
+        bindings = [
+            self.columns.customer,
+            self.columns.interaction,
+            self.columns.action,
+            self.columns.rank,
+        ]
+        if len(set(bindings)) != len(bindings):
+            raise ValueError(
+                "frequency_response customer, interaction, action, and rank bindings must be "
+                "distinct columns"
+            )
+        if not self.outcome.positive_values or not self.outcome.negative_values:
+            raise ValueError(
+                "frequency_response outcome needs at least one positive and one negative value"
+            )
+        overlap = [
+            value for value in self.outcome.positive_values if value in self.outcome.negative_values
+        ]
+        if overlap:
+            raise ValueError(
+                "frequency_response outcome values cannot be both positive and negative: "
+                + ", ".join(repr(value) for value in overlap)
+            )
+        derived = {*FREQUENCY_RESPONSE_DERIVED_COLUMNS, self.frequency_column}
+        if len(self.scope_by) != len(set(self.scope_by)):
+            raise ValueError("frequency_response scope_by columns must be unique")
+        invalid_scope = sorted(
             column
-            for column in self.alternative_group_by
+            for column in self.scope_by
             if not column.strip()
             or column != column.strip()
             or column in _FREQUENCY_RESPONSE_RESERVED_COLUMNS
-            or column == self.frequency_column
+            or column in derived
             or column.startswith("__valuestream_")
         )
-        if invalid_alternative_columns:
+        if invalid_scope:
             raise ValueError(
-                "frequency_response alternative_group_by must contain raw source columns: "
-                + ", ".join(repr(column) for column in invalid_alternative_columns)
+                "frequency_response scope_by must contain raw source columns: "
+                + ", ".join(repr(column) for column in invalid_scope)
             )
-        mandatory_alternative_columns = {self.columns.customer, self.columns.interaction}
-        redundant_alternative_columns = sorted(
-            mandatory_alternative_columns.intersection(self.alternative_group_by)
+        bound_scope = sorted(
+            {*bindings, self.time.property, self.outcome.column}.intersection(self.scope_by)
         )
-        if redundant_alternative_columns:
+        if bound_scope:
             raise ValueError(
-                "frequency_response alternative_group_by must not repeat mandatory "
-                "customer/interaction columns: " + ", ".join(redundant_alternative_columns)
-            )
-        if self.columns.customer == self.columns.interaction:
-            raise ValueError(
-                "frequency_response customer and interaction bindings must be distinct"
+                "frequency_response scope_by must not repeat the customer, interaction, action, "
+                "rank, decision-time, or outcome columns: " + ", ".join(bound_scope)
             )
         if self.window_granularity == "daily":
             if self.window_hours % 24 != 0:
@@ -881,7 +873,7 @@ class FrequencyResponseProcessor(_ProcessorBase):
         invalid_group_columns = sorted(
             column
             for column in self.group_by
-            if column in _FREQUENCY_RESPONSE_RESERVED_COLUMNS - {"Day"}
+            if column in _FREQUENCY_RESPONSE_RESERVED_COLUMNS - FREQUENCY_RESPONSE_DERIVED_COLUMNS
             or column.startswith("__valuestream_")
         )
         if invalid_group_columns:
@@ -889,29 +881,21 @@ class FrequencyResponseProcessor(_ProcessorBase):
                 "frequency_response reserved derived columns cannot be used in group_by: "
                 + ", ".join(invalid_group_columns)
             )
-        raw_columns = set(self.columns.model_dump(exclude_none=True).values())
+        raw_columns = {*bindings, self.time.property, self.outcome.column, *self.scope_by}
         invalid_input_bindings = sorted(
             column
-            for column in {*raw_columns, self.time.property}
-            if column.startswith("__valuestream_")
+            for column in raw_columns
+            if column.startswith("__valuestream_") or column in derived
         )
         if invalid_input_bindings:
             raise ValueError(
-                "frequency_response raw input bindings cannot use internal column names: "
-                + ", ".join(invalid_input_bindings)
+                "frequency_response raw input bindings cannot use internal or derived column "
+                "names: " + ", ".join(invalid_input_bindings)
             )
-        if self.frequency_column in raw_columns:
-            raise ValueError("frequency_column must be a derived column, not a raw input binding")
         invalid_filter_columns = sorted(
             column
             for column in column_references(self.filter)
-            if column
-            in {
-                *FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
-                "Day",
-                self.frequency_column,
-            }
-            or column.startswith("__valuestream_")
+            if column in derived or column.startswith("__valuestream_")
         )
         if invalid_filter_columns:
             raise ValueError(
@@ -921,9 +905,7 @@ class FrequencyResponseProcessor(_ProcessorBase):
         colliding_states = sorted(
             name
             for name in self.states
-            if name
-            in set(self.group_by)
-            | (_FREQUENCY_RESPONSE_RESERVED_COLUMNS - FREQUENCY_RESPONSE_VIRTUAL_COLUMNS)
+            if name in set(self.group_by) | _FREQUENCY_RESPONSE_RESERVED_COLUMNS | derived
             or name.startswith("__valuestream_")
         )
         if colliding_states:
@@ -931,69 +913,35 @@ class FrequencyResponseProcessor(_ProcessorBase):
                 "frequency_response state names collide with dimensions or reserved columns: "
                 + ", ".join(colliding_states)
             )
-        for name, state in self.states.items():
-            source_column = getattr(state, "source_column", None)
-            internal_state_inputs = sorted(
-                {
-                    *(
-                        {source_column}
-                        if isinstance(source_column, str)
-                        and source_column.startswith("__valuestream_")
-                        else set()
-                    ),
-                    *(
-                        column
-                        for column in column_references(getattr(state, "where", None))
-                        if column.startswith("__valuestream_")
-                    ),
-                }
-            )
-            if internal_state_inputs:
-                raise ValueError(
-                    f"frequency_response state {name!r} cannot read internal columns: "
-                    + ", ".join(internal_state_inputs)
-                )
-            if state.type not in {"count", "value_sum"}:
-                raise ValueError(f"frequency_response state {name!r} must use count or value_sum")
-            if isinstance(state, CountState) and (state.outcome is not None or state.stage):
-                raise ValueError(
-                    f"frequency_response state {name!r} must bind a virtual/source column "
-                    "instead of an outcome or stage selector"
-                )
         self._states_match_canonical_contract()
         return self
 
     def _states_match_canonical_contract(self) -> None:
         """Reject states outside the kind's fixed published contract.
 
-        The processor derives a fixed set of virtual columns, so its states are
-        canonical rather than authored: both editors render them read-only. A
-        catalog may declare a subset — hand-written configs that publish only
-        part of the contract stay valid — but never a different name, type, or
-        binding.
+        The processor classifies each contact as positive or negative, so its
+        states are canonical rather than authored: both editors render them
+        read-only. A catalog may declare a subset, but never a different name,
+        type, or selector.
         """
 
-        canonical = frequency_response_states(priority=self.columns.priority is not None)
         for name, state in self.states.items():
-            expected = canonical.get(name)
+            expected = FREQUENCY_RESPONSE_STATES.get(name)
             if expected is None:
-                raise ValueError(_frequency_unknown_state_message(name, self.columns.priority))
+                raise ValueError(_frequency_unknown_state_message(name))
             settings = state.model_dump(mode="json", exclude_none=True)
-            actual_source = settings.pop("source_column", None)
             if (
                 state.type != expected.type
-                or actual_source != expected.source_column
+                or settings.get("outcome") != expected.outcome
+                or settings.get("source_column") is not None
                 or settings.get("distinct", False)
+                or settings.get("stage") is not None
                 or settings.get("where") is not None
             ):
-                binding = (
-                    f"source_column {expected.source_column!r}"
-                    if expected.source_column is not None
-                    else "no source column"
-                )
                 raise ValueError(
-                    f"frequency_response state {name!r} is canonical and must be declared "
-                    f"as type {expected.type!r} with {binding}, without extra settings"
+                    f"frequency_response state {name!r} is canonical and must be declared as "
+                    f"type {expected.type!r} with outcome {expected.outcome!r}, without extra "
+                    "settings"
                 )
 
     @property
@@ -1008,18 +956,39 @@ class FrequencyResponseProcessor(_ProcessorBase):
         )
 
     @property
-    def alternative_group_columns(self) -> list[str]:
-        """Return source columns that define one selected-action comparison."""
+    def exposure_key_columns(self) -> list[str]:
+        """Source columns identifying "the same action shown to the same customer"."""
+
+        return list(dict.fromkeys([self.columns.customer, self.columns.action, *self.scope_by]))
+
+    @property
+    def rank_partition_columns(self) -> list[str]:
+        """Source columns inside which the shown actions of one decision are ranked."""
+
+        return list(
+            dict.fromkeys([self.columns.customer, self.columns.interaction, *self.scope_by])
+        )
+
+    @property
+    def contact_identity_columns(self) -> list[str]:
+        """Source columns of one contact, excluding the rank binding."""
 
         return list(
             dict.fromkeys(
                 [
                     self.columns.customer,
                     self.columns.interaction,
-                    *self.alternative_group_by,
+                    self.columns.action,
+                    *self.scope_by,
                 ]
             )
         )
+
+    @property
+    def derived_columns(self) -> frozenset[str]:
+        """Dimensions this processor derives, including the impressions column."""
+
+        return frozenset({*FREQUENCY_RESPONSE_DERIVED_COLUMNS, self.frequency_column})
 
     @property
     def window_days(self) -> int:
@@ -1702,7 +1671,11 @@ class Catalog(_StrictModel):
 
 __all__ = [
     "DEFAULT_STATE_PARAMETERS",
-    "FREQUENCY_RESPONSE_VIRTUAL_COLUMNS",
+    "FREQUENCY_PRIOR_POSITIVE_COLUMN",
+    "FREQUENCY_RESPONSE_DERIVED_COLUMNS",
+    "FREQUENCY_RESPONSE_RETIRED_STATES",
+    "FREQUENCY_RESPONSE_STATES",
+    "FREQUENCY_SCOPE_RANK_COLUMN",
     "ApproxDistinctCountMetric",
     "BinaryOutcomeProcessor",
     "Calendar",

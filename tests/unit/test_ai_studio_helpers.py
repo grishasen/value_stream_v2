@@ -2036,7 +2036,7 @@ from valuestream.ui.pages import ai_config_studio
 states, valid = ai_config_studio._processor_state_editor(
     {"states": {"Legacy": {"type": "count"}}},
     "frequency_response",
-    {"columns": {"customer": "CustomerID", "priority": "Priority"}},
+    {"columns": {"customer": "CustomerID"}},
     key_prefix="studio_frequency",
 )
 import streamlit as st
@@ -2048,7 +2048,7 @@ st.session_state["result"] = (states, valid)
     states, valid = app.session_state["result"]
     # The draft's own states are ignored: this kind publishes a fixed contract.
     assert valid is True
-    assert states == model.frequency_response_state_definitions(priority=True)
+    assert states == model.frequency_response_state_definitions()
     assert not app.get("data_editor")
 
 
@@ -2056,10 +2056,7 @@ st.session_state["result"] = (states, valid)
 def test_frequency_response_state_editor_preserves_a_valid_subset() -> None:
     from streamlit.testing.v1 import AppTest
 
-    subset = {
-        "Responses": {"type": "count"},
-        "Positives": {"type": "count", "source_column": "ClickedContact"},
-    }
+    subset = {"Positives": {"type": "count", "outcome": "positive"}}
     app = AppTest.from_string(
         f"""
 from valuestream.ui.pages import ai_config_studio
@@ -2067,11 +2064,10 @@ from valuestream.ui.pages import ai_config_studio
 states, valid = ai_config_studio._processor_state_editor(
     {{
         "kind": "frequency_response",
-        "columns": {{"priority": "Priority"}},
         "states": {subset!r},
     }},
     "frequency_response",
-    {{"columns": {{"customer": "CustomerID", "priority": "Priority"}}}},
+    {{"columns": {{"customer": "CustomerID"}}}},
     key_prefix="studio_frequency_subset",
 )
 import streamlit as st
@@ -2111,7 +2107,7 @@ def test_frequency_response_group_by_follows_the_derived_column() -> None:
 def test_processor_kind_switch_reseeds_authored_states() -> None:
     frequency = {
         "kind": "frequency_response",
-        "states": model.frequency_response_state_definitions(priority=True),
+        "states": model.frequency_response_state_definitions(),
     }
 
     binary = _processor_state_definition_for_kind(
@@ -2131,7 +2127,7 @@ def test_processor_kind_switch_reseeds_authored_states() -> None:
         "Positives": {"type": "count", "outcome": "positive"},
         "Negatives": {"type": "count", "outcome": "negative"},
     }
-    assert "Responses" not in binary["states"]
+    assert "Negatives" in binary["states"]
 
 
 @pytest.mark.unit

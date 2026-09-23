@@ -93,7 +93,7 @@ The 5 provenance columns are added by the engine wrapper, not by the processor i
 | State type | Storage dtype | Build from | Merge rule | Used by |
 |---|---|---|---|---|
 | `count` | `INT64` | `pl.len()` or `pl.sum(<bool 0/1>)` | `SUM` | binary_outcome, frequency_response, numeric_distribution, score_distribution, entity_lifecycle, funnel, snapshot |
-| `value_sum` | `FLOAT64` | `pl.sum(col)` | `SUM` | binary_outcome, frequency_response, numeric_distribution, snapshot |
+| `value_sum` | `FLOAT64` | `pl.sum(col)` | `SUM` | binary_outcome, numeric_distribution, snapshot |
 | `min` | matches data | `pl.min(col)` | `MIN` | numeric_distribution, entity_lifecycle |
 | `max` | matches data | `pl.max(col)` | `MAX` | numeric_distribution, entity_lifecycle |
 | `pooled_mean` | `FLOAT64` (explicit `source_column` or recipe plus `weight`) | `pl.mean(col)` or named recipe | `weighted_mean(value, weight)` | numeric_distribution, score_distribution |
@@ -957,14 +957,16 @@ preserves atomic publication and history; vacuum removes superseded files.
 
 ### 10.1 Purpose
 
-`frequency_response` measures how response changes with the number of impressions
-of the same action in a fixed trailing time window. It also records the raw
-propensity of the selected rank-2 action from an explicitly configured
-comparison group, so the selected rank-1 action curve can be compared with the
-opportunity cost of occupying the placement.
+`frequency_response` measures how the response to an action changes as the same
+customer sees it again: the engagement rate after the 1st, 2nd, 3rd, ...
+impression of the same action in a fixed trailing time window. Its purpose is
+to show after how many impressions an action's response falls far enough that
+it should stop being shown. It can split that curve by the action's rank inside
+a configurable scope (for example channel and placement) and by whether the
+customer already responded.
 
 This is a sequence-aware processor. Its published contract remains
-aggregate-first: only daily count and sum states are queryable. Ingestion can
+aggregate-first: only daily count states are queryable. Ingestion can
 either rescan bounded source history or retain a minimal, rebuildable sharded
 checkpoint that is never exposed to reports.
 
@@ -984,18 +986,16 @@ processors:
       customer: CustomerID
       interaction: InteractionID
       action: ActionID
-      placement: Placement
       rank: Rank
-      outcome: Outcome
-      propensity: Propensity
-      priority: Priority               # optional diagnostic
-    alternative_group_by: [Placement]
-    positive_values: [Clicked]
-    exposure_values: [Impression, Clicked]
-    candidate_values: [Pending, Impression, Clicked]
+    outcome:                         # classified exactly like binary_outcome
+      column: Outcome
+      positive_values: [Clicked]
+      negative_values: [Impression, Pending]
+    scope_by: [Channel, Placement]   # count impressions and rank actions inside these
     window_hours: 168
     partition_lag_hours: 24          # default 0; dependency padding only
-    max_frequency: 7
+    max_frequency: 20                # terminal impressions bucket (20 = 20+)
+    max_rank: 3                      # terminal ScopeRank bucket (3 = 3+)
     frequency_column: ExposureBucket
     window_granularity: exact        # default; `daily` counts calendar days
     # customer_sample:               # optional deterministic customer subsample
@@ -1010,77 +1010,64 @@ processors:
       - Day
       - Channel
       - Placement
-      - ActionID
+      - Name
       - ExposureBucket
+      - ScopeRank                    # optional derived dimension
+      - PriorPositive                # optional derived dimension
     states:
-      Responses:                   {type: count}
-      Positives:                   {type: count, source_column: ClickedContact}
-      ComparableResponses:         {type: count, source_column: ComparableContact}
-      ComparablePositives:         {type: count, source_column: ComparableClick}
-      RunnerAvailable:             {type: count, source_column: RunnerAvailable}
-      RunnerPropensitySum:         {type: value_sum, source_column: RunnerPropensity}
-      PriorityComparableContacts:  {type: count, source_column: PriorityComparableContact}
-      FocalPriorityComparableSum:  {type: value_sum, source_column: FocalPriorityComparable}
-      RunnerPriorityComparableSum: {type: value_sum, source_column: RunnerPriorityComparable}
+      Positives: {type: count, outcome: positive}
+      Negatives: {type: count, outcome: negative}
 ```
 
-These states are **canonical**: they are not authored per catalog. The processor
-derives a fixed set of virtual columns, so the state set that can be built from
-them is fixed too, and both configuration editors render the table above
-read-only with a plain-language definition of each state. A catalog may publish a
-subset, but never a different name, type, or binding; anything else fails
-validation. The three arbitration diagnostics
-(`PriorityComparableContacts`, `FocalPriorityComparableSum`,
-`RunnerPriorityComparableSum`) exist only when `columns.priority` is bound —
-without it the processor emits all-null priority columns, so those states would
-publish constant zeros.
+These states are **canonical**: the processor classifies every contact as
+positive or negative, so the state set is fixed and both configuration editors
+render it read-only with a plain-language definition. A catalog may publish a
+subset, but never a different name, type, or selector; anything else fails
+validation. The engagement rate is `Positives / (Positives + Negatives)`.
 
-Three of the states are denominators — `Responses`, `ComparableResponses`, and
-`PriorityComparableContacts` — and a ratio is meaningful only when its numerator
-comes from the same family.
+`outcome` works exactly as in `binary_outcome`: every row whose outcome is one
+of `positive_values` or `negative_values` is an **impression** of its action, at
+any rank; rows with any other outcome are ignored. Both lists must be
+non-empty and disjoint.
 
-The processor accepts only `count` and `value_sum` states. `Day` and the
-configured number-of-impressions column (`frequency_column` in YAML) are
-derived by the processor; the other group-by
-columns must be present after source transforms. The transformed source must
-not already contain the configured number-of-impressions column because the processor owns
-that derived name. Raw bindings and state inputs may not use the reserved
-`__valuestream_` prefix. `rank` must have an integer dtype, while `propensity`
-and an optional `priority` must be numeric; configure strict source casts when
-the raw export uses text fields. These checks run on the target schema before
-it is combined with history, so relaxed union coercion cannot mask a bad target
-day.
+`scope_by` is a required list of zero or more **physical transformed source
+columns**. It answers "inside what" the processor looks:
 
-`alternative_group_by` is a list of zero or more **physical transformed source
-columns** appended to the processor's implicit customer + interaction key. It
-is evaluated before aggregation and is separate from the published `group_by`.
-The default is `[Placement]`, so the default comparison group is `CustomerID +
-InteractionID + Placement` for the bindings above. Multiple fields are allowed,
-for example `[Placement, Channel, Issue]`.
+- the number of impressions counts the same customer and action with the same
+  values of every `scope_by` field;
+- `ScopeRank` ranks the decision's shown actions among those with the same
+  `scope_by` values.
 
-The customer and interaction bindings are always present and must not be
-repeated in `alternative_group_by`. Customer preserves customer/checkpoint-shard
-isolation; interaction keeps ranked candidates inside one decision. Canonical
-examples are:
+`[Channel, Placement]` keeps both apart; `[Placement]` counts a Web and a
+Mobile impression of the same placement together; `[]` counts and ranks across
+everything. `scope_by` must not repeat the customer, interaction, action, rank,
+decision-time, or outcome bindings, and it is separate from the published
+`group_by`. Rows with a null scope value cannot form a contact and are dropped.
 
-- `[]` selects across placements within the same customer and interaction.
-- `[Placement]` selects within the same customer, interaction, and placement
-  (the default).
-- `[Placement, Channel]` further requires the same channel.
-- `[Placement, Channel, Issue]` requires every listed field to match.
-
-The processor never crosses `InteractionID` when selecting a ranked candidate.
-Null values in an additional comparison field form one group: a null value on
-the selected rank-1 row matches a null value on a candidate row.
+The processor derives `Day`, the configured number-of-impressions column
+(`frequency_column`), `ScopeRank`, and `PriorPositive`; the other group-by
+columns must be present after source transforms. The frequency column must be
+in `group_by`; `ScopeRank` and `PriorPositive` are optional. The transformed
+source must not already contain any of the derived names. Raw bindings may not
+use the reserved `__valuestream_` prefix or a derived name. `rank` must have an
+integer dtype; configure strict source casts when the raw export uses text
+fields. These checks run on the target schema before it is combined with
+history, so relaxed union coercion cannot mask a bad target day.
 
 A processor-level `filter` runs on transformed source rows before contacts,
-number-of-impressions buckets, or virtual state columns are derived. It may
-reference only raw/transformed source fields—not `Day`, the configured
-number-of-impressions column,
-`ClickedContact`, `RunnerPropensity`, or another processor-created field.
-Canonical frequency-response states do not accept state-level `where`
-expressions or any other extra settings. Use the processor-level `filter` when
-the entire published contract should share an additional source-row predicate.
+number-of-impressions buckets, or derived columns exist. It may reference only
+raw/transformed source fields—not `Day`, the frequency column, `ScopeRank`, or
+`PriorPositive`. Canonical states do not accept state-level `where` expressions
+or any other extra settings.
+
+Catalogs written for the retired rank-2 opportunity contract fail validation
+with a migration hint: `alternative_group_by` became `scope_by`;
+`positive_values`, `exposure_values`, and `candidate_values` became the
+`outcome` block; `columns.placement` moved into `scope_by`, `columns.outcome`
+into `outcome.column`, and `columns.propensity` and `columns.priority` are no
+longer used. Its states (`Responses`, `ComparableResponses`,
+`RunnerPropensitySum`, the priority diagnostics, and the `Fresh*` states) are
+reported as retired.
 
 ### 10.3 Contact and number-of-impressions semantics
 
@@ -1095,9 +1082,9 @@ target/history rows in an ephemeral frame. With `persistent_sharded`, each raw
 target is transformed, filtered, classified, projected, and assigned a
 deterministic logical customer shard. Polars passes the complete prepared
 current payload as an Arrow C Stream to a temporary relation in one long-lived
-`rolling.duckdb` writer; it is not persisted. The database persists only
-exposed rank-1 history required by later targets, tagged with its source chunk
-id and logical shard, plus a transactional fingerprint journal.
+`rolling.duckdb` writer; it is not persisted. The database persists the
+normalized impression history required by later targets, tagged with its
+source chunk id and logical shard, plus a transactional fingerprint journal.
 
 Both modes canonicalize the configured decision-time field to timezone-naive
 UTC `Datetime(us)` truncated to whole seconds before contact normalization.
@@ -1110,16 +1097,16 @@ source-scan relational tail, matching DuckDB `VARCHAR`; customer sharding still
 hashes the original logical `Categorical`/`Enum` value first.
 
 Frequency targets run in ascending ISO-date order in one process. For each
-logical shard, one native SQL plan combines temporary current candidates with
+logical shard, one native SQL plan combines temporary current impressions with
 rolling history, performs cross-partition contact normalization, the exact
-timestamp window, and selected rank-2 action resolution, then streams only
-enriched target rank-1 rows to Polars. Polars applies virtual state columns,
-canonical count/value-sum aggregation, grouping, and provenance. Appending the
-target's narrow history, recording its fingerprint, and pruning expired state
-is one DuckDB transaction. Candidate rows remain
-uncollapsed until current and history are combined, preserving cross-partition
-duplicate precedence. The connection remains open across the complete source
-run and closes once at the source-run boundary.
+timestamp window, the prior-response test, and the scope rank, then streams
+only enriched target contacts to Polars. Polars applies canonical count
+aggregation, grouping, and provenance. Appending the target's narrow history,
+recording its fingerprint, and pruning expired state is one DuckDB
+transaction. Impression rows remain uncollapsed until current and history are
+combined, preserving cross-partition duplicate precedence. The connection
+remains open across the complete source run and closes once at the source-run
+boundary.
 
 The DuckDB connection is used only by its owning ingestion thread. A single
 queried shard keeps the batched lazy Arrow-to-Polars path. With multiple shards,
@@ -1131,71 +1118,53 @@ on this pipeline working set.
 
 The two modes implement the same following rules:
 
-1. A contact is identified by customer, interaction, action, placement, and
-   rank. Repeated outcome rows for that contact are collapsed; a positive
-   outcome wins over a non-positive exposure.
-2. A selected rank-1 action contact is rank 1, has an exposure outcome, and belongs
-   to the target chunk. Historical rows influence the number of impressions but are
-   never emitted again.
-3. The number of impressions is counted for the same customer, action, and placement
-   in the strict interval `(decision_time - window_hours, decision_time]`.
-   `max_frequency` is a terminal bucket: with a value of 7, the seventh and
-   every later impression proxy are stored as `7` and may be labelled `7+` by
-   a report.
-4. The response flag comes from `positive_values`. `Clicked` may therefore win
-   over an `Impression` row for the same contact.
+1. A contact is identified by customer, interaction, action, the `scope_by`
+   values, and rank. Repeated outcome rows for that contact are collapsed; a
+   positive outcome wins over a negative one.
+2. Every contact of the target chunk is emitted once. Historical rows influence
+   the number of impressions, the prior-response flag, and the rank of a
+   decision that straddles partitions, but are never emitted again.
+3. The number of impressions counts the same customer, action, and `scope_by`
+   values, at any rank, in the strict interval
+   `(decision_time - window_hours, decision_time]`, including the current
+   contact. Ties at the same second are ordered by interaction and source
+   order. `max_frequency` is a terminal bucket: with a value of 7, the seventh
+   and every later impression are stored as `7` and may be labelled `7+`.
+4. `ScopeRank` is the dense rank of the recorded `rank` among the decision's
+   contacts with the same customer, interaction, and `scope_by` values, so the
+   first shown action in a placement is rank 1 whatever its interaction-wide
+   arbitration rank. `max_rank` is its terminal bucket.
+5. `PriorPositive` is true when an earlier contact in the same window, for the
+   same customer, action, and `scope_by` values, was positive. The contact's
+   own outcome and later contacts never count.
 
 The fixed window makes the x-axis reproducible. It is not a calendar-week
 bucket and it does not reset at midnight or on Monday.
 
-### 10.4 Selected rank-2 action semantics
+### 10.4 Reading the curves
 
-The opportunity comparison is resolved within the implicit customer +
-interaction keys plus the physical fields configured in
-`alternative_group_by`. The processor selects exact rank 2 in that group when
-it exists; otherwise it selects the smallest recorded rank greater than 1 in
-the same group. “Selected rank-2
-action” is therefore the business role: the underlying recorded rank can be
-greater than 2 when rank 2 is absent. If no such row exists, the selected
-rank-1 action contact remains in the all-contact response curve but is excluded
-from comparable curves.
-
-`RunnerPropensity` is the selected rank-2 action's raw `Propensity`, interpreted
-as its expected response probability. `Priority` must not be substituted for this
-field: priority drives arbitration ranking, but it can also include context,
-business value, levers, and other multipliers, so it is neither a probability
-nor a CTR. When configured, selected rank-1 action and selected rank-2 action
-priority sums are retained as a separate arbitration diagnostic over rows where
-both values exist.
-
-Comparison scope is declarative and always decision-local. Keeping the default
-physical `Placement` field answers the same-placement opportunity question and
-may reduce comparable coverage. Removing `Placement` allows cross-placement
-selection within the same interaction. In every case the fallback chooses the
-smallest available rank
-greater than 1 inside the complete configured group rather than silently
-crossing one of its boundaries.
+Customers who respond are usually shown the same action again more often than
+customers who do not, and heavy visitors accumulate high impression counts. An
+all-customer engagement curve can therefore rise with repeated impressions
+even when each customer responds less every time. Split or filter by
+`PriorPositive` before reading a decline as fatigue: the `PriorPositive = false`
+curve answers "if the customer has not responded after N−1 impressions, how
+likely is a response to the N-th?", which is the decision a frequency cap
+makes. Keep `scope_by` fields apart in reports, because channel and placement
+rates can differ tenfold and a pooled curve then mostly shows their mix. The
+curves are observational, not a causal estimate of wearout.
 
 ### 10.5 Merge and derived KPIs
 
 All stored states merge by addition. Canonical formulas include:
 
 ```text
-selected rank-1 action CTR = Positives / Responses
-comparable selected rank-1 action CTR = ComparablePositives / ComparableResponses
-selected rank-2 action expected CTR = RunnerPropensitySum / ComparableResponses
-selected rank-2 action coverage = ComparableResponses / Responses
-response opportunity    = (ComparablePositives - RunnerPropensitySum)
-                          / ComparableResponses
-priority opportunity gap = (FocalPriorityComparableSum
-                            - RunnerPriorityComparableSum)
-                           / PriorityComparableContacts
+engagement rate = Positives / (Positives + Negatives)
+impressions     = Positives + Negatives
 ```
 
-The comparable selected rank-1 action and selected rank-2 action curves use the
-same denominator and therefore belong on the same response-rate axis. Selected
-rank-1 action CTR over all contacts should remain visible as a separate curve or
-diagnostic because missing selected rank-2 actions change its population.
+`contact_policy.engagement_rate_by_impressions` installs the engagement rate as
+a line over the frequency column.
 
 ### 10.6 Dependency, idempotency, and limitations
 
@@ -1222,7 +1191,7 @@ closure; zero lag is a source-partition contract, not proof inferred from the
 chunk id.
 
 Every transformed history chunk is validated independently for the decision
-time, customer, interaction, action, placement, rank, outcome, and any
+time, customer, interaction, action, rank, outcome, `scope_by`, and any
 processor-filter fields before it is combined or checkpointed. This prevents a
 relaxed multi-day schema union from turning a missing history key into null and
 silently undercounting the number of impressions.
@@ -1231,23 +1200,23 @@ silently undercounting the number of impressions.
 
 - `source_scan` (the compatibility default) retains no processor state and
   rereads the bounded source closure for each target.
-- `persistent_sharded` is the compatibility name for schema-revision-8 bounded
-  rolling DuckDB state. Revision 8 is the default and only supported checkpoint
+- `persistent_sharded` is the compatibility name for schema-revision-9 bounded
+  rolling DuckDB state. Revision 9 is the default and only supported checkpoint
   schema. One `rolling.duckdb` has the stable path
   `.valuestream/state/frequency_response/source=<source>/processor=<processor>/rolling.duckdb`.
   Schema, hashing, Polars-version, processor-config, and layout values do not
   create directory levels. Schema and hashing revisions, Polars version,
   processor computation hash, shard count, history projection, and customer
   dtype are stored inside the database as compatibility metadata; DuckDB
-  version is audit-only. The complete current candidates remain
-  temporary; persisted exact history is filtered to exposed rank-1 rows,
+  version is audit-only. The complete current impressions remain temporary
+  until the target succeeds; persisted exact history keeps every impression,
   normalized to one row per contact and source chunk (earliest decision time
-  and source order, or-combined outcome flags), and projected to customer,
-  interaction, action, placement, decision time, contact classification,
+  and source order, or-combined positive flag), and projected to customer,
+  interaction, action, `scope_by` values, rank, decision time, positive flag,
   deterministic local order, source chunk id, and logical shard. Daily history
-  instead keeps one row per contact, canonical UTC decision day, and source
-  chunk. Propensity, priority, report/alternative groups, outcome, and every
-  rank>1 candidate are omitted from history. `shards` is an integer from `1`
+  instead keeps one row per contact, canonical UTC decision day, positive flag,
+  and source chunk. Report dimensions and outcome values are omitted from
+  history. `shards` is an integer from `1`
   through `4096` and defaults to `64`; it controls a logical partition, not a
   physical file count.
 
@@ -1256,7 +1225,7 @@ silently undercounting the number of impressions.
   shards on a small daily volume spend most of their time on per-plan
   overhead, while few shards on a large volume materialize large per-shard
   intermediates. As a starting point, keep the default `64` for daily volumes
-  in the tens of millions of candidate rows, and reduce toward `8`–`16` when a
+  in the tens of millions of impression rows, and reduce toward `8`–`16` when a
   day stays below roughly a million rows. Changing `shards` never republishes
   aggregates; the rolling state is rebuilt automatically at the same path on
   the next run.
@@ -1289,8 +1258,8 @@ remain result semantics and therefore do change computation hashes.
 
 - `exact` (default): the strict `(decision_time − window_hours, decision_time]`
   timestamp interval at second precision.
-- `daily`: the exposure count for a focal contact is the number of exposed
-  rank-1 contacts of the same customer/action/placement over the last
+- `daily`: the impression count for a target contact is the number of
+  impressions of the same customer and action inside the scope over the last
   `window_hours / 24` calendar days — the previous `window_hours / 24 − 1`
   full days come from day-level history, and the focal day itself is
   sequenced exactly. Days use the canonical UTC calendar date of the decision
@@ -1298,17 +1267,17 @@ remain result semantics and therefore do change computation hashes.
   be `0`. Current-day sequencing is partitioned by the canonical decision day,
   so a physical source chunk that contains adjacent UTC decision days does not
   carry a same-day counter across midnight. Rolling state persists contact
-  identity per calendar day (no time-of-day, source order, or outcome flags),
-  and the per-target SQL globally deduplicates that identity across retained
-  source chunks before replacing timestamp windowing with a per-day counter
-  join.
+  identity and response per calendar day (no time-of-day or source order), and
+  the per-target SQL globally deduplicates that identity across retained
+  source chunks before replacing timestamp windowing with per-day impression
+  and positive counters. `ScopeRank` uses the target day's contacts only.
   The approximation error is bounded by one day at the old edge of the
   window; the `max_frequency` terminal bucket absorbs most of it.
 
 `customer_sample` optionally evaluates the processor over a deterministic
 customer-hash subsample with otherwise exact semantics. Every row of a sampled
-customer is kept in both execution modes and in history. CTR by bucket remains
-an approximate ratio estimated from the sample; numerator and denominator
+customer is kept in both execution modes and in history. The engagement rate by
+bucket remains an approximate ratio estimated from the sample; numerator and denominator
 totals can each be estimated by scaling by `1 / fraction`, but their finite-
 sample ratio is not generally unbiased. Sampling is result
 semantics: changing the effective `fraction` republishes the processor's
@@ -1367,7 +1336,7 @@ Queries, reports, DuckDB views, API/MCP, and SQL export cannot read
 `rolling.duckdb`. Missing state is initialized from authoritative IH. Corrupt
 state fails closed and can be replaced with a forced rebuild.
 Earlier per-day checkpoints are incompatible acceleration state and are
-rebuilt, not migrated, into schema-revision-8 state. Legacy nested identity
+rebuilt, not migrated, into schema-revision-9 state. Legacy nested identity
 layouts are likewise obsolete and may be vacuumed. A
 persistent frequency source processes target chunks oldest-to-newest in one
 process; a requested `--parallel` value is capped at one for that source while
@@ -1378,7 +1347,7 @@ the original customer key retained for exact comparison. Treat the checkpoint
 as sensitive source-derived data, apply workspace access/encryption and
 retention controls, and tokenize or HMAC identifiers upstream where required.
 Sampling or sketches are not a transparent replacement because they cannot
-preserve exact event order and selected rank-2 action joins.
+preserve exact event order and contact identity.
 The source's exact logical customer dtype governs hashing and drift checks;
 DuckDB's learned physical storage dtype is validated separately. Consequently,
 Polars `Categorical` and `Enum` keys may persist physically as `VARCHAR` without

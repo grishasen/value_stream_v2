@@ -161,7 +161,7 @@ class TestCatalogHash:
             checkpoint: dict[str, object],
             *,
             window_hours: int = 168,
-            alternative_group_by: list[str] | None = None,
+            scope_by: list[str] | None = None,
         ) -> model.FrequencyResponseProcessor:
             return model.FrequencyResponseProcessor.model_validate(
                 {
@@ -174,19 +174,16 @@ class TestCatalogHash:
                         "customer": "CustomerID",
                         "interaction": "InteractionID",
                         "action": "ActionID",
-                        "placement": "Placement",
                         "rank": "Rank",
-                        "outcome": "Outcome",
-                        "propensity": "Propensity",
                     },
-                    "alternative_group_by": (
-                        ["Placement"] if alternative_group_by is None else alternative_group_by
-                    ),
-                    "positive_values": ["Clicked"],
-                    "exposure_values": ["Impression", "Clicked"],
-                    "candidate_values": ["Pending", "Impression", "Clicked"],
+                    "scope_by": (["Placement"] if scope_by is None else scope_by),
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked"],
+                        "negative_values": ["Impression", "Pending"],
+                    },
                     "window_hours": window_hours,
-                    "states": {"Responses": {"type": "count"}},
+                    "states": {"Positives": {"type": "count", "outcome": "positive"}},
                     "checkpoint": checkpoint,
                 }
             )
@@ -235,7 +232,7 @@ class TestCatalogHash:
 
         cross_placement = frequency(
             {"mode": "persistent_sharded", "shards": 32, "retention_days": 30},
-            alternative_group_by=[],
+            scope_by=[],
         )
         assert processor_computation_hash(catalog, cross_placement) != semantic_hash
         assert source_hash(cross_placement) != source_hash(persistent)
@@ -254,16 +251,15 @@ class TestCatalogHash:
                     "customer": "CustomerID",
                     "interaction": "InteractionID",
                     "action": "ActionID",
-                    "placement": "Placement",
                     "rank": "Rank",
-                    "outcome": "Outcome",
-                    "propensity": "Propensity",
                 },
-                "alternative_group_by": ["Placement"],
-                "positive_values": ["Clicked"],
-                "exposure_values": ["Impression", "Clicked"],
-                "candidate_values": ["Pending", "Impression", "Clicked"],
-                "states": {"Responses": {"type": "count"}},
+                "scope_by": ["Placement"],
+                "outcome": {
+                    "column": "Outcome",
+                    "positive_values": ["Clicked"],
+                    "negative_values": ["Impression", "Pending"],
+                },
+                "states": {"Positives": {"type": "count", "outcome": "positive"}},
             }
             payload.update(overrides)
             return model.FrequencyResponseProcessor.model_validate(payload)
@@ -301,7 +297,7 @@ class TestCatalogHash:
         assert "customer_sample_contract" not in _processor_computation_fields(full_sample)
         assert "window_granularity" not in _processor_computation_fields(explicit_exact)
         assert _processor_computation_fields(daily)["window_granularity"] == "daily"
-        assert fields["__valuestream_algorithm_revision"]["frequency_response_semantics"] == 4
+        assert fields["__valuestream_algorithm_revision"]["frequency_response_semantics"] == 5
 
     def test_bounded_ml_order_revision_is_scoped_to_score_processors(self) -> None:
         catalog = load(DEMO_WS)

@@ -173,7 +173,7 @@ class ChatIntentPlanningError(ValueError):
 
 _PROCESSOR_KIND_EXPLANATIONS = {
     "binary_outcome": "Counts positive and negative outcomes for rates, lift, and tests.",
-    "frequency_response": "Stores response and opportunity counters per number of impressions in a fixed trailing window.",
+    "frequency_response": "Stores positive and negative impression counts by number of impressions of the same action in a fixed trailing window.",
     "numeric_distribution": "Stores numeric distribution states such as count, mean, variance, and quantile sketches.",
     "score_distribution": "Stores score distributions split by outcome for ROC, precision/recall, and calibration.",
     "entity_lifecycle": "Aggregates lifecycle state per entity for CLV/RFM-style summaries.",

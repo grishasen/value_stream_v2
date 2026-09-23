@@ -206,63 +206,32 @@ FIELD_HELP: dict[str, str] = {
         "Dimensions persisted in aggregate rows and available to filters and report grouping.",
         "Channel, Direction, Issue",
     ),
-    "processor.alternative_group_by": _tip(
-        "Additional source fields used to match the selected rank-2 action. Customer and "
-        "InteractionID are always included; the default Placement therefore keeps "
-        "comparison inside one decision and placement. This matching key is separate "
-        "from the published aggregate Group By.",
-        "Placement",
+    "processor.scope_by": _tip(
+        "Fields inside which impressions of the same action to the same customer are "
+        "counted and the decision's shown actions are ranked. Empty counts and ranks "
+        "across every placement and channel.",
+        "Channel, Placement",
     ),
     "processor.frequency_customer": _tip(
         "Field identifying the customer whose prior impressions are counted.", "CustomerID"
     ),
     "processor.frequency_interaction": _tip(
-        "Field identifying one decision. Ranked alternatives are never compared across "
-        "interactions.",
+        "Field identifying one decision. Actions are ranked only among the actions of the "
+        "same decision.",
         "InteractionID",
     ),
     "processor.frequency_action": _tip(
         "Field identifying the offered action, used for contact identity and impression counting.",
         "ActionID",
     ),
-    "processor.frequency_placement": _tip(
-        "Field identifying where the action was shown; part of contact identity.", "Placement"
-    ),
     "processor.frequency_rank": _tip(
-        "Integer arbitration rank. Rank 1 is the served action; lower ranks supply the "
-        "selected rank-2 alternative.",
+        "Integer arbitration rank. Only its order matters: the processor re-ranks the "
+        "decision's shown actions inside the scope as 1, 2, 3, ...",
         "Rank",
     ),
-    "processor.frequency_outcome": _tip(
-        "Categorical field classified by the positive, exposure, and candidate value lists.",
-        "Outcome",
-    ),
-    "processor.frequency_propensity": _tip(
-        "Numeric response probability. The selected rank-2 action's value becomes the "
-        "opportunity-cost estimate.",
-        "Propensity",
-    ),
-    "processor.frequency_priority": _tip(
-        "Optional arbitration priority. It is a ranking score, never a probability, and "
-        "publishes the three arbitration diagnostic states when bound.",
-        "Priority",
-    ),
-    "processor.frequency_positive_values": _tip(
-        "Outcome values that count as a positive response. A positive always counts as an "
-        "exposure too. Enter a YAML list so quoted strings, numbers, and booleans remain "
-        "distinct; matching is exact and case-sensitive.",
-        '["Clicked", 1, true]',
-    ),
-    "processor.frequency_exposure_values": _tip(
-        "Outcome values that mean the action was shown. Repeated rows for one contact "
-        "collapse, and a positive outcome wins. Use YAML list syntax and quote values that "
-        "contain commas or significant whitespace.",
-        '["Impression", "Clicked"]',
-    ),
-    "processor.frequency_candidate_values": _tip(
-        "Outcome values kept as eligible ranked alternatives, including actions that were "
-        "arbitrated but never shown. Use YAML list syntax to preserve each value's type.",
-        '["Pending", "Impression", "Clicked"]',
+    "processor.frequency_max_rank": _tip(
+        "Terminal ScopeRank bucket. That rank and every lower-ranked action share it.",
+        "3",
     ),
     "processor.frequency_window_hours": _tip(
         "Length of the trailing window that counts prior impressions of the same action, "

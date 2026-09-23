@@ -294,7 +294,7 @@ def resolve_recipe_parameters(
     return resolved
 
 
-def recipe_readiness(  # noqa: PLR0912 - explicit compatibility and binding decisions
+def recipe_readiness(
     recipe: KpiRecipe,
     processor: model.Processor,
     *,
@@ -310,18 +310,6 @@ def recipe_readiness(  # noqa: PLR0912 - explicit compatibility and binding deci
             messages=(
                 f"Requires {', '.join(recipe.processor_kinds)}; {processor.id} is "
                 f"{processor.kind}.",
-            ),
-        )
-
-    if _requires_unconfigured_frequency_priority(recipe, processor):
-        return RecipeReadiness(
-            recipe_id=recipe.id,
-            processor_id=processor.id,
-            status="incompatible",
-            messages=(
-                f"{recipe.title} requires {processor.id} to configure columns.priority "
-                "with a numeric arbitration-priority source field. Configure the binding "
-                "and backfill aggregates before installing this recipe.",
             ),
         )
 
@@ -379,29 +367,6 @@ def recipe_readiness(  # noqa: PLR0912 - explicit compatibility and binding deci
         input_options=options,
         resolved_inputs=resolved,
         messages=tuple(messages),
-    )
-
-
-def _requires_unconfigured_frequency_priority(
-    recipe: KpiRecipe,
-    processor: model.Processor,
-) -> bool:
-    """Return whether a recipe requires priority-only canonical frequency states."""
-
-    if processor.kind != "frequency_response":
-        return False
-    columns = getattr(processor, "columns", None)
-    if getattr(columns, "priority", None) is not None:
-        return False
-    return any(
-        item.require_preferred
-        and bool(item.preferred_names)
-        and all(
-            (state := model.FREQUENCY_RESPONSE_STATES.get(name)) is not None
-            and state.requires_priority
-            for name in item.preferred_names
-        )
-        for item in recipe.inputs
     )
 
 

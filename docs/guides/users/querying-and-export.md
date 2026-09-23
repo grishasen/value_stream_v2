@@ -45,6 +45,9 @@ SQL-readable columns.
 
 ## Use the Read-Only API or MCP Server
 
+To connect a desktop assistant, follow
+[Connect Codex and Claude Desktop (Russian)](mcp-clients.md).
+
 Start local aggregate-safe tools:
 
 ```sh

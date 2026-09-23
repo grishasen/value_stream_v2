@@ -480,56 +480,38 @@ def test_frequency_combo_resolves_business_labels_through_chart_rendering() -> N
                 "customer": "CustomerID",
                 "interaction": "InteractionID",
                 "action": "ActionID",
-                "placement": "Placement",
                 "rank": "Rank",
-                "outcome": "Outcome",
-                "propensity": "Propensity",
             },
-            "alternative_group_by": ["Placement"],
-            "positive_values": ["Clicked"],
-            "exposure_values": ["Impression", "Clicked"],
-            "candidate_values": ["Pending", "Impression", "Clicked"],
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression", "Pending"],
+            },
+            "scope_by": ["Placement"],
             "frequency_column": "ExposureBucket",
             "group_by": ["ExposureBucket"],
-            "states": {
-                "ComparablePositives": {
-                    "type": "count",
-                    "source_column": "ComparableClick",
-                },
-                "ComparableResponses": {
-                    "type": "count",
-                    "source_column": "ComparableContact",
-                },
-                "RunnerPropensitySum": {
-                    "type": "value_sum",
-                    "source_column": "RunnerPropensity",
-                },
-            },
+            "states": model.frequency_response_state_definitions(),
         }
     )
     catalog.metrics.metrics = {
-        "FrequencyComparableCTR": model.FormulaMetric.model_validate(
+        "EngagementRate": model.FormulaMetric.model_validate(
             {
                 "processor": "frequency_response",
                 "kind": "formula",
                 "expression": {
                     "op": "safe_div",
-                    "num": {"col": "ComparablePositives"},
-                    "den": {"col": "ComparableResponses"},
+                    "num": {"col": "Positives"},
+                    "den": {"op": "add", "args": [{"col": "Positives"}, {"col": "Negatives"}]},
                 },
-                "display": {"label": "Comparable selected rank-1 action CTR"},
+                "display": {"label": "Engagement rate"},
             }
         ),
-        "RunnerExpectedCTR": model.FormulaMetric.model_validate(
+        "FrequencyImpressions": model.FormulaMetric.model_validate(
             {
                 "processor": "frequency_response",
                 "kind": "formula",
-                "expression": {
-                    "op": "safe_div",
-                    "num": {"col": "RunnerPropensitySum"},
-                    "den": {"col": "ComparableResponses"},
-                },
-                "display": {"label": "Selected rank-2 action expected CTR"},
+                "expression": {"op": "add", "args": [{"col": "Positives"}, {"col": "Negatives"}]},
+                "display": {"label": "Impressions"},
             }
         ),
     }
@@ -537,18 +519,17 @@ def test_frequency_combo_resolves_business_labels_through_chart_rendering() -> N
         catalog,
         {
             "id": "frequency_combo",
-            "metric": "FrequencyComparableCTR",
-            "metric_output": "FrequencyComparableCTR",
+            "metric": "EngagementRate",
+            "metric_output": "EngagementRate",
             "chart": "combo",
             "x": "ExposureBucket",
-            "secondary_metric": "RunnerExpectedCTR",
+            "secondary_metric": "FrequencyImpressions",
             "primary_mark": "line",
-            "shared_y_axis": True,
         },
     )
 
-    assert resolved["labels"]["FrequencyComparableCTR"] == ("Comparable selected rank-1 action CTR")
-    assert resolved["labels"]["RunnerExpectedCTR"] == ("Selected rank-2 action expected CTR")
+    assert resolved["labels"]["EngagementRate"] == "Engagement rate"
+    assert resolved["labels"]["FrequencyImpressions"] == "Impressions"
     assert resolved["labels"]["ExposureBucket"] == "Number of impressions"
     assert resolved["x_axis_title"] == "Number of impressions"
 
@@ -556,16 +537,13 @@ def test_frequency_combo_resolves_business_labels_through_chart_rendering() -> N
         pl.DataFrame(
             {
                 "ExposureBucket": [1, 2],
-                "FrequencyComparableCTR": [0.02, 0.01],
-                "RunnerExpectedCTR": [0.03, 0.015],
+                "EngagementRate": [0.02, 0.01],
+                "FrequencyImpressions": [1000, 400],
             }
         ),
         resolved,
     )
-    assert [trace.name for trace in figure.data] == [
-        "Comparable selected rank-1 action CTR",
-        "Selected rank-2 action expected CTR",
-    ]
+    assert sorted(trace.name for trace in figure.data) == ["Engagement rate", "Impressions"]
 
 
 @pytest.mark.unit

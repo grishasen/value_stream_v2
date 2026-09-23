@@ -57,16 +57,15 @@ def test_registry_constructs_frequency_response_processor() -> None:
                 "customer": "CustomerID",
                 "interaction": "InteractionID",
                 "action": "ActionID",
-                "placement": "Placement",
                 "rank": "Rank",
-                "outcome": "Outcome",
-                "propensity": "Propensity",
             },
-            "alternative_group_by": ["Placement"],
-            "positive_values": ["Clicked"],
-            "exposure_values": ["Impression"],
-            "candidate_values": ["Pending"],
-            "states": {"Responses": {"type": "count"}},
+            "scope_by": ["Placement"],
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression", "Pending"],
+            },
+            "states": {"Positives": {"type": "count", "outcome": "positive"}},
         }
     )
 

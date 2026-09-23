@@ -55,28 +55,21 @@ def _processor(
                     "group_by": ["Placement", "ExposureBucket"],
                     "time": {"property": "DecisionTime", "grain": "daily"},
                     "states": {
-                        "Positives": {
-                            "type": "count",
-                            "source_column": "ClickedContact",
-                        },
-                        "RunnerPropensitySum": {
-                            "type": "value_sum",
-                            "source_column": "RunnerPropensity",
-                        },
+                        "Positives": {"type": "count", "outcome": "positive"},
+                        "Negatives": {"type": "count", "outcome": "negative"},
                     },
                     "columns": {
                         "customer": "CustomerID",
                         "interaction": "InteractionID",
                         "action": "ActionID",
-                        "placement": "Placement",
                         "rank": "Rank",
-                        "outcome": "Outcome",
-                        "propensity": "Propensity",
                     },
-                    "alternative_group_by": ["Placement"],
-                    "positive_values": ["Clicked"],
-                    "exposure_values": ["Impression"],
-                    "candidate_values": ["Impression", "Clicked"],
+                    "outcome": {
+                        "column": "Outcome",
+                        "positive_values": ["Clicked"],
+                        "negative_values": ["Impression"],
+                    },
+                    "scope_by": ["Placement"],
                     "window_hours": window_hours,
                     "partition_lag_hours": partition_lag_hours,
                     "frequency_column": "ExposureBucket",
@@ -962,7 +955,7 @@ def test_target_schema_gap_cannot_be_masked_by_a_history_column(
                 "Placement": ["Hero"],
                 "Rank": [1],
                 "Outcome": ["Impression"],
-                "Propensity": [0.1],
+                "Name": ["history-only"],
                 "DecisionTime": [dt.datetime(2024, 1, 1, tzinfo=dt.UTC)],
             }
         ).lazy(),
@@ -981,6 +974,9 @@ def test_target_schema_gap_cannot_be_masked_by_a_history_column(
 
     monkeypatch.setattr(runner, "read", lambda _reader, files: frames[files[0]])
     processor = _processor(frequency=True)
+    processor.config = processor.config.model_copy(
+        update={"group_by": ["Placement", "Name", "ExposureBucket"]}
+    )
     plan = runner._ChunkPlan(
         Chunk("2024-01-02", (current_file,)),
         (Chunk("2024-01-01", (history_file,)),),
@@ -992,11 +988,11 @@ def test_target_schema_gap_cannot_be_masked_by_a_history_column(
     )
 
     assert bounded is not None
-    # Narrow history projection prevents a history-only Propensity field from
-    # masking the target-day schema gap in the relaxed union.
-    assert "Propensity" not in bounded.collect_schema()
-    assert "Propensity" not in current.collect_schema()
-    with pytest.raises(ValueError, match=r"target chunk.*Propensity"):
+    # Narrow history projection prevents a history-only reporting dimension
+    # from masking the target-day schema gap in the relaxed union.
+    assert "Name" not in bounded.collect_schema()
+    assert "Name" not in current.collect_schema()
+    with pytest.raises(ValueError, match=r"target chunk.*Name"):
         runner._validate_frequency_current_input_columns(
             [processor],
             current.collect_schema(),

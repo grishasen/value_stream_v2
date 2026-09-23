@@ -175,7 +175,7 @@ internal state-ID choice.
 
 ## Built-in Recipes
 
-Choose a recipe by the business question it answers. The 41 recipes below are
+Choose a recipe by the business question it answers. The 36 recipes below are
 grouped by business purpose; recipe IDs remain unchanged even when their
 technical domain differs from the group. Examples use Pega Customer Decision
 Hub (CDH) terminology. All numbers and
@@ -197,7 +197,7 @@ context and levers, so it must not be read as a probability. `ResponseTime` is
 - [Value distributions and response time](#value-distributions-and-response-time)
 - [Prediction quality](#prediction-quality)
 - [Adaptive learning and exploration](#adaptive-learning-and-exploration)
-- [Contact policy and alternative actions](#contact-policy-and-alternative-actions)
+- [Contact policy and repeated impressions](#contact-policy-and-repeated-impressions)
 
 **Accuracy** describes how the result is calculated: **Exact** uses configured
 counts and sums; **Approximate** uses compact statistical summaries or an
@@ -387,50 +387,41 @@ is `mean(revision²) / mean(p × (1 − p))`, an unbounded ratio rather than an
 uncertainty probability. Other score adjustments can affect both diagnostics.
 Randomised control arms must be excluded from all three.
 
-### Contact Policy and Alternative Actions
+### Contact Policy and Repeated Impressions
 
-Assess response at different contact frequencies and compare the selected
-action with a recorded alternative. **CTR** means click-through rate. Below,
-the **chosen action** is the selected rank-1 action; the **alternative** is
-the selected rank-2 action, or the next recorded rank greater than 1 when
-rank 2 is absent, within the configured comparison group. **Comparable
-contacts** have a recorded alternative response probability. An **impression**
-here is a configured exposure record, not proof that a customer viewed it.
+Assess how the response to an action changes as the same customer sees it
+again, to decide after how many impressions it should stop being shown. The
+**engagement rate** is positive impressions divided by positive plus negative
+impressions, as in the engagement recipes. An **impression** is any record
+with one of the processor's configured positive or negative outcomes, at any
+rank; it is not proof that a customer viewed it.
 
-Count contacts for the same `CustomerID + ActionID + Placement` within a
-trailing 168-hour window, including the current contact; the final bucket is
-`7+`. Alternatives are compared within the same customer, interaction and
-placement. A `Clicked` record takes precedence over an `Impression` record for
-the same contact, so the frequency examples count that contact once.
+`ExposureBucket` counts the impressions of the same `CustomerID + ActionID`
+inside the processor's `scope_by` fields (for example `Channel` and
+`Placement`) within a trailing 168-hour window, including the current one; the
+final bucket collects every later impression. `ScopeRank` is the action's rank
+among the decision's shown actions inside the same scope, so a banner shown at
+arbitration rank 6 in a one-slot placement is rank 1 there. `PriorPositive`
+marks impressions whose customer already responded to the action inside the
+window. A `Clicked` record takes precedence over an `Impression` or `Pending`
+record for the same contact, so each contact counts once.
 
 | Business KPI | Explanation | Recipe ID | Required capability | Accuracy | Default report |
 |---|---|---|---|---|---|
-| Chosen action CTR by impression count | The chosen action’s observed click rate at each impression-frequency level. **Example:** For one action in the Web Hero placement, 30 clicks among 1,000 contacts in the three-impression bucket give 3% CTR; each contact is that customer’s third for the same action and placement within 168 hours. | `contact_policy.frequency_marginal_ctr` | Exact `Positives` and `Responses` states | Approximate fixed-window interpretation | Line |
-| Chosen action CTR on comparable contacts | The chosen action’s click rate restricted to contacts with an alternative action’s usable `Propensity`. **Example:** Of 1,000 rank-1 action contacts, 600 have a comparable alternative and 24 of those are clicked: comparable CTR is 4%, even if all-contact CTR is 3%. | `contact_policy.frequency_comparable_ctr` | Exact `ComparablePositives` and `ComparableResponses` states | Approximate fixed-window interpretation | Line |
-| Alternative action expected CTR | The alternative action’s mean raw `Propensity` on the same comparable contacts. **Example:** If the alternatives average 0.05 propensity across 600 contacts, their expected CTR is 5%, equivalent to 30 predicted clicks; those clicks were not observed for the alternatives. | `contact_policy.runner_up_expected_ctr` | Exact `RunnerPropensitySum` and `ComparableResponses` states | Approximate fixed-window interpretation | Line |
-| Alternative action coverage | The share of chosen-action contacts with a usable response prediction for an alternative action. **Example:** If 600 of 1,000 Web Hero rank-1 contacts have a comparable alternative in the same customer decision and placement, coverage is 60%. | `contact_policy.runner_up_coverage` | Exact `ComparableResponses` and `Responses` states | Approximate fixed-window interpretation | KPI card |
-| Response opportunity margin | The chosen action’s observed CTR minus the alternative action’s expected CTR on the same contacts. **Example:** 24 clicks from 600 comparable contacts give 4%; alternatives with 5% mean `Propensity` give a −1 percentage-point margin, identifying an action-choice opportunity to investigate rather than proven uplift. | `contact_policy.response_opportunity_margin` | Exact `ComparablePositives`, `RunnerPropensitySum`, and shared `ComparableResponses` states | Approximate fixed-window interpretation | Bar |
-| Priority opportunity gap | The average difference between chosen and alternative action `Priority`, the score used for arbitration. **Example:** Mean priorities of 1.4 for chosen actions and 1.1 for alternatives on the same comparable contacts give a +0.3 index gap; it measures ranking advantage, not extra clicks or conversions. | `contact_policy.priority_opportunity_gap` | Exact `FocalPriorityComparableSum`, `RunnerPriorityComparableSum`, and shared `PriorityComparableContacts` states | Approximate arbitration diagnostic | Bar |
+| Engagement rate by number of impressions | The share of impressions with a positive outcome after the 1st, 2nd, 3rd, ... impression of the same action to the same customer. **Example:** In the Web Hero placement, 1,000 fifth impressions to customers who have not clicked yet produce 12 clicks: a 1.2% engagement rate, against 1.6% on first impressions, so the action has lost a quarter of its response by the fifth impression. | `contact_policy.engagement_rate_by_impressions` | Exact `Positives` and `Negatives` states | Approximate fixed-window interpretation | Line |
 
-The six **Contact policy** recipes target only the `frequency_response`
-processor and require the exact state names shown above. They never propose a
-generic count or sum as a substitute for those population contracts. Their
-line and bar recommendations use `ExposureBucket`, whose value is an upstream
-fixed-window approximation; changing a report date filter does not recompute
-customer contact history.
+The **Contact policy** recipe targets only the `frequency_response` processor
+and requires its exact `Positives` and `Negatives` states; it never proposes a
+generic count as a substitute. Its line recommendation uses `ExposureBucket`,
+whose value is an upstream fixed-window approximation; changing a report date
+filter does not recompute customer contact history.
 
-`Responses` are derived from the processor's configured exposure outcomes. The
-user-facing number of impressions is therefore based on Impression proxies rather
-than measured viewability; dismiss telemetry is never inferred when the source does
-not provide it. Within the processor's implicit customer + interaction keys
-plus the physical fields configured in `alternative_group_by`, “selected rank-2 action” means
-exact rank 2 when present, otherwise the next recorded rank greater than 1;
-its response uses raw `Propensity` as the probability. `Placement` is the
-default additional field, so comparison stays inside one decision and
-placement. Comparable selected rank-1 action CTR, selected
-rank-2 action expected CTR, and response opportunity margin use the same
-`ComparableResponses` denominator. `Priority` is retained only for the separate,
-neutral arbitration index; it is never treated as CTR or probability.
+Customers who already responded are shown the same action again more often,
+so an all-customer curve can rise with repeated impressions even when every
+customer responds less each time. Split or filter by `PriorPositive` before
+reading a decline as fatigue, and keep `Channel` and `Placement` apart, since
+their rates can differ tenfold. The curve is observational, not a causal
+estimate of wearout.
 
 ## Versioning and Governance
 

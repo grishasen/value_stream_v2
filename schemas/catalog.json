@@ -5909,34 +5909,6 @@
           "title": "Interaction",
           "type": "string"
         },
-        "outcome": {
-          "minLength": 1,
-          "title": "Outcome",
-          "type": "string"
-        },
-        "placement": {
-          "minLength": 1,
-          "title": "Placement",
-          "type": "string"
-        },
-        "priority": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Priority"
-        },
-        "propensity": {
-          "minLength": 1,
-          "title": "Propensity",
-          "type": "string"
-        },
         "rank": {
           "minLength": 1,
           "title": "Rank",
@@ -5947,10 +5919,7 @@
         "customer",
         "interaction",
         "action",
-        "placement",
-        "rank",
-        "outcome",
-        "propensity"
+        "rank"
       ],
       "title": "FrequencyResponseColumns",
       "type": "object"
@@ -5974,21 +5943,8 @@
     },
     "FrequencyResponseProcessor": {
       "additionalProperties": false,
-      "description": "Frequency-window response states over a marked current chunk plus lookback.",
+      "description": "Engagement by number of impressions over a marked current chunk plus lookback.\n\nEvery contact whose outcome is classified by ``outcome`` is one impression\nof its action. ``scope_by`` names the fields inside which impressions are\ncounted and actions are ranked, for example ``[Channel, Placement]``.",
       "properties": {
-        "alternative_group_by": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Alternative Group By",
-          "type": "array"
-        },
-        "candidate_values": {
-          "items": {},
-          "minItems": 1,
-          "title": "Candidate Values",
-          "type": "array"
-        },
         "checkpoint": {
           "$ref": "#/$defs/FrequencyResponseCheckpoint"
         },
@@ -6010,12 +5966,6 @@
           "default": "",
           "title": "Description",
           "type": "string"
-        },
-        "exposure_values": {
-          "items": {},
-          "minItems": 1,
-          "title": "Exposure Values",
-          "type": "array"
         },
         "filter": {
           "anyOf": [
@@ -6148,16 +6098,26 @@
           "title": "Max Frequency",
           "type": "integer"
         },
+        "max_rank": {
+          "default": 3,
+          "exclusiveMinimum": 0,
+          "title": "Max Rank",
+          "type": "integer"
+        },
+        "outcome": {
+          "$ref": "#/$defs/OutcomeSpec"
+        },
         "partition_lag_hours": {
           "default": 0,
           "minimum": 0,
           "title": "Partition Lag Hours",
           "type": "integer"
         },
-        "positive_values": {
-          "items": {},
-          "minItems": 1,
-          "title": "Positive Values",
+        "scope_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scope By",
           "type": "array"
         },
         "source": {
@@ -6252,10 +6212,8 @@
         "time",
         "states",
         "columns",
-        "alternative_group_by",
-        "positive_values",
-        "exposure_values",
-        "candidate_values"
+        "outcome",
+        "scope_by"
       ],
       "title": "FrequencyResponseProcessor",
       "type": "object"

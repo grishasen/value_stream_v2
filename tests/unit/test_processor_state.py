@@ -34,8 +34,6 @@ PATH_IDENTITY = {
 }
 HISTORY_SPEC = HistoryProjectionSpec(
     columns=("CustomerID", "DecisionTime", "LocalOrder", "Rank", "Exposed"),
-    rank_column="Rank",
-    exposed_column="Exposed",
 )
 
 
@@ -226,7 +224,7 @@ def test_stage_current_uses_arrow_stream_and_keeps_complete_temp_payload(
 
 
 @pytest.mark.unit
-def test_commit_promotes_only_rank1_exposed_history_and_journals(tmp_path: Path) -> None:
+def test_commit_promotes_every_staged_row_to_history_and_journals(tmp_path: Path) -> None:
     with _rolling(tmp_path) as checkpoint:
         checkpoint.stage_current(
             _contacts(),
@@ -237,10 +235,14 @@ def test_commit_promotes_only_rank1_exposed_history_and_journals(tmp_path: Path)
 
         rows = checkpoint.connection.execute(
             f'SELECT "CustomerID", "Rank", "Exposed", "{CHUNK_ID_COLUMN}" '
-            f'FROM "{HISTORY_TABLE}" ORDER BY "CustomerID"'
+            f'FROM "{HISTORY_TABLE}" ORDER BY "CustomerID", "LocalOrder"'
         ).fetchall()
+        # The processor stages only rows a later target depends on, so the
+        # store persists every one of them regardless of rank or outcome.
         assert rows == [
             ("customer-a", 1, True, "2026-07-31"),
+            ("customer-a", 1, False, "2026-07-31"),
+            ("customer-b", 2, True, "2026-07-31"),
             ("customer-c", 1, True, "2026-07-31"),
         ]
         assert checkpoint.journal[0].chunk_id == "2026-07-31"
@@ -362,8 +364,6 @@ def test_commit_normalizes_history_to_one_row_per_key_with_min_and_bool_or(
 ) -> None:
     normalized_spec = HistoryProjectionSpec(
         columns=("CustomerID", "DecisionTime", "LocalOrder", "Rank", "Exposed", "Positive"),
-        rank_column="Rank",
-        exposed_column="Exposed",
         min_columns=("DecisionTime", "LocalOrder"),
         bool_or_columns=("Exposed", "Positive"),
     )
@@ -405,8 +405,6 @@ def test_reopen_rejects_corrupt_normalized_history(
 ) -> None:
     normalized_spec = HistoryProjectionSpec(
         columns=("CustomerID", "ActionID", "DecisionTime", "Rank", "Exposed"),
-        rank_column="Rank",
-        exposed_column="Exposed",
         min_columns=("DecisionTime",),
         bool_or_columns=("Exposed",),
     )
@@ -662,8 +660,6 @@ def test_history_schema_promotes_non_customer_columns_across_chunks(tmp_path: Pa
             "Rank",
             "Exposed",
         ),
-        rank_column="Rank",
-        exposed_column="Exposed",
     )
     action_values = [1, 2, 3, 4]
     first = _contacts().with_columns(pl.Series("ActionName", action_values, dtype=pl.Int32))
@@ -695,7 +691,7 @@ def test_history_schema_promotes_non_customer_columns_across_chunks(tmp_path: Pa
         )
         assert isinstance(recovered, pl.DataFrame)
         assert recovered.schema["ActionName"] == pl.String
-        assert set(recovered.get_column("ActionName")) == {"1", "4"}
+        assert set(recovered.get_column("ActionName")) == {"1", "2", "3", "4"}
 
 
 @pytest.mark.unit
@@ -711,7 +707,6 @@ def test_dictionary_customer_type_keeps_logical_and_physical_types_separate(
     logical_dtype = str(customer_type)
     expected_shards = (
         assign_customer_shard(frame, customer_column="CustomerID", shard_count=8)
-        .filter((pl.col("Rank") == 1) & pl.col("Exposed"))
         .select("CustomerID", SHARD_COLUMN)
         .sort("CustomerID")
         .rows()
@@ -798,7 +793,7 @@ def test_empty_null_customer_day_does_not_lock_dynamic_history_type(
         )
         assert (
             checkpoint.connection.execute(f'SELECT count(*) FROM "{HISTORY_TABLE}"').fetchone()[0]
-            == 2
+            == 4
         )
 
 
@@ -945,7 +940,7 @@ def test_shard_count_change_reinitializes_same_stable_database(tmp_path: Path) -
 
 @pytest.mark.unit
 def test_unsupported_schema_revision_reinitializes_to_current_only(tmp_path: Path) -> None:
-    assert CHECKPOINT_SCHEMA_REVISION == 8
+    assert CHECKPOINT_SCHEMA_REVISION == 9
     with _rolling(tmp_path) as checkpoint:
         _stage_and_commit(checkpoint, "2026-07-30", _fingerprint(1))
         path = checkpoint.path
@@ -1060,7 +1055,6 @@ def test_context_close_aborts_uncommitted_current(tmp_path: Path) -> None:
             "cannot contain nulls",
         ),
         (_contacts().drop("LocalOrder"), "missing history"),
-        (_contacts().with_columns(pl.col("Exposed").cast(pl.Int64)), "must be Boolean"),
     ],
 )
 def test_stage_rejects_invalid_current_frames(

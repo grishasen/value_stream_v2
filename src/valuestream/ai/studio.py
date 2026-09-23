@@ -202,36 +202,25 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
     },
     "frequency_response": {
         "purpose": (
-            "how response changes with the number of impressions of the same action in a "
-            "fixed trailing window, plus the opportunity cost of the alternative that lost "
-            "the placement"
+            "how the engagement rate changes after the 1st, 2nd, 3rd, ... impression of the "
+            "same action to the same customer in a fixed trailing window, to find when an "
+            "action should stop being shown"
         ),
         "key_fields": [
-            "columns.customer/interaction/action/placement/rank/outcome/propensity",
-            "columns.priority only when arbitration diagnostics are wanted",
-            "positive_values, exposure_values, candidate_values over columns.outcome",
-            "window_hours, partition_lag_hours, max_frequency, frequency_column",
-            "alternative_group_by for the selected rank-2 action comparison group",
+            "columns.customer/interaction/action/rank",
+            "outcome.column with positive_values and negative_values, as in binary_outcome",
+            "scope_by: the fields inside which impressions are counted and actions ranked",
+            "window_hours, partition_lag_hours, max_frequency, frequency_column, max_rank",
         ],
         "authoring": (
-            "requires a source with ranked decision alternatives and a raw response "
-            "propensity; time.grain must be daily and frequency_column must appear in "
-            "group_by"
+            "requires a decision source with customer, interaction, action, integer rank, and a "
+            "decision timestamp; time.grain must be daily and frequency_column must appear in "
+            "group_by; ScopeRank and PriorPositive are optional derived dimensions"
         ),
-        "canonical_states": [
-            "Responses",
-            "Positives",
-            "ComparableResponses",
-            "ComparablePositives",
-            "RunnerAvailable",
-            "RunnerPropensitySum",
-            "PriorityComparableContacts",
-            "FocalPriorityComparableSum",
-            "RunnerPriorityComparableSum",
-        ],
+        "canonical_states": ["Positives", "Negatives"],
         "states_rule": (
-            "states are canonical for this kind: never invent, rename, or drop one, and "
-            "declare the last three only when columns.priority is bound"
+            "states are canonical for this kind: declare Positives and Negatives exactly as "
+            "{type: count, outcome: positive|negative}; never invent or rename one"
         ),
         "compatible_metrics": ["formula"],
     },

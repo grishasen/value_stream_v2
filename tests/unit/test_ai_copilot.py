@@ -146,32 +146,29 @@ def _binary_processor(channel_field: str) -> dict:
 def _frequency_response_processor(
     *,
     customer_field: str = "CustomerID",
-    alternative_group_by: list[str] | None = None,
+    scope_by: list[str] | None = None,
 ) -> dict:
     return {
         "id": "engagement",
         "source": "ih",
         "kind": "frequency_response",
-        "group_by": ["Day", "ExposureBucket"],
+        "group_by": ["Day", "ExposureBucket", "ScopeRank", "PriorPositive"],
         "time": {"property": "DecisionTime", "grain": "daily"},
         "columns": {
             "customer": customer_field,
             "interaction": "InteractionID",
             "action": "ActionID",
-            "placement": "Placement",
             "rank": "Rank",
-            "outcome": "Outcome",
-            "propensity": "Propensity",
         },
-        "alternative_group_by": (
-            ["Placement"] if alternative_group_by is None else alternative_group_by
-        ),
-        "positive_values": ["Clicked"],
-        "exposure_values": ["Impression", "Clicked"],
-        "candidate_values": ["Pending", "Impression", "Clicked"],
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": ["Clicked"],
+            "negative_values": ["Impression", "Pending"],
+        },
+        "scope_by": ["Placement"] if scope_by is None else scope_by,
         "states": {
-            "Responses": {"type": "count"},
-            "Positives": {"type": "count", "source_column": "ClickedContact"},
+            "Positives": {"type": "count", "outcome": "positive"},
+            "Negatives": {"type": "count", "outcome": "negative"},
         },
     }
 
@@ -1783,7 +1780,7 @@ def test_draft_field_contract_rejects_unapproved_frequency_raw_bindings() -> Non
     draft["processors"]["processors"] = [
         _frequency_response_processor(
             customer_field="SecretCustomer",
-            alternative_group_by=["SecretSegment"],
+            scope_by=["SecretSegment"],
         )
     ]
 
@@ -1807,7 +1804,7 @@ def test_draft_field_contract_rejects_unapproved_frequency_raw_bindings() -> Non
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("customer_field", ["ClickedContact", "Day"])
+@pytest.mark.parametrize("customer_field", ["ScopeRank", "Day"])
 def test_frequency_raw_binding_is_not_exempt_when_named_like_a_derived_column(
     customer_field: str,
 ) -> None:
@@ -1835,7 +1832,7 @@ def test_frequency_raw_binding_is_not_exempt_when_named_like_a_derived_column(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("time_property", ["ClickedContact", "Day"])
+@pytest.mark.parametrize("time_property", ["PriorPositive", "Day"])
 def test_frequency_raw_time_binding_is_not_exempt_as_a_derived_field(
     time_property: str,
 ) -> None:

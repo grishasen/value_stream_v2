@@ -63,19 +63,18 @@ PROCESSOR_KIND_GUIDE: dict[str, ProcessorKindGuide] = {
     ),
     "frequency_response": ProcessorKindGuide(
         summary=(
-            "Builds daily selected-action response and opportunity states by number of "
-            "impressions in a fixed trailing time window."
+            "Counts positive and negative impressions by how many times the same action was "
+            "shown to the same customer in a fixed trailing time window."
         ),
         purposes=(
-            "Use for contact-policy saturation curves when source interactions carry "
-            "ranked alternatives and raw response propensity."
+            "Use for contact-policy fatigue curves: after how many impressions an action's "
+            "engagement falls far enough to stop showing it, overall and by rank inside a "
+            "scope such as channel and placement."
         ),
         example_kpis=(
-            "Selected Rank-1 Action CTR by Number of Impressions",
-            "Comparable Selected Rank-1 Action CTR",
-            "Selected Rank-2 Action Expected CTR",
-            "Selected Rank-2 Action Coverage",
-            "Response Opportunity Margin",
+            "Engagement Rate by Number of Impressions",
+            "Engagement Rate of Rank 1 and Rank 2 inside a Placement",
+            "Engagement Rate before and after a First Response",
         ),
     ),
     "numeric_distribution": ProcessorKindGuide(
@@ -204,13 +203,11 @@ PROCESSOR_KIND_MANAGED_FIELDS = frozenset(
         "stages",
         "snapshot_kind",
         "cadence",
-        "alternative_group_by",
         # frequency_response owns every non-state field through its kind form,
         # so each one must be strippable when the kind changes.
         "columns",
-        "positive_values",
-        "exposure_values",
-        "candidate_values",
+        "scope_by",
+        "max_rank",
         "window_hours",
         "partition_lag_hours",
         "max_frequency",
@@ -291,41 +288,6 @@ def csv_list_field(label: str, value: Any, *, key: str, help_key: str) -> list[s
     return builder.csv_text_to_list(raw)
 
 
-def typed_yaml_list_field(
-    label: str,
-    value: Any,
-    *,
-    key: str,
-    help_key: str,
-) -> list[Any]:
-    """Render a typed YAML list without flattening values to CSV text."""
-
-    configured = value if isinstance(value, list) else []
-    raw = st.text_input(
-        label,
-        value=yaml.safe_dump(
-            configured,
-            default_flow_style=True,
-            sort_keys=False,
-            allow_unicode=True,
-            width=4096,
-        ).strip(),
-        key=key,
-        help=config_help.field_help(help_key),
-    )
-    try:
-        parsed = yaml.safe_load(raw)
-    except yaml.YAMLError as exc:
-        st.error(f"{label} must be a valid YAML list: {exc}")
-        return []
-    if parsed is None and not raw.strip():
-        return []
-    if not isinstance(parsed, list):
-        st.error(f"{label} must use YAML list syntax, for example [Clicked, 1, true].")
-        return []
-    return parsed
-
-
 def first_preferred_field(fields: list[str], targets: list[str]) -> str:
     """Return the first field that case-insensitively matches a preferred name."""
     for target in targets:
@@ -386,11 +348,9 @@ FREQUENCY_COLUMN_SPECS = (
     ("customer", "Customer Column", "CustomerID", "processor.frequency_customer"),
     ("interaction", "Interaction Column", "InteractionID", "processor.frequency_interaction"),
     ("action", "Action Column", "ActionID", "processor.frequency_action"),
-    ("placement", "Placement Column", "Placement", "processor.frequency_placement"),
     ("rank", "Rank Column", "Rank", "processor.frequency_rank"),
-    ("outcome", "Outcome Column", "Outcome", "processor.frequency_outcome"),
-    ("propensity", "Propensity Column", "Propensity", "processor.frequency_propensity"),
 )
+FREQUENCY_DEFAULT_SCOPE = ("Channel", "Placement")
 FREQUENCY_WINDOW_GRANULARITY_OPTIONS = ("exact", "daily")
 FREQUENCY_CHECKPOINT_MODE_OPTIONS = ("source_scan", "persistent_sharded")
 FREQUENCY_CHECKPOINT_MODE_LABELS = {
@@ -412,21 +372,33 @@ def _frequency_response_fields(
     """
 
     columns = _frequency_column_bindings(processor_def, field_options, key_prefix)
-    outcome_values = _frequency_outcome_values(processor_def, key_prefix)
-    window = _frequency_window_fields(processor_def, key_prefix)
-    alternative_group_by = _frequency_alternative_group_by(
+    st.write("### Outcome Classification")
+    outcome = _outcome_fields(
         processor_def,
         field_options,
         key_prefix,
-        columns=columns,
+        positive_defaults=["Clicked"],
+        negative_defaults=["Impression", "Pending"],
+    )
+    st.caption(
+        "Every contact with a positive or negative value is one impression; a positive "
+        "outcome wins when both describe the same contact. Values are matched exactly."
+    )
+    window = _frequency_window_fields(processor_def, key_prefix)
+    outcome_column = str(outcome.get("outcome", {}).get("column") or "")
+    scope_by = _frequency_scope_by(
+        processor_def,
+        field_options,
+        key_prefix,
+        bound_fields={*columns.values(), outcome_column},
         frequency_column=str(window["frequency_column"]),
     )
     execution = _frequency_execution_fields(processor_def, key_prefix)
     return {
         "columns": columns,
-        **outcome_values,
+        **outcome,
         **window,
-        "alternative_group_by": alternative_group_by,
+        "scope_by": scope_by,
         **execution,
     }
 
@@ -442,72 +414,20 @@ def _frequency_column_bindings(
     raw_columns = processor_def.get("columns")
     configured: dict[str, Any] = raw_columns if isinstance(raw_columns, dict) else {}
     edited: dict[str, str] = {}
-    for row_specs in (FREQUENCY_COLUMN_SPECS[:4], FREQUENCY_COLUMN_SPECS[4:]):
-        row = st.columns(len(row_specs), gap="small")
-        for column, (name, label, default, help_key) in zip(row, row_specs, strict=True):
-            with column:
-                value = select_or_text(
-                    label,
-                    field_options,
-                    str(configured.get(name, "") or "") or default,
-                    key=f"{key_prefix}_frequency_column_{name}",
-                    help_key=help_key,
-                ).strip()
-            edited[name] = value or default
-    priority_col, _spacer = st.columns(2, gap="small")
-    with priority_col:
-        priority = select_or_text(
-            "Priority Column (optional)",
-            field_options,
-            str(configured.get("priority", "") or ""),
-            key=f"{key_prefix}_frequency_column_priority",
-            help_key="processor.frequency_priority",
-        ).strip()
-    if priority:
-        edited["priority"] = priority
-    else:
-        st.caption(
-            "Without a priority binding the arbitration diagnostic states "
-            "(PriorityComparableContacts, FocalPriorityComparableSum, "
-            "RunnerPriorityComparableSum) are not published."
-        )
-    if edited["customer"] == edited["interaction"]:
-        st.warning("Customer and interaction bindings must be different columns.")
-    return edited
-
-
-def _frequency_outcome_values(
-    processor_def: dict[str, Any],
-    key_prefix: str,
-) -> dict[str, Any]:
-    """Render the three outcome classifications read from the outcome column."""
-
-    st.write("### Outcome Classification")
-    value_specs = (
-        ("positive_values", "Positive Values", "processor.frequency_positive_values"),
-        ("exposure_values", "Exposure Values", "processor.frequency_exposure_values"),
-        ("candidate_values", "Candidate Values", "processor.frequency_candidate_values"),
-    )
-    columns = st.columns(len(value_specs), gap="small")
-    settings: dict[str, Any] = {}
-    for column, (name, label, help_key) in zip(columns, value_specs, strict=True):
-        configured = processor_def.get(name)
+    row = st.columns(len(FREQUENCY_COLUMN_SPECS), gap="small")
+    for column, (name, label, default, help_key) in zip(row, FREQUENCY_COLUMN_SPECS, strict=True):
         with column:
-            edited = typed_yaml_list_field(
+            value = select_or_text(
                 label,
-                configured,
-                key=f"{key_prefix}_frequency_{name}",
+                field_options,
+                str(configured.get(name, "") or "") or default,
+                key=f"{key_prefix}_frequency_column_{name}",
                 help_key=help_key,
-            )
-        if not edited:
-            st.warning(f"{label} cannot be empty.")
-        settings[name] = edited
-    st.caption(
-        "A positive outcome always counts as an exposure. Candidate values additionally keep "
-        "never-shown ranked alternatives selectable as the rank-2 action. Values are matched "
-        "exactly, so casing must follow the source."
-    )
-    return settings
+            ).strip()
+        edited[name] = value or default
+    if len(set(edited.values())) != len(edited):
+        st.warning("Customer, interaction, action, and rank bindings must be different columns.")
+    return edited
 
 
 def _frequency_window_fields(
@@ -548,7 +468,17 @@ def _frequency_window_fields(
             help=config_help.field_help("processor.frequency_max_frequency"),
         )
     )
-    column_col, granularity_col = st.columns(2, gap="small")
+    column_col, rank_col, granularity_col = st.columns(3, gap="small")
+    max_rank = int(
+        rank_col.number_input(
+            "Max Rank Bucket",
+            min_value=1,
+            value=int(processor_def.get("max_rank") or 3),
+            step=1,
+            key=f"{key_prefix}_frequency_max_rank",
+            help=config_help.field_help("processor.frequency_max_rank"),
+        )
+    )
     frequency_column = (
         column_col.text_input(
             "Number-of-impressions Column",
@@ -575,67 +505,67 @@ def _frequency_window_fields(
             st.warning("Daily window granularity requires Partition Lag Hours to be 0.")
     st.caption(
         f"`{frequency_column}` is derived by the processor and kept in Group By automatically. "
-        f"Bucket {max_frequency} is terminal: that impression and every later one share it."
+        f"Bucket {max_frequency} is terminal: that impression and every later one share it. "
+        f"`{model.FREQUENCY_SCOPE_RANK_COLUMN}` (terminal bucket {max_rank}) and "
+        f"`{model.FREQUENCY_PRIOR_POSITIVE_COLUMN}` are derived too; add them to Group By to "
+        "split the curve by rank inside the scope or by an earlier response."
     )
     return {
         "window_hours": window_hours,
         "partition_lag_hours": partition_lag_hours,
         "max_frequency": max_frequency,
         "frequency_column": frequency_column,
+        "max_rank": max_rank,
         "window_granularity": window_granularity,
     }
 
 
-def _frequency_alternative_group_by(
+def _frequency_scope_by(
     processor_def: dict[str, Any],
     field_options: list[str],
     key_prefix: str,
     *,
-    columns: dict[str, str],
+    bound_fields: set[str],
     frequency_column: str,
 ) -> list[str]:
-    """Render the candidate-matching dimensions for frequency response."""
+    """Render the fields inside which impressions are counted and actions ranked."""
 
-    st.write("### Selected Action Comparison")
-    customer_column = columns.get("customer") or "CustomerID"
-    interaction_column = columns.get("interaction") or "InteractionID"
-    placement_column = columns.get("placement") or "Placement"
-    configured = builder.string_list(processor_def.get("alternative_group_by"))
+    st.write("### Scope")
+    configured = builder.string_list(processor_def.get("scope_by"))
     current = (
-        configured if processor_def.get("alternative_group_by") is not None else [placement_column]
+        configured
+        if processor_def.get("scope_by") is not None
+        else [field for field in FREQUENCY_DEFAULT_SCOPE if field in field_options]
     )
-    reserved = {
-        "Day",
+    excluded = {
+        *bound_fields,
         "pipeline_run_id",
         "chunk_id",
         "period",
         "created_at",
         "config_hash",
         frequency_column,
-        *model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
+        *model.FREQUENCY_RESPONSE_DERIVED_COLUMNS,
     }
-    options = builder.dedupe([*field_options, *current, placement_column])
     options = [
         field_name
-        for field_name in options
-        if field_name not in {customer_column, interaction_column}
-        and field_name not in reserved
-        and not field_name.startswith("__valuestream_")
+        for field_name in builder.dedupe([*field_options, *current])
+        if field_name not in excluded and not field_name.startswith("__valuestream_")
     ]
-    default = [field_name for field_name in current if field_name in options]
     st.caption(
-        f"{customer_column} and {interaction_column} are always included. "
-        "Select zero or more additional comparison fields."
+        "Impressions of the same action to the same customer are counted inside these "
+        "fields, and the decision's shown actions are ranked inside them. Leave it empty "
+        "to count and rank across everything."
     )
     selected = st.multiselect(
-        "Selected rank-2 action Group By",
+        "Scope By",
         options,
-        default=default,
+        default=[field_name for field_name in current if field_name in options],
         accept_new_options=True,
-        key=f"{key_prefix}_alternative_group_by",
-        help=config_help.field_help("processor.alternative_group_by"),
+        key=f"{key_prefix}_frequency_scope_by",
+        help=config_help.field_help("processor.scope_by"),
     )
-    return builder.dedupe([str(value).strip() for value in selected])
+    return builder.dedupe([str(value).strip() for value in selected if str(value).strip()])
 
 
 def _frequency_execution_fields(

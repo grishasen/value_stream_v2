@@ -25,11 +25,11 @@ views, SQL allowlist, API, MCP, Chat, SDK, or Reports.
 `frequency_response` can opt into `checkpoint.mode: persistent_sharded`. Treat
 the resulting checkpoint as sensitive source-derived data:
 
-- It contains only filtered candidate rows and fields required to repeat exact
-  bounded history: exposed rank-1 contact identity, time, classification,
-  deterministic order, chunk id, and logical shard. The complete current
-  candidate payload is temporary, but the rolling history may retain an exact
-  customer key.
+- It contains only filtered impression rows and fields required to repeat exact
+  bounded history: contact identity (customer, interaction, action, scope
+  values, rank), time, positive flag, deterministic order, chunk id, and
+  logical shard. The complete current payload is temporary, but the rolling
+  history may retain an exact customer key.
 - Customer hashing routes records to logical shards. It is not encryption,
   anonymization, or a substitute for upstream tokenization/HMAC.
 - One schema-revision-8 `rolling.duckdb` uses the stable path

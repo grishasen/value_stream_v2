@@ -79,6 +79,7 @@ nav:
           - Running reports: guides/users/running-reports.md
           - Chat with data: guides/users/chat-with-data.md
           - Querying & export: guides/users/querying-and-export.md
+          - Codex & Claude Desktop (RU): guides/users/mcp-clients.md
       - Configuration:
           - Workspaces & catalog: guides/configuration/workspaces-and-catalog.md
           - Configuration Builder: guides/configuration/builder.md

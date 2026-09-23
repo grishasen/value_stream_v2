@@ -57,26 +57,20 @@ processors:
       customer: CustomerID
       interaction: InteractionID
       action: ActionID
-      placement: Placement
       rank: Rank
-      outcome: Outcome
-      propensity: Propensity
-      priority: Priority
-    alternative_group_by: [Placement]
-    positive_values: [Clicked]
-    exposure_values: [Impression]
-    candidate_values: [Pending, Impression, Clicked]
+    outcome:
+      column: Outcome
+      positive_values: [Clicked]
+      negative_values: [Impression]
+    scope_by: [Placement]
     window_hours: 168
     partition_lag_hours: 0
     max_frequency: 7
     frequency_column: ExposureBucket
     checkpoint: {mode: persistent_sharded, shards: 4}
     states:
-      Responses: {type: count}
-      Positives: {type: count, source_column: ClickedContact}
-      ComparableResponses: {type: count, source_column: ComparableContact}
-      ComparablePositives: {type: count, source_column: ComparableClick}
-      RunnerPropensitySum: {type: value_sum, source_column: RunnerPropensity}
+      Positives: {type: count, outcome: positive}
+      Negatives: {type: count, outcome: negative}
 """,
         encoding="utf-8",
     )
@@ -84,13 +78,15 @@ processors:
         """
 catalog_version: 2
 metrics:
-  FrequencyMarginalCTR:
+  EngagementRate:
     processor: frequency_response
     kind: formula
     expression:
       op: safe_div
       num: {col: Positives}
-      den: {col: Responses}
+      den:
+        op: add
+        args: [{col: Positives}, {col: Negatives}]
 """,
         encoding="utf-8",
     )
@@ -148,16 +144,16 @@ def _seed_workspace(workspace: Path) -> None:
 def _frequency_rows(workspace: Path) -> dict[int, tuple[int, int, float]]:
     result = query_metric_result(
         workspace,
-        "FrequencyMarginalCTR",
+        "EngagementRate",
         group_by=["ExposureBucket"],
         grain="summary",
         include_state_columns=True,
     )
     return {
         int(row["ExposureBucket"]): (
-            int(row["Responses"]),
+            int(row["Positives"]) + int(row["Negatives"]),
             int(row["Positives"]),
-            float(row["FrequencyMarginalCTR"]),
+            float(row["EngagementRate"]),
         )
         for row in result.rows.iter_rows(named=True)
     }
@@ -228,7 +224,7 @@ def test_frequency_response_pipeline_replays_bounded_dependencies_and_hides_empt
 
     before = query_metric_result(
         tmp_path,
-        "FrequencyMarginalCTR",
+        "EngagementRate",
         group_by=["ExposureBucket"],
         grain="summary",
         include_state_columns=True,
@@ -267,7 +263,7 @@ def test_frequency_response_pipeline_replays_bounded_dependencies_and_hides_empt
 
     after = query_metric_result(
         tmp_path,
-        "FrequencyMarginalCTR",
+        "EngagementRate",
         group_by=["ExposureBucket"],
         grain="summary",
         include_state_columns=True,

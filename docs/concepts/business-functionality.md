@@ -68,19 +68,16 @@ processing.
 ### Frequency-response interpretation
 
 The `frequency_response` processor supports a contact-policy diagnostic from
-Interaction History without retaining contact rows. It assigns each selected
-rank-1 action contact to a fixed trailing-window number-of-impressions bucket
-for the same customer, action, and placement, then persists daily counts and
-sums by that bucket. The selected rank-1 action curve is observed
-click-through rate. The selected rank-2 action comparison curve uses the raw
-`Propensity` of exact rank 2 when present, or the smallest recorded rank above
-1 when rank 2 is absent, within the processor's explicitly configured
-customer/interaction comparison group and over exactly the contacts for which
-that propensity exists. The group can additionally require equal placement.
+Interaction History without retaining contact rows. It assigns every impression
+to a fixed trailing-window number-of-impressions bucket for the same customer
+and action inside the configured `scope_by` fields (for example channel and
+placement), then persists daily positive and negative counts by that bucket.
+The resulting engagement-rate curve shows after how many impressions an
+action's response falls far enough to stop showing it. The same counts can be
+split by the action's rank inside the scope and by whether the customer
+already responded; the latter matters because responders are re-shown more
+often, which lifts an all-customer curve.
 
-`Priority` remains useful, but for a different question: it explains the
-arbitration score gap between the selected rank-1 and selected rank-2 actions.
-It is not a probability and must not be plotted as expected CTR. Likewise,
 Interaction History cannot supply a dismiss/irritation curve or true
 viewability unless those events exist in the source. A configured Impression
 is therefore a contact proxy, and the missing concepts stay visibly missing

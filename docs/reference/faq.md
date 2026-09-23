@@ -61,7 +61,7 @@ The planner classifies the change against the existing store (concepts/domain-mo
   persistent target needs it; retention is enforced transactionally after
   commits and whenever the rolling writer opens.
 - *Incompatible* (add a group-by column that was not materialized, change a
-  filter or `frequency_response.alternative_group_by`, change
+  filter or `frequency_response.scope_by`, change
   positive/negative outcomes, change CPC/HLL `lg_k`, switch sketch type) →
   re-run from chunks.
 

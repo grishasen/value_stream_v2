@@ -55,7 +55,9 @@ _FLOAT64_VALUE_SUM_REVISION = 1
 # membership at sub-second boundaries changed and both execution paths agree.
 # Revision 4: daily current-day counters are partitioned by canonical UTC day,
 # and retained daily contact identity is deduplicated across source chunks.
-_FREQUENCY_RESPONSE_SEMANTICS_REVISION = 4
+# Revision 5: every classified impression counts, at any rank, inside the
+# configured scope; the rank-2 opportunity contract is retired.
+_FREQUENCY_RESPONSE_SEMANTICS_REVISION = 5
 # Revision 2 hashes the UTF-8 string representation of the customer key, so
 # text, integer, and dictionary-backed IDs that render identically do not
 # change sample membership solely due to those source representations.

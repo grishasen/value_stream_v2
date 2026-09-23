@@ -27,7 +27,8 @@ import polars as pl
 
 from valuestream.utils.logger import get_logger
 
-CHECKPOINT_SCHEMA_REVISION = 8
+# Revision 9: history keeps every staged impression, not only exposed rank-1 rows.
+CHECKPOINT_SCHEMA_REVISION = 9
 SHARD_HASH_REVISION = 1
 SHARD_HASH_ALGORITHM = "polars.Expr.hash"
 SHARD_HASH_SEEDS = (
@@ -78,17 +79,16 @@ class _CheckpointCompatibilityError(CheckpointValidationError):
 
 @dataclass(frozen=True, slots=True)
 class HistoryProjectionSpec:
-    """SQL-compatible narrow history projection and inclusion predicate.
+    """SQL-compatible narrow history projection.
 
-    ``min_columns`` and ``bool_or_columns`` optionally normalize the committed
-    projection to one row per remaining key tuple: listed columns aggregate
-    with ``MIN``/``BOOL_OR`` while every other column groups. Empty roles keep
-    the plain row projection.
+    Every staged row is history: the processor stages only rows a later target
+    can depend on. ``min_columns`` and ``bool_or_columns`` optionally normalize
+    the committed projection to one row per remaining key tuple: listed columns
+    aggregate with ``MIN``/``BOOL_OR`` while every other column groups. Empty
+    roles keep the plain row projection.
     """
 
     columns: tuple[str, ...]
-    rank_column: str
-    exposed_column: str
     min_columns: tuple[str, ...] = ()
     bool_or_columns: tuple[str, ...] = ()
 
@@ -104,14 +104,6 @@ class HistoryProjectionSpec:
             raise ValueError(
                 "checkpoint history columns use reserved column(s): " + ", ".join(reserved)
             )
-        for label, name in {
-            "rank_column": self.rank_column,
-            "exposed_column": self.exposed_column,
-        }.items():
-            if not isinstance(name, str) or not name:
-                raise ValueError(f"checkpoint history {label} must be a non-empty string")
-            if name not in self.columns:
-                raise ValueError(f"checkpoint history {label} {name!r} must appear in columns")
         for label, names in {
             "min_columns": self.min_columns,
             "bool_or_columns": self.bool_or_columns,
@@ -128,8 +120,6 @@ class HistoryProjectionSpec:
             raise ValueError(
                 "checkpoint history min/bool_or roles must be disjoint: " + ", ".join(overlap)
             )
-        if self.rank_column in {*self.min_columns, *self.bool_or_columns}:
-            raise ValueError("checkpoint history rank_column must stay a grouping key")
 
     @property
     def key_columns(self) -> tuple[str, ...]:
@@ -421,11 +411,6 @@ class RollingCheckpoint:
         if missing:
             raise ValueError(
                 "checkpoint current frame is missing history column(s): " + ", ".join(missing)
-            )
-        if schema[self.history_projection.exposed_column] != pl.Boolean:
-            raise TypeError(
-                f"checkpoint history exposed column {self.history_projection.exposed_column!r} "
-                "must be Boolean"
             )
         incoming_dtype = str(schema[self.customer_column])
         if not _customer_dtypes_compatible(self._effective_customer_dtype, incoming_dtype):
@@ -808,16 +793,12 @@ class RollingCheckpoint:
         customer = _quote_identifier(self.customer_column)
         chunk = _quote_identifier(CHUNK_ID_COLUMN)
         shard = _quote_identifier(SHARD_COLUMN)
-        rank = _quote_identifier(self.history_projection.rank_column)
-        exposed = _quote_identifier(self.history_projection.exposed_column)
         validation = connection.execute(
             "SELECT count(*), "
             f"coalesce(count_if(history.{customer} IS NULL), 0), "
             f"coalesce(count_if(history.{chunk} IS NULL), 0), "
             f"coalesce(count_if(history.{shard} IS NULL), 0), "
             f"coalesce(count_if(history.{shard} < 0 OR history.{shard} >= ?), 0), "
-            f"coalesce(count_if(history.{rank} IS NULL OR history.{rank} <> 1 "
-            f"OR history.{exposed} IS DISTINCT FROM TRUE), 0), "
             "coalesce(count_if(journal.chunk_id IS NULL), 0) "
             f"FROM {_quote_identifier(HISTORY_TABLE)} AS history "
             f"LEFT JOIN {_quote_identifier(JOURNAL_TABLE)} AS journal "
@@ -832,7 +813,6 @@ class RollingCheckpoint:
             null_chunks,
             null_shards,
             invalid_shards,
-            invalid_roles,
             orphan_rows,
         ) = (int(value) for value in validation)
         if not rows:
@@ -849,10 +829,6 @@ class RollingCheckpoint:
                 )
         if invalid_shards:
             raise CheckpointValidationError("rolling checkpoint history has invalid shard IDs")
-        if invalid_roles:
-            raise CheckpointValidationError(
-                "rolling checkpoint history contains non-rank-1 or unexposed rows"
-            )
         if orphan_rows:
             raise CheckpointValidationError(
                 "rolling checkpoint history contains a chunk absent from the journal"
@@ -1117,8 +1093,6 @@ def _projection_json(spec: HistoryProjectionSpec) -> str:
     return json.dumps(
         {
             "columns": list(spec.columns),
-            "rank_column": spec.rank_column,
-            "exposed_column": spec.exposed_column,
             "min_columns": list(spec.min_columns),
             "bool_or_columns": list(spec.bool_or_columns),
         },
@@ -1128,19 +1102,14 @@ def _projection_json(spec: HistoryProjectionSpec) -> str:
 
 
 def _history_insert_sql(projection: HistoryProjectionSpec) -> str:
-    """Project (and optionally normalize) staged rank-1 exposed rows into history."""
+    """Project (and optionally normalize) every staged row into history."""
 
-    filter_sql = (
-        f"WHERE {_quote_identifier(projection.rank_column)} = 1 "
-        f"AND {_quote_identifier(projection.exposed_column)} IS TRUE"
-    )
     if not projection.normalizes:
         selected = [*projection.columns, CHUNK_ID_COLUMN, SHARD_COLUMN]
         return (
             f"INSERT INTO {_quote_identifier(HISTORY_TABLE)} "
             f"SELECT {_identifier_csv(selected)} "
-            f"FROM {_quote_identifier(CURRENT_TABLE)} "
-            f"{filter_sql}"
+            f"FROM {_quote_identifier(CURRENT_TABLE)}"
         )
     expressions: list[str] = []
     for column in projection.columns:
@@ -1159,7 +1128,6 @@ def _history_insert_sql(projection: HistoryProjectionSpec) -> str:
         f"INSERT INTO {_quote_identifier(HISTORY_TABLE)} "
         f"SELECT {', '.join(expressions)} "
         f"FROM {_quote_identifier(CURRENT_TABLE)} "
-        f"{filter_sql} "
         f"GROUP BY {_identifier_csv(group_columns)}"
     )
 

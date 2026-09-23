@@ -1400,22 +1400,20 @@ processor = {
         "customer": "CustomerID",
         "interaction": "InteractionID",
         "action": "ActionID",
-        "placement": "Placement",
         "rank": "Rank",
-        "outcome": "Outcome",
-        "propensity": "Propensity",
-        "priority": "Priority",
     },
-    "positive_values": ["Clicked"],
-    "exposure_values": ["Impression", "Clicked"],
-    "candidate_values": ["Pending", "Impression", "Clicked"],
-    "alternative_group_by": ["Placement"],
+    "outcome": {
+        "column": "Outcome",
+        "positive_values": ["Clicked"],
+        "negative_values": ["Impression", "Pending"],
+    },
+    "scope_by": ["Channel", "Placement"],
     "checkpoint": {"mode": "persistent_sharded", "shards": 64, "retention_days": 9},
 }
 forms.processor_kind_fields(
     processor,
     "frequency_response",
-    field_options=["CustomerID", "InteractionID", "Placement", "Priority"],
+    field_options=["CustomerID", "InteractionID", "Outcome", "Channel", "Placement"],
     key_prefix="frequency_render",
 )
 """
@@ -1426,69 +1424,22 @@ forms.processor_kind_fields(
     assert {
         "Customer Column",
         "Rank Column",
-        "Priority Column (optional)",
+        "Outcome Column",
         "Window Granularity",
         "Checkpoint Mode",
     } <= labels
-    assert {"Positive Values", "Exposure Values", "Candidate Values"} <= {
-        item.label for item in app.text_input
-    }
-    assert {"Window Hours", "Partition Lag Hours", "Max Frequency Bucket", "Shards"} <= {
-        item.label for item in app.number_input
-    }
+    assert "Priority Column (optional)" not in labels
+    assert {"Positive Values", "Negative Values"} <= {item.label for item in app.text_input}
+    assert {
+        "Window Hours",
+        "Partition Lag Hours",
+        "Max Frequency Bucket",
+        "Max Rank Bucket",
+        "Shards",
+    } <= {item.label for item in app.number_input}
+    assert [item.label for item in app.multiselect] == ["Scope By"]
+    assert app.multiselect[0].value == ["Channel", "Placement"]
     assert [item.label for item in app.checkbox] == ["Sample customers"]
-
-
-@pytest.mark.unit
-def test_typed_yaml_list_field_preserves_exact_scalar_types_and_text(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    raw = '["A,B", " padded ", 1, true, "1", "true", false, 0]'
-    monkeypatch.setattr(forms.st, "text_input", lambda *_args, **_kwargs: raw)
-    errors: list[str] = []
-    monkeypatch.setattr(forms.st, "error", lambda message, **_kwargs: errors.append(message))
-
-    values = forms.typed_yaml_list_field(
-        "Positive Values",
-        [],
-        key="typed_values",
-        help_key="processor.frequency_positive_values",
-    )
-
-    assert errors == []
-    assert [(type(value), value) for value in values] == [
-        (str, "A,B"),
-        (str, " padded "),
-        (int, 1),
-        (bool, True),
-        (str, "1"),
-        (str, "true"),
-        (bool, False),
-        (int, 0),
-    ]
-
-
-@pytest.mark.unit
-def test_typed_yaml_list_field_rejects_csv_or_scalar_input(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        forms.st,
-        "text_input",
-        lambda *_args, **_kwargs: "Clicked, Impression",
-    )
-    errors: list[str] = []
-    monkeypatch.setattr(forms.st, "error", lambda message, **_kwargs: errors.append(message))
-
-    values = forms.typed_yaml_list_field(
-        "Exposure Values",
-        ["Clicked"],
-        key="typed_values",
-        help_key="processor.frequency_exposure_values",
-    )
-
-    assert values == []
-    assert errors == ["Exposure Values must use YAML list syntax, for example [Clicked, 1, true]."]
 
 
 @pytest.mark.unit
@@ -1502,25 +1453,24 @@ processor = {
         "customer": "CustomerID",
         "interaction": "InteractionID",
         "action": "ActionID",
-        "placement": "Placement",
         "rank": "Rank",
-        "outcome": "Outcome",
-        "propensity": "Propensity",
     },
-    "positive_values": ["Clicked"],
-    "exposure_values": ["Impression", "Clicked"],
-    "candidate_values": ["Pending", "Impression", "Clicked"],
+    "outcome": {
+        "column": "Outcome",
+        "positive_values": ["Clicked"],
+        "negative_values": ["Impression"],
+    },
     "window_hours": 9000,
     "partition_lag_hours": 9001,
     "max_frequency": 1001,
-    "alternative_group_by": ["Placement"],
+    "max_rank": 12,
+    "scope_by": ["Placement"],
 }
 forms.processor_kind_fields(
     processor,
     "frequency_response",
     field_options=[
-        "CustomerID", "InteractionID", "ActionID", "Placement",
-        "Rank", "Outcome", "Propensity",
+        "CustomerID", "InteractionID", "ActionID", "Placement", "Rank", "Outcome",
     ],
     key_prefix="frequency_large",
 )
@@ -1532,20 +1482,33 @@ forms.processor_kind_fields(
     assert values["Window Hours"] == 9000
     assert values["Partition Lag Hours"] == 9001
     assert values["Max Frequency Bucket"] == 1001
+    assert values["Max Rank Bucket"] == 12
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("priority", "expected_rows"),
-    [("Priority", 9), ("", 6)],
+    ("outcome", "derived_from"),
+    [
+        (
+            {"positive_values": ["Clicked"], "negative_values": ["Impression", "Pending"]},
+            ["impressions with Clicked", "impressions with Impression, Pending"],
+        ),
+        (
+            {},
+            ["impressions with a positive outcome", "impressions with a negative outcome"],
+        ),
+    ],
 )
-def test_canonical_frequency_state_grid_is_read_only(priority: str, expected_rows: int) -> None:
+def test_canonical_frequency_state_grid_is_read_only(
+    outcome: dict[str, list[str]],
+    derived_from: list[str],
+) -> None:
     app = AppTest.from_string(
         f"""
 from valuestream.ui import builder
 from valuestream.ui.pages import config_builder
 
-definition = {{"columns": {{"priority": {priority!r}}}}}
+definition = {{"outcome": {outcome!r}}}
 config_builder._render_canonical_state_grid(
     builder.frequency_response_state_frame(definition)
 )
@@ -1557,20 +1520,18 @@ config_builder._render_canonical_state_grid(
     assert not app.get("data_editor")
     assert not app.button
     frame = app.get("dataframe")[0].value
-    assert len(frame) == expected_rows
     assert list(frame.columns) == builder.FREQUENCY_STATE_EDITOR_COLUMNS
-    assert list(frame["State"])[:2] == ["Responses", "Positives"]
+    assert list(frame["State"]) == ["Positives", "Negatives"]
+    assert list(frame["Outcome"]) == ["positive", "negative"]
+    assert list(frame["Derived From"]) == derived_from
     assert all(explanation for explanation in frame["Explanation"])
 
 
 @pytest.mark.unit
 def test_canonical_frequency_state_frame_shows_only_the_published_subset() -> None:
-    frame = builder.frequency_response_state_frame(
-        {"columns": {"priority": "Priority"}},
-        ["Responses", "PriorityComparableContacts"],
-    )
+    frame = builder.frequency_response_state_frame({}, ["Negatives"])
 
-    assert list(frame["State"]) == ["Responses", "PriorityComparableContacts"]
+    assert list(frame["State"]) == ["Negatives"]
 
 
 class _StubColumn:
@@ -1629,28 +1590,24 @@ def _stub_frequency_widgets(
 
 
 @pytest.mark.unit
-def test_frequency_response_editor_defaults_to_placement_and_keeps_identity_implicit(
+def test_frequency_response_editor_defaults_to_channel_placement_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
     _stub_frequency_widgets(monkeypatch, captured)
 
     fields = forms.processor_kind_fields(
-        {
-            "columns": {
-                "customer": "CustomerKey",
-                "interaction": "InteractionKey",
-                "placement": "PlacementName",
-            }
-        },
+        {"columns": {"customer": "CustomerKey", "interaction": "InteractionKey"}},
         "frequency_response",
         field_options=[
             "CustomerKey",
             "InteractionKey",
-            "PlacementName",
+            "Outcome",
             "Channel",
+            "Placement",
             "Day",
             "ExposureBucket",
+            "ScopeRank",
         ],
         key_prefix="frequency",
     )
@@ -1660,50 +1617,48 @@ def test_frequency_response_editor_defaults_to_placement_and_keeps_identity_impl
             "customer": "CustomerKey",
             "interaction": "InteractionKey",
             "action": "ActionID",
-            "placement": "PlacementName",
             "rank": "Rank",
-            "outcome": "Outcome",
-            "propensity": "Propensity",
         },
-        "positive_values": [],
-        "exposure_values": [],
-        "candidate_values": [],
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": ["Clicked"],
+            "negative_values": ["Impression", "Pending"],
+        },
         "window_hours": 168,
         "partition_lag_hours": 0,
         "max_frequency": 7,
         "frequency_column": "ExposureBucket",
+        "max_rank": 3,
         "window_granularity": "exact",
-        "alternative_group_by": ["PlacementName"],
+        "scope_by": ["Channel", "Placement"],
         "checkpoint": {"mode": "source_scan", "shards": 64},
     }
-    assert captured["label"] == "Selected rank-2 action Group By"
-    assert captured["default"] == ["PlacementName"]
-    assert captured["options"] == ["PlacementName", "Channel"]
+    assert captured["label"] == "Scope By"
+    assert captured["default"] == ["Channel", "Placement"]
+    # Bindings, the outcome column, and derived dimensions are never offered.
+    assert captured["options"] == ["Channel", "Placement"]
     assert captured["accept_new_options"] is True
-    assert "alternative_group_by" in forms.PROCESSOR_KIND_MANAGED_FIELDS
+    assert {"scope_by", "max_rank", "outcome"} <= forms.PROCESSOR_KIND_MANAGED_FIELDS
 
 
 @pytest.mark.unit
-def test_frequency_response_editor_preserves_explicit_empty_alternative_group_by(
+def test_frequency_response_editor_preserves_explicit_empty_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
     _stub_frequency_widgets(monkeypatch, captured)
 
     fields = forms.processor_kind_fields(
-        {
-            "columns": {"customer": "CustomerID", "placement": "Placement"},
-            "alternative_group_by": [],
-        },
+        {"columns": {"customer": "CustomerID"}, "scope_by": []},
         "frequency_response",
-        field_options=["CustomerID", "InteractionID", "Placement"],
+        field_options=["CustomerID", "InteractionID", "Channel", "Placement"],
         key_prefix="frequency",
     )
 
     assert captured["default"] == []
-    # An empty comparison group is a decision, not an omission: the key must
-    # still be emitted so it reaches the catalog.
-    assert fields["alternative_group_by"] == []
+    # An empty scope is a decision, not an omission: the key must still be
+    # emitted so it reaches the catalog.
+    assert fields["scope_by"] == []
 
 
 @pytest.mark.unit
@@ -1716,12 +1671,8 @@ def test_frequency_response_editor_retains_multiple_and_custom_physical_fields(
 
     fields = forms.processor_kind_fields(
         {
-            "columns": {
-                "customer": "CustomerID",
-                "interaction": "InteractionID",
-                "placement": "Placement",
-            },
-            "alternative_group_by": configured,
+            "columns": {"customer": "CustomerID", "interaction": "InteractionID"},
+            "scope_by": configured,
         },
         "frequency_response",
         field_options=["CustomerID", "InteractionID", "Placement", "Channel"],
@@ -1730,7 +1681,7 @@ def test_frequency_response_editor_retains_multiple_and_custom_physical_fields(
 
     assert captured["default"] == configured
     assert captured["options"] == ["Placement", "Channel", "AudienceClass"]
-    assert fields["alternative_group_by"] == configured
+    assert fields["scope_by"] == configured
 
 
 @pytest.mark.unit
@@ -1744,21 +1695,20 @@ def test_frequency_response_editor_round_trips_every_non_state_field(
             "customer": "CustomerID",
             "interaction": "InteractionID",
             "action": "ActionID",
-            "placement": "Placement",
             "rank": "Rank",
-            "outcome": "Outcome",
-            "propensity": "Propensity",
-            "priority": "Priority",
         },
-        "positive_values": ["Clicked"],
-        "exposure_values": ["Impression", "Clicked"],
-        "candidate_values": ["Pending", "Impression", "Clicked"],
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": ["Clicked"],
+            "negative_values": ["Impression", "Pending"],
+        },
         "window_hours": 336,
         "partition_lag_hours": 24,
         "max_frequency": 9,
         "frequency_column": "ExposureBucket",
+        "max_rank": 2,
         "window_granularity": "daily",
-        "alternative_group_by": ["Placement"],
+        "scope_by": ["Channel", "Placement"],
         "checkpoint": {
             "mode": "persistent_sharded",
             "shards": 128,
@@ -1772,7 +1722,15 @@ def test_frequency_response_editor_round_trips_every_non_state_field(
     fields = forms.processor_kind_fields(
         dict(configured),
         "frequency_response",
-        field_options=["CustomerID", "InteractionID", "Placement", "Priority"],
+        field_options=[
+            "CustomerID",
+            "InteractionID",
+            "ActionID",
+            "Rank",
+            "Outcome",
+            "Channel",
+            "Placement",
+        ],
         key_prefix="frequency",
     )
 
@@ -1781,7 +1739,7 @@ def test_frequency_response_editor_round_trips_every_non_state_field(
 
 
 @pytest.mark.unit
-def test_frequency_response_editor_clears_optional_priority_and_sampling(
+def test_frequency_response_editor_clears_optional_sampling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -1790,34 +1748,33 @@ def test_frequency_response_editor_clears_optional_priority_and_sampling(
     fields = forms.processor_kind_fields(
         {
             "columns": {"customer": "CustomerID", "interaction": "InteractionID"},
-            "alternative_group_by": ["Placement"],
+            "scope_by": ["Placement"],
         },
         "frequency_response",
         field_options=["CustomerID", "InteractionID", "Placement"],
         key_prefix="frequency",
     )
 
-    # Both keys are managed, so omitting them is what removes them from YAML.
-    assert "priority" not in fields["columns"]
+    # The key is managed, so omitting it is what removes it from YAML.
     assert "customer_sample" not in fields
     assert "customer_sample" in forms.PROCESSOR_KIND_MANAGED_FIELDS
 
 
 @pytest.mark.unit
-def test_group_by_kind_transition_removes_only_the_derived_frequency_column() -> None:
+def test_group_by_kind_transition_removes_only_the_derived_frequency_columns() -> None:
     assert builder.group_by_for_kind_transition(
-        ["Channel", "ExposureBucket", "Day"],
+        ["Channel", "ExposureBucket", "ScopeRank", "PriorPositive", "Day"],
         previous_kind="frequency_response",
         kind="binary_outcome",
         configured_frequency_column="ExposureBucket",
     ) == ["Channel", "Day"]
     assert builder.group_by_for_kind_transition(
-        ["Channel", "OldBucket"],
+        ["Channel", "OldBucket", "ScopeRank"],
         previous_kind="frequency_response",
         kind="frequency_response",
         configured_frequency_column="OldBucket",
         frequency_column="NewBucket",
-    ) == ["Channel", "NewBucket"]
+    ) == ["Channel", "ScopeRank", "NewBucket"]
     assert builder.group_by_for_kind_transition(
         ["Day", "ExposureBucket", "Channel"],
         previous_kind="frequency_response",
@@ -1826,37 +1783,28 @@ def test_group_by_kind_transition_removes_only_the_derived_frequency_column() ->
 
 
 @pytest.mark.unit
-def test_frequency_state_edit_preserves_subset_and_filters_removed_priority_states() -> None:
-    available_with_priority = model.frequency_response_state_definitions(priority=True)
-    definition = {
+def test_frequency_state_edit_preserves_a_canonical_subset() -> None:
+    available = model.frequency_response_state_definitions()
+    subset = {
         "kind": "frequency_response",
-        "columns": {"priority": "Priority"},
-        "states": {
-            "Responses": available_with_priority["Responses"],
-            "PriorityComparableContacts": available_with_priority["PriorityComparableContacts"],
-        },
+        "states": {"Negatives": available["Negatives"]},
     }
+    retired = {"kind": "frequency_response", "states": {"Responses": {"type": "count"}}}
 
-    unchanged = builder.frequency_response_states_for_edit(definition, priority=True)
-    cleared = builder.frequency_response_states_for_edit(definition, priority=False)
-
-    assert list(unchanged) == ["Responses", "PriorityComparableContacts"]
-    assert cleared == {"Responses": {"type": "count"}}
+    assert builder.frequency_response_states_for_edit(subset) == {
+        "Negatives": available["Negatives"]
+    }
+    # A state outside the contract falls back to the whole contract.
+    assert builder.frequency_response_states_for_edit(retired) == available
 
 
 @pytest.mark.unit
-def test_frequency_state_edit_keeps_full_contract_full_across_priority_change() -> None:
-    without_priority = model.frequency_response_state_definitions(priority=False)
-    definition = {
-        "kind": "frequency_response",
-        "columns": {},
-        "states": without_priority,
-    }
+def test_frequency_state_edit_keeps_full_contract_full() -> None:
+    available = model.frequency_response_state_definitions()
+    definition = {"kind": "frequency_response", "states": dict(available)}
 
-    assert builder.frequency_response_states_for_edit(
-        definition,
-        priority=True,
-    ) == model.frequency_response_state_definitions(priority=True)
+    assert builder.frequency_response_states_for_edit(definition) == available
+    assert builder.frequency_response_states_for_edit(None) == available
 
 
 @pytest.mark.unit
@@ -1879,15 +1827,16 @@ def test_default_authored_states_do_not_reuse_frequency_contract() -> None:
     ]
     assert [row["State"] for row in rows] == ["Count", "Positives", "Negatives"]
     assert binary["Positives"] == {"type": "count", "outcome": "positive"}
-    assert "Responses" not in binary
-    assert "ComparableResponses" not in binary
+    assert builder.default_processor_state_definitions("frequency_response") == (
+        model.frequency_response_state_definitions()
+    )
 
 
 @pytest.mark.unit
-def test_processor_field_remap_updates_frequency_alternative_group_by() -> None:
+def test_processor_field_remap_updates_frequency_scope_by() -> None:
     processor = {
         "id": "frequency_response",
-        "alternative_group_by": ["Placement", "AudienceClass"],
+        "scope_by": ["Placement", "AudienceClass"],
     }
 
     remapped = config_builder._remap_processor_def_fields(
@@ -1898,14 +1847,8 @@ def test_processor_field_remap_updates_frequency_alternative_group_by() -> None:
         },
     )
 
-    assert remapped["alternative_group_by"] == [
-        "Placement",
-        "Audienceclass",
-    ]
-    assert processor["alternative_group_by"] == [
-        "Placement",
-        "AudienceClass",
-    ]
+    assert remapped["scope_by"] == ["Placement", "Audienceclass"]
+    assert processor["scope_by"] == ["Placement", "AudienceClass"]
 
 
 @pytest.mark.unit
@@ -3015,18 +2958,17 @@ def test_chart_field_options_use_display_labels_without_renaming_stored_values()
                     "customer": "CustomerID",
                     "interaction": "InteractionID",
                     "action": "ActionID",
-                    "placement": "Placement",
                     "rank": "Rank",
-                    "outcome": "Outcome",
-                    "propensity": "Propensity",
                 },
-                "alternative_group_by": ["Placement"],
-                "positive_values": ["Clicked"],
-                "exposure_values": ["Impression", "Clicked"],
-                "candidate_values": ["Pending", "Impression", "Clicked"],
+                "outcome": {
+                    "column": "Outcome",
+                    "positive_values": ["Clicked"],
+                    "negative_values": ["Impression", "Pending"],
+                },
+                "scope_by": ["Placement"],
                 "frequency_column": "ExposureBucket",
                 "group_by": ["ExposureBucket"],
-                "states": {"Responses": {"type": "count"}},
+                "states": {"Positives": {"type": "count", "outcome": "positive"}},
             }
         )
     )
@@ -3034,7 +2976,7 @@ def test_chart_field_options_use_display_labels_without_renaming_stored_values()
         {
             "processor": "frequency_response",
             "kind": "formula",
-            "expression": {"col": "Responses"},
+            "expression": {"col": "Positives"},
             "display": {"label": "Comparable selected rank-1 action CTR"},
         }
     )

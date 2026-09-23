@@ -39,7 +39,7 @@ def test_builtin_recipe_library_is_versioned_and_unique() -> None:
     Draft202012Validator(generate_schema()).validate(payload)
 
     assert library.schema_version == 1
-    assert len(library.recipes) == 41
+    assert len(library.recipes) == 36
     assert len({recipe.id for recipe in library.recipes}) == len(library.recipes)
     assert {recipe.domain for recipe in library.recipes} >= {
         "Audience",
@@ -54,169 +54,56 @@ def test_builtin_recipe_library_is_versioned_and_unique() -> None:
 
 
 @pytest.mark.unit
-def test_contact_policy_recipes_require_exact_frequency_response_states() -> None:
+def test_contact_policy_recipe_binds_exact_frequency_response_states() -> None:
     processor = _frequency_response_processor()
-    expected = {
-        "contact_policy.frequency_marginal_ctr": (
-            {"clicks": "Positives", "contacts": "Responses"},
-            {
-                "op": "safe_div",
-                "num": {"col": "Positives"},
-                "den": {"col": "Responses"},
-            },
-        ),
-        "contact_policy.frequency_comparable_ctr": (
-            {
-                "comparable_clicks": "ComparablePositives",
-                "comparable_contacts": "ComparableResponses",
-            },
-            {
-                "op": "safe_div",
-                "num": {"col": "ComparablePositives"},
-                "den": {"col": "ComparableResponses"},
-            },
-        ),
-        "contact_policy.runner_up_expected_ctr": (
-            {
-                "runner_propensity_sum": "RunnerPropensitySum",
-                "comparable_contacts": "ComparableResponses",
-            },
-            {
-                "op": "safe_div",
-                "num": {"col": "RunnerPropensitySum"},
-                "den": {"col": "ComparableResponses"},
-            },
-        ),
-        "contact_policy.runner_up_coverage": (
-            {
-                "comparable_contacts": "ComparableResponses",
-                "contacts": "Responses",
-            },
-            {
-                "op": "safe_div",
-                "num": {"col": "ComparableResponses"},
-                "den": {"col": "Responses"},
-            },
-        ),
-        "contact_policy.response_opportunity_margin": (
-            {
-                "comparable_clicks": "ComparablePositives",
-                "runner_propensity_sum": "RunnerPropensitySum",
-                "comparable_contacts": "ComparableResponses",
-            },
-            {
-                "op": "safe_div",
-                "num": {
-                    "op": "sub",
-                    "args": [
-                        {"col": "ComparablePositives"},
-                        {"col": "RunnerPropensitySum"},
-                    ],
-                },
-                "den": {"col": "ComparableResponses"},
-            },
-        ),
-        "contact_policy.priority_opportunity_gap": (
-            {
-                "focal_priority_comparable_sum": "FocalPriorityComparableSum",
-                "runner_priority_comparable_sum": "RunnerPriorityComparableSum",
-                "priority_comparable_contacts": "PriorityComparableContacts",
-            },
-            {
-                "op": "safe_div",
-                "num": {
-                    "op": "sub",
-                    "args": [
-                        {"col": "FocalPriorityComparableSum"},
-                        {"col": "RunnerPriorityComparableSum"},
-                    ],
-                },
-                "den": {"col": "PriorityComparableContacts"},
-            },
-        ),
+    recipe = _recipe("contact_policy.engagement_rate_by_impressions")
+    readiness = recipe_readiness(recipe, processor)
+
+    assert recipe.title == "Engagement rate by number of impressions"
+    assert recipe.domain == "Contact policy"
+    assert recipe.maturity == "reviewed"
+    assert recipe.processor_kinds == ("frequency_response",)
+    assert recipe.metric.kind == "formula"
+    assert readiness.status == "ready"
+    assert readiness.resolved_inputs == {"positives": "Positives", "negatives": "Negatives"}
+    assert {item.role: item.preferred_names for item in recipe.inputs} == {
+        "positives": ("Positives",),
+        "negatives": ("Negatives",),
     }
+    assert all(item.require_preferred for item in recipe.inputs)
+    assert all(item.selection == "automatic" for item in recipe.inputs)
+    assert all(not item.state_template and not item.proposed_name for item in recipe.inputs)
 
-    for recipe_id, (bindings, expression) in expected.items():
-        recipe = _recipe(recipe_id)
-        readiness = recipe_readiness(recipe, processor)
-
-        assert recipe.maturity == "reviewed"
-        assert recipe.processor_kinds == ("frequency_response",)
-        assert recipe.metric.kind == "formula"
-        assert readiness.status == "ready"
-        assert readiness.resolved_inputs == bindings
-        assert {item.role: item.preferred_names for item in recipe.inputs} == {
-            role: (state,) for role, state in bindings.items()
-        }
-        assert all(item.require_preferred for item in recipe.inputs)
-        assert all(item.selection == "automatic" for item in recipe.inputs)
-        assert all(not item.state_template and not item.proposed_name for item in recipe.inputs)
-
-        metric = instantiate_metric(
-            recipe,
-            processor,
-            recipe.default_metric_id,
-            readiness.resolved_inputs,
-        )
-        assert metric["expression"] == expression
-        assert metric["display"]["label"] == recipe.metric.display.label
-        caveat = recipe.method.caveat.casefold()
-        assert "fixed-window number-of-impressions approximation" in caveat
-        assert "exposurebucket" in caveat
-        assert "configured impression proxies" in caveat
-        assert "not measured viewability" in caveat
-        assert "no dismiss telemetry" in caveat
-        assert "rank 2" in caveat
-        assert "next recorded rank" in caveat
-        assert "raw propensity" in caveat
-        assert "response probability" in caveat
-        assert "arbitration diagnostic" in caveat
-        assert "never ctr" in caveat
-
-    priority = _recipe("contact_policy.priority_opportunity_gap")
-    assert priority.metric.display.unit == "index"
-    assert priority.metric.display.value_format == "number"
-    assert priority.metric.display.direction == "neutral"
-    assert all(
-        _recipe(recipe_id).metric.display.unit == "percent"
-        for recipe_id in set(expected) - {priority.id}
+    metric = instantiate_metric(
+        recipe,
+        processor,
+        recipe.default_metric_id,
+        readiness.resolved_inputs,
     )
-
-    presentation = {
-        "contact_policy.frequency_marginal_ctr": (
-            "Selected rank-1 action CTR by number of impressions",
-            "Selected rank-1 action CTR by number of impressions",
-        ),
-        "contact_policy.frequency_comparable_ctr": (
-            "Comparable selected rank-1 action CTR",
-            "Comparable selected rank-1 action CTR",
-        ),
-        "contact_policy.runner_up_expected_ctr": (
-            "Selected rank-2 action expected CTR",
-            "Selected rank-2 action expected CTR",
-        ),
-        "contact_policy.runner_up_coverage": (
-            "Selected rank-2 action coverage",
-            "Selected rank-2 action coverage",
-        ),
-        "contact_policy.response_opportunity_margin": (
-            "Response opportunity margin",
-            "Response opportunity margin",
-        ),
-        "contact_policy.priority_opportunity_gap": (
-            "Priority opportunity gap",
-            "Priority opportunity gap",
-        ),
+    assert metric["expression"] == {
+        "op": "safe_div",
+        "num": {"col": "Positives"},
+        "den": {"op": "add", "args": [{"col": "Positives"}, {"col": "Negatives"}]},
     }
-    for recipe_id, (title, display_label) in presentation.items():
-        recipe = _recipe(recipe_id)
-        assert recipe.title == title
-        assert recipe.metric.display.label == display_label
+    assert metric["display"]["label"] == "Engagement rate"
+    assert recipe.metric.display.unit == "percent"
+    caveat = recipe.method.caveat.casefold()
+    assert "exposurebucket" in caveat
+    assert "scope_by" in caveat
+    assert "scoperank" in caveat
+    assert "priorpositive" in caveat
+    assert "report filters do not recompute it" in caveat
+    assert "not a causal estimate" in caveat
+    assert not any(
+        candidate.id.startswith("contact_policy.")
+        and candidate.id != "contact_policy.engagement_rate_by_impressions"
+        for candidate in load_builtin_kpi_recipes().recipes
+    )
 
 
 @pytest.mark.unit
-def test_contact_policy_recipes_do_not_propose_generic_replacement_states() -> None:
-    recipe = _recipe("contact_policy.frequency_marginal_ctr")
+def test_contact_policy_recipe_does_not_propose_generic_replacement_states() -> None:
+    recipe = _recipe("contact_policy.engagement_rate_by_impressions")
     processor = SimpleNamespace(
         id="frequency",
         kind="frequency_response",
@@ -225,7 +112,7 @@ def test_contact_policy_recipes_do_not_propose_generic_replacement_states() -> N
     readiness = recipe_readiness(recipe, processor)
 
     assert readiness.status == "backfill_required"
-    assert readiness.input_options == {"clicks": (), "contacts": ()}
+    assert readiness.input_options == {"positives": (), "negatives": ()}
     for item in recipe.inputs:
         assert (
             recipe_binding_options(
@@ -239,48 +126,35 @@ def test_contact_policy_recipes_do_not_propose_generic_replacement_states() -> N
 
 
 @pytest.mark.unit
-def test_priority_opportunity_gap_requires_priority_column_binding() -> None:
-    recipe = _recipe("contact_policy.priority_opportunity_gap")
+def test_contact_policy_recipe_is_ready_for_a_validated_frequency_processor() -> None:
+    recipe = _recipe("contact_policy.engagement_rate_by_impressions")
     processor = model.FrequencyResponseProcessor.model_validate(
         {
             "id": "frequency",
             "source": "interaction_history",
             "kind": "frequency_response",
-            "group_by": ["Day", "ExposureBucket"],
+            "group_by": ["Day", "ExposureBucket", "ScopeRank"],
             "time": {"property": "DecisionTime", "grain": "daily"},
             "columns": {
                 "customer": "CustomerID",
                 "interaction": "InteractionID",
                 "action": "ActionID",
-                "placement": "Placement",
                 "rank": "Rank",
-                "outcome": "Outcome",
-                "propensity": "Propensity",
             },
-            "alternative_group_by": ["Placement"],
-            "positive_values": ["Clicked"],
-            "exposure_values": ["Impression"],
-            "candidate_values": ["Pending"],
-            "states": model.frequency_response_state_definitions(priority=False),
+            "outcome": {
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression", "Pending"],
+            },
+            "scope_by": ["Channel", "Placement"],
+            "states": model.frequency_response_state_definitions(),
         }
     )
 
     readiness = recipe_readiness(recipe, processor)
 
-    assert readiness.status == "incompatible"
-    assert readiness.input_options == {}
-    assert readiness.resolved_inputs == {}
-    assert readiness.messages == (
-        "Priority opportunity gap requires frequency to configure columns.priority with "
-        "a numeric arbitration-priority source field. Configure the binding and backfill "
-        "aggregates before installing this recipe.",
-    )
-
-    marginal = recipe_readiness(
-        _recipe("contact_policy.frequency_marginal_ctr"),
-        processor,
-    )
-    assert marginal.status == "ready"
+    assert readiness.status == "ready"
+    assert processor_with_recipe_states(processor, {"Extra": {"type": "count"}}) is processor
 
 
 @pytest.mark.unit
@@ -288,7 +162,7 @@ def test_frequency_response_supports_aggregate_recipe_charts() -> None:
     for chart in ("line", "bar", "kpi_card", "combo", "table"):
         assert "frequency_response" in CHART_RECIPES[chart].allowed_processor_kinds
 
-    recipe = _recipe("contact_policy.frequency_marginal_ctr")
+    recipe = _recipe("contact_policy.engagement_rate_by_impressions")
     processor = _frequency_response_processor()
     tile = instantiate_tile(recipe, processor, recipe.default_metric_id, "frequency_curve")
     assert tile["chart"] == "line"
@@ -1178,11 +1052,10 @@ def _frequency_response_processor() -> SimpleNamespace:
     state_adapter = TypeAdapter(model.StateSpec)
     # The kind's states are canonical, so the recipes must bind against exactly
     # what the model publishes rather than a hand-copied list.
-    definitions = model.frequency_response_state_definitions(priority=True)
+    definitions = model.frequency_response_state_definitions()
     return SimpleNamespace(
         id="frequency",
         kind="frequency_response",
-        columns=SimpleNamespace(priority="Priority"),
         states={
             name: state_adapter.validate_python(definition)
             for name, definition in definitions.items()

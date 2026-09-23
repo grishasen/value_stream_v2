@@ -521,7 +521,7 @@ def _remap_processor_fields(  # noqa: PLR0912
     processor: dict[str, Any], mapping: Mapping[str, str]
 ) -> dict[str, Any]:
     updated = copy.deepcopy(processor)
-    for key in ("group_by", "dedup_keys", "properties", "alternative_group_by"):
+    for key in ("group_by", "dedup_keys", "properties", "scope_by"):
         if key in updated:
             updated[key] = _remap_field_sequence(updated[key], mapping)
     for key in (
@@ -2023,7 +2023,7 @@ def _processor_raw_field_references(  # noqa: PLR0912
     if str(processor.get("kind") or "") == "frequency_response":
         produced_group_fields.update(
             {
-                "Day",
+                *model.FREQUENCY_RESPONSE_DERIVED_COLUMNS,
                 str(processor.get("frequency_column") or "ExposureBucket"),
             }
         )
@@ -2032,7 +2032,7 @@ def _processor_raw_field_references(  # noqa: PLR0912
         for field in _string_field_values(processor.get("group_by"))
         if field not in produced_group_fields
     }
-    for key in ("dedup_keys", "properties", "alternative_group_by"):
+    for key in ("dedup_keys", "properties", "scope_by"):
         references.update(_string_field_values(processor.get(key)))
     for key in ("variant_column", "entity", "as_of_property"):
         references.update(_string_field_values(processor.get(key)))
@@ -2076,10 +2076,7 @@ def _processor_raw_field_references(  # noqa: PLR0912
         for spec in state_specs:
             if not isinstance(spec, dict):
                 continue
-            source_column = _string_field_values(spec.get("source_column"))
-            if str(processor.get("kind") or "") == "frequency_response":
-                source_column -= model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS
-            references.update(source_column)
+            references.update(_string_field_values(spec.get("source_column")))
             references.update(_expression_field_references(spec.get("where")))
     if typed is not None:
         references.update(_processor_state_source_fields(typed))
@@ -2093,27 +2090,21 @@ def _processor_derived_fields(
     """Return columns a processor materializes itself rather than reads.
 
     Mirrors ``config.validate._processor_source_columns``: frequency_response
-    binds its states to virtual columns it derives and groups by its own
-    exposure bucket, so none of those names belong to the approved schema. The
-    raw draft is the fallback because an otherwise invalid processor should not
+    groups by the impressions bucket, scope rank, and prior-positive flag it
+    derives, so none of those names belong to the approved schema. The raw
+    draft is the fallback because an otherwise invalid processor should not
     also collect phantom field-reference issues.
     """
 
     derived = _processor_calendar_fields(processor)
     if isinstance(typed, model.FrequencyResponseProcessor):
-        return {
-            *derived,
-            *model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
-            "Day",
-            typed.frequency_column,
-        }
+        return {*derived, *typed.derived_columns}
     if str(processor.get("kind") or "") != "frequency_response":
         return derived
     return {
         *derived,
-        *model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS,
-        "Day",
-        *_string_field_values(processor.get("frequency_column")),
+        *model.FREQUENCY_RESPONSE_DERIVED_COLUMNS,
+        *_string_field_values(processor.get("frequency_column") or "ExposureBucket"),
     }
 
 
@@ -2153,13 +2144,7 @@ def _processor_state_source_fields(processor: model.Processor) -> set[str]:
     for name, state in model.effective_processor_states(processor).items():
         source_column = getattr(state, "source_column", None)
         if source_column:
-            # Canonical frequency_response states bind virtual columns the
-            # processor derives, so they are outputs rather than source inputs.
-            if not (
-                isinstance(processor, model.FrequencyResponseProcessor)
-                and source_column in model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS
-            ):
-                references.add(str(source_column))
+            references.add(str(source_column))
             continue
         if state.type not in source_state_types:
             continue

@@ -25,6 +25,9 @@ edits without a restart.
 
 ## Starting the Servers
 
+For desktop client setup and connection checks, see
+[Connect Codex and Claude Desktop (Russian)](../guides/users/mcp-clients.md).
+
 ```sh
 uv sync --extra ai    # MCP dependency
 uv sync --extra api   # FastAPI dependency

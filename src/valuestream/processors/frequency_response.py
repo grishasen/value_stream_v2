@@ -1,8 +1,6 @@
-"""Frequency-window response processor over a marked current chunk plus lookback."""
+"""Engagement by number of impressions over a marked current chunk plus lookback."""
 
 from __future__ import annotations
-
-from typing import Any
 
 import polars as pl
 
@@ -21,25 +19,25 @@ from valuestream.processors.outcomes import compatible_values, is_in_values
 from valuestream.store.processor_state import HistoryProjectionSpec
 from valuestream.utils.timer import timed
 
-VIRTUAL_COLUMNS = model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS
-DERIVED_GROUP_COLUMNS = frozenset({"Day"})
+SCOPE_RANK_COLUMN = model.FREQUENCY_SCOPE_RANK_COLUMN
+PRIOR_POSITIVE_COLUMN = model.FREQUENCY_PRIOR_POSITIVE_COLUMN
+DERIVED_GROUP_COLUMNS = model.FREQUENCY_RESPONSE_DERIVED_COLUMNS
 
 _RANK_COLUMN = frequency_fields.RANK_COLUMN
 _ROW_ORDER_COLUMN = frequency_fields.ROW_ORDER_COLUMN
 _DECISION_DAY_COLUMN = frequency_fields.DECISION_DAY_COLUMN
 _PRIOR_EXPOSURES_COLUMN = frequency_fields.PRIOR_EXPOSURES_COLUMN
+_PRIOR_POSITIVES_COLUMN = frequency_fields.PRIOR_POSITIVES_COLUMN
 _POSITIVE_COLUMN = frequency_fields.POSITIVE_COLUMN
-_EXPOSED_COLUMN = frequency_fields.EXPOSED_COLUMN
 _SEEN_CURRENT_COLUMN = frequency_fields.SEEN_CURRENT_COLUMN
 _SEEN_HISTORY_COLUMN = frequency_fields.SEEN_HISTORY_COLUMN
 _CONTACT_ORDER_COLUMN = frequency_fields.CONTACT_ORDER_COLUMN
 _EXPOSURE_SEQUENCE_COLUMN = frequency_fields.EXPOSURE_SEQUENCE_COLUMN
+_POSITIVE_SEQUENCE_COLUMN = frequency_fields.POSITIVE_SEQUENCE_COLUMN
 _WINDOW_START_COLUMN = frequency_fields.WINDOW_START_COLUMN
 _BOUNDARY_TIME_COLUMN = frequency_fields.BOUNDARY_TIME_COLUMN
 _BOUNDARY_SEQUENCE_COLUMN = frequency_fields.BOUNDARY_SEQUENCE_COLUMN
-_RUNNER_PROPENSITY_COLUMN = frequency_fields.RUNNER_PROPENSITY_COLUMN
-_RUNNER_PRIORITY_COLUMN = frequency_fields.RUNNER_PRIORITY_COLUMN
-_RUNNER_AVAILABLE_COLUMN = frequency_fields.RUNNER_AVAILABLE_COLUMN
+_BOUNDARY_POSITIVE_COLUMN = frequency_fields.BOUNDARY_POSITIVE_COLUMN
 _CHECKPOINT_PARTITION_ORDER_COLUMN = frequency_fields.CHECKPOINT_PARTITION_ORDER_COLUMN
 _CHECKPOINT_LOCAL_ORDER_COLUMN = frequency_fields.CHECKPOINT_LOCAL_ORDER_COLUMN
 
@@ -47,47 +45,39 @@ _CHECKPOINT_LOCAL_ORDER_COLUMN = frequency_fields.CHECKPOINT_LOCAL_ORDER_COLUMN
 def required_input_columns(config: model.FrequencyResponseProcessor) -> frozenset[str]:
     """Return raw transformed-frame inputs required by ``config``.
 
-    Processor-created contact markers, the number-of-impressions bucket, and the
-    daily calendar key are intentionally excluded.
+    The number-of-impressions bucket, scope rank, prior-positive flag, and the
+    daily calendar key are derived here and therefore excluded.
     """
 
-    virtual = {*VIRTUAL_COLUMNS, config.frequency_column, *DERIVED_GROUP_COLUMNS}
+    derived = config.derived_columns
     required = {
         config.time.property,
         TARGET_CHUNK_COLUMN,
-        *config.columns.model_dump(exclude_none=True).values(),
-        *config.alternative_group_by,
-        *(column for column in config.group_by if column not in virtual),
+        *config.columns.model_dump().values(),
+        config.outcome.column,
+        *config.scope_by,
+        *(column for column in config.group_by if column not in derived),
     }
     required.update(column_references(config.filter))
-    for spec in config.states.values():
-        source_column = getattr(spec, "source_column", None)
-        if source_column and source_column not in virtual:
-            required.add(source_column)
-        required.update(column_references(getattr(spec, "where", None)) - virtual)
     return frozenset(str(column) for column in required if str(column).strip())
 
 
 def required_history_input_columns(
     config: model.FrequencyResponseProcessor,
 ) -> frozenset[str]:
-    """Return the narrow transformed history schema needed for exposure counts.
+    """Return the narrow transformed history schema a later target can depend on.
 
-    Historical alternatives, reporting dimensions, and state inputs never
-    contribute to the target contact. Raw processor-filter columns remain
-    required because that filter applies before history is reduced to exposed
-    rank-one contacts.
+    History contributes impressions, earlier positive outcomes, and the ranks of
+    a decision that straddles partitions; reporting dimensions never do. Raw
+    processor-filter columns remain required because that filter applies
+    before history is reduced to contacts.
     """
 
-    columns = config.columns
     required = {
         config.time.property,
-        columns.customer,
-        columns.interaction,
-        columns.action,
-        columns.placement,
-        columns.rank,
-        columns.outcome,
+        *config.columns.model_dump().values(),
+        config.outcome.column,
+        *config.scope_by,
         *column_references(config.filter),
     }
     return frozenset(str(column) for column in required if str(column).strip())
@@ -105,11 +95,14 @@ def validate_current_input_schema(
             f"frequency_response processor {config.id!r} requires missing input "
             f"column(s): {', '.join(missing)}"
         )
-    if config.frequency_column in schema.names():
+    colliding = sorted(
+        column for column in config.derived_columns - {"Day"} if column in schema.names()
+    )
+    if colliding:
         raise ValueError(
-            f"frequency_response processor {config.id!r} cannot derive frequency column "
-            f"{config.frequency_column!r} because it already exists in the transformed "
-            "source schema"
+            f"frequency_response processor {config.id!r} cannot derive "
+            f"{', '.join(repr(column) for column in colliding)} because the transformed "
+            "source schema already contains it"
         )
     decision_dtype = schema[config.time.property]
     if decision_dtype.base_type() != pl.Datetime:
@@ -117,29 +110,16 @@ def validate_current_input_schema(
             f"frequency_response processor {config.id!r} requires datetime decision "
             f"column {config.time.property!r}, got {decision_dtype}"
         )
-    columns = config.columns
-    rank_dtype = schema[columns.rank]
+    rank_dtype = schema[config.columns.rank]
     if not rank_dtype.is_integer():
         raise TypeError(
             f"frequency_response processor {config.id!r} requires integer rank "
-            f"column {columns.rank!r}, got {rank_dtype}"
+            f"column {config.columns.rank!r}, got {rank_dtype}"
         )
-    for role, column in (
-        ("propensity", columns.propensity),
-        ("priority", columns.priority),
-    ):
-        if column is None:
-            continue
-        dtype = schema[column]
-        if not dtype.is_numeric():
-            raise TypeError(
-                f"frequency_response processor {config.id!r} requires numeric {role} "
-                f"column {column!r}, got {dtype}"
-            )
 
 
 class FrequencyResponseProcessor:
-    """Build mergeable response/opportunity states by number of impressions."""
+    """Build mergeable engagement states by number of impressions of the same action."""
 
     def __init__(self, config: model.Processor, *, computation_hash: str | None = None) -> None:
         if not isinstance(config, model.FrequencyResponseProcessor):
@@ -162,6 +142,10 @@ class FrequencyResponseProcessor:
     @property
     def state_specs(self) -> dict[str, model.StateSpec]:
         return model.effective_processor_states(self.config)
+
+    @property
+    def _contact_keys(self) -> list[str]:
+        return [*self.config.contact_identity_columns, _RANK_COLUMN]
 
     @timed
     def chunk_aggregate(self, frame: pl.LazyFrame, ctx: ChunkContext) -> pl.DataFrame:
@@ -186,11 +170,11 @@ class FrequencyResponseProcessor:
         source_schema: pl.Schema,
         ctx: ChunkContext,
     ) -> pl.LazyFrame:
-        """Aggregate one marked chunk with day-granular exposure history.
+        """Aggregate one marked chunk with day-granular impression history.
 
         Unlike the exact path, history rows never merge with current contacts:
-        they only contribute per-day exposure counters. The current day itself
-        is still normalized and sequenced exactly.
+        they only contribute per-day impression and positive counters. The
+        current day itself is still normalized and sequenced exactly.
         """
 
         time_column = self.config.time.property
@@ -198,9 +182,7 @@ class FrequencyResponseProcessor:
         canonical = self._canonicalize_dictionary_columns(
             self._canonicalize_decision_time(prepared, source_schema[time_column])
         )
-        dated = canonical.with_columns(
-            pl.col(time_column).dt.date().alias(_DECISION_DAY_COLUMN)
-        )
+        dated = canonical.with_columns(pl.col(time_column).dt.date().alias(_DECISION_DAY_COLUMN))
         current = dated.filter(pl.col(TARGET_CHUNK_COLUMN)).drop(_DECISION_DAY_COLUMN)
         history = dated.filter(~pl.col(TARGET_CHUNK_COLUMN))
         counters = self._daily_history_counters(history)
@@ -210,10 +192,10 @@ class FrequencyResponseProcessor:
     def checkpoint_contacts_lazy(self, frame: pl.LazyFrame) -> pl.LazyFrame:
         """Prepare one current source chunk for rolling checkpoint staging.
 
-        The temporary current table retains filtered/projected candidate rows
-        because cross-partition contact normalization must see duplicates before
-        collapsing them. Its exposed rank-1 projection is committed as bounded
-        history only after the target calculation succeeds.
+        The temporary current table retains the filtered, projected impression
+        rows because cross-partition contact normalization must see duplicates
+        before collapsing them. Their normalized projection is committed as
+        bounded history only after the target calculation succeeds.
         """
 
         source_schema = frame.collect_schema()
@@ -234,13 +216,12 @@ class FrequencyResponseProcessor:
         return canonical
 
     def checkpoint_history_contacts_lazy(self, frame: pl.LazyFrame) -> pl.LazyFrame:
-        """Project staged target candidates to the exact bounded-history payload.
+        """Project staged target rows to the exact bounded-history payload.
 
-        Mirrors the SQL commit projection: exposed rank-1 rows collapse to one
-        row per contact with the earliest decision time and source order and
-        or-combined outcome flags. MIN/BOOL_OR are associative, so per-day
-        normalized rows merge across days exactly like the raw rows they
-        replace.
+        Mirrors the SQL commit projection: rows collapse to one row per contact
+        with the earliest decision time and source order and an or-combined
+        positive flag. MIN/BOOL_OR are associative, so per-day normalized rows
+        merge across days exactly like the raw rows they replace.
         """
 
         projection = self.checkpoint_history_projection()
@@ -251,9 +232,6 @@ class FrequencyResponseProcessor:
                 f"frequency_response processor {self.id!r} target checkpoint is missing "
                 f"history column(s): {', '.join(missing)}"
             )
-        filtered = frame.filter(
-            pl.col(projection.exposed_column) & (pl.col(projection.rank_column) == 1)
-        )
         aggregations: list[pl.Expr] = []
         for column in projection.columns:
             if column in projection.min_columns:
@@ -261,7 +239,7 @@ class FrequencyResponseProcessor:
             elif column in projection.bool_or_columns:
                 aggregations.append(pl.col(column).any().alias(column))
         return (
-            filtered.group_by(list(projection.key_columns), maintain_order=True)
+            frame.group_by(list(projection.key_columns), maintain_order=True)
             .agg(aggregations)
             .select(projection.columns)
         )
@@ -269,52 +247,30 @@ class FrequencyResponseProcessor:
     def checkpoint_history_projection(self) -> HistoryProjectionSpec:
         """Return the persisted normalized history contract."""
 
-        columns = self.config.columns
+        identity = self.config.contact_identity_columns
         if self.config.window_granularity == "daily":
-            # Day-granular history needs only contact identity per calendar
-            # day: the SQL plan reduces it to per-day exposure counters, and
-            # exact time-of-day, source order, and outcome flags never affect
-            # a later target.
-            daily_columns = tuple(
+            # Day-granular history needs only contact identity and response per
+            # calendar day: the SQL plan reduces it to per-day counters, and
+            # exact time-of-day, rank, and source order never affect a later
+            # target.
+            return HistoryProjectionSpec(
+                columns=tuple(dict.fromkeys([*identity, _DECISION_DAY_COLUMN, _POSITIVE_COLUMN])),
+                bool_or_columns=(_POSITIVE_COLUMN,),
+            )
+        return HistoryProjectionSpec(
+            columns=tuple(
                 dict.fromkeys(
                     [
-                        columns.customer,
-                        columns.interaction,
-                        columns.action,
-                        columns.placement,
-                        _DECISION_DAY_COLUMN,
+                        *identity,
+                        self.config.time.property,
+                        _ROW_ORDER_COLUMN,
                         _RANK_COLUMN,
-                        _EXPOSED_COLUMN,
+                        _POSITIVE_COLUMN,
                     ]
                 )
-            )
-            return HistoryProjectionSpec(
-                columns=daily_columns,
-                rank_column=_RANK_COLUMN,
-                exposed_column=_EXPOSED_COLUMN,
-                bool_or_columns=(_EXPOSED_COLUMN,),
-            )
-        history_columns = tuple(
-            dict.fromkeys(
-                [
-                    columns.customer,
-                    columns.interaction,
-                    columns.action,
-                    columns.placement,
-                    self.config.time.property,
-                    _ROW_ORDER_COLUMN,
-                    _RANK_COLUMN,
-                    _POSITIVE_COLUMN,
-                    _EXPOSED_COLUMN,
-                ]
-            )
-        )
-        return HistoryProjectionSpec(
-            columns=history_columns,
-            rank_column=_RANK_COLUMN,
-            exposed_column=_EXPOSED_COLUMN,
+            ),
             min_columns=(self.config.time.property, _ROW_ORDER_COLUMN),
-            bool_or_columns=(_POSITIVE_COLUMN, _EXPOSED_COLUMN),
+            bool_or_columns=(_POSITIVE_COLUMN,),
         )
 
     @timed
@@ -328,17 +284,13 @@ class FrequencyResponseProcessor:
 
         if self.config.window_granularity == "daily":
             return self._checkpoint_aggregate_daily_lazy(current, history, ctx)
-        columns = self.config.columns
-        prepared: list[pl.LazyFrame] = []
-        for partition_order, historical in enumerate(history):
-            prepared.append(
-                historical.filter(
-                    pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)
-                ).with_columns(
-                    pl.lit(False).alias(TARGET_CHUNK_COLUMN),
-                    pl.lit(partition_order).alias(_CHECKPOINT_PARTITION_ORDER_COLUMN),
-                )
+        prepared: list[pl.LazyFrame] = [
+            historical.with_columns(
+                pl.lit(False).alias(TARGET_CHUNK_COLUMN),
+                pl.lit(partition_order).alias(_CHECKPOINT_PARTITION_ORDER_COLUMN),
             )
+            for partition_order, historical in enumerate(history)
+        ]
         prepared.append(
             current.with_columns(
                 pl.lit(True).alias(TARGET_CHUNK_COLUMN),
@@ -356,18 +308,12 @@ class FrequencyResponseProcessor:
         checkpoint_schema = contacts.collect_schema()
         missing = sorted(
             {
-                columns.customer,
-                columns.interaction,
-                columns.action,
-                columns.placement,
-                columns.propensity,
-                *self.config.alternative_group_by,
+                *self.config.contact_identity_columns,
                 self.config.time.property,
                 TARGET_CHUNK_COLUMN,
                 _RANK_COLUMN,
                 _ROW_ORDER_COLUMN,
                 _POSITIVE_COLUMN,
-                _EXPOSED_COLUMN,
             }
             - set(checkpoint_schema.names())
         )
@@ -388,7 +334,7 @@ class FrequencyResponseProcessor:
         """Reference daily aggregation over a staged current chunk and history.
 
         ``history`` frames must carry the day-granular projection columns
-        (contact identity plus canonical decision day).
+        (contact identity, canonical decision day, and positive flag).
         """
 
         marked = current.with_columns(pl.lit(True).alias(TARGET_CHUNK_COLUMN))
@@ -398,36 +344,24 @@ class FrequencyResponseProcessor:
         contacts = self._normalize_contacts(self._canonicalize_dictionary_columns(marked))
         counters: pl.LazyFrame | None = None
         if history:
-            history_rows = pl.concat(history, how="diagonal_relaxed").filter(
-                pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)
-            )
             counters = self._daily_history_counters(
-                self._canonicalize_dictionary_columns(history_rows)
+                self._canonicalize_dictionary_columns(pl.concat(history, how="diagonal_relaxed"))
             )
         return self._aggregate_daily_contacts_lazy(contacts, counters, ctx)
 
     def _daily_history_counters(self, history: pl.LazyFrame) -> pl.LazyFrame:
-        """Reduce exposed rank-1 history rows to per-day exposure counters."""
+        """Reduce history rows to per-day impression and positive counters."""
 
-        columns = self.config.columns
-        contact_identity = [
-            columns.customer,
-            columns.interaction,
-            columns.action,
-            columns.placement,
-            _DECISION_DAY_COLUMN,
-        ]
-        counter_keys = [
-            columns.customer,
-            columns.action,
-            columns.placement,
-            _DECISION_DAY_COLUMN,
-        ]
+        contact_identity = [*self.config.contact_identity_columns, _DECISION_DAY_COLUMN]
+        counter_keys = [*self.config.exposure_key_columns, _DECISION_DAY_COLUMN]
         return (
-            history.select(contact_identity)
-            .unique()
+            history.group_by(contact_identity)
+            .agg(pl.col(_POSITIVE_COLUMN).any())
             .group_by(counter_keys)
-            .agg(pl.len().cast(pl.Int64).alias(_PRIOR_EXPOSURES_COLUMN))
+            .agg(
+                pl.len().cast(pl.Int64).alias(_PRIOR_EXPOSURES_COLUMN),
+                pl.col(_POSITIVE_COLUMN).sum().cast(pl.Int64).alias(_PRIOR_POSITIVES_COLUMN),
+            )
         )
 
     def _aggregate_daily_contacts_lazy(
@@ -438,19 +372,8 @@ class FrequencyResponseProcessor:
     ) -> pl.LazyFrame:
         """Build daily additive states from current contacts and day counters."""
 
-        exposures = self._with_daily_exposure_frequency(contacts, counters)
-        runners = self._runner_candidates(contacts)
-        focal = exposures.filter(
-            pl.col(_SEEN_CURRENT_COLUMN)
-            & ~pl.col(_SEEN_HISTORY_COLUMN)
-            & pl.col(_EXPOSED_COLUMN)
-            & (pl.col(_RANK_COLUMN) == 1)
-        ).join(
-            runners,
-            on=self.config.alternative_group_columns,
-            how="left",
-            nulls_equal=True,
-        )
+        exposures = self._with_scope_rank(self._with_daily_exposure_frequency(contacts, counters))
+        focal = exposures.filter(pl.col(_SEEN_CURRENT_COLUMN) & ~pl.col(_SEEN_HISTORY_COLUMN))
         return self.aggregate_focal_lazy(focal, ctx)
 
     def _with_daily_exposure_frequency(
@@ -458,44 +381,50 @@ class FrequencyResponseProcessor:
         contacts: pl.LazyFrame,
         counters: pl.LazyFrame | None,
     ) -> pl.LazyFrame:
-        """Bucket = prior full-day exposures plus the exact intra-day sequence."""
+        """Bucket = prior full-day impressions plus the exact intra-day sequence."""
 
         columns = self.config.columns
         time_column = self.config.time.property
-        exposure_keys = [columns.customer, columns.action, columns.placement]
+        exposure_keys = self.config.exposure_key_columns
         window_days = self.config.window_days
+        day_keys = [*exposure_keys, _DECISION_DAY_COLUMN]
         ordered = (
-            contacts.filter(pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1))
-            .with_columns(pl.col(time_column).dt.date().alias(_DECISION_DAY_COLUMN))
-            .sort(
-                [
-                    *exposure_keys,
-                    _DECISION_DAY_COLUMN,
-                    time_column,
-                    columns.interaction,
-                    _CONTACT_ORDER_COLUMN,
-                ]
+            contacts.with_columns(pl.col(time_column).dt.date().alias(_DECISION_DAY_COLUMN))
+            .sort([*day_keys, time_column, columns.interaction, _CONTACT_ORDER_COLUMN])
+            .with_columns(
+                pl.col(time_column)
+                .cum_count()
+                .over(day_keys)
+                .cast(pl.Int64)
+                .alias(_EXPOSURE_SEQUENCE_COLUMN),
+                pl.col(_POSITIVE_COLUMN)
+                .cast(pl.Int64)
+                .cum_sum()
+                .over(day_keys)
+                .alias(_POSITIVE_SEQUENCE_COLUMN),
             )
         )
-        ordered = ordered.with_columns(
-            pl.col(time_column)
-            .cum_count()
-            .over([*exposure_keys, _DECISION_DAY_COLUMN])
-            .cast(pl.Int64)
-            .alias(_EXPOSURE_SEQUENCE_COLUMN),
+        earlier_positives = pl.col(_POSITIVE_SEQUENCE_COLUMN) - pl.col(_POSITIVE_COLUMN).cast(
+            pl.Int64
         )
         sequence = pl.col(_EXPOSURE_SEQUENCE_COLUMN)
+        derived_columns = [
+            _DECISION_DAY_COLUMN,
+            _EXPOSURE_SEQUENCE_COLUMN,
+            _POSITIVE_SEQUENCE_COLUMN,
+        ]
         if counters is None:
             return ordered.with_columns(
                 sequence.clip(upper_bound=self.config.max_frequency)
                 .cast(pl.Int64)
-                .alias(self.config.frequency_column)
-            ).drop(_DECISION_DAY_COLUMN)
+                .alias(self.config.frequency_column),
+                (earlier_positives > 0).alias(PRIOR_POSITIVE_COLUMN),
+            ).drop(derived_columns)
         counter_day = "__valuestream_frequency_counter_day"
         # Date columns compare as days-since-epoch integers, mirroring the SQL
         # ``counter_day > focal_day - window AND counter_day < focal_day``.
         prior = (
-            ordered.select([*exposure_keys, _DECISION_DAY_COLUMN])
+            ordered.select(day_keys)
             .unique()
             .join(
                 counters.rename({_DECISION_DAY_COLUMN: counter_day}),
@@ -509,18 +438,24 @@ class FrequencyResponseProcessor:
                 )
                 & (pl.col(counter_day) < pl.col(_DECISION_DAY_COLUMN))
             )
-            .group_by([*exposure_keys, _DECISION_DAY_COLUMN])
-            .agg(pl.col(_PRIOR_EXPOSURES_COLUMN).sum())
+            .group_by(day_keys)
+            .agg(
+                pl.col(_PRIOR_EXPOSURES_COLUMN).sum(),
+                pl.col(_PRIOR_POSITIVES_COLUMN).sum(),
+            )
         )
         return (
-            ordered.join(prior, on=[*exposure_keys, _DECISION_DAY_COLUMN], how="left")
+            ordered.join(prior, on=day_keys, how="left")
             .with_columns(
                 (sequence + pl.col(_PRIOR_EXPOSURES_COLUMN).fill_null(0))
                 .clip(upper_bound=self.config.max_frequency)
                 .cast(pl.Int64)
-                .alias(self.config.frequency_column)
+                .alias(self.config.frequency_column),
+                ((earlier_positives + pl.col(_PRIOR_POSITIVES_COLUMN).fill_null(0)) > 0).alias(
+                    PRIOR_POSITIVE_COLUMN
+                ),
             )
-            .drop(_DECISION_DAY_COLUMN, _PRIOR_EXPOSURES_COLUMN)
+            .drop([*derived_columns, _PRIOR_EXPOSURES_COLUMN, _PRIOR_POSITIVES_COLUMN])
         )
 
     def _prepare_contacts(self, frame: pl.LazyFrame, source_schema: pl.Schema) -> pl.LazyFrame:
@@ -571,50 +506,33 @@ class FrequencyResponseProcessor:
         frame: pl.LazyFrame,
         source_schema: pl.Schema,
     ) -> pl.LazyFrame:
-        """Return the narrow classified rows persisted by a contact checkpoint."""
+        """Return the narrow classified impression rows persisted by a checkpoint."""
 
         source = frame
         if self.config.filter is not None:
             source = source.filter(translate(self.config.filter))
 
         columns = self.config.columns
-        outcome_dtype = source_schema[columns.outcome]
-        positive_values = compatible_values(self.config.positive_values, outcome_dtype)
-        exposure_values = compatible_values(self.config.exposure_values, outcome_dtype)
-        candidate_values = compatible_values(
-            _dedupe_values(
-                [
-                    *self.config.candidate_values,
-                    *self.config.exposure_values,
-                    *self.config.positive_values,
-                ]
-            ),
-            outcome_dtype,
-        )
+        outcome = self.config.outcome
+        outcome_dtype = source_schema[outcome.column]
+        positive_values = compatible_values(outcome.positive_values, outcome_dtype)
+        negative_values = compatible_values(outcome.negative_values, outcome_dtype)
         source = (
-            source.filter(is_in_values(columns.outcome, candidate_values))
+            source.filter(is_in_values(outcome.column, [*positive_values, *negative_values]))
             .with_columns(
                 pl.col(TARGET_CHUNK_COLUMN).fill_null(False).alias(TARGET_CHUNK_COLUMN),
                 pl.col(columns.rank).cast(pl.Int64).alias(_RANK_COLUMN),
-                is_in_values(columns.outcome, positive_values).alias(_POSITIVE_COLUMN),
+                is_in_values(outcome.column, positive_values).alias(_POSITIVE_COLUMN),
             )
-            .with_columns(
-                (pl.col(_POSITIVE_COLUMN) | is_in_values(columns.outcome, exposure_values)).alias(
-                    _EXPOSED_COLUMN
-                )
-            )
-            # Rows missing a contact identity or decision time can never
-            # contribute after normalization. Drop them before checkpoint
+            # Rows missing a contact identity, scope value, or decision time can
+            # never contribute after normalization. Drop them before checkpoint
             # sharding as well, so a null customer is excluded rather than
             # turning persistent mode into an input error.
             .filter(
                 pl.all_horizontal(
                     pl.col(column).is_not_null()
                     for column in (
-                        columns.customer,
-                        columns.interaction,
-                        columns.action,
-                        columns.placement,
+                        *self.config.contact_identity_columns,
                         columns.rank,
                         self.config.time.property,
                     )
@@ -635,18 +553,12 @@ class FrequencyResponseProcessor:
                     dtype=pl.UInt64,
                 )
             )
-        source = (
-            source.filter(
-                pl.col(TARGET_CHUNK_COLUMN)
-                | ((pl.col(_RANK_COLUMN) == 1) & pl.col(_EXPOSED_COLUMN))
-            )
-            .with_row_index(_ROW_ORDER_COLUMN)
-        )
+        source = source.with_row_index(_ROW_ORDER_COLUMN)
 
         projected = set(required_input_columns(self.config))
         projected.update(
             {
-                columns.outcome,
+                outcome.column,
                 columns.rank,
                 self.config.time.property,
                 TARGET_CHUNK_COLUMN,
@@ -657,7 +569,6 @@ class FrequencyResponseProcessor:
             _ROW_ORDER_COLUMN,
             _RANK_COLUMN,
             _POSITIVE_COLUMN,
-            _EXPOSED_COLUMN,
         )
 
     def _aggregate_contacts_lazy(
@@ -667,20 +578,8 @@ class FrequencyResponseProcessor:
     ) -> pl.LazyFrame:
         """Build daily additive states from normalized current/history contacts."""
 
-        exposures = self._with_exposure_frequency(contacts)
-        runners = self._runner_candidates(contacts)
-
-        focal = exposures.filter(
-            pl.col(_SEEN_CURRENT_COLUMN)
-            & ~pl.col(_SEEN_HISTORY_COLUMN)
-            & pl.col(_EXPOSED_COLUMN)
-            & (pl.col(_RANK_COLUMN) == 1)
-        ).join(
-            runners,
-            on=self.config.alternative_group_columns,
-            how="left",
-            nulls_equal=True,
-        )
+        exposures = self._with_scope_rank(self._with_exposure_frequency(contacts))
+        focal = exposures.filter(pl.col(_SEEN_CURRENT_COLUMN) & ~pl.col(_SEEN_HISTORY_COLUMN))
         return self.aggregate_focal_lazy(focal, ctx)
 
     def aggregate_focal_lazy(
@@ -688,7 +587,7 @@ class FrequencyResponseProcessor:
         focal: pl.LazyFrame,
         ctx: ChunkContext,
     ) -> pl.LazyFrame:
-        """Aggregate already-normalized focal contacts into daily additive states."""
+        """Aggregate already-enriched focal contacts into daily additive states."""
 
         focal_schema = focal.collect_schema()
         time_column = self.config.time.property
@@ -697,7 +596,6 @@ class FrequencyResponseProcessor:
                 f"frequency_response processor {self.id!r} focal rows are missing "
                 f"decision-time column {time_column!r}"
             )
-        focal = self._with_virtual_columns(focal)
         focal = focal.with_columns(self._decision_day_expr(focal_schema[time_column]).alias("Day"))
 
         group_keys = list(dict.fromkeys([*self.group_by_columns, "Day"]))
@@ -708,7 +606,7 @@ class FrequencyResponseProcessor:
                 f"frequency_response processor {self.id!r} cannot derive group-by "
                 f"column(s): {', '.join(missing_groups)}"
             )
-        grouped = focal.group_by(group_keys).agg(self._agg_exprs(enriched_columns))
+        grouped = focal.group_by(group_keys).agg(self._agg_exprs())
         return p3.with_provenance(
             grouped,
             self.config_hash,
@@ -744,7 +642,7 @@ class FrequencyResponseProcessor:
 
     @timed
     def merge(self, frame: pl.DataFrame, group_columns: list[str] | None = None) -> pl.DataFrame:
-        """Merge count/value-sum partials with the generic state algebra."""
+        """Merge count partials with the generic state algebra."""
 
         if frame.is_empty():
             return frame
@@ -775,15 +673,10 @@ class FrequencyResponseProcessor:
         return timestamp.dt.convert_time_zone(self.config.time.calendar.timezone).dt.date()
 
     def _normalize_contacts(self, source: pl.LazyFrame) -> pl.LazyFrame:
-        columns = self.config.columns
+        """Collapse repeated outcome rows to one contact; a positive outcome wins."""
+
         time_column = self.config.time.property
-        contact_keys = [
-            columns.customer,
-            columns.interaction,
-            columns.action,
-            columns.placement,
-            _RANK_COLUMN,
-        ]
+        contact_keys = self._contact_keys
         source = source.filter(
             pl.all_horizontal(pl.col(key).is_not_null() for key in contact_keys),
             pl.col(time_column).is_not_null(),
@@ -791,62 +684,61 @@ class FrequencyResponseProcessor:
         sort_columns = [
             *contact_keys,
             _POSITIVE_COLUMN,
-            _EXPOSED_COLUMN,
             TARGET_CHUNK_COLUMN,
             time_column,
             _ROW_ORDER_COLUMN,
         ]
         source = source.sort(
             sort_columns,
-            descending=[False] * len(contact_keys) + [True, True, True, False, False],
+            descending=[False] * len(contact_keys) + [True, True, False, False],
         )
-        source_columns = source.collect_schema().names()
         passthrough = [
             name
-            for name in source_columns
+            for name in source.collect_schema().names()
             if name
             not in {
                 *contact_keys,
                 TARGET_CHUNK_COLUMN,
                 _ROW_ORDER_COLUMN,
                 _POSITIVE_COLUMN,
-                _EXPOSED_COLUMN,
                 time_column,
-                columns.propensity,
-                *(set() if columns.priority is None else {columns.priority}),
             }
         ]
-        aggregations: list[pl.Expr] = [
+        return source.group_by(contact_keys, maintain_order=True).agg(
             pl.col(time_column).min().alias(time_column),
-            pl.col(columns.propensity).drop_nulls().first().alias(columns.propensity),
             pl.col(_POSITIVE_COLUMN).max().alias(_POSITIVE_COLUMN),
-            pl.col(_EXPOSED_COLUMN).max().alias(_EXPOSED_COLUMN),
             pl.col(TARGET_CHUNK_COLUMN).any().alias(_SEEN_CURRENT_COLUMN),
             (~pl.col(TARGET_CHUNK_COLUMN)).any().alias(_SEEN_HISTORY_COLUMN),
             pl.col(_ROW_ORDER_COLUMN).min().alias(_CONTACT_ORDER_COLUMN),
             *(pl.col(name).first().alias(name) for name in passthrough),
-        ]
-        if columns.priority is not None:
-            aggregations.append(
-                pl.col(columns.priority).drop_nulls().first().alias(columns.priority)
-            )
-        return source.group_by(contact_keys, maintain_order=True).agg(aggregations)
+        )
 
     def _with_exposure_frequency(self, contacts: pl.LazyFrame) -> pl.LazyFrame:
+        """Number of impressions and earlier positives in ``(t - window, t]``.
+
+        Both come from the same running sequence of the action's impressions to
+        the customer inside the scope, minus the running totals at the last
+        impression on or before the window start.
+        """
+
         columns = self.config.columns
         time_column = self.config.time.property
         time_dtype = contacts.collect_schema()[time_column]
         time_unit = time_dtype.time_unit if isinstance(time_dtype, pl.Datetime) else None
-        exposure_keys = [columns.customer, columns.action, columns.placement]
-        ordered = contacts.filter(pl.col(_EXPOSED_COLUMN) & (pl.col(_RANK_COLUMN) == 1)).sort(
+        exposure_keys = self.config.exposure_key_columns
+        ordered = contacts.sort(
             [*exposure_keys, time_column, columns.interaction, _CONTACT_ORDER_COLUMN]
-        )
-        ordered = ordered.with_columns(
+        ).with_columns(
             pl.col(time_column)
             .cum_count()
             .over(exposure_keys)
             .cast(pl.Int64)
-            .alias(_EXPOSURE_SEQUENCE_COLUMN)
+            .alias(_EXPOSURE_SEQUENCE_COLUMN),
+            pl.col(_POSITIVE_COLUMN)
+            .cast(pl.Int64)
+            .cum_sum()
+            .over(exposure_keys)
+            .alias(_POSITIVE_SEQUENCE_COLUMN),
         )
         left = ordered.with_columns(
             (
@@ -858,7 +750,13 @@ class FrequencyResponseProcessor:
             *exposure_keys,
             pl.col(time_column).alias(_BOUNDARY_TIME_COLUMN),
             pl.col(_EXPOSURE_SEQUENCE_COLUMN).alias(_BOUNDARY_SEQUENCE_COLUMN),
+            pl.col(_POSITIVE_SEQUENCE_COLUMN).alias(_BOUNDARY_POSITIVE_COLUMN),
         ).sort([*exposure_keys, _BOUNDARY_TIME_COLUMN, _BOUNDARY_SEQUENCE_COLUMN])
+        earlier_positives = (
+            pl.col(_POSITIVE_SEQUENCE_COLUMN)
+            - pl.col(_POSITIVE_COLUMN).cast(pl.Int64)
+            - pl.col(_BOUNDARY_POSITIVE_COLUMN).fill_null(0)
+        )
         return (
             left.join_asof(
                 right,
@@ -873,145 +771,52 @@ class FrequencyResponseProcessor:
                 (pl.col(_EXPOSURE_SEQUENCE_COLUMN) - pl.col(_BOUNDARY_SEQUENCE_COLUMN).fill_null(0))
                 .clip(upper_bound=self.config.max_frequency)
                 .cast(pl.Int64)
-                .alias(self.config.frequency_column)
+                .alias(self.config.frequency_column),
+                (earlier_positives > 0).alias(PRIOR_POSITIVE_COLUMN),
             )
             .drop(
                 _WINDOW_START_COLUMN,
                 _BOUNDARY_TIME_COLUMN,
                 _BOUNDARY_SEQUENCE_COLUMN,
+                _BOUNDARY_POSITIVE_COLUMN,
+                _EXPOSURE_SEQUENCE_COLUMN,
+                _POSITIVE_SEQUENCE_COLUMN,
             )
         )
 
-    def _runner_candidates(self, contacts: pl.LazyFrame) -> pl.LazyFrame:
-        columns = self.config.columns
-        runner_keys = self.config.alternative_group_columns
-        sort_columns = list(
-            dict.fromkeys(
-                [
-                    *runner_keys,
-                    "__valuestream_runner_rank_class",
-                    _RANK_COLUMN,
-                    columns.action,
-                    columns.placement,
-                    self.config.time.property,
-                    _CONTACT_ORDER_COLUMN,
-                ]
-            )
-        )
-        runner = (
-            contacts.filter(pl.col(_SEEN_CURRENT_COLUMN) & (pl.col(_RANK_COLUMN) > 1))
-            .with_columns(
-                pl.when(pl.col(_RANK_COLUMN) == 2)
-                .then(0)
-                .otherwise(1)
-                .alias("__valuestream_runner_rank_class")
-            )
-            .sort(sort_columns)
-            .group_by(runner_keys, maintain_order=True)
-            .agg(
-                pl.col(columns.propensity)
-                .first()
-                .cast(pl.Float64)
-                .alias(_RUNNER_PROPENSITY_COLUMN),
-                pl.lit(True).alias(_RUNNER_AVAILABLE_COLUMN),
-                *(
-                    [
-                        pl.col(columns.priority)
-                        .first()
-                        .cast(pl.Float64)
-                        .alias(_RUNNER_PRIORITY_COLUMN)
-                    ]
-                    if columns.priority is not None
-                    else []
-                ),
-            )
-        )
-        if columns.priority is None:
-            runner = runner.with_columns(
-                pl.lit(None, dtype=pl.Float64).alias(_RUNNER_PRIORITY_COLUMN)
-            )
-        return runner
+    def _with_scope_rank(self, contacts: pl.LazyFrame) -> pl.LazyFrame:
+        """Rank each shown action among the decision's actions inside its scope."""
 
-    def _with_virtual_columns(self, focal: pl.LazyFrame) -> pl.LazyFrame:
-        columns = self.config.columns
-        contact = pl.struct(
-            columns.customer,
-            columns.interaction,
-            columns.action,
-            columns.placement,
-            _RANK_COLUMN,
-        )
-        runner_available = pl.col(_RUNNER_AVAILABLE_COLUMN).fill_null(False)
-        comparable = runner_available & pl.col(_RUNNER_PROPENSITY_COLUMN).is_not_null()
-        focal_priority = (
-            pl.col(columns.priority).cast(pl.Float64)
-            if columns.priority is not None
-            else pl.lit(None, dtype=pl.Float64)
-        )
-        priority_comparable = (
-            runner_available
-            & focal_priority.is_not_null()
-            & pl.col(_RUNNER_PRIORITY_COLUMN).is_not_null()
-        )
-        return focal.with_columns(
-            pl.when(pl.col(_POSITIVE_COLUMN)).then(contact).otherwise(None).alias("ClickedContact"),
-            pl.when(comparable).then(contact).otherwise(None).alias("ComparableContact"),
-            pl.when(comparable & pl.col(_POSITIVE_COLUMN))
-            .then(contact)
-            .otherwise(None)
-            .alias("ComparableClick"),
-            pl.when(runner_available).then(contact).otherwise(None).alias("RunnerAvailable"),
-            pl.col(_RUNNER_PROPENSITY_COLUMN).alias("RunnerPropensity"),
-            pl.when(priority_comparable)
-            .then(contact)
-            .otherwise(None)
-            .alias("PriorityComparableContact"),
-            pl.when(priority_comparable)
-            .then(focal_priority)
-            .otherwise(None)
-            .alias("FocalPriorityComparable"),
-            pl.when(priority_comparable)
-            .then(pl.col(_RUNNER_PRIORITY_COLUMN))
-            .otherwise(None)
-            .alias("RunnerPriorityComparable"),
+        return contacts.with_columns(
+            pl.col(_RANK_COLUMN)
+            .rank("dense")
+            .over(self.config.rank_partition_columns)
+            .cast(pl.Int64)
+            .clip(upper_bound=self.config.max_rank)
+            .alias(SCOPE_RANK_COLUMN)
         )
 
-    def _agg_exprs(self, existing: set[str]) -> list[pl.Expr]:
+    def _agg_exprs(self) -> list[pl.Expr]:
+        positive = pl.col(_POSITIVE_COLUMN)
         expressions: list[pl.Expr] = []
         for name, spec in self.state_specs.items():
-            raw_extra = p3.spec_extra(spec)
-            source_column = getattr(spec, "source_column", None)
-            if source_column and source_column not in existing:
+            selector = getattr(spec, "outcome", None)
+            if spec.type != "count" or selector not in {"positive", "negative"}:
+                # The model rejects this; retained for defensive runtime errors.
                 raise ValueError(
-                    f"frequency_response processor {self.id!r} state {name!r} "
-                    f"requires missing enriched column {source_column!r}"
+                    f"frequency_response processor {self.id!r} cannot build state {name!r}"
                 )
-            if spec.type == "count":
-                expressions.append(p3.count_expr(raw_extra, alias=name))
-            elif spec.type == "value_sum":
-                assert source_column is not None
-                expressions.append(p3.value_sum_expr(source_column, raw_extra, alias=name))
-            else:  # Pydantic guards this, retained for defensive runtime errors.
-                raise ValueError(
-                    f"frequency_response processor {self.id!r} cannot build state type "
-                    f"{spec.type!r}"
-                )
+            counted = positive if selector == "positive" else ~positive
+            expressions.append(counted.sum().cast(pl.Int64).alias(name))
         return expressions
-
-
-def _dedupe_values(values: list[Any]) -> list[Any]:
-    out: list[Any] = []
-    for value in values:
-        if value not in out:
-            out.append(value)
-    return out
 
 
 __all__ = [
     "DERIVED_GROUP_COLUMNS",
+    "PRIOR_POSITIVE_COLUMN",
     "PROVENANCE_COLUMNS",
+    "SCOPE_RANK_COLUMN",
     "TARGET_CHUNK_COLUMN",
-    "VIRTUAL_COLUMNS",
     "ChunkContext",
     "FrequencyResponseProcessor",
     "required_history_input_columns",

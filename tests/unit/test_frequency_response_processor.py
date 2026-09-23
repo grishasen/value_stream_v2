@@ -18,6 +18,11 @@ from valuestream.processors.frequency_response import (
     required_input_columns,
 )
 
+_STATES = {
+    "Positives": {"type": "count", "outcome": "positive"},
+    "Negatives": {"type": "count", "outcome": "negative"},
+}
+
 
 def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
     payload: dict[str, Any] = {
@@ -30,48 +35,15 @@ def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
             "customer": "CustomerID",
             "interaction": "InteractionID",
             "action": "ActionID",
-            "placement": "Placement",
             "rank": "Rank",
-            "outcome": "Outcome",
-            "propensity": "Propensity",
-            "priority": "Priority",
         },
-        "alternative_group_by": ["Placement"],
-        "positive_values": ["Clicked"],
-        "exposure_values": ["Impression"],
-        "candidate_values": ["Pending"],
-        "states": {
-            "Responses": {"type": "count"},
-            "Positives": {"type": "count", "source_column": "ClickedContact"},
-            "ComparableResponses": {
-                "type": "count",
-                "source_column": "ComparableContact",
-            },
-            "ComparablePositives": {
-                "type": "count",
-                "source_column": "ComparableClick",
-            },
-            "RunnerAvailable": {
-                "type": "count",
-                "source_column": "RunnerAvailable",
-            },
-            "RunnerPropensitySum": {
-                "type": "value_sum",
-                "source_column": "RunnerPropensity",
-            },
-            "PriorityComparableContacts": {
-                "type": "count",
-                "source_column": "PriorityComparableContact",
-            },
-            "FocalPriorityComparableSum": {
-                "type": "value_sum",
-                "source_column": "FocalPriorityComparable",
-            },
-            "RunnerPriorityComparableSum": {
-                "type": "value_sum",
-                "source_column": "RunnerPriorityComparable",
-            },
+        "outcome": {
+            "column": "Outcome",
+            "positive_values": ["Clicked"],
+            "negative_values": ["Impression", "Pending"],
         },
+        "scope_by": ["Placement"],
+        "states": dict(_STATES),
     }
     payload.update(overrides)
     return model.FrequencyResponseProcessor.model_validate(payload)
@@ -93,22 +65,18 @@ def _row(
     target: bool,
     action: str = "A",
     placement: str = "Hero",
+    channel: str = "Web",
     rank: int = 1,
     outcome: str = "Impression",
-    propensity: float | None = 0.5,
-    priority: float | None = 1.0,
-    comparison_group: str | None = "default",
 ) -> dict[str, Any]:
     return {
         "CustomerID": customer,
         "InteractionID": interaction,
         "ActionID": action,
         "Placement": placement,
+        "Channel": channel,
         "Rank": rank,
         "Outcome": outcome,
-        "Propensity": propensity,
-        "Priority": priority,
-        "ComparisonGroup": comparison_group,
         "DecisionTime": decision_time,
         TARGET_CHUNK_COLUMN: target,
     }
@@ -117,176 +85,171 @@ def _row(
 def _aggregate(
     rows: list[dict[str, Any]], config: model.FrequencyResponseProcessor | None = None
 ) -> pl.DataFrame:
-    processor = FrequencyResponseProcessor(config or _config(), computation_hash="hash")
-    return processor.chunk_aggregate(pl.DataFrame(rows).lazy(), _ctx()).sort(
-        ["Day", "ExposureBucket"]
-    )
+    config = config or _config()
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+    keys = [column for column in config.group_by if column != "Day"]
+    return processor.chunk_aggregate(pl.DataFrame(rows).lazy(), _ctx()).sort(["Day", *keys])
 
 
 @pytest.mark.unit
-def test_model_requires_daily_bucketed_mergeable_states() -> None:
+def test_model_contract_is_daily_bucketed_and_scoped() -> None:
     config = _config()
 
     assert config.partition_lag_hours == 0
+    assert config.max_frequency == 7
+    assert config.max_rank == 3
     assert config.checkpoint.mode == "source_scan"
     assert config.checkpoint.shards == 64
     assert config.checkpoint.retention_days is None
     assert config.checkpoint_retention_days == 7
-    assert config.alternative_group_by == ["Placement"]
-    assert config.alternative_group_columns == ["CustomerID", "InteractionID", "Placement"]
-    assert set(config.positive_values).isdisjoint(config.exposure_values)
-    assert set(config.candidate_values).isdisjoint(
-        [*config.positive_values, *config.exposure_values]
-    )
+    assert config.exposure_key_columns == ["CustomerID", "ActionID", "Placement"]
+    assert config.rank_partition_columns == ["CustomerID", "InteractionID", "Placement"]
+    assert config.contact_identity_columns == [
+        "CustomerID",
+        "InteractionID",
+        "ActionID",
+        "Placement",
+    ]
+    assert config.derived_columns == {"Day", "ExposureBucket", "ScopeRank", "PriorPositive"}
+    everywhere = _config(scope_by=[])
+    assert everywhere.exposure_key_columns == ["CustomerID", "ActionID"]
+    assert everywhere.rank_partition_columns == ["CustomerID", "InteractionID"]
+    channel_placement = _config(scope_by=["Channel", "Placement"])
+    assert channel_placement.exposure_key_columns == [
+        "CustomerID",
+        "ActionID",
+        "Channel",
+        "Placement",
+    ]
+    grouped = _config(group_by=["Day", "ExposureBucket", "ScopeRank", "PriorPositive"])
+    assert grouped.group_by[-2:] == ["ScopeRank", "PriorPositive"]
+
     with pytest.raises(ValidationError, match=r"time\.grain 'daily'"):
         _config(time={"property": "DecisionTime", "grain": "hourly"})
     with pytest.raises(ValidationError, match="frequency_column must be present in group_by"):
         _config(group_by=["Day"])
-    with pytest.raises(ValidationError, match="must use count or value_sum"):
-        _config(states={"Minimum": {"type": "min", "source_column": "Propensity"}})
     with pytest.raises(ValidationError, match="reserved derived column"):
         _config(frequency_column="Day")
+    with pytest.raises(ValidationError, match="reserved derived column"):
+        _config(frequency_column="ScopeRank", group_by=["Day", "ScopeRank"])
     with pytest.raises(ValidationError, match="cannot be used in group_by"):
-        _config(group_by=["Day", "ExposureBucket", "ClickedContact"])
+        _config(group_by=["Day", "ExposureBucket", "config_hash"])
     with pytest.raises(ValidationError, match="cannot be used in group_by"):
         _config(group_by=["Day", "ExposureBucket", "__valuestream_private"])
     with pytest.raises(ValidationError, match="state names collide"):
-        _config(states={"ExposureBucket": {"type": "count"}})
+        _config(states={"ExposureBucket": {"type": "count", "outcome": "positive"}})
     with pytest.raises(ValidationError, match="partition_lag_hours"):
         _config(partition_lag_hours=-1)
+    with pytest.raises(ValidationError, match="max_rank"):
+        _config(max_rank=0)
     payload = config.model_dump(mode="python")
-    payload.pop("alternative_group_by")
-    with pytest.raises(ValidationError, match=r"(?s)alternative_group_by.*Field required"):
+    payload.pop("scope_by")
+    with pytest.raises(ValidationError, match=r"(?s)scope_by.*Field required"):
         model.FrequencyResponseProcessor.model_validate(payload)
-    interaction_wide = _config(alternative_group_by=[])
-    assert interaction_wide.alternative_group_columns == ["CustomerID", "InteractionID"]
-    multi_field = _config(alternative_group_by=["Placement", "ComparisonGroup"])
-    assert multi_field.alternative_group_columns == [
-        "CustomerID",
-        "InteractionID",
-        "Placement",
-        "ComparisonGroup",
-    ]
-    with pytest.raises(ValidationError, match="columns must be unique"):
-        _config(alternative_group_by=["Placement", "Placement"])
-    for mandatory_column in ("CustomerID", "InteractionID"):
-        with pytest.raises(ValidationError, match="must not repeat mandatory"):
-            _config(alternative_group_by=[mandatory_column])
-    for invalid_column in ("", " Day", "Day", "ExposureBucket", "ClickedContact", "config_hash"):
+    with pytest.raises(ValidationError, match="scope_by columns must be unique"):
+        _config(scope_by=["Placement", "Placement"])
+    for bound_column in ("CustomerID", "InteractionID", "ActionID", "Rank", "Outcome"):
+        with pytest.raises(ValidationError, match="must not repeat the customer"):
+            _config(scope_by=[bound_column])
+    for invalid_column in ("", " Day", "Day", "ExposureBucket", "ScopeRank", "config_hash"):
         with pytest.raises(ValidationError, match="must contain raw source columns"):
-            _config(alternative_group_by=[invalid_column])
+            _config(scope_by=[invalid_column])
     duplicate_columns = config.columns.model_dump()
     duplicate_columns["interaction"] = duplicate_columns["customer"]
-    with pytest.raises(ValidationError, match="customer and interaction bindings must be distinct"):
+    with pytest.raises(ValidationError, match="bindings must be distinct"):
         _config(columns=duplicate_columns)
+    with pytest.raises(ValidationError, match="at least one positive and one negative"):
+        _config(
+            outcome={"column": "Outcome", "positive_values": ["Clicked"], "negative_values": []}
+        )
+    with pytest.raises(ValidationError, match="both positive and negative"):
+        _config(
+            outcome={
+                "column": "Outcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression", "Clicked"],
+            }
+        )
     with pytest.raises(ValidationError, match="shards"):
         _config(checkpoint={"mode": "persistent_sharded", "shards": 0})
     with pytest.raises(ValidationError, match=r"retention_days must be at least 7"):
-        _config(
-            checkpoint={
-                "mode": "persistent_sharded",
-                "shards": 8,
-                "retention_days": 6,
-            }
-        )
+        _config(checkpoint={"mode": "persistent_sharded", "shards": 8, "retention_days": 6})
     exact_minimum = _config(
-        checkpoint={
-            "mode": "persistent_sharded",
-            "shards": 8,
-            "retention_days": 7,
-        }
+        checkpoint={"mode": "persistent_sharded", "shards": 8, "retention_days": 7}
     )
     assert exact_minimum.checkpoint_retention_days == 7
     columns = config.columns.model_dump()
     columns["rank"] = "__valuestream_frequency_rank"
-    with pytest.raises(
-        ValidationError,
-        match=r"raw input bindings.*__valuestream_frequency_rank",
-    ):
+    with pytest.raises(ValidationError, match=r"raw input bindings.*__valuestream_frequency_rank"):
         _config(columns=columns)
-    with pytest.raises(ValidationError, match="cannot read internal columns"):
-        _config(
-            states={
-                "Private": {
-                    "type": "value_sum",
-                    "source_column": "__valuestream_runner_propensity",
-                }
-            }
-        )
+    with pytest.raises(ValidationError, match=r"raw input bindings.*PriorPositive"):
+        _config(outcome={**config.outcome.model_dump(), "column": "PriorPositive"})
 
 
 @pytest.mark.unit
 def test_states_are_canonical_for_the_kind() -> None:
-    priority_states = model.frequency_response_state_definitions(priority=True)
-    plain_states = model.frequency_response_state_definitions(priority=False)
+    definitions = model.frequency_response_state_definitions()
 
-    assert list(plain_states) == [
-        "Responses",
-        "Positives",
-        "ComparableResponses",
-        "ComparablePositives",
-        "RunnerAvailable",
-        "RunnerPropensitySum",
-    ]
-    assert set(priority_states) - set(plain_states) == {
-        "PriorityComparableContacts",
-        "FocalPriorityComparableSum",
-        "RunnerPriorityComparableSum",
-    }
-    assert priority_states["Responses"] == {"type": "count"}
-    assert set(_config(states=priority_states).states) == set(priority_states)
+    assert definitions == _STATES
+    assert list(model.frequency_response_states()) == ["Positives", "Negatives"]
+    assert set(_config(states=definitions).states) == {"Positives", "Negatives"}
     # A catalog may publish part of the contract without publishing all of it.
-    assert set(_config(states={"Responses": {"type": "count"}}).states) == {"Responses"}
+    assert set(_config(states={"Positives": _STATES["Positives"]}).states) == {"Positives"}
 
-    with pytest.raises(ValidationError, match=r"'Contacts' was renamed to 'Responses'"):
-        _config(states={"Contacts": {"type": "count"}})
+    with pytest.raises(ValidationError, match="retired rank-2 opportunity contract"):
+        _config(states={"Responses": {"type": "count"}})
+    with pytest.raises(ValidationError, match="retired rank-2 opportunity contract"):
+        _config(states={"RunnerPropensitySum": {"type": "value_sum", "source_column": "Rank"}})
     with pytest.raises(ValidationError, match="not part of the kind's canonical contract"):
-        _config(states={"MyOwnCounter": {"type": "count"}})
+        _config(states={"MyOwnCounter": {"type": "count", "outcome": "positive"}})
     with pytest.raises(ValidationError, match=r"'Positives' is canonical"):
-        _config(states={"Positives": {"type": "count", "source_column": "ComparableClick"}})
-    with pytest.raises(ValidationError, match=r"'RunnerPropensitySum' is canonical"):
-        _config(
-            states={
-                "RunnerPropensitySum": {"type": "count", "source_column": "RunnerPropensity"}
-            }
-        )
+        _config(states={"Positives": {"type": "count", "source_column": "ClickedContact"}})
+    with pytest.raises(ValidationError, match=r"'Negatives' is canonical"):
+        _config(states={"Negatives": {"type": "count", "outcome": "positive"}})
     with pytest.raises(ValidationError, match=r"'Positives' is canonical"):
         _config(
             states={
                 "Positives": {
                     "type": "count",
-                    "source_column": "ClickedContact",
-                    "distinct": True,
+                    "outcome": "positive",
+                    "where": {"op": "eq", "column": "Channel", "value": "Web"},
                 }
             }
         )
 
 
 @pytest.mark.unit
-def test_priority_states_require_the_priority_binding() -> None:
-    columns = {
-        "customer": "CustomerID",
-        "interaction": "InteractionID",
-        "action": "ActionID",
-        "placement": "Placement",
-        "rank": "Rank",
-        "outcome": "Outcome",
-        "propensity": "Propensity",
-    }
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"alternative_group_by": ["Placement"]}, r"alternative_group_by \(replaced by scope_by"),
+        ({"positive_values": ["Clicked"]}, r"positive_values \(replaced by outcome"),
+        ({"exposure_values": ["Impression"]}, r"exposure_values \(replaced by outcome"),
+        ({"candidate_values": ["Pending"]}, r"candidate_values \(replaced by outcome"),
+    ],
+)
+def test_retired_rank_two_settings_fail_with_a_migration_hint(
+    overrides: dict[str, Any],
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        _config(**overrides)
 
-    unbound = _config(
-        columns=columns,
-        states=model.frequency_response_state_definitions(priority=False),
-    )
-    assert unbound.columns.priority is None
 
-    # Without the binding the processor emits all-null priority columns, so
-    # these states could only ever publish zeros.
-    with pytest.raises(ValidationError, match=r"requires the optional columns\.priority"):
-        _config(
-            columns=columns,
-            states=model.frequency_response_state_definitions(priority=True),
-        )
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("binding", "message"),
+    [
+        ("placement", "list the placement field in scope_by"),
+        ("outcome", r"moved to outcome\.column"),
+        ("propensity", "no longer used"),
+        ("priority", "no longer used"),
+    ],
+)
+def test_retired_column_bindings_fail_with_a_migration_hint(binding: str, message: str) -> None:
+    columns = {**_config().columns.model_dump(), binding: "Legacy"}
+    with pytest.raises(ValidationError, match=message):
+        _config(columns=columns)
 
 
 @pytest.mark.unit
@@ -344,11 +307,8 @@ def test_checkpoint_retention_is_exact_source_day_closure(
     ("filter_expression", "derived_column"),
     [
         ({"op": "eq", "column": "ExposureBucket", "value": 1}, "ExposureBucket"),
-        ({"op": "not_null", "column": "ClickedContact"}, "ClickedContact"),
-        (
-            {"polars": 'pl.col("RunnerPropensity").is_not_null()'},
-            "RunnerPropensity",
-        ),
+        ({"op": "eq", "column": "ScopeRank", "value": 1}, "ScopeRank"),
+        ({"polars": 'pl.col("PriorPositive")'}, "PriorPositive"),
     ],
 )
 def test_processor_filter_cannot_reference_post_filter_derived_columns(
@@ -360,10 +320,10 @@ def test_processor_filter_cannot_reference_post_filter_derived_columns(
 
 
 @pytest.mark.unit
-def test_required_inputs_exclude_derived_bucket_and_virtual_state_fields() -> None:
+def test_required_inputs_exclude_derived_dimensions() -> None:
     config = _config(
-        group_by=["Day", "Channel", "ExposureBucket"],
-        alternative_group_by=["Placement", "ComparisonSegment"],
+        group_by=["Day", "Name", "ExposureBucket", "ScopeRank", "PriorPositive"],
+        scope_by=["Channel", "Placement"],
         filter={"op": "eq", "column": "Market", "value": "DE"},
     )
     required = required_input_columns(config)
@@ -372,46 +332,44 @@ def test_required_inputs_exclude_derived_bucket_and_virtual_state_fields() -> No
 
     assert {
         "DecisionTime",
+        "Name",
         "Channel",
-        "ComparisonSegment",
+        "Placement",
+        "Outcome",
+        "Rank",
         "Market",
-        "Priority",
         TARGET_CHUNK_COLUMN,
     } <= required
-    assert "Day" not in required
-    assert "ExposureBucket" not in required
-    assert not model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS.intersection(required)
-    assert {"DecisionTime", "Channel", "ComparisonSegment", "Priority"} <= (catalog_source_columns)
-    assert "ExposureBucket" not in catalog_source_columns
-    assert not model.FREQUENCY_RESPONSE_VIRTUAL_COLUMNS.intersection(catalog_source_columns)
+    assert not config.derived_columns.intersection(required)
+    assert {"DecisionTime", "Name", "Channel", "Placement", "Outcome"} <= catalog_source_columns
+    assert not config.derived_columns.intersection(catalog_source_columns)
     assert history_required == {
         "CustomerID",
         "InteractionID",
         "ActionID",
-        "Placement",
         "Rank",
         "Outcome",
+        "Channel",
+        "Placement",
         "DecisionTime",
         "Market",
     }
 
 
 @pytest.mark.unit
-def test_runtime_rejects_existing_bucket_and_non_numeric_bindings() -> None:
+def test_runtime_rejects_existing_derived_columns_and_non_integer_rank() -> None:
     when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
     valid = _row(customer="c1", interaction="i1", decision_time=when, target=True)
 
-    with pytest.raises(ValueError, match=r"ExposureBucket.*already exists"):
+    with pytest.raises(ValueError, match=r"'ExposureBucket'.*already contains"):
         _aggregate([{**valid, "ExposureBucket": 99}])
-
+    with pytest.raises(ValueError, match=r"'ScopeRank'.*already contains"):
+        _aggregate([{**valid, "ScopeRank": 1}])
     with pytest.raises(TypeError, match=r"integer rank.*Float64"):
         _aggregate([{**valid, "Rank": 1.5}])
-
-    with pytest.raises(TypeError, match=r"numeric propensity.*String"):
-        _aggregate([{**valid, "Propensity": "malformed"}])
-
-    with pytest.raises(TypeError, match=r"numeric priority.*String"):
-        _aggregate([{**valid, "Priority": "malformed"}])
+    missing = {key: value for key, value in valid.items() if key != "Placement"}
+    with pytest.raises(ValueError, match=r"requires missing input column\(s\): Placement"):
+        _aggregate([missing])
 
 
 @pytest.mark.unit
@@ -455,7 +413,187 @@ def test_strict_168_hour_boundary_is_excluded_and_frequency_is_capped_at_seven()
 
     out = _aggregate(rows)
 
-    assert out.select("ExposureBucket", "Responses").rows() == [(1, 1), (7, 1)]
+    assert out.select("ExposureBucket", "Negatives").rows() == [(1, 1), (7, 1)]
+
+
+@pytest.mark.unit
+def test_impressions_at_every_rank_count_for_the_same_action() -> None:
+    """The action's earlier impressions count wherever arbitration ranked it."""
+
+    target_time = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        _row(
+            customer="c",
+            interaction=f"earlier-{rank}",
+            decision_time=target_time - dt.timedelta(hours=rank),
+            target=False,
+            rank=rank,
+        )
+        for rank in (2, 4, 6)
+    ]
+    rows.append(
+        _row(customer="c", interaction="target", decision_time=target_time, target=True, rank=6)
+    )
+
+    out = _aggregate(rows)
+
+    assert out.select("ExposureBucket", "Positives", "Negatives").rows() == [(4, 0, 1)]
+
+
+@pytest.mark.unit
+def test_scope_by_isolates_counting_and_ranking() -> None:
+    earlier = dt.datetime(2024, 1, 8, 10, tzinfo=dt.UTC)
+    target_time = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        _row(customer="c", interaction="web", decision_time=earlier, target=False, channel="Web"),
+        _row(
+            customer="c",
+            interaction="flex",
+            decision_time=earlier,
+            target=False,
+            placement="Flex",
+        ),
+        _row(
+            customer="c",
+            interaction="target",
+            decision_time=target_time,
+            target=True,
+            channel="Mobile",
+        ),
+    ]
+    group_by = ["Day", "ExposureBucket"]
+
+    everywhere = _aggregate(rows, _config(scope_by=[], group_by=group_by))
+    placement = _aggregate(rows, _config(scope_by=["Placement"], group_by=group_by))
+    channel_placement = _aggregate(
+        rows, _config(scope_by=["Channel", "Placement"], group_by=group_by)
+    )
+
+    assert everywhere["ExposureBucket"].to_list() == [3]
+    assert placement["ExposureBucket"].to_list() == [2]
+    assert channel_placement["ExposureBucket"].to_list() == [1]
+
+
+@pytest.mark.unit
+def test_scope_rank_reranks_shown_actions_inside_the_scope_and_caps() -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        # One banner shown at arbitration rank 6 is the placement's first action.
+        _row(customer="hero", interaction="i", decision_time=when, target=True, rank=6),
+        # A carousel that does not own rank 1: recorded 2, 3, 4, 5 become 1, 2, 3, 3+.
+        *[
+            _row(
+                customer="flex",
+                interaction="i",
+                decision_time=when,
+                target=True,
+                action=f"A{rank}",
+                placement="Flex",
+                rank=rank,
+                outcome="Clicked" if rank == 3 else "Impression",
+            )
+            for rank in (2, 3, 4, 5)
+        ],
+        _row(customer="flex", interaction="i", decision_time=when, target=True, action="H"),
+    ]
+    config = _config(group_by=["Day", "Placement", "ExposureBucket", "ScopeRank"])
+
+    out = _aggregate(rows, config)
+
+    assert out.select("Placement", "ScopeRank", "Positives", "Negatives").rows() == [
+        ("Flex", 1, 0, 1),
+        ("Flex", 2, 1, 0),
+        ("Flex", 3, 0, 2),
+        ("Hero", 1, 0, 2),
+    ]
+
+
+@pytest.mark.unit
+def test_prior_positive_marks_impressions_after_an_earlier_response_in_the_window() -> None:
+    target_time = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        _row(
+            customer="responded",
+            interaction="click",
+            decision_time=target_time - dt.timedelta(hours=2),
+            target=False,
+            outcome="Clicked",
+        ),
+        _row(customer="responded", interaction="target", decision_time=target_time, target=True),
+        # A click outside the strict window no longer counts.
+        _row(
+            customer="expired",
+            interaction="click",
+            decision_time=target_time - dt.timedelta(hours=168),
+            target=False,
+            outcome="Clicked",
+        ),
+        _row(customer="expired", interaction="target", decision_time=target_time, target=True),
+        # The contact's own click and a later click are not "prior".
+        _row(
+            customer="self",
+            interaction="target",
+            decision_time=target_time,
+            target=True,
+            outcome="Clicked",
+        ),
+        _row(
+            customer="later",
+            interaction="target",
+            decision_time=target_time,
+            target=True,
+        ),
+        _row(
+            customer="later",
+            interaction="click",
+            decision_time=target_time + dt.timedelta(hours=1),
+            target=False,
+            outcome="Clicked",
+        ),
+    ]
+    config = _config(group_by=["Day", "ExposureBucket", "PriorPositive"])
+
+    out = _aggregate(rows, config)
+
+    assert out.select("ExposureBucket", "PriorPositive", "Positives", "Negatives").rows() == [
+        (1, False, 1, 2),
+        (2, True, 0, 1),
+    ]
+
+
+@pytest.mark.unit
+def test_every_configured_negative_value_is_an_impression_and_positive_wins() -> None:
+    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    rows = [
+        # A sent email is recorded as Pending and later as Clicked: one contact.
+        _row(
+            customer="email", interaction="sent", decision_time=when, target=True, outcome="Pending"
+        ),
+        _row(
+            customer="email", interaction="sent", decision_time=when, target=True, outcome="Clicked"
+        ),
+        _row(
+            customer="email",
+            interaction="other",
+            decision_time=when,
+            target=True,
+            action="B",
+            outcome="Pending",
+        ),
+        # An unclassified outcome is not an impression.
+        _row(
+            customer="email",
+            interaction="skip",
+            decision_time=when,
+            target=True,
+            action="C",
+            outcome="Conversion",
+        ),
+    ]
+
+    out = _aggregate(rows)
+
+    assert out.select(pl.col("Positives").sum(), pl.col("Negatives").sum()).row(0) == (1, 1)
 
 
 @pytest.mark.unit
@@ -560,7 +698,7 @@ def test_dictionary_dimensions_match_duckdb_varchar_semantics() -> None:
 
 
 @pytest.mark.unit
-def test_clicked_wins_contact_normalization_and_history_overlap_is_not_targeted() -> None:
+def test_positive_wins_contact_normalization_and_history_overlap_is_not_targeted() -> None:
     when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
     rows = [
         _row(customer="c1", interaction="new", decision_time=when, target=True),
@@ -583,23 +721,18 @@ def test_clicked_wins_contact_normalization_and_history_overlap_is_not_targeted(
 
     out = _aggregate(rows)
 
-    assert out.select("Responses", "Positives").row(0) == (1, 1)
+    assert out.select("Positives", "Negatives").row(0) == (1, 0)
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "alternative_group_by",
-    [
-        [],
-        ["Placement"],
-    ],
-)
-def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_late_time(
-    alternative_group_by: list[str],
+@pytest.mark.parametrize("scope_by", [[], ["Placement"], ["Channel", "Placement"]])
+def test_checkpoint_matches_source_scan_for_cross_day_duplicates_and_late_time(
+    scope_by: list[str],
 ) -> None:
     processor = FrequencyResponseProcessor(
         _config(
-            alternative_group_by=alternative_group_by,
+            scope_by=scope_by,
+            group_by=["Day", "ExposureBucket", "ScopeRank", "PriorPositive"],
             checkpoint={"mode": "persistent_sharded", "shards": 8},
         ),
         computation_hash="hash",
@@ -611,6 +744,7 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
             interaction="old",
             decision_time=target_time - dt.timedelta(hours=1),
             target=False,
+            outcome="Clicked",
         ),
         # A lagged partition can contain a later DecisionTime. It must not enter
         # the prefix count for the chronologically earlier target contact.
@@ -625,7 +759,6 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
             interaction="overlap",
             decision_time=target_time - dt.timedelta(minutes=5),
             target=False,
-            propensity=None,
         ),
     ]
     current_rows = [
@@ -641,23 +774,19 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
             interaction="target",
             decision_time=target_time,
             target=True,
-            action="global-runner",
+            action="other-placement",
             placement="DifferentPlacement",
             rank=2,
             outcome="Pending",
-            propensity=0.15,
-            priority=0.4,
         ),
         _row(
             customer="c1",
             interaction="target",
             decision_time=target_time,
             target=True,
-            action="runner",
+            action="second",
             rank=3,
             outcome="Pending",
-            propensity=0.25,
-            priority=0.5,
         ),
         _row(
             customer="c2",
@@ -665,7 +794,6 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
             decision_time=target_time,
             target=True,
             outcome="Clicked",
-            propensity=0.7,
         ),
         {
             **_row(
@@ -677,10 +805,11 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
             "CustomerID": None,
         },
     ]
+    sort = ["Day", "ExposureBucket", "ScopeRank", "PriorPositive"]
     expected = processor.chunk_aggregate(
         pl.DataFrame([*history_rows, *current_rows]).lazy(),
         _ctx(),
-    ).sort(["Day", "ExposureBucket"])
+    ).sort(sort)
     history_target_checkpoint = processor.checkpoint_contacts_lazy(
         pl.DataFrame(history_rows).drop(TARGET_CHUNK_COLUMN).lazy()
     )
@@ -691,13 +820,7 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
 
     history_schema = set(history_checkpoint.collect_schema().names())
     assert history_checkpoint.collect().height == 3
-    assert {
-        "Propensity",
-        "Priority",
-        "Outcome",
-        "Rank",
-        TARGET_CHUNK_COLUMN,
-    }.isdisjoint(history_schema)
+    assert {"Outcome", "Rank", TARGET_CHUNK_COLUMN}.isdisjoint(history_schema)
 
     actual = (
         processor.checkpoint_aggregate_lazy(
@@ -706,278 +829,15 @@ def test_checkpoint_candidates_match_source_scan_for_cross_day_duplicates_and_la
             _ctx(),
         )
         .collect()
-        .sort(["Day", "ExposureBucket"])
+        .sort(sort)
     )
 
     assert actual.equals(expected)
+    assert actual.select(pl.col("Positives").sum(), pl.col("Negatives").sum()).row(0) == (1, 2)
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    ("alternative_group_by", "expected_propensity", "expected_priority"),
-    [
-        ([], 0.5, 1.0),
-        (["Placement"], 1.2, 1.5),
-    ],
-)
-def test_selected_rank_two_uses_configured_group_and_fallback(
-    alternative_group_by: list[str],
-    expected_propensity: float,
-    expected_priority: float,
-) -> None:
-    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
-    rows = [
-        _row(customer="c1", interaction="exact", decision_time=when, target=True),
-        _row(
-            customer="c1",
-            interaction="exact",
-            decision_time=when,
-            target=True,
-            action="B",
-            placement="DifferentPlacement",
-            rank=2,
-            outcome="Pending",
-            propensity=0.2,
-            priority=0.4,
-        ),
-        _row(
-            customer="c1",
-            interaction="exact",
-            decision_time=when,
-            target=True,
-            action="C",
-            rank=3,
-            outcome="Pending",
-            propensity=0.9,
-            priority=0.9,
-        ),
-        _row(customer="c2", interaction="fallback", decision_time=when, target=True),
-        _row(
-            customer="c2",
-            interaction="fallback",
-            decision_time=when,
-            target=True,
-            action="B",
-            rank=3,
-            outcome="Pending",
-            propensity=0.3,
-            priority=0.6,
-        ),
-        _row(
-            customer="c2",
-            interaction="fallback",
-            decision_time=when,
-            target=True,
-            action="C",
-            rank=4,
-            outcome="Pending",
-            propensity=0.4,
-            priority=0.8,
-        ),
-        _row(customer="c3", interaction="missing", decision_time=when, target=True),
-    ]
-
-    row = (
-        _aggregate(rows, _config(alternative_group_by=alternative_group_by))
-        .select(
-            pl.col("Responses").sum(),
-            pl.col("RunnerAvailable").sum(),
-            pl.col("ComparableResponses").sum(),
-            pl.col("RunnerPropensitySum").sum(),
-            pl.col("RunnerPriorityComparableSum").sum(),
-        )
-        .row(0)
-    )
-
-    assert row[:3] == (3, 2, 2)
-    assert row[3] == pytest.approx(expected_propensity)
-    assert row[4] == pytest.approx(expected_priority)
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "alternative_group_by",
-    [
-        [],
-        ["Placement"],
-    ],
-)
-def test_alternative_group_never_crosses_interactions(
-    alternative_group_by: list[str],
-) -> None:
-    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
-    rows = [
-        _row(customer="c1", interaction="focal", decision_time=when, target=True),
-        _row(
-            customer="c1",
-            interaction="runner",
-            decision_time=when,
-            target=True,
-            action="B",
-            rank=2,
-            outcome="Pending",
-            propensity=0.4,
-        ),
-    ]
-
-    result = _aggregate(rows, _config(alternative_group_by=alternative_group_by)).select(
-        pl.col("ComparableResponses").sum(),
-        pl.col("RunnerPropensitySum").sum(),
-    )
-
-    assert result.row(0) == (0, 0.0)
-
-
-@pytest.mark.unit
-def test_multiple_alternative_group_fields_constrain_runner_selection() -> None:
-    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
-    rows = [
-        _row(
-            customer="c1",
-            interaction="decision",
-            decision_time=when,
-            target=True,
-            comparison_group="A",
-        ),
-        _row(
-            customer="c1",
-            interaction="decision",
-            decision_time=when,
-            target=True,
-            action="B",
-            rank=2,
-            outcome="Pending",
-            propensity=0.2,
-            comparison_group="B",
-        ),
-        _row(
-            customer="c1",
-            interaction="decision",
-            decision_time=when,
-            target=True,
-            action="C",
-            rank=3,
-            outcome="Pending",
-            propensity=0.7,
-            comparison_group="A",
-        ),
-    ]
-
-    result = _aggregate(
-        rows,
-        _config(alternative_group_by=["Placement", "ComparisonGroup"]),
-    ).select(
-        pl.col("ComparableResponses").sum(),
-        pl.col("RunnerPropensitySum").sum(),
-    )
-
-    assert result.row(0) == (1, 0.7)
-
-
-@pytest.mark.unit
-def test_null_alternative_group_values_compare_as_one_group() -> None:
-    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
-    rows: list[dict[str, Any]] = []
-    for customer, comparison_group in (("c1", None), ("c2", "known")):
-        rows.extend(
-            [
-                _row(
-                    customer=customer,
-                    interaction=f"{customer}-decision",
-                    decision_time=when,
-                    target=True,
-                    comparison_group=comparison_group,
-                ),
-                _row(
-                    customer=customer,
-                    interaction=f"{customer}-decision",
-                    decision_time=when,
-                    target=True,
-                    action="B",
-                    rank=2,
-                    outcome="Pending",
-                    propensity=0.3,
-                    comparison_group=comparison_group,
-                ),
-            ]
-        )
-
-    result = _aggregate(
-        rows,
-        _config(alternative_group_by=["Placement", "ComparisonGroup"]),
-    ).select(pl.col("ComparableResponses").sum())
-
-    assert result.item() == 2
-
-
-@pytest.mark.unit
-def test_missing_alternative_group_input_fails_before_processing() -> None:
-    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
-    row = _row(customer="c1", interaction="i1", decision_time=when, target=True)
-    row.pop("ComparisonGroup")
-
-    with pytest.raises(ValueError, match=r"missing input column\(s\): ComparisonGroup"):
-        _aggregate([row], _config(alternative_group_by=["ComparisonGroup"]))
-
-
-@pytest.mark.unit
-def test_placement_scoped_alternative_does_not_cross_placements() -> None:
-    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
-    rows = [
-        _row(customer="c1", interaction="decision", decision_time=when, target=True),
-        _row(
-            customer="c1",
-            interaction="decision",
-            decision_time=when,
-            target=True,
-            action="B",
-            placement="DifferentPlacement",
-            rank=2,
-            outcome="Pending",
-            propensity=0.2,
-        ),
-    ]
-
-    result = _aggregate(rows).select(
-        pl.col("Responses").sum(),
-        pl.col("RunnerAvailable").sum(),
-        pl.col("ComparableResponses").sum(),
-        pl.col("RunnerPropensitySum").sum(),
-    )
-
-    assert result.row(0) == (1, 0, 0, 0.0)
-
-
-@pytest.mark.unit
-def test_alternative_group_never_crosses_customers() -> None:
-    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
-    rows = [
-        _row(customer="c1", interaction="shared", decision_time=when, target=True),
-        _row(customer="c2", interaction="shared", decision_time=when, target=True),
-        _row(
-            customer="c2",
-            interaction="shared",
-            decision_time=when,
-            target=True,
-            action="B",
-            rank=2,
-            outcome="Pending",
-            propensity=0.4,
-        ),
-    ]
-
-    result = _aggregate(rows).select(
-        pl.col("Responses").sum(),
-        pl.col("RunnerAvailable").sum(),
-        pl.col("ComparableResponses").sum(),
-        pl.col("RunnerPropensitySum").sum(),
-    )
-
-    assert result.row(0) == (2, 1, 1, 0.4)
-
-
-@pytest.mark.unit
-def test_frequency_keys_isolate_customer_action_and_placement() -> None:
+def test_frequency_keys_isolate_customer_action_and_scope() -> None:
     old = dt.datetime(2024, 1, 8, 10, tzinfo=dt.UTC)
     current = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
     rows = [
@@ -1002,78 +862,22 @@ def test_frequency_keys_isolate_customer_action_and_placement() -> None:
 
     out = _aggregate(rows)
 
-    assert out.select("ExposureBucket", "Responses").rows() == [(1, 3), (2, 1)]
-
-
-@pytest.mark.unit
-def test_comparable_clicks_and_propensity_share_the_same_eligible_population() -> None:
-    when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
-    rows: list[dict[str, Any]] = []
-    for customer, interaction, outcome, runner_propensity in (
-        ("c1", "clicked-comparable", "Clicked", 0.2),
-        ("c2", "impression-comparable", "Impression", 0.3),
-        ("c3", "clicked-null", "Clicked", None),
-    ):
-        rows.extend(
-            [
-                _row(
-                    customer=customer,
-                    interaction=interaction,
-                    decision_time=when,
-                    target=True,
-                    outcome=outcome,
-                ),
-                _row(
-                    customer=customer,
-                    interaction=interaction,
-                    decision_time=when,
-                    target=True,
-                    action="Runner",
-                    rank=2,
-                    outcome="Pending",
-                    propensity=runner_propensity,
-                ),
-            ]
-        )
-    rows.append(_row(customer="c4", interaction="no-runner", decision_time=when, target=True))
-
-    row = (
-        _aggregate(rows)
-        .select(
-            pl.col("Responses").sum(),
-            pl.col("Positives").sum(),
-            pl.col("RunnerAvailable").sum(),
-            pl.col("ComparableResponses").sum(),
-            pl.col("ComparablePositives").sum(),
-            pl.col("RunnerPropensitySum").sum(),
-        )
-        .row(0)
-    )
-
-    assert row[:5] == (4, 2, 3, 2, 1)
-    assert row[5] == pytest.approx(0.5)
+    assert out.select("ExposureBucket", "Negatives").rows() == [(1, 3), (2, 1)]
 
 
 @pytest.mark.unit
 def test_chunk_partials_merge_to_the_combined_result() -> None:
     when = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
     first = [
+        _row(customer="c1", interaction="i1", decision_time=when, target=True, outcome="Clicked"),
         _row(
             customer="c1",
             interaction="i1",
             decision_time=when,
             target=True,
-            outcome="Clicked",
-        ),
-        _row(
-            customer="c1",
-            interaction="i1",
-            decision_time=when,
-            target=True,
-            action="Runner",
+            action="Second",
             rank=2,
             outcome="Pending",
-            propensity=0.2,
         ),
     ]
     second = [
@@ -1083,28 +887,29 @@ def test_chunk_partials_merge_to_the_combined_result() -> None:
             interaction="i2",
             decision_time=when,
             target=True,
-            action="Runner",
+            action="Second",
             rank=2,
-            outcome="Pending",
-            propensity=0.3,
+            outcome="Clicked",
         ),
     ]
-    processor = FrequencyResponseProcessor(_config(), computation_hash="hash")
+    config = _config(group_by=["Day", "ExposureBucket", "ScopeRank"])
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
     partials = [
         processor.chunk_aggregate(pl.DataFrame(rows).lazy(), _ctx(chunk))
         for rows, chunk in ((first, "first"), (second, "second"))
     ]
     merged = processor.merge(
         pl.concat(partials).drop("pipeline_run_id", "chunk_id", "created_at", "config_hash"),
-        group_columns=["Day", "ExposureBucket", "period"],
-    ).sort(["Day", "ExposureBucket"])
+        group_columns=["Day", "ExposureBucket", "ScopeRank", "period"],
+    ).sort(["Day", "ExposureBucket", "ScopeRank"])
     combined = (
         processor.chunk_aggregate(pl.DataFrame([*first, *second]).lazy(), _ctx())
         .drop("pipeline_run_id", "chunk_id", "created_at", "config_hash")
-        .sort(["Day", "ExposureBucket"])
+        .sort(["Day", "ExposureBucket", "ScopeRank"])
     )
 
     assert merged.select(combined.columns).equals(combined)
+    assert combined.select("ScopeRank", "Positives", "Negatives").rows() == [(1, 1, 1), (2, 1, 1)]
 
 
 @pytest.mark.unit
@@ -1182,24 +987,17 @@ def test_customer_sampling_is_deterministic_and_keeps_whole_customers() -> None:
     processor = FrequencyResponseProcessor(config, computation_hash="hash")
 
     assert config.customer_sample is not None
-    membership = (
-        frame.select(pl.col("CustomerID").unique().sort())
-        .with_columns(
-            (
-                pl.col("CustomerID")
-                .cast(pl.String)
-                .hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
-                % pl.lit(model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS, dtype=pl.UInt64)
-                < pl.lit(config.customer_sample.sample_threshold, dtype=pl.UInt64)
-            ).alias("sampled")
-        )
+    membership = frame.select(pl.col("CustomerID").unique().sort()).with_columns(
+        (
+            pl.col("CustomerID").cast(pl.String).hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
+            % pl.lit(model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS, dtype=pl.UInt64)
+            < pl.lit(config.customer_sample.sample_threshold, dtype=pl.UInt64)
+        ).alias("sampled")
     )
     expected = set(membership.filter(pl.col("sampled"))["CustomerID"].to_list())
     assert 0 < len(expected) < 40
 
-    prepared = processor.checkpoint_contacts_lazy(
-        frame.drop(TARGET_CHUNK_COLUMN).lazy()
-    ).collect()
+    prepared = processor.checkpoint_contacts_lazy(frame.drop(TARGET_CHUNK_COLUMN).lazy()).collect()
     assert set(prepared["CustomerID"].to_list()) == expected
     # Every row of a sampled customer survives; repeated runs are identical.
     assert prepared.height == 2 * len(expected)
@@ -1207,7 +1005,8 @@ def test_customer_sampling_is_deterministic_and_keeps_whole_customers() -> None:
     assert again.equals(prepared)
 
     aggregated = processor.chunk_aggregate(frame.lazy(), _ctx())
-    assert aggregated["Responses"].sum() == len(expected)
+    assert aggregated["Positives"].sum() == len(expected)
+    assert aggregated["Negatives"].sum() == 0
 
 
 @pytest.mark.unit
@@ -1240,7 +1039,7 @@ def test_customer_sampling_matches_text_integer_and_dictionary_ids_that_render_a
 def test_daily_bucket_adds_prior_full_day_counters_to_exact_intraday_sequence() -> None:
     target_day = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
     rows = [
-        # Two distinct prior-day exposures (one is a duplicated contact whose
+        # Two distinct prior-day impressions (one is a duplicated contact whose
         # rows must count once) inside the 7-day window.
         _row(
             customer="c",
@@ -1260,6 +1059,7 @@ def test_daily_bucket_adds_prior_full_day_counters_to_exact_intraday_sequence() 
             interaction="d6-b",
             decision_time=dt.datetime(2024, 1, 3, 23, tzinfo=dt.UTC),
             target=False,
+            rank=3,
         ),
         # A day outside the last 7 calendar days contributes nothing.
         _row(
@@ -1270,12 +1070,15 @@ def test_daily_bucket_adds_prior_full_day_counters_to_exact_intraday_sequence() 
         ),
         _row(customer="c", interaction="target", decision_time=target_day, target=True),
     ]
-    config = _config(window_granularity="daily")
+    config = _config(
+        window_granularity="daily", group_by=["Day", "ExposureBucket", "PriorPositive"]
+    )
     aggregated = _aggregate(rows, config)
 
     # Prior counters: 2024-01-02 and 2024-01-03 => 2; intra-day sequence adds 1.
-    assert aggregated["ExposureBucket"].to_list() == [3]
-    assert aggregated["Responses"].sum() == 1
+    assert aggregated.select("ExposureBucket", "PriorPositive", "Negatives").rows() == [
+        (3, True, 1)
+    ]
 
 
 @pytest.mark.unit
@@ -1297,7 +1100,7 @@ def test_daily_intrachunk_sequence_resets_for_each_utc_decision_day() -> None:
 
     aggregated = _aggregate(rows, _config(window_granularity="daily"))
 
-    assert aggregated.select("Day", "ExposureBucket", "Responses").rows() == [
+    assert aggregated.select("Day", "ExposureBucket", "Negatives").rows() == [
         (dt.date(2024, 1, 7), 1, 1),
         (dt.date(2024, 1, 8), 1, 1),
     ]
@@ -1311,7 +1114,13 @@ def test_daily_and_exact_agree_on_midnight_aligned_exposures() -> None:
     rows = [
         # Exactly 7 days before the target: excluded by both modes.
         _row(customer="c", interaction="boundary", decision_time=midnight(1), target=False),
-        _row(customer="c", interaction="inside", decision_time=midnight(2), target=False),
+        _row(
+            customer="c",
+            interaction="inside",
+            decision_time=midnight(2),
+            target=False,
+            outcome="Clicked",
+        ),
         _row(customer="c", interaction="later", decision_time=midnight(5), target=False),
         _row(customer="c", interaction="target", decision_time=midnight(8), target=True),
         _row(
@@ -1319,15 +1128,19 @@ def test_daily_and_exact_agree_on_midnight_aligned_exposures() -> None:
             interaction="target",
             decision_time=midnight(8),
             target=True,
-            action="runner",
+            action="second",
             rank=2,
             outcome="Pending",
-            propensity=0.4,
         ),
         _row(customer="other", interaction="solo", decision_time=midnight(8), target=True),
     ]
-    exact = _aggregate(rows, _config())
-    daily = _aggregate(rows, _config(window_granularity="daily"))
+    group_by = ["Day", "ExposureBucket", "ScopeRank", "PriorPositive"]
+    exact = _aggregate(rows, _config(group_by=group_by))
+    daily = _aggregate(rows, _config(window_granularity="daily", group_by=group_by))
 
     assert exact.equals(daily)
-    assert exact.filter(pl.col("Responses") > 0)["ExposureBucket"].sort().to_list() == [1, 3]
+    assert exact.select("ExposureBucket", "ScopeRank", "PriorPositive", "Negatives").rows() == [
+        (1, 1, False, 1),
+        (1, 2, False, 1),
+        (3, 1, True, 1),
+    ]

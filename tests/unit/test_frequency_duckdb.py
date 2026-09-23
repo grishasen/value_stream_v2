@@ -16,58 +16,50 @@ from valuestream.engine.frequency import DuckDBFrequencySession
 from valuestream.processors.context import TARGET_CHUNK_COLUMN, ChunkContext
 from valuestream.processors.frequency_fields import (
     CHECKPOINT_SHARD_COLUMN,
-    EXPOSED_COLUMN,
+    DECISION_DAY_COLUMN,
+    POSITIVE_COLUMN,
     RANK_COLUMN,
+    ROW_ORDER_COLUMN,
 )
 from valuestream.processors.frequency_response import FrequencyResponseProcessor
 
 _CHUNK_ID_COLUMN = "__valuestream_checkpoint_chunk_id"
 _SEGMENT_COLUMN = 'Comparison "Group'
+_SORT = ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket", "ScopeRank", "PriorPositive"]
 
 
 def _config(**overrides: Any) -> model.FrequencyResponseProcessor:
     payload: dict[str, Any] = {
-            "id": "frequency",
-            "source": "interaction_history",
-            "kind": "frequency_response",
-            "group_by": ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"],
-            "time": {"property": "DecisionTime", "grain": "daily"},
-            "columns": {
-                "customer": "CustomerID",
-                "interaction": "InteractionID",
-                "action": "ActionID",
-                "placement": "Placement",
-                "rank": "Rank",
-                "outcome": "Outcome",
-                "propensity": "Propensity",
-                "priority": "Priority",
-            },
-            "alternative_group_by": ["Placement", _SEGMENT_COLUMN],
+        "id": "frequency",
+        "source": "interaction_history",
+        "kind": "frequency_response",
+        "group_by": [
+            "Day",
+            "Placement",
+            _SEGMENT_COLUMN,
+            "ExposureBucket",
+            "ScopeRank",
+            "PriorPositive",
+        ],
+        "time": {"property": "DecisionTime", "grain": "daily"},
+        "columns": {
+            "customer": "CustomerID",
+            "interaction": "InteractionID",
+            "action": "ActionID",
+            "rank": "Rank",
+        },
+        "outcome": {
+            "column": "Outcome",
             "positive_values": ["Clicked"],
-            "exposure_values": ["Impression"],
-            "candidate_values": ["Pending"],
-            "window_hours": 168,
-            "max_frequency": 7,
-            "states": {
-                "Responses": {"type": "count"},
-                "Positives": {"type": "count", "source_column": "ClickedContact"},
-                "ComparableResponses": {
-                    "type": "count",
-                    "source_column": "ComparableContact",
-                },
-                "RunnerAvailable": {
-                    "type": "count",
-                    "source_column": "RunnerAvailable",
-                },
-                "RunnerPropensitySum": {
-                    "type": "value_sum",
-                    "source_column": "RunnerPropensity",
-                },
-                "RunnerPriorityComparableSum": {
-                    "type": "value_sum",
-                    "source_column": "RunnerPriorityComparable",
-                },
-            },
+            "negative_values": ["Impression", "Pending"],
+        },
+        "scope_by": ["Placement", _SEGMENT_COLUMN],
+        "window_hours": 168,
+        "max_frequency": 7,
+        "states": {
+            "Positives": {"type": "count", "outcome": "positive"},
+            "Negatives": {"type": "count", "outcome": "negative"},
+        },
     }
     payload.update(overrides)
     return model.FrequencyResponseProcessor.model_validate(payload)
@@ -82,8 +74,6 @@ def _row(
     placement: str = "Hero",
     rank: int = 1,
     outcome: str = "Impression",
-    propensity: float | None = 0.5,
-    priority: float | None = 1.0,
     segment: str | None = "A",
 ) -> dict[str, Any]:
     return {
@@ -93,8 +83,6 @@ def _row(
         "Placement": placement,
         "Rank": rank,
         "Outcome": outcome,
-        "Propensity": propensity,
-        "Priority": priority,
         _SEGMENT_COLUMN: segment,
         "DecisionTime": decision_time,
     }
@@ -190,7 +178,7 @@ def _create_rolling_tables(
         connection.unregister("rolling_current_input")
 
 
-def _old_checkpoint_result(
+def _reference_result(
     processor: FrequencyResponseProcessor,
     current: pl.DataFrame,
     history: Sequence[pl.DataFrame],
@@ -208,7 +196,7 @@ def _old_checkpoint_result(
             _ctx(chunk_id),
         )
         .collect()
-        .sort(["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"], nulls_last=False)
+        .sort(_SORT, nulls_last=False)
     )
 
 
@@ -216,8 +204,13 @@ def _quote_identifier(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
+def _totals(frame: pl.DataFrame, column: str) -> dict[Any, tuple[int, int]]:
+    grouped = frame.group_by(column).agg(pl.col("Positives").sum(), pl.col("Negatives").sum())
+    return {row[0]: (row[1], row[2]) for row in grouped.rows()}
+
+
 @pytest.mark.unit
-def test_rolling_frequency_sql_matches_polars_for_exact_window_and_runner_semantics() -> None:
+def test_rolling_frequency_sql_matches_polars_for_exact_window_and_scope_semantics() -> None:
     config = _config()
     processor = FrequencyResponseProcessor(config, computation_hash="hash")
     target_chunk = "2024-01-08"
@@ -232,82 +225,41 @@ def test_rolling_frequency_sql_matches_polars_for_exact_window_and_runner_semant
             target_time - dt.timedelta(hours=168) + dt.timedelta(seconds=1),
         ),
         # A later DecisionTime in history must not enter an earlier target prefix.
-        _row("late", "future", target_time + dt.timedelta(hours=2)),
-        _row("nullable", "old", target_time - dt.timedelta(hours=1), segment=None),
+        _row("late", "future", target_time + dt.timedelta(hours=2), outcome="Clicked"),
+        # An earlier impression at any rank counts for the same action and scope.
+        _row("lower-rank", "earlier", target_time - dt.timedelta(hours=3), rank=4),
+        # The same action in another placement is outside the scope.
+        _row("scoped", "earlier", target_time - dt.timedelta(hours=3), placement="Other"),
         _row("other-shard", "old", target_time - dt.timedelta(hours=1)),
     ]
     newest_rows = [
         # Cross-chunk overlap must mark this contact as historical.
         _row("overlap", "same", target_time - dt.timedelta(minutes=5)),
+        # An earlier positive of the same action marks the target PriorPositive.
+        _row("clicker", "earlier", target_time - dt.timedelta(hours=1), outcome="Clicked"),
     ]
     current_rows = [
         _row("strict", "target", target_time, outcome="Clicked"),
-        # No exact rank 2 in this group: choose the smallest available rank > 2.
-        _row(
-            "strict",
-            "target",
-            target_time,
-            action="fallback",
-            rank=3,
-            outcome="Pending",
-            propensity=0.25,
-            priority=0.4,
-        ),
+        # Recorded rank 3 is the second shown action inside this scope.
+        _row("strict", "target", target_time, action="second", rank=3, outcome="Pending"),
         _row("late", "target", target_time),
-        _row(
-            "late",
-            "target",
-            target_time,
-            action="runner",
-            rank=2,
-            outcome="Pending",
-            propensity=0.4,
-            priority=0.5,
-        ),
-        _row("nullable", "target", target_time, segment=None),
-        _row(
-            "nullable",
-            "target",
-            target_time,
-            action="runner",
-            rank=2,
-            outcome="Pending",
-            propensity=0.3,
-            priority=0.6,
-            segment=None,
-        ),
+        _row("lower-rank", "target", target_time),
+        _row("scoped", "target", target_time),
         _row("placement", "target", target_time, segment="B"),
-        # Exact rank 2 is in another placement and cannot win this configured group.
-        _row(
-            "placement",
-            "target",
-            target_time,
-            action="other-placement",
-            placement="Other",
-            rank=2,
-            outcome="Pending",
-            propensity=0.1,
-            segment="B",
-        ),
-        _row(
-            "placement",
-            "target",
-            target_time,
-            action="same-placement",
-            rank=3,
-            outcome="Pending",
-            propensity=0.7,
-            priority=0.8,
-            segment="B",
-        ),
+        # Rank 2 in another placement is that placement's first action.
+        _row("placement", "target", target_time, action="other", placement="Other", rank=2),
+        _row("placement", "target", target_time, action="third", rank=3, segment="B"),
         # Current values win, but the historical overlap suppresses focal output.
-        _row("overlap", "same", target_time, outcome="Clicked", propensity=0.9),
+        _row("overlap", "same", target_time, outcome="Clicked"),
+        _row("clicker", "target", target_time),
+        # A null scope value cannot form a contact.
+        _row("nullable", "target", target_time, segment=None),
         _row("other-shard", "target", target_time, outcome="Clicked"),
     ]
     oldest = _prepared_history(processor, oldest_rows)
     newest = _prepared_history(processor, newest_rows)
     current = _prepared_current(processor, current_rows)
-    expected = _old_checkpoint_result(processor, current, [oldest, newest])
+    expected = _reference_result(processor, current, [oldest, newest])
 
     # The physical insertion order is deliberately newest-first. SQL must
     # reconstruct deterministic chunk/local order rather than trust table order.
@@ -347,27 +299,65 @@ def test_rolling_frequency_sql_matches_polars_for_exact_window_and_runner_semant
             actual = (
                 processor.aggregate_focal_lazy(focal, _ctx())
                 .collect()
-                .sort(
-                    ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"],
-                    nulls_last=False,
-                )
+                .sort(_SORT, nulls_last=False)
             )
 
         # The SQL session borrows rather than closes the rolling-store connection.
         assert connection.execute("SELECT 1").fetchone() == (1,)
 
     assert_frame_equal(actual, expected)
-    totals = actual.select(
-        pl.col("Responses").sum(),
-        pl.col("Positives").sum(),
-        pl.col("ComparableResponses").sum(),
-        pl.col("RunnerAvailable").sum(),
-        pl.col("RunnerPropensitySum").sum(),
-    ).row(0)
-    assert totals[:4] == (4, 1, 4, 4)
-    assert totals[4] == pytest.approx(1.65)
-    strict = actual.filter((pl.col(_SEGMENT_COLUMN) == "A") & (pl.col("ExposureBucket") == 2))
-    assert strict.select(pl.col("Responses").sum()).item() == 1
+    assert actual.schema["Positives"] == pl.Int64
+    assert actual.select(pl.col("Positives").sum(), pl.col("Negatives").sum()).row(0) == (1, 8)
+    # strict and clicker are second impressions; lower-rank counts its rank-4
+    # impression; scoped does not count the other placement's impression.
+    assert _totals(actual, "ExposureBucket") == {1: (0, 6), 2: (1, 2)}
+    assert _totals(actual, "ScopeRank") == {1: (1, 6), 2: (0, 2)}
+    assert _totals(actual, "PriorPositive") == {False: (1, 7), True: (0, 1)}
+
+
+@pytest.mark.unit
+def test_rolling_frequency_sql_caps_buckets_and_ranks() -> None:
+    config = _config(max_frequency=2, max_rank=2)
+    processor = FrequencyResponseProcessor(config, computation_hash="hash")
+    target_chunk = "2024-01-08"
+    target_time = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
+    history_rows = [
+        _row("customer", f"earlier-{index}", target_time - dt.timedelta(hours=index))
+        for index in range(1, 4)
+    ]
+    current_rows = [
+        _row("customer", "target", target_time),
+        _row("customer", "target", target_time, action="b", rank=2),
+        _row("customer", "target", target_time, action="c", rank=5),
+        _row("customer", "target", target_time, action="d", rank=9),
+    ]
+    history = _prepared_history(processor, history_rows)
+    current = _prepared_current(processor, current_rows)
+    expected = _reference_result(processor, current, [history])
+
+    with duckdb.connect(":memory:") as connection:
+        _create_rolling_tables(
+            connection,
+            history=[("2024-01-07", history)],
+            current=[(target_chunk, current)],
+            empty_history=history.head(0),
+        )
+        with DuckDBFrequencySession(
+            config=config,
+            connection=connection,
+            current_chunk_id=target_chunk,
+        ) as session:
+            actual = (
+                processor.aggregate_focal_lazy(session.focal_lazy(0), _ctx())
+                .collect()
+                .sort(_SORT, nulls_last=False)
+            )
+
+    assert_frame_equal(actual, expected)
+    assert actual.select("ExposureBucket", "ScopeRank", "Negatives").rows() == [
+        (1, 2, 3),
+        (2, 1, 1),
+    ]
 
 
 @pytest.mark.unit
@@ -409,7 +399,7 @@ def test_rolling_frequency_sql_matches_second_canonical_strict_boundary() -> Non
     current = processor.checkpoint_contacts_lazy(current_source.lazy()).collect()
     assert current.schema["DecisionTime"] == pl.Datetime("us")
     assert current.get_column("DecisionTime").cast(pl.Int64).item() == target_us
-    expected = _old_checkpoint_result(processor, current, [history])
+    expected = _reference_result(processor, current, [history])
 
     with duckdb.connect(":memory:") as connection:
         _create_rolling_tables(
@@ -456,7 +446,7 @@ def test_rolling_frequency_sql_agrees_on_previously_divergent_sub_second_target(
     prepared_history_target = processor.checkpoint_contacts_lazy(history_source.lazy()).collect()
     history = processor.checkpoint_history_contacts_lazy(prepared_history_target.lazy()).collect()
     current = processor.checkpoint_contacts_lazy(current_source.lazy()).collect()
-    expected = _old_checkpoint_result(processor, current, [history])
+    expected = _reference_result(processor, current, [history])
 
     with duckdb.connect(":memory:") as connection:
         _create_rolling_tables(
@@ -485,14 +475,7 @@ def test_rolling_frequency_sql_matches_source_storage_types_for_dictionary_dimen
     source = pl.DataFrame(
         [
             _row("customer", "target", target_time, outcome="Clicked"),
-            _row(
-                "customer",
-                "target",
-                target_time,
-                action="runner",
-                rank=2,
-                outcome="Pending",
-            ),
+            _row("customer", "target", target_time, action="second", rank=2, outcome="Pending"),
         ]
     ).with_columns(
         pl.col("CustomerID").cast(pl.Categorical),
@@ -501,7 +484,7 @@ def test_rolling_frequency_sql_matches_source_storage_types_for_dictionary_dimen
     )
     current = processor.checkpoint_contacts_lazy(source.lazy()).collect()
     empty_history = processor.checkpoint_history_contacts_lazy(current.lazy()).collect().head(0)
-    expected = _old_checkpoint_result(processor, current, [], chunk_id=target_chunk)
+    expected = _reference_result(processor, current, [], chunk_id=target_chunk)
 
     with duckdb.connect(":memory:") as connection:
         _create_rolling_tables(
@@ -516,9 +499,7 @@ def test_rolling_frequency_sql_matches_source_storage_types_for_dictionary_dimen
             current_chunk_id=target_chunk,
         ) as session:
             actual = (
-                processor.aggregate_focal_lazy(session.focal_lazy(0), _ctx())
-                .collect()
-                .sort(["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"])
+                processor.aggregate_focal_lazy(session.focal_lazy(0), _ctx()).collect().sort(_SORT)
             )
 
     assert actual.schema["Placement"] == pl.String
@@ -541,7 +522,7 @@ def test_rolling_frequency_session_bootstraps_empty_history_and_filters_staged_c
         [_row("stray", "other", target_time, outcome="Clicked")],
     )
     empty_history = processor.checkpoint_history_contacts_lazy(current.lazy()).collect().head(0)
-    expected = _old_checkpoint_result(processor, current, [], chunk_id=target_chunk)
+    expected = _reference_result(processor, current, [], chunk_id=target_chunk)
 
     with duckdb.connect(":memory:") as connection:
         _create_rolling_tables(
@@ -565,7 +546,9 @@ def test_rolling_frequency_session_bootstraps_empty_history_and_filters_staged_c
             empty_focal = pl.from_arrow(session.focal_table(1))
             assert isinstance(empty_focal, pl.DataFrame)
             assert empty_focal.is_empty()
-            assert "DecisionTime" in empty_focal.columns
+            assert {"DecisionTime", "ExposureBucket", "ScopeRank", "PriorPositive"} <= set(
+                empty_focal.columns
+            )
         assert connection.execute("SELECT count(*) FROM history").fetchone() == (0,)
 
     assert_frame_equal(actual, expected, check_row_order=False)
@@ -579,7 +562,9 @@ def test_rolling_frequency_sql_matches_polars_for_daily_granularity() -> None:
     target_time = dt.datetime(2024, 1, 8, 12, tzinfo=dt.UTC)
     outside_rows = [
         # The whole calendar day 2024-01-01 is outside the last 7 days.
-        _row("strict", "outside", dt.datetime(2024, 1, 1, 23, 59, tzinfo=dt.UTC)),
+        _row(
+            "strict", "outside", dt.datetime(2024, 1, 1, 23, 59, tzinfo=dt.UTC), outcome="Clicked"
+        ),
     ]
     inside_rows = [
         # A duplicated contact (impression + click rows) must count once.
@@ -590,29 +575,20 @@ def test_rolling_frequency_sql_matches_polars_for_daily_granularity() -> None:
             dt.datetime(2024, 1, 2, 9, tzinfo=dt.UTC),
             outcome="Clicked",
         ),
-        _row("strict", "inside-b", dt.datetime(2024, 1, 2, 15, tzinfo=dt.UTC)),
+        _row("strict", "inside-b", dt.datetime(2024, 1, 2, 15, tzinfo=dt.UTC), rank=2),
         _row("other-shard", "foreign", dt.datetime(2024, 1, 2, 10, tzinfo=dt.UTC)),
     ]
     current_rows = [
         _row("strict", "target", target_time, outcome="Clicked"),
-        _row(
-            "strict",
-            "target",
-            target_time,
-            action="runner",
-            rank=2,
-            outcome="Pending",
-            propensity=0.4,
-            priority=0.5,
-        ),
-        # Two same-day exposures: intra-day sequence stays exact.
-        _row("fresh", "first", target_time),
+        _row("strict", "target", target_time, action="second", rank=2, outcome="Pending"),
+        # Two same-day exposures: intra-day sequence and positives stay exact.
+        _row("fresh", "first", target_time, outcome="Clicked"),
         _row("fresh", "second", target_time + dt.timedelta(hours=1)),
     ]
     oldest = _prepared_history(processor, outside_rows)
     newest = _prepared_history(processor, inside_rows)
     current = _prepared_current(processor, current_rows)
-    expected = _old_checkpoint_result(processor, current, [oldest, newest])
+    expected = _reference_result(processor, current, [oldest, newest])
 
     with duckdb.connect(":memory:") as connection:
         _create_rolling_tables(
@@ -632,17 +608,20 @@ def test_rolling_frequency_sql_matches_polars_for_daily_granularity() -> None:
             actual = (
                 processor.aggregate_focal_lazy(session.focal_lazy(0), _ctx())
                 .collect()
-                .sort(
-                    ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"],
-                    nulls_last=False,
-                )
+                .sort(_SORT, nulls_last=False)
             )
 
     assert_frame_equal(actual, expected)
-    # strict: 2 prior-day contacts + 1 today = bucket 3; fresh: buckets 1 and 2.
-    assert actual.select(pl.col("ExposureBucket").sum()).item() == 6
-    assert actual.select(pl.col("Responses").sum()).item() == 3
-    assert actual.select(pl.col("RunnerAvailable").sum()).item() == 1
+    # strict: 2 prior-day contacts + 1 today = bucket 3 after a prior click;
+    # strict/second: first impression; fresh: buckets 1 and 2, the second
+    # after the first one's click.
+    assert actual.select("ExposureBucket", "ScopeRank", "PriorPositive").rows() == [
+        (1, 1, False),
+        (1, 2, False),
+        (2, 1, True),
+        (3, 1, True),
+    ]
+    assert actual.select(pl.col("Positives").sum(), pl.col("Negatives").sum()).row(0) == (2, 2)
 
 
 @pytest.mark.unit
@@ -673,7 +652,7 @@ def test_rolling_daily_sql_matches_source_scan_for_cross_chunk_duplicate_contact
         *({**row, TARGET_CHUNK_COLUMN: True} for row in current_rows),
     ]
     expected = processor.chunk_aggregate(pl.DataFrame(source_rows).lazy(), _ctx()).sort(
-        ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"], nulls_last=False
+        _SORT, nulls_last=False
     )
 
     oldest = _prepared_history(processor, [duplicate])
@@ -697,14 +676,11 @@ def test_rolling_daily_sql_matches_source_scan_for_cross_chunk_duplicate_contact
             actual = (
                 processor.aggregate_focal_lazy(session.focal_lazy(0), _ctx())
                 .collect()
-                .sort(
-                    ["Day", "Placement", _SEGMENT_COLUMN, "ExposureBucket"],
-                    nulls_last=False,
-                )
+                .sort(_SORT, nulls_last=False)
             )
 
     assert_frame_equal(actual, expected)
-    assert actual.select("Day", "ExposureBucket", "Responses").rows() == [
+    assert actual.select("Day", "ExposureBucket", "Negatives").rows() == [
         (dt.date(2024, 1, 7), 2, 1),
         (dt.date(2024, 1, 8), 2, 1),
     ]
@@ -716,23 +692,48 @@ def test_processor_exposes_exact_history_projection_contract() -> None:
 
     projection = processor.checkpoint_history_projection()
 
-    assert projection.rank_column == RANK_COLUMN
-    assert projection.exposed_column == EXPOSED_COLUMN
-    assert projection.columns[-4:] == (
-        "__valuestream_frequency_row_order",
+    # Contact keys group; decision time/source order take MIN and the positive
+    # flag ORs together, so each committed day stores one row per contact.
+    assert projection.columns == (
+        "CustomerID",
+        "InteractionID",
+        "ActionID",
+        "Placement",
+        _SEGMENT_COLUMN,
+        "DecisionTime",
+        ROW_ORDER_COLUMN,
         RANK_COLUMN,
-        "__valuestream_frequency_positive",
-        EXPOSED_COLUMN,
+        POSITIVE_COLUMN,
     )
-    # Contact keys group; decision time/source order take MIN and outcome
-    # flags OR together, so each committed day stores one row per contact.
     assert projection.key_columns == (
         "CustomerID",
         "InteractionID",
         "ActionID",
         "Placement",
+        _SEGMENT_COLUMN,
         RANK_COLUMN,
     )
-    assert projection.min_columns == ("DecisionTime", "__valuestream_frequency_row_order")
-    assert projection.bool_or_columns == ("__valuestream_frequency_positive", EXPOSED_COLUMN)
+    assert projection.min_columns == ("DecisionTime", ROW_ORDER_COLUMN)
+    assert projection.bool_or_columns == (POSITIVE_COLUMN,)
     assert projection.normalizes
+
+
+@pytest.mark.unit
+def test_processor_exposes_daily_history_projection_contract() -> None:
+    processor = FrequencyResponseProcessor(
+        _config(window_granularity="daily"), computation_hash="hash"
+    )
+
+    projection = processor.checkpoint_history_projection()
+
+    assert projection.columns == (
+        "CustomerID",
+        "InteractionID",
+        "ActionID",
+        "Placement",
+        _SEGMENT_COLUMN,
+        DECISION_DAY_COLUMN,
+        POSITIVE_COLUMN,
+    )
+    assert projection.bool_or_columns == (POSITIVE_COLUMN,)
+    assert projection.min_columns == ()

@@ -302,7 +302,7 @@ The most important concept in Value Stream. A Processor is a typed function `(So
 - `entity_set` — CPC/HLL/Theta distinct-count sketches, with Theta also supporting set algebra
 - `funnel` — per-stage counts for funnel KPIs
 - `snapshot` — periodic / accumulating snapshots for state KPIs
-- `frequency_response` — response and opportunity curves by exact bounded number of impressions
+- `frequency_response` — engagement rate by exact bounded number of impressions of the same action
 
 Processors implement the interface in reference/processors.md §1.
 
@@ -315,7 +315,7 @@ There are no schema, hashing, Polars-version, processor-config, or layout path
 levels. Schema and hashing revisions, Polars version, processor computation
 hash, logical shard count, history projection, and customer dtype remain inside
 the database as compatibility metadata; DuckDB version is audit-only. The
-database persists only exposed rank-1 contact identity, time, classification,
+database persists only the impression contact identity, time, positive flag,
 deterministic order, source chunk id, and logical customer shard needed by
 later targets. A transactional journal records the retained ISO-date chunks and
 their authoritative raw fingerprints. The complete current candidate payload
@@ -324,10 +324,9 @@ is not persisted.
 
 For a target calculation, DuckDB SQL performs the stable exact relational
 prefix—cross-day contact normalization, strict rolling number-of-impressions
-window, and configured selected rank-2 resolution—one logical customer shard
-at a time. It returns enriched selected rank-1 target rows to Polars through
-Arrow; Polars applies configured state predicates, aggregation, grouping, and
-provenance. Targets run oldest-to-newest through one long-lived writer per
+window, prior-response flag, and scope rank—one logical customer shard at a
+time. It returns enriched target contacts to Polars through Arrow; Polars
+applies aggregation, grouping, and provenance. Targets run oldest-to-newest through one long-lived writer per
 persistent processor. Adding a target's narrow history, journal fingerprint,
 and retention deletes is one transaction; this acceleration-state commit may
 precede aggregate publication but is never a ledger or query publication

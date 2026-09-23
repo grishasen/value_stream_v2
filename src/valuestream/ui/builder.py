@@ -1979,7 +1979,7 @@ def state_spec_definitions(processor_def: dict[str, Any]) -> dict[str, dict[str,
 FREQUENCY_STATE_EDITOR_COLUMNS = [
     "State",
     "Type",
-    "Source Column",
+    "Outcome",
     "Derived From",
     "Explanation",
 ]
@@ -2021,9 +2021,9 @@ def group_by_for_kind_transition(
     """Return group-by dimensions normalized for a processor-kind edit.
 
     Entering or remaining on ``frequency_response`` carries the live derived
-    frequency column. Leaving that kind removes the previously derived column,
-    which is not a raw source field and must not leak into another processor
-    kind's authored dimensions.
+    frequency column. Leaving that kind removes every column it derives, which
+    is not a raw source field and must not leak into another processor kind's
+    authored dimensions.
     """
 
     if kind == "frequency_response":
@@ -2033,34 +2033,26 @@ def group_by_for_kind_transition(
             frequency_column=frequency_column,
         )
     if previous_kind == "frequency_response":
-        previous_frequency_column = configured_frequency_column or "ExposureBucket"
-        return [dimension for dimension in group_by if dimension != previous_frequency_column]
+        derived = {
+            configured_frequency_column or "ExposureBucket",
+            model.FREQUENCY_SCOPE_RANK_COLUMN,
+            model.FREQUENCY_PRIOR_POSITIVE_COLUMN,
+        }
+        return [dimension for dimension in group_by if dimension not in derived]
     return list(group_by)
 
 
-def frequency_response_has_priority(processor_def: dict[str, Any]) -> bool:
-    """Return whether a frequency-response definition binds the priority column."""
-
-    raw_columns = processor_def.get("columns")
-    if not isinstance(raw_columns, dict):
-        return False
-    return bool(str(raw_columns.get("priority", "") or "").strip())
-
-
-def frequency_response_states_for_edit(  # noqa: PLR0911 - explicit fallback guards
+def frequency_response_states_for_edit(
     existing_definition: Mapping[str, Any] | None,
-    *,
-    priority: bool,
 ) -> dict[str, dict[str, Any]]:
     """Resolve the canonical states to write during a frequency-response edit.
 
     New processors and existing processors that publish the whole contract get
-    the whole currently available contract. A valid authored subset remains a
-    subset, so an unrelated UI edit cannot silently expand persisted outputs.
-    When priority is removed, unavailable priority-only states are dropped.
+    the whole contract. A valid authored subset remains a subset, so an
+    unrelated UI edit cannot silently expand persisted outputs.
     """
 
-    available = model.frequency_response_state_definitions(priority=priority)
+    available = model.frequency_response_state_definitions()
     if not isinstance(existing_definition, Mapping):
         return available
     if str(existing_definition.get("kind", "")) != "frequency_response":
@@ -2068,13 +2060,10 @@ def frequency_response_states_for_edit(  # noqa: PLR0911 - explicit fallback gua
     raw_states = existing_definition.get("states")
     if not isinstance(raw_states, Mapping) or not raw_states:
         return available
-
-    previous_priority = frequency_response_has_priority(dict(existing_definition))
-    previous_available = model.frequency_response_state_definitions(priority=previous_priority)
-    state_names: list[str] = []
+    preserved: dict[str, dict[str, Any]] = {}
     for raw_name, raw_definition in raw_states.items():
         name = str(raw_name)
-        expected = previous_available.get(name)
+        expected = available.get(name)
         if expected is None or not isinstance(raw_definition, Mapping):
             return available
         normalized = dict(raw_definition)
@@ -2082,14 +2071,8 @@ def frequency_response_states_for_edit(  # noqa: PLR0911 - explicit fallback gua
             normalized.pop("distinct")
         if normalized != expected:
             return available
-        state_names.append(name)
-
-    if set(state_names) == set(previous_available):
-        return available
-    preserved = {name: available[name] for name in state_names if name in available}
-    # ``states`` is non-empty in the catalog model. A priority-only subset
-    # therefore falls back to the available contract when priority is cleared.
-    return preserved or available
+        preserved[name] = expected
+    return {name: available[name] for name in available if name in preserved}
 
 
 def default_processor_state_definitions(
@@ -2100,9 +2083,7 @@ def default_processor_state_definitions(
 
     settings = kind_settings or {}
     if kind == "frequency_response":
-        return model.frequency_response_state_definitions(
-            priority=frequency_response_has_priority(dict(settings))
-        )
+        return model.frequency_response_state_definitions()
     if kind == "binary_outcome":
         return {
             "Count": {"type": "count"},
@@ -2160,31 +2141,26 @@ def frequency_response_state_rows(
     processor_def: dict[str, Any],
     state_names: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return read-only grid rows for the kind's canonical states.
+    """Return read-only grid rows for the kind's canonical states."""
 
-    The three arbitration-priority states appear only when the definition binds
-    a priority column, matching what the processor can actually publish.
-    """
-
-    priority = frequency_response_has_priority(processor_def)
+    raw_outcome = processor_def.get("outcome")
+    outcome: Mapping[str, Any] = raw_outcome if isinstance(raw_outcome, Mapping) else {}
     selected = None if state_names is None else {str(name) for name in state_names}
     rows: list[dict[str, Any]] = []
-    for name, state in model.frequency_response_states(priority=priority).items():
+    for name, state in model.frequency_response_states().items():
         if selected is not None and name not in selected:
             continue
-        source_column = state.source_column or ""
-        if state.type == "value_sum":
-            derived = f"sum of {source_column}"
-        elif source_column:
-            derived = f"non-null {source_column}"
-        else:
-            derived = "included rows"
+        values = string_list(outcome.get(f"{state.outcome}_values"))
         rows.append(
             {
                 "State": name,
                 "Type": state.type,
-                "Source Column": source_column,
-                "Derived From": derived,
+                "Outcome": state.outcome,
+                "Derived From": (
+                    f"impressions with {', '.join(values)}"
+                    if values
+                    else f"impressions with a {state.outcome} outcome"
+                ),
                 "Explanation": state.explanation,
             }
         )
@@ -2192,12 +2168,10 @@ def frequency_response_state_rows(
 
 
 FREQUENCY_STATE_PANEL_CAPTION = (
-    "These available state definitions and bindings are fixed by the processor kind; "
-    "a catalog may publish a subset, which this editor preserves. They cannot be authored "
-    "or rebound here. Ratios stay meaningful only inside one family — Responses, "
-    "ComparableResponses, and PriorityComparableContacts are three different "
-    "denominators. Binding a priority column makes the three arbitration diagnostics "
-    "available."
+    "These state definitions are fixed by the processor kind; a catalog may publish a "
+    "subset, which this editor preserves. They cannot be authored here. The engagement rate "
+    "is Positives / (Positives + Negatives); which outcome values count as positive or "
+    "negative is set in Outcome Classification above."
 )
 
 
