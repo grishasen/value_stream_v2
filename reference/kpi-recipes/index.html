@@ -831,6 +831,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/mcp-clients/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex & Claude Desktop (RU)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2165,10 +2193,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#contact-policy-and-alternative-actions" class="md-nav__link">
+  <a href="#contact-policy-and-repeated-impressions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Contact Policy and Alternative Actions
+        Contact Policy and Repeated Impressions
       
     </span>
   </a>
@@ -2703,10 +2731,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#contact-policy-and-alternative-actions" class="md-nav__link">
+  <a href="#contact-policy-and-repeated-impressions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Contact Policy and Alternative Actions
+        Contact Policy and Repeated Impressions
       
     </span>
   </a>
@@ -2975,7 +3003,7 @@ If two states have identical business field/algorithm metadata and no
 distinguishing population, installation is blocked instead of exposing an
 internal state-ID choice.</p>
 <h2 id="built-in-recipes">Built-in Recipes<a class="headerlink" href="#built-in-recipes" title="Permanent link">&para;</a></h2>
-<p>Choose a recipe by the business question it answers. The 41 recipes below are
+<p>Choose a recipe by the business question it answers. The 36 recipes below are
 grouped by business purpose; recipe IDs remain unchanged even when their
 technical domain differs from the group. Examples use Pega Customer Decision
 Hub (CDH) terminology. All numbers and
@@ -2996,7 +3024,7 @@ context and levers, so it must not be read as a probability. <code>ResponseTime<
 <li><a href="#value-distributions-and-response-time">Value distributions and response time</a></li>
 <li><a href="#prediction-quality">Prediction quality</a></li>
 <li><a href="#adaptive-learning-and-exploration">Adaptive learning and exploration</a></li>
-<li><a href="#contact-policy-and-alternative-actions">Contact policy and alternative actions</a></li>
+<li><a href="#contact-policy-and-repeated-impressions">Contact policy and repeated impressions</a></li>
 </ul>
 <p><strong>Accuracy</strong> describes how the result is calculated: <strong>Exact</strong> uses configured
 counts and sums; <strong>Approximate</strong> uses compact statistical summaries or an
@@ -3500,19 +3528,22 @@ response count or fitted posterior parameter. Relative exploration variance
 is <code>mean(revision²) / mean(p × (1 − p))</code>, an unbounded ratio rather than an
 uncertainty probability. Other score adjustments can affect both diagnostics.
 Randomised control arms must be excluded from all three.</p>
-<h3 id="contact-policy-and-alternative-actions">Contact Policy and Alternative Actions<a class="headerlink" href="#contact-policy-and-alternative-actions" title="Permanent link">&para;</a></h3>
-<p>Assess response at different contact frequencies and compare the selected
-action with a recorded alternative. <strong>CTR</strong> means click-through rate. Below,
-the <strong>chosen action</strong> is the selected rank-1 action; the <strong>alternative</strong> is
-the selected rank-2 action, or the next recorded rank greater than 1 when
-rank 2 is absent, within the configured comparison group. <strong>Comparable
-contacts</strong> have a recorded alternative response probability. An <strong>impression</strong>
-here is a configured exposure record, not proof that a customer viewed it.</p>
-<p>Count contacts for the same <code>CustomerID + ActionID + Placement</code> within a
-trailing 168-hour window, including the current contact; the final bucket is
-<code>7+</code>. Alternatives are compared within the same customer, interaction and
-placement. A <code>Clicked</code> record takes precedence over an <code>Impression</code> record for
-the same contact, so the frequency examples count that contact once.</p>
+<h3 id="contact-policy-and-repeated-impressions">Contact Policy and Repeated Impressions<a class="headerlink" href="#contact-policy-and-repeated-impressions" title="Permanent link">&para;</a></h3>
+<p>Assess how the response to an action changes as the same customer sees it
+again, to decide after how many impressions it should stop being shown. The
+<strong>engagement rate</strong> is positive impressions divided by positive plus negative
+impressions, as in the engagement recipes. An <strong>impression</strong> is any record
+with one of the processor's configured positive or negative outcomes, at any
+rank; it is not proof that a customer viewed it.</p>
+<p><code>ExposureBucket</code> counts the impressions of the same <code>CustomerID + ActionID</code>
+inside the processor's <code>scope_by</code> fields (for example <code>Channel</code> and
+<code>Placement</code>) within a trailing 168-hour window, including the current one; the
+final bucket collects every later impression. <code>ScopeRank</code> is the action's rank
+among the decision's shown actions inside the same scope, so a banner shown at
+arbitration rank 6 in a one-slot placement is rank 1 there. <code>PriorPositive</code>
+marks impressions whose customer already responded to the action inside the
+window. A <code>Clicked</code> record takes precedence over an <code>Impression</code> or <code>Pending</code>
+record for the same contact, so each contact counts once.</p>
 <table>
 <thead>
 <tr>
@@ -3526,73 +3557,26 @@ the same contact, so the frequency examples count that contact once.</p>
 </thead>
 <tbody>
 <tr>
-<td>Chosen action CTR by impression count</td>
-<td>The chosen action’s observed click rate at each impression-frequency level. <strong>Example:</strong> For one action in the Web Hero placement, 30 clicks among 1,000 contacts in the three-impression bucket give 3% CTR; each contact is that customer’s third for the same action and placement within 168 hours.</td>
-<td><code>contact_policy.frequency_marginal_ctr</code></td>
-<td>Exact <code>Positives</code> and <code>Responses</code> states</td>
+<td>Engagement rate by number of impressions</td>
+<td>The share of impressions with a positive outcome after the 1st, 2nd, 3rd, ... impression of the same action to the same customer. <strong>Example:</strong> In the Web Hero placement, 1,000 fifth impressions to customers who have not clicked yet produce 12 clicks: a 1.2% engagement rate, against 1.6% on first impressions, so the action has lost a quarter of its response by the fifth impression.</td>
+<td><code>contact_policy.engagement_rate_by_impressions</code></td>
+<td>Exact <code>Positives</code> and <code>Negatives</code> states</td>
 <td>Approximate fixed-window interpretation</td>
 <td>Line</td>
-</tr>
-<tr>
-<td>Chosen action CTR on comparable contacts</td>
-<td>The chosen action’s click rate restricted to contacts with an alternative action’s usable <code>Propensity</code>. <strong>Example:</strong> Of 1,000 rank-1 action contacts, 600 have a comparable alternative and 24 of those are clicked: comparable CTR is 4%, even if all-contact CTR is 3%.</td>
-<td><code>contact_policy.frequency_comparable_ctr</code></td>
-<td>Exact <code>ComparablePositives</code> and <code>ComparableResponses</code> states</td>
-<td>Approximate fixed-window interpretation</td>
-<td>Line</td>
-</tr>
-<tr>
-<td>Alternative action expected CTR</td>
-<td>The alternative action’s mean raw <code>Propensity</code> on the same comparable contacts. <strong>Example:</strong> If the alternatives average 0.05 propensity across 600 contacts, their expected CTR is 5%, equivalent to 30 predicted clicks; those clicks were not observed for the alternatives.</td>
-<td><code>contact_policy.runner_up_expected_ctr</code></td>
-<td>Exact <code>RunnerPropensitySum</code> and <code>ComparableResponses</code> states</td>
-<td>Approximate fixed-window interpretation</td>
-<td>Line</td>
-</tr>
-<tr>
-<td>Alternative action coverage</td>
-<td>The share of chosen-action contacts with a usable response prediction for an alternative action. <strong>Example:</strong> If 600 of 1,000 Web Hero rank-1 contacts have a comparable alternative in the same customer decision and placement, coverage is 60%.</td>
-<td><code>contact_policy.runner_up_coverage</code></td>
-<td>Exact <code>ComparableResponses</code> and <code>Responses</code> states</td>
-<td>Approximate fixed-window interpretation</td>
-<td>KPI card</td>
-</tr>
-<tr>
-<td>Response opportunity margin</td>
-<td>The chosen action’s observed CTR minus the alternative action’s expected CTR on the same contacts. <strong>Example:</strong> 24 clicks from 600 comparable contacts give 4%; alternatives with 5% mean <code>Propensity</code> give a −1 percentage-point margin, identifying an action-choice opportunity to investigate rather than proven uplift.</td>
-<td><code>contact_policy.response_opportunity_margin</code></td>
-<td>Exact <code>ComparablePositives</code>, <code>RunnerPropensitySum</code>, and shared <code>ComparableResponses</code> states</td>
-<td>Approximate fixed-window interpretation</td>
-<td>Bar</td>
-</tr>
-<tr>
-<td>Priority opportunity gap</td>
-<td>The average difference between chosen and alternative action <code>Priority</code>, the score used for arbitration. <strong>Example:</strong> Mean priorities of 1.4 for chosen actions and 1.1 for alternatives on the same comparable contacts give a +0.3 index gap; it measures ranking advantage, not extra clicks or conversions.</td>
-<td><code>contact_policy.priority_opportunity_gap</code></td>
-<td>Exact <code>FocalPriorityComparableSum</code>, <code>RunnerPriorityComparableSum</code>, and shared <code>PriorityComparableContacts</code> states</td>
-<td>Approximate arbitration diagnostic</td>
-<td>Bar</td>
 </tr>
 </tbody>
 </table>
-<p>The six <strong>Contact policy</strong> recipes target only the <code>frequency_response</code>
-processor and require the exact state names shown above. They never propose a
-generic count or sum as a substitute for those population contracts. Their
-line and bar recommendations use <code>ExposureBucket</code>, whose value is an upstream
-fixed-window approximation; changing a report date filter does not recompute
-customer contact history.</p>
-<p><code>Responses</code> are derived from the processor's configured exposure outcomes. The
-user-facing number of impressions is therefore based on Impression proxies rather
-than measured viewability; dismiss telemetry is never inferred when the source does
-not provide it. Within the processor's implicit customer + interaction keys
-plus the physical fields configured in <code>alternative_group_by</code>, “selected rank-2 action” means
-exact rank 2 when present, otherwise the next recorded rank greater than 1;
-its response uses raw <code>Propensity</code> as the probability. <code>Placement</code> is the
-default additional field, so comparison stays inside one decision and
-placement. Comparable selected rank-1 action CTR, selected
-rank-2 action expected CTR, and response opportunity margin use the same
-<code>ComparableResponses</code> denominator. <code>Priority</code> is retained only for the separate,
-neutral arbitration index; it is never treated as CTR or probability.</p>
+<p>The <strong>Contact policy</strong> recipe targets only the <code>frequency_response</code> processor
+and requires its exact <code>Positives</code> and <code>Negatives</code> states; it never proposes a
+generic count as a substitute. Its line recommendation uses <code>ExposureBucket</code>,
+whose value is an upstream fixed-window approximation; changing a report date
+filter does not recompute customer contact history.</p>
+<p>Customers who already responded are shown the same action again more often,
+so an all-customer curve can rise with repeated impressions even when every
+customer responds less each time. Split or filter by <code>PriorPositive</code> before
+reading a decline as fatigue, and keep <code>Channel</code> and <code>Placement</code> apart, since
+their rates can differ tenfold. The curve is observational, not a causal
+estimate of wearout.</p>
 <h2 id="versioning-and-governance">Versioning and Governance<a class="headerlink" href="#versioning-and-governance" title="Permanent link">&para;</a></h2>
 <ul>
 <li>A recipe version is immutable once published. Calculation, input semantics,

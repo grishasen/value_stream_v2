@@ -831,6 +831,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/mcp-clients/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex & Claude Desktop (RU)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2746,19 +2774,16 @@ contract: a page can only filter by dimensions that were persisted during
 processing.</p>
 <h3 id="frequency-response-interpretation">Frequency-response interpretation<a class="headerlink" href="#frequency-response-interpretation" title="Permanent link">&para;</a></h3>
 <p>The <code>frequency_response</code> processor supports a contact-policy diagnostic from
-Interaction History without retaining contact rows. It assigns each selected
-rank-1 action contact to a fixed trailing-window number-of-impressions bucket
-for the same customer, action, and placement, then persists daily counts and
-sums by that bucket. The selected rank-1 action curve is observed
-click-through rate. The selected rank-2 action comparison curve uses the raw
-<code>Propensity</code> of exact rank 2 when present, or the smallest recorded rank above
-1 when rank 2 is absent, within the processor's explicitly configured
-customer/interaction comparison group and over exactly the contacts for which
-that propensity exists. The group can additionally require equal placement.</p>
-<p><code>Priority</code> remains useful, but for a different question: it explains the
-arbitration score gap between the selected rank-1 and selected rank-2 actions.
-It is not a probability and must not be plotted as expected CTR. Likewise,
-Interaction History cannot supply a dismiss/irritation curve or true
+Interaction History without retaining contact rows. It assigns every impression
+to a fixed trailing-window number-of-impressions bucket for the same customer
+and action inside the configured <code>scope_by</code> fields (for example channel and
+placement), then persists daily positive and negative counts by that bucket.
+The resulting engagement-rate curve shows after how many impressions an
+action's response falls far enough to stop showing it. The same counts can be
+split by the action's rank inside the scope and by whether the customer
+already responded; the latter matters because responders are re-shown more
+often, which lifts an all-customer curve.</p>
+<p>Interaction History cannot supply a dismiss/irritation curve or true
 viewability unless those events exist in the source. A configured Impression
 is therefore a contact proxy, and the missing concepts stay visibly missing
 rather than being inferred.</p>

@@ -841,6 +841,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../users/mcp-clients/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex & Claude Desktop (RU)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2603,11 +2631,11 @@ views, SQL allowlist, API, MCP, Chat, SDK, or Reports.</p>
 <p><code>frequency_response</code> can opt into <code>checkpoint.mode: persistent_sharded</code>. Treat
 the resulting checkpoint as sensitive source-derived data:</p>
 <ul>
-<li>It contains only filtered candidate rows and fields required to repeat exact
-  bounded history: exposed rank-1 contact identity, time, classification,
-  deterministic order, chunk id, and logical shard. The complete current
-  candidate payload is temporary, but the rolling history may retain an exact
-  customer key.</li>
+<li>It contains only filtered impression rows and fields required to repeat exact
+  bounded history: contact identity (customer, interaction, action, scope
+  values, rank), time, positive flag, deterministic order, chunk id, and
+  logical shard. The complete current payload is temporary, but the rolling
+  history may retain an exact customer key.</li>
 <li>Customer hashing routes records to logical shards. It is not encryption,
   anonymization, or a substitute for upstream tokenization/HMAC.</li>
 <li>One schema-revision-8 <code>rolling.duckdb</code> uses the stable path

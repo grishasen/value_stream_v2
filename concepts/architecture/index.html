@@ -831,6 +831,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/users/mcp-clients/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codex & Claude Desktop (RU)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -3175,13 +3203,13 @@ alive for the complete source run. Revision 8 is the default and only supported
 checkpoint schema. Targets execute in ascending ISO-date order. Polars streams the
 complete prepared current target through the Arrow C Stream interface into a
 temporary DuckDB relation; it is never persisted. The database retains only
-bounded exposed-rank-1 history with source chunk id and logical customer shard,
-plus a transactional journal of authoritative raw fingerprints.</p>
-<p>For each logical shard, native DuckDB SQL combines current candidates with the
+bounded, normalized impression history with source chunk id and logical
+customer shard, plus a transactional journal of authoritative raw fingerprints.</p>
+<p>For each logical shard, native DuckDB SQL combines current impressions with the
 rolling history and performs cross-day contact normalization, the strict
-frequency window, and selected rank-2 resolution. It returns only enriched
-target rank-1 rows to Polars through Arrow; Polars applies configured state
-predicates, count/value-sum aggregation, grouping, and provenance. Appending the
+frequency window, the prior-response flag, and the scope rank. It returns only
+enriched target contacts to Polars through Arrow; Polars applies count
+aggregation, grouping, and provenance. Appending the
 new narrow history, journal fingerprint, and retention deletes is one state
 transaction. That acceleration commit may precede aggregate publication but
 never authorizes query visibility or chunk reuse. Before each pending target,
