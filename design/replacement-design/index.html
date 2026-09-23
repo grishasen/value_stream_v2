@@ -4403,15 +4403,15 @@
 </code></pre></div>
 <p>The processor-state namespace is deliberately separate from aggregate and
 metadata publication. It is never scanned by query planning or DuckDB views.
-Persistent frequency response uses checkpoint schema revision 8, the default
+Persistent frequency response uses checkpoint schema revision 9, the default
 and only supported revision, at one stable source/processor path. Schema,
 hashing, Polars-version, processor-config, and layout values do not create path
 levels. Schema and hashing revisions, Polars version, processor computation
 hash, logical shard count, history projection, and customer dtype remain inside
 the database as compatibility metadata; DuckDB version is audit-only. Its
 transactional journal records ISO-date chunks and authoritative raw
-fingerprints; its history relation retains only exposed rank-1 rows needed by
-later targets. The complete current candidate payload is temporary. State is
+fingerprints; its history relation retains normalized impressions at every
+rank needed by later targets. The complete current impression payload is temporary. State is
 reconciled and rebuilt from IH on fingerprint/order mismatch or correction and
 has an independent bounded-retention lifecycle. Valid incompatible state is
 reinitialized at the same path; corrupt or identity-invalid state fails closed,
@@ -5108,18 +5108,13 @@ reprocessing.</p>
 </code></pre></div>
 <p>This is the same recipe the current app uses, but parameterized by config rather than hard-coded.</p>
 <h4 id="frequency_response">frequency_response<a class="headerlink" href="#frequency_response" title="Permanent link">&para;</a></h4>
-<p>Daily count and sum states indexed by a fixed trailing
+<p>Daily positive and negative count states indexed by a fixed trailing
 number-of-impressions bucket. The target day is evaluated from either an
 ephemeral bounded history frame or an exact persistent customer-sharded
-checkpoint; counting keys are customer + action + placement, while the
-selected rank-2 action is resolved by implicit customer + interaction keys plus
-the physical source fields in processor-level <code>alternative_group_by</code>. The
-default <code>[Placement]</code> therefore compares within customer + interaction +
-placement, and zero or multiple additional scope fields are supported. Exact
-rank 2 is selected when present, otherwise the smallest rank greater than 1 in
-that complete group. Its raw propensity is
-retained as an expected-response sum. Priority, when configured, remains a
-separate arbitration diagnostic and is never treated as a probability. See
+checkpoint. Counting keys are customer, action, and the configured <code>scope_by</code>
+fields. Every classified impression counts at its recorded rank. Optional
+<code>ScopeRank</code> and <code>PriorPositive</code> dimensions describe the action's rank within
+the decision scope and whether a prior impression in the window was positive. See
 the complete contract in <a href="../../reference/processors/#10-frequency_response-processor">Processor Specifications §10</a>.</p>
 <h4 id="numeric_distribution">numeric_distribution<a class="headerlink" href="#numeric_distribution" title="Permanent link">&para;</a></h4>
 <p>State per numeric column <code>&lt;prop&gt;</code>: <code>Count, Sum, Mean, Var, Min, Max, tdigest</code>.

@@ -2657,9 +2657,9 @@ from the authoritative source.</p>
 Parquet is the resting form of every aggregate (one directory per <code>source/processor/grain</code>, hive-partitioned by <code>period</code>). DuckDB does three jobs that Parquet alone can't: it serves a SQL surface to ad-hoc users (<code>read_parquet(...)</code>), it hosts the small metadata DBs (<code>chunks</code>, <code>pipeline_runs</code>, <code>config_versions</code>, <code>lineage</code>), and it provides workspace-level views named identically to logical metrics (so power users can <code>SELECT * FROM v_metric_ctr_daily</code> without learning the file layout). Inside the engine, frames are still Polars.</p>
 <p>Optional processor checkpoints use a separate state namespace. DuckDB views,
 metric planning, SQL export, and the chunk publication ledger do not expose it.
-Schema-revision-8 persistent frequency processing uses one bounded
+Schema-revision-9 persistent frequency processing uses one bounded
 <code>.valuestream/state/frequency_response/source=&lt;source&gt;/processor=&lt;processor&gt;/rolling.duckdb</code>;
-revision 8 is the default and only supported checkpoint schema. Its
+revision 9 is the default and only supported checkpoint schema. Its
 transactional raw-fingerprint journal and compatibility/audit metadata live
 inside the database rather than in schema/hash/Polars/config/layout path levels.
 Polars version participates in the internal shard compatibility contract;

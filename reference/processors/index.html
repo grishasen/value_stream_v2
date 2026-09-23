@@ -5025,6 +5025,12 @@ use the reserved <code>__valuestream_</code> prefix or a derived name. <code>ran
 integer dtype; configure strict source casts when the raw export uses text
 fields. These checks run on the target schema before it is combined with
 history, so relaxed union coercion cannot mask a bad target day.</p>
+<p>After classification and filtering, ingestion projects contact identity,
+decision time, the current/history marker, raw report group fields, and the
+internal rank, positive flag, and row-order fields needed for sequencing. The
+exact-window Polars and DuckDB plans, and the daily DuckDB plan, omit the
+<code>ScopeRank</code> and <code>PriorPositive</code> window calculations when those optional
+dimensions are not published in <code>group_by</code>.</p>
 <p>A processor-level <code>filter</code> runs on transformed source rows before contacts,
 number-of-impressions buckets, or derived columns exist. It may reference only
 raw/transformed source fields—not <code>Day</code>, the frequency column, <code>ScopeRank</code>, or
@@ -5121,6 +5127,23 @@ impressions     = Positives + Negatives
 </code></pre></div>
 <p><code>contact_policy.engagement_rate_by_impressions</code> installs the engagement rate as
 a line over the frequency column.</p>
+<p><code>frequency_threshold_share</code> derives two query-time values from the same daily
+count states without persisting another aggregate. With threshold <code>k</code>, its
+primary output is
+<code>sum(Positives + Negatives where frequency &gt; k) / sum(Positives + Negatives)</code>;
+<code>PositiveShareAboveThreshold</code> is
+<code>sum(Positives where frequency &gt; k) / sum(Positives)</code>. Both use zero for a zero
+denominator. The query retains the frequency bucket while merging states, then
+groups it away before dividing. A metric definition must set <code>threshold</code> below
+<code>max_frequency</code>; the terminal bucket cannot resolve a cap at or above that
+value. <code>positive_state</code> and <code>negative_state</code> bind the canonical states, and
+<code>frequency_column</code> must match the processor's configured column. Grouping or
+filtering a query by the frequency column is rejected for this metric kind.
+It cannot participate in <code>depends_on</code> formulas because those formulas merge
+away the bucket before they evaluate their dependencies.
+The KPI library provides a repeat-share recipe (<code>k = 1</code>) and an editable
+historical cap-cost recipe (default <code>k = 3</code>). The latter's positive share is
+an observed share, not a causal forecast of conversions lost to a new cap.</p>
 <h3 id="106-dependency-idempotency-and-limitations">10.6 Dependency, idempotency, and limitations<a class="headerlink" href="#106-dependency-idempotency-and-limitations" title="Permanent link">&para;</a></h3>
 <p>Sources bound to this processor must discover ISO <code>YYYY-MM-DD</code> chunk IDs. The
 target chunk remains the output and idempotency unit, while its input

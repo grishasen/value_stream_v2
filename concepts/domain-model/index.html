@@ -3999,7 +3999,7 @@ inflate the published-row totals shown by operational surfaces.</p>
 <h3 id="processor-checkpoint">Processor Checkpoint<a class="headerlink" href="#processor-checkpoint" title="Permanent link">&para;</a></h3>
 <p>An optional, ingestion-only acceleration artifact owned by a bounded Processor.
 For <code>frequency_response</code>, the current and only supported checkpoint schema is
-revision 8. It uses one bounded database at the stable path
+revision 9. It uses one bounded database at the stable path
 <code>.valuestream/state/frequency_response/source=&lt;source&gt;/processor=&lt;processor&gt;/rolling.duckdb</code>.
 There are no schema, hashing, Polars-version, processor-config, or layout path
 levels. Schema and hashing revisions, Polars version, processor computation
@@ -4051,8 +4051,8 @@ partitioning, and retention selects lifecycle. They remain in the full catalog
 identity for audit. Changing them does not republish aggregates; incompatible
 state at the stable path is rebuilt from IH when the next persistent run opens
 it. Earlier per-day checkpoints, nested identity layouts, and schema revisions
-before 8 are obsolete acceleration artifacts and are rebuilt, not migrated,
-into schema-revision-8 state. See
+before 9 are obsolete acceleration artifacts and are rebuilt, not migrated,
+into schema-revision-9 state. See
 <a href="../adr/0007-bounded-lookback-processors/">ADR 0007</a> and
 <a href="../adr/0008-bounded-rolling-duckdb-state/">ADR 0008</a>.</p>
 <h3 id="reader">Reader<a class="headerlink" href="#reader" title="Permanent link">&para;</a></h3>

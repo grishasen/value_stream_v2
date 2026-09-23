@@ -2514,9 +2514,12 @@ fingerprint journal, deterministic processing order, bounded retention, and an
 unambiguous rebuild path from authoritative Interaction History.</p>
 <h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
 <p><code>frequency_response.checkpoint.mode: persistent_sharded</code> remains the catalog
-spelling for compatibility. The current and only supported checkpoint schema
-is revision 8. It selects <strong>bounded rolling DuckDB state</strong>, not immutable
+spelling for compatibility. The initial checkpoint schema in this decision
+was revision 8. It selects <strong>bounded rolling DuckDB state</strong>, not immutable
 per-day shard files.</p>
+<p>This ADR records the original revision-8 decision. The current checkpoint
+schema is revision 9; see <a href="../../../reference/processors/#10-frequency_response-processor">Processor Specifications §10</a>
+for its supported contract.</p>
 <p>There is one stable database path for each source and processor:</p>
 <div class="highlight"><pre><span></span><code>.valuestream/state/frequency_response/source=&lt;source&gt;/processor=&lt;processor&gt;/rolling.duckdb
 </code></pre></div>

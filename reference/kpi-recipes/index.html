@@ -3564,13 +3564,40 @@ record for the same contact, so each contact counts once.</p>
 <td>Approximate fixed-window interpretation</td>
 <td>Line</td>
 </tr>
+<tr>
+<td>Repeat impression share</td>
+<td>The fraction of classified impressions at frequency 2 or higher. <strong>Example:</strong> If 800 of 1,000 impressions are in repeat buckets, the share is 80%.</td>
+<td><code>contact_policy.repeat_impression_share</code></td>
+<td><code>Positives</code>, <code>Negatives</code>, and a terminal bucket above 1</td>
+<td>Approximate fixed-window interpretation</td>
+<td>KPI card</td>
+</tr>
+<tr>
+<td>Historical frequency-cap cost</td>
+<td>For a chosen cap <code>k</code>, the fraction of historical impressions above <code>k</code>; the query also returns <code>PositiveShareAboveThreshold</code>, the fraction of positive outcomes above <code>k</code>. <strong>Example:</strong> If 200 of 1,000 impressions and 5 of 50 positive outcomes occurred above cap 3, the two shares are 20% and 10%.</td>
+<td><code>contact_policy.historical_cap_cost</code></td>
+<td><code>Positives</code>, <code>Negatives</code>, and <code>k &lt; max_frequency</code></td>
+<td>Approximate fixed-window interpretation</td>
+<td>Table</td>
+</tr>
 </tbody>
 </table>
-<p>The <strong>Contact policy</strong> recipe targets only the <code>frequency_response</code> processor
-and requires its exact <code>Positives</code> and <code>Negatives</code> states; it never proposes a
-generic count as a substitute. Its line recommendation uses <code>ExposureBucket</code>,
+<p>The <strong>Contact policy</strong> recipes target only the <code>frequency_response</code> processor
+and require its exact <code>Positives</code> and <code>Negatives</code> states; they never propose a
+generic count as a substitute. The engagement-rate line uses <code>ExposureBucket</code>,
 whose value is an upstream fixed-window approximation; changing a report date
 filter does not recompute customer contact history.</p>
+<p>The two share recipes use <code>frequency_threshold_share</code>. For each requested
+report group, the query first merges stored counts by frequency bucket, then
+divides the counts above the threshold by all counts in the group. A zero
+denominator yields zero. The repeat-share threshold is 1. The cap-cost recipe
+accepts a whole-number <code>cap</code> parameter (default 3), which must be below the
+processor's terminal <code>max_frequency</code> bucket. Its primary output is the
+historical impression share; <code>PositiveShareAboveThreshold</code> is a companion
+output with positive outcomes as both numerator and denominator. Queries may
+group or filter by other stored dimensions, but cannot group or filter by the
+frequency column because that would remove buckets from the denominator.
+Both values describe observed data, not the outcomes a new cap would cause.</p>
 <p>Customers who already responded are shown the same action again more often,
 so an all-customer curve can rise with repeated impressions even when every
 customer responds less each time. Split or filter by <code>PriorPositive</code> before
