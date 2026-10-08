@@ -5181,7 +5181,13 @@ silently undercounting the number of impressions.</p>
   create directory levels. Schema and hashing revisions, Polars version,
   processor computation hash, shard count, history projection, and customer
   dtype are stored inside the database as compatibility metadata; DuckDB
-  version is audit-only. The complete current impressions remain temporary
+  version is audit-only. Shard hashing revision 2 uses <code>pl.Expr.hash</code> with the
+  single seed <code>0x243F6A8885A308D3</code>, compatible with the Polars 2.0 hash API.
+  Schema revision 9 retains <code>seed_0</code> through <code>seed_3</code> as metadata slots, all
+  mirroring that one seed; only <code>seed_0</code> is passed to the hash function. A hash
+  revision or Polars version change reinitializes the checkpoint at the same
+  path and rebuilds history from authoritative input before reuse.
+  The complete current impressions remain temporary
   until the target succeeds; persisted exact history keeps every impression,
   normalized to one row per contact and source chunk (earliest decision time
   and source order, or-combined positive flag), and projected to customer,
@@ -5255,14 +5261,17 @@ semantics: changing the effective <code>fraction</code> republishes the processo
 aggregates. The fraction must be an exact multiple of <code>0.000001</code>, from that
 minimum through <code>1.0</code>, so the configured fraction, hash threshold, and
 <code>1 / fraction</code> scale always describe the same cohort. Membership hashes the
-customer key after conversion to Polars <code>String</code>, under fixed seeds and a fixed
-modulus. Text, integer, and dictionary-backed IDs share membership when they
+customer key after conversion to Polars <code>String</code>, under the single fixed seed
+<code>0x452821E638D01377</code> and a fixed modulus. Text, integer, and dictionary-backed
+IDs share membership when they
 render to the same string. Distinct renderings such as integer <code>2</code> and float
 <code>2.0</code> remain distinct IDs; normalize such source drift explicitly in
 <code>pipelines.yaml</code>. The Polars version is pinned into the computation contract,
 so a Polars upgrade recomputes sampled processors rather than silently changing
-membership. <code>fraction: 1.0</code> retains the explicit author setting in the catalog
-but is computation-equivalent to omitting <code>customer_sample</code>. Small segments
+membership. Sampling contract revision 3 records the single seed and replaces
+the previous four-seed contract, so existing sampled aggregates are recomputed
+on the next ingestion run. <code>fraction: 1.0</code> retains the explicit author setting
+in the catalog but is computation-equivalent to omitting <code>customer_sample</code>. Small segments
 become noisy under sampling; prefer it for high-volume decision-support
 analytics.</p>
 <p><code>retention_days</code> optionally sets the number of source-day journal entries
