@@ -29,14 +29,11 @@ from valuestream.utils.logger import get_logger
 
 # Revision 9: history keeps every staged impression, not only exposed rank-1 rows.
 CHECKPOINT_SCHEMA_REVISION = 9
-SHARD_HASH_REVISION = 1
+SHARD_HASH_REVISION = 2
 SHARD_HASH_ALGORITHM = "polars.Expr.hash"
-SHARD_HASH_SEEDS = (
-    0x243F6A8885A308D3,
-    0x13198A2E03707344,
-    0xA4093822299F31D0,
-    0x082EFA98EC4E6C89,
-)
+SHARD_HASH_SEED = 0x243F6A8885A308D3
+# Keep schema revision 9's four metadata slots; all mirror the sole hash seed.
+SHARD_HASH_SEEDS = (SHARD_HASH_SEED,) * 4
 SHARD_COLUMN = "__valuestream_checkpoint_shard"
 CHUNK_ID_COLUMN = "__valuestream_checkpoint_chunk_id"
 ROLLING_DATABASE_FILENAME = "rolling.duckdb"
@@ -174,7 +171,7 @@ def assign_customer_shard(
 
     _validate_shard_request(frame, customer_column=customer_column, shard_count=shard_count)
     shard = (
-        pl.col(customer_column).hash(*SHARD_HASH_SEEDS) % pl.lit(shard_count, dtype=pl.UInt64)
+        pl.col(customer_column).hash(seed=SHARD_HASH_SEED) % pl.lit(shard_count, dtype=pl.UInt64)
     ).cast(pl.UInt32)
     return frame.with_columns(shard.alias(SHARD_COLUMN))
 
@@ -1460,6 +1457,7 @@ __all__ = [
     "SHARD_COLUMN",
     "SHARD_HASH_ALGORITHM",
     "SHARD_HASH_REVISION",
+    "SHARD_HASH_SEED",
     "SHARD_HASH_SEEDS",
     "CheckpointJournalEntry",
     "CheckpointValidationError",

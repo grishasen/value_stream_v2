@@ -61,7 +61,8 @@ _FREQUENCY_RESPONSE_SEMANTICS_REVISION = 5
 # Revision 2 hashes the UTF-8 string representation of the customer key, so
 # text, integer, and dictionary-backed IDs that render identically do not
 # change sample membership solely due to those source representations.
-_FREQUENCY_CUSTOMER_SAMPLE_REVISION = 2
+# Revision 3 uses the single-seed hash API supported by Polars 2.0.
+_FREQUENCY_CUSTOMER_SAMPLE_REVISION = 3
 
 
 def canonicalize(value: Any) -> Any:
@@ -248,7 +249,7 @@ def _processor_computation_fields(processor: model.Processor) -> dict[str, Any]:
         elif customer_sample is not None:
             # Sample membership is computed with polars.Expr.hash, which is
             # not guaranteed stable across Polars versions. Pinning the
-            # version (with the fixed seeds and modulus) into the semantic
+            # version (with the fixed seed and modulus) into the semantic
             # contract keeps published numbers deterministic: a Polars
             # upgrade recomputes sampled processors instead of silently
             # changing which customers are sampled.

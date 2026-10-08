@@ -989,7 +989,7 @@ def test_customer_sampling_is_deterministic_and_keeps_whole_customers() -> None:
     assert config.customer_sample is not None
     membership = frame.select(pl.col("CustomerID").unique().sort()).with_columns(
         (
-            pl.col("CustomerID").cast(pl.String).hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
+            pl.col("CustomerID").cast(pl.String).hash(seed=model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS[0])
             % pl.lit(model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS, dtype=pl.UInt64)
             < pl.lit(config.customer_sample.sample_threshold, dtype=pl.UInt64)
         ).alias("sampled")

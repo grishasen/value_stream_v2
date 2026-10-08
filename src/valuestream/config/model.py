@@ -704,12 +704,7 @@ def _minimum_frequency_checkpoint_retention_days(
 # computation-hash contract (see canonical.py) — upgrading Polars deliberately
 # recomputes sampled processors.
 FREQUENCY_CUSTOMER_SAMPLE_MODULUS = 1_000_000
-FREQUENCY_CUSTOMER_SAMPLE_SEEDS = (
-    0x452821E638D01377,
-    0xBE5466CF34E90C6C,
-    0xC0AC29B7C97C50DD,
-    0x3F84D5B5B5470917,
-)
+FREQUENCY_CUSTOMER_SAMPLE_SEEDS = (0x452821E638D01377,)
 
 
 class FrequencyResponseCustomerSample(_StrictModel):

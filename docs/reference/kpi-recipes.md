@@ -175,7 +175,7 @@ internal state-ID choice.
 
 ## Built-in Recipes
 
-Choose a recipe by the business question it answers. The 36 recipes below are
+Choose a recipe by the business question it answers. The 38 recipes below are
 grouped by business purpose; recipe IDs remain unchanged even when their
 technical domain differs from the group. Examples use Pega Customer Decision
 Hub (CDH) terminology. All numbers and

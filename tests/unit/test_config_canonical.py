@@ -289,7 +289,7 @@ class TestCatalogHash:
             "algorithm": "polars.Expr.cast(String).hash",
             "modulus": model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS,
             "polars_version": pl.__version__,
-            "revision": 2,
+            "revision": 3,
             "seeds": list(model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS),
         }
         assert "customer_sample_contract" not in _processor_computation_fields(base)

@@ -129,14 +129,17 @@ def test_rolling_path_is_stable_and_contains_only_source_and_processor(tmp_path:
 
 
 @pytest.mark.unit
-def test_native_polars_customer_shards_are_deterministic() -> None:
+@pytest.mark.parametrize("shard_count", [1, 8, 4096])
+def test_native_polars_customer_shards_are_deterministic(shard_count: int) -> None:
     frame = _contacts()
-    eager = assign_customer_shard(frame, customer_column="CustomerID", shard_count=8)
-    repeated = assign_customer_shard(frame, customer_column="CustomerID", shard_count=8)
+    eager = assign_customer_shard(frame, customer_column="CustomerID", shard_count=shard_count)
+    repeated = assign_customer_shard(frame, customer_column="CustomerID", shard_count=shard_count)
     lazy = assign_customer_shard(
-        frame.lazy(), customer_column="CustomerID", shard_count=8
+        frame.lazy(), customer_column="CustomerID", shard_count=shard_count
     ).collect()
 
+    assert eager.schema[SHARD_COLUMN] == pl.UInt32
+    assert eager.get_column(SHARD_COLUMN).is_between(0, shard_count - 1).all()
     assert eager.get_column(SHARD_COLUMN).to_list() == repeated.get_column(SHARD_COLUMN).to_list()
     assert eager.get_column(SHARD_COLUMN).to_list() == lazy.get_column(SHARD_COLUMN).to_list()
     assert (
@@ -957,6 +960,35 @@ def test_unsupported_schema_revision_reinitializes_to_current_only(tmp_path: Pat
         assert rebuilt.connection.execute(
             f'SELECT schema_revision FROM "{METADATA_TABLE}"'
         ).fetchone() == (CHECKPOINT_SCHEMA_REVISION,)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("field", ["shard_hash_revision", "seed_1"])
+def test_legacy_multiseed_hash_reinitializes_same_stable_database(
+    tmp_path: Path, field: str
+) -> None:
+    with _rolling(tmp_path) as checkpoint:
+        _stage_and_commit(checkpoint, "2026-07-30", _fingerprint(1))
+        path = checkpoint.path
+    legacy_value = 1 if field == "shard_hash_revision" else 0x13198A2E03707344
+    with duckdb.connect(str(path)) as connection:
+        connection.execute(
+            f'UPDATE "{METADATA_TABLE}" SET "{field}" = ?',
+            [legacy_value],
+        )
+
+    with _rolling(tmp_path) as rebuilt:
+        assert rebuilt.path == path
+        assert rebuilt.journal == ()
+        assert HISTORY_TABLE not in _persistent_tables(rebuilt.connection)
+        metadata = rebuilt.connection.execute(
+            f'SELECT shard_hash_revision, seed_0, seed_1, seed_2, seed_3 FROM "{METADATA_TABLE}"'
+        ).fetchone()
+        assert metadata == (2, *(processor_state.SHARD_HASH_SEED for _ in range(4)))
+        _stage_and_commit(rebuilt, "2026-07-31", _fingerprint(2))
+
+    with _rolling(tmp_path) as reopened:
+        assert [entry.chunk_id for entry in reopened.journal] == ["2026-07-31"]
 
 
 @pytest.mark.unit

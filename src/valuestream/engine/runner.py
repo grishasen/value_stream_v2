@@ -533,7 +533,7 @@ def _process_chunk(
             chunk_id=chunk.chunk_id,
             created_at=dt.datetime.now(dt.UTC),
         )
-        source_engine: _CollectEngine = "streaming" if source.reader.streaming else "auto"
+        source_engine: _CollectEngine = "streaming" if source.reader.streaming else "in-memory"
         normal_processors = [
             processor for processor in processors if not _is_frequency_processor(processor)
         ]

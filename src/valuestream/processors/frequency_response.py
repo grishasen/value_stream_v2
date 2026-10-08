@@ -548,7 +548,7 @@ class FrequencyResponseProcessor:
             source = source.filter(
                 pl.col(columns.customer)
                 .cast(pl.String)
-                .hash(*model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS)
+                .hash(seed=model.FREQUENCY_CUSTOMER_SAMPLE_SEEDS[0])
                 % pl.lit(model.FREQUENCY_CUSTOMER_SAMPLE_MODULUS, dtype=pl.UInt64)
                 < pl.lit(
                     self.config.customer_sample.sample_threshold,
