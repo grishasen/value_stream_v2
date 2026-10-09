@@ -3,7 +3,7 @@ name = "valuestream"
 version = "0.1.0"
 description = "Aggregate-first business intelligence platform — configuration-driven, file-input, sufficient-statistics at rest."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -13,37 +13,31 @@ dependencies = [
     "polars>=2.0.0",
     "numpy>=2.0",
     "duckdb>=1.5.6",
-    "pyarrow>=19",
+    "pyarrow>=19.0.1",
     "datasketches>=5.2.0",
-    "pydantic>=2.13.4",
+    "pydantic>=2.14.0",
     "jsonschema>=4",
     "pyyaml>=6.0",
     "click>=8.0",
     "rich>=13.9",
     "structlog>=24.4.0",
-    "pandas>=3.0",
+    "pandas>=3.0.6",
     "plotly>=7.1.0",
-    "scipy>=1.17.1",
+    "scipy>=1.18.1",
     "streamlit>=1.65.0",
-    # Streamlit 1.59.1 does not pass Starlette 1.4's required
-    # GZipResponder.thread_minimum_size argument.
     "starlette>=1.7.0",
     "litellm>=1.104.1",
 ]
 
 [project.optional-dependencies]
 ai = [
-    # 2.0 renamed FastMCP to MCPServer; the server supports both, but the lock
-    # resolves 2.x and 1.x is no longer exercised.
-    "mcp>=2.0",
+    "mcp>=2.3.0",
 ]
 api = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
 ]
 viz = [
-    # Static chart images for the report page's PNG export and the tool
-    # surfaces' render="png". Needs a Chrome/Chromium the first time it runs.
     "kaleido>=1",
 ]
 dev = [
@@ -63,8 +57,6 @@ dev = [
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.22",
     "fastapi>=0.115",
-    # starlette>=1.3 testclient prefers httpx2 (the httpx 2.x successor line)
-    # and deprecates plain httpx, which our filterwarnings=error escalates.
     "httpx2",
 ]
 
