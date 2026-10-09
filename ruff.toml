@@ -1,4 +1,4 @@
-target-version = "py311"
+target-version = "py313"
 line-length = 100
 src = ["src", "tests"]
 extend-exclude = ["docs", "examples/**/data"]
