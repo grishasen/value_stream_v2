@@ -1884,6 +1884,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adr/0009-single-workspace-http-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0009 Single-workspace HTTP MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2642,7 +2670,7 @@ or proxy-backed providers:</p>
 <span class="w">    </span><span class="nt">api_key_env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANTHROPIC_API_KEY</span>
 </code></pre></div>
 <p>The Chat page also lets you override these values for the current Streamlit
-session. MCP clients such as Claude Code should use the local stdio MCP server
+session. MCP clients such as Claude Code can use the stdio or bearer-protected HTTP MCP server
 instead of the Chat page; registration steps are in the
 <a href="../../../reference/api-and-mcp/">API &amp; MCP reference</a>.</p>
 <p>Configuration Builder's Chat Review step can edit <code>chat_with_data</code> settings in

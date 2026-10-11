@@ -2034,6 +2034,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0009-single-workspace-http-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0009 Single-workspace HTTP MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2925,11 +2953,11 @@
 </tr>
 <tr>
 <td>Current headless surfaces</td>
-<td>Read-only FastAPI HTTP API · local stdio MCP</td>
+<td>Read-only FastAPI HTTP API · stdio/HTTP MCP</td>
 </tr>
 <tr>
 <td>Deferred surfaces</td>
-<td>Remote HTTP MCP · OIDC/multi-user service deployment</td>
+<td>OIDC/multi-user service deployment</td>
 </tr>
 </tbody>
 </table>
@@ -3032,8 +3060,8 @@
                        +-------------+                  |  export     |
                                                         +------+------+
                                                                |
-                                                 local MCP + read-only HTTP API;
-                                                 remote HTTP MCP deferred
+                                                 stdio/HTTP MCP + read-only HTTP API;
+                                                 OIDC/multi-user deferred
 </code></pre></div>
 <h2 id="5-c4-containers-logical">5. C4 — Containers (logical)<a class="headerlink" href="#5-c4-containers-logical" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>+-------------------------+   +-------------------------+   +-------------------------+
@@ -3064,9 +3092,9 @@
       |                         |  - Streamlit UI         |
       |                         |  - Python SDK           |
 |                         |  - SQL via DuckDB views |
-|                         |  - local MCP tools      |
+|                         |  - stdio/HTTP MCP tools |
 |                         |  - read-only HTTP API   |
-|                         |  - remote MCP deferred  |
+|                         |  - OIDC deferred        |
       |                         +-------------------------+
       |
       |
@@ -3086,7 +3114,7 @@
 <li><strong>Metadata store</strong> — small DuckDB databases tracking chunks, runs, config versions, lineage. Single-writer per database file; readers can be many.</li>
 <li><strong>Ingestion engine</strong> — turns files into aggregates. Reads files lazily via Polars, applies transforms, fans out to processors, writes Parquet partials, runs compactions, updates the chunks ledger.</li>
 <li><strong>Query layer</strong> — turns metric requests into reads from the aggregate store. Plans, scans Parquet via DuckDB, materializes Polars frames, applies derived metric DSL, returns rows.</li>
-<li><strong>Surfaces</strong> — current read clients on top of the same query layer are Streamlit UI, Python SDK, DuckDB export, Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API. Remote HTTP MCP and multi-user/OIDC deployment are deferred.</li>
+<li><strong>Surfaces</strong> — current read clients on top of the same query layer are Streamlit UI, Python SDK, DuckDB export, Chat With Data, stdio and bearer-protected HTTP MCP, and a read-only FastAPI HTTP API. HTTP MCP serves one fixed workspace per process. Multi-user/OIDC deployment is deferred; see <a href="../adr/0009-single-workspace-http-mcp/">ADR 0009</a>.</li>
 <li><strong>CLI</strong> — operator entry point: <code>run</code>, <code>validate</code>, <code>backfill</code>, <code>vacuum</code>, <code>serve</code>.</li>
 </ol>
 <p>The Streamlit reports surface reads typed page-filter definitions from
@@ -3776,9 +3804,9 @@ only the chunks whose final durable marker is <code>ok</code>.</p>
 |                                           |
 |   ├── Streamlit on :8501                 |
 |   ├── ingestion runner (CLI / cron)      |
-|   ├── optional local stdio MCP           |
+|   ├── optional stdio/HTTP MCP             |
 |   ├── optional read-only FastAPI         |
-|   └── deferred: remote HTTP MCP/OIDC     |
+|   └── deferred: OIDC/multi-user           |
 |                                           |
 |   $WORKSPACE_DIR -&gt; /data/valuestream/bdt    |
 +-------------------------------------------+

@@ -1742,6 +1742,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0009-single-workspace-http-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0009 Single-workspace HTTP MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2880,9 +2908,9 @@ and <code>lift_curve</code> derive gain/lift from the reconstructed <code>tpr</c
 One process per workspace.</p>
 <div class="highlight"><pre><span></span><code>valuestream<span class="w"> </span>serve<span class="w"> </span>--workspace<span class="w"> </span>bdt
 <span class="c1"># starts Streamlit :8501 for the current product</span>
-<span class="c1"># optional: local stdio MCP through valuestream serve-mcp</span>
+<span class="c1"># optional: stdio or HTTP MCP through valuestream serve-mcp</span>
 <span class="c1"># optional: read-only FastAPI through valuestream serve-api</span>
-<span class="c1"># deferred: remote HTTP MCP and OIDC/multi-user deployment</span>
+<span class="c1"># deferred: OIDC/multi-user deployment</span>
 <span class="c1"># pointed at /data/valuestream/bdt</span>
 </code></pre></div>
 <p>A reverse proxy routes by hostname for multiple workspaces.</p>
@@ -2947,7 +2975,7 @@ required. There is no <code>eval</code>, so config injection isn't a vector. Agg
 provenance lets an auditor reconstruct the exact config that produced any
 number.</p>
 <p><strong>F2. How does authentication work?</strong>
-Current product: SDK and local stdio MCP run under the host process identity; UI auth is handled by Streamlit/basic auth or an upstream proxy; per-workspace filesystem permissions enforce hard isolation. The read-only HTTP API supports a single bearer token and the CLI refuses non-loopback binding without one. Remote HTTP MCP and OIDC/multi-user auth remain deferred.</p>
+Current product: SDK and local stdio MCP run under the host process identity; UI auth is handled by Streamlit/basic auth or an upstream proxy; per-workspace filesystem permissions enforce hard isolation. The read-only HTTP API supports a single bearer token and the CLI refuses non-loopback binding without one. HTTP MCP serves one fixed workspace and requires a bearer token on every request, with Host/Origin checks. OIDC/multi-user auth remains deferred.</p>
 <p><strong>F3. How do I redact a customer?</strong>
 Remove or redact the customer's records in the authoritative source, delete or
 rebuild affected rolling processor state while its writer is closed and the

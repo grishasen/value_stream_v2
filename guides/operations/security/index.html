@@ -1293,6 +1293,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#http-mcp-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP MCP Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#governed-sql-is-opt-in" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1882,6 +1893,34 @@
     
   
     0008 Bounded rolling DuckDB state
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adr/0009-single-workspace-http-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0009 Single-workspace HTTP MCP
   
 
     
@@ -2539,6 +2578,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#http-mcp-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP MCP Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#governed-sql-is-opt-in" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2682,8 +2732,27 @@ uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w">
   <code>127.0.0.1</code>, <code>localhost</code>, or <code>::1</code>) unless a token is set.</li>
 <li>The API never mutates the catalog or aggregate store.</li>
 </ul>
-<p>Remote HTTP MCP, OAuth/OIDC, and hosted multi-user auth are deferred; the
-current surfaces are designed for trusted local or single-team use.</p>
+<h2 id="http-mcp-authentication">HTTP MCP Authentication<a class="headerlink" href="#http-mcp-authentication" title="Permanent link">&para;</a></h2>
+<p>HTTP MCP requires a non-empty bearer token on every HTTP request, including
+localhost, and returns 401 for missing/invalid credentials. Set <code>--token</code> or
+<code>VALUESTREAM_MCP_TOKEN</code>; the separate REST token is not used. Prefer the
+environment variable over command-line secrets in process arguments. The
+server compares token bytes with <code>hmac.compare_digest</code> and does not log them.</p>
+<p>Host checks stay enabled for every bind. Loopback names and a concrete bind
+address are allowed automatically; add the public hostname with
+<code>--allowed-host</code> when using a reverse proxy. A wildcard bind requires an
+explicit host allowlist. Origin headers are rejected unless the origin
+is added with <code>--allowed-origin</code>; requests without Origin are accepted.
+These checks do not enable browser CORS access.</p>
+<p>Use HTTPS for remote connections, normally terminated by a reverse proxy, and
+keep the backend listener on loopback. The proxy must forward Authorization
+and preserve a Host value in the server's allowlist. MCP HTTP is a separate
+SDK application; REST authentication dependencies do not protect it.</p>
+<p>One process is bound to one workspace. All token holders have the same
+aggregate tools and optional SQL access. The token also grants access to the
+catalog and dashboard resources, so treat catalog contents as shared data.
+<code>stdio</code> continues to run under the host process identity. OAuth/OIDC and
+per-user permissions remain deferred; current deployments are single-team.</p>
 <h2 id="governed-sql-is-opt-in">Governed SQL Is Opt-In<a class="headerlink" href="#governed-sql-is-opt-in" title="Permanent link">&para;</a></h2>
 <p>SQL tools and endpoints are absent unless <code>--enable-sql</code> is passed to
 <code>serve-mcp</code> or <code>serve-api</code> (and are opt-in inside Chat). When enabled, SQL is

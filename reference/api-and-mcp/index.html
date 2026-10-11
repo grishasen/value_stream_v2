@@ -1742,6 +1742,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0009-single-workspace-http-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0009 Single-workspace HTTP MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2109,6 +2137,17 @@
     <span class="md-ellipsis">
       
         Starting the Servers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-transports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP Transports
       
     </span>
   </a>
@@ -2548,6 +2587,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#mcp-transports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP Transports
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#http-endpoints" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2686,16 +2736,16 @@
 
 
 <h1 id="api-and-mcp-reference">API and MCP Reference<a class="headerlink" href="#api-and-mcp-reference" title="Permanent link">&para;</a></h1>
-<p>The read-only HTTP API and the local stdio MCP server expose the same
+<p>The read-only HTTP API and the stdio/Streamable HTTP MCP server expose the same
 governed tool layer over the aggregate query path. Neither surface mutates the
 catalog or aggregate store, and neither exposes raw source rows. LLM provider
 setup for the in-app planner is in
 <a href="../../guides/users/chat-with-data/">Chat with data</a>; the security posture
 is summarized in <a href="../../guides/operations/security/">Security</a>.</p>
-<div class="highlight"><pre><span></span><code>Streamlit Chat page      MCP client (stdio)          HTTP API client
+<div class="highlight"><pre><span></span><code>Streamlit Chat page      MCP client (stdio/HTTP)     HTTP API client
         |                          |                          |
         v                          v                          v
-LLM intent planner          stdio MCP tools           FastAPI endpoints
+LLM intent planner          shared MCP tools          FastAPI endpoints
         |                          |                          |
         +----------- governed tool layer (one implementation) +
                          |
@@ -2706,18 +2756,39 @@ LLM intent planner          stdio MCP tools           FastAPI endpoints
 on disk, so manifest and chart validation stay in sync with Config Builder
 edits without a restart.</p>
 <h2 id="starting-the-servers">Starting the Servers<a class="headerlink" href="#starting-the-servers" title="Permanent link">&para;</a></h2>
-<p>For desktop client setup and connection checks, see
+<p>For local and remote client setup and connection checks, see
 <a href="../../guides/users/mcp-clients/">Connect Codex and Claude Desktop (Russian)</a>.</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>ai<span class="w">    </span><span class="c1"># MCP dependency</span>
 uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>api<span class="w">   </span><span class="c1"># FastAPI dependency</span>
 
 uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-mcp<span class="w"> </span>WORKSPACE<span class="w"> </span><span class="o">[</span>--enable-sql<span class="o">]</span>
+uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-mcp<span class="w"> </span>WORKSPACE<span class="w"> </span>--transport<span class="w"> </span>http<span class="w"> </span><span class="o">[</span>--enable-sql<span class="o">]</span>
 uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-api<span class="w"> </span>WORKSPACE<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="o">[</span>--enable-sql<span class="o">]</span>
 </code></pre></div>
 <p>CLI options are in the <a href="../cli/#serve-api">CLI reference</a>. Registration for
 Claude Code:</p>
 <div class="highlight"><pre><span></span><code>claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>valuestream<span class="w"> </span>--<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-mcp<span class="w"> </span>/absolute/path/to/workspace
 </code></pre></div>
+<h2 id="mcp-transports">MCP Transports<a class="headerlink" href="#mcp-transports" title="Permanent link">&para;</a></h2>
+<p><code>stdio</code> remains the default: the client owns a local subprocess. HTTP serves
+the SDK Streamable HTTP protocol at <code>/mcp</code> in one Uvicorn worker, with stateless
+request handling and JSON responses. The tools, resources, prompts, SQL opt-in,
+query layer, catalog reload, bounded outputs, and provenance are shared.</p>
+<p>HTTP requires <code>Authorization: Bearer &lt;token&gt;</code> on <strong>every request</strong>. Set the
+token with <code>--token</code> or <code>VALUESTREAM_MCP_TOKEN</code>; unlike REST, there is no open
+localhost mode or unauthenticated health endpoint. Missing, incorrect, or
+duplicate Authorization headers return 401 with <code>WWW-Authenticate: Bearer</code>.
+Host and Origin validation stays enabled; see the
+<a href="../cli/#serve-mcp">CLI options</a> and <a href="../../guides/operations/security/#http-mcp-authentication">security guide</a>.</p>
+<p>One process serves one workspace fixed at startup. All holders of the token
+have the same access to that workspace. HTTP MCP does not implement OAuth
+discovery, user accounts, workspace selection, or per-user permissions.
+Clients must support Streamable HTTP and sending a configured bearer header.
+The REST URL from <code>serve-api</code> is not an MCP endpoint.</p>
+<p>PNG image blocks and Plotly <code>render="spec"</code> are carried in MCP responses over
+either transport. HTML modes retain the existing server-local <code>render.path</code>
+contract: HTTP does not publish those files. Use PNG/spec for a remote client,
+or retrieve HTML separately through your deployment's authorized file access.</p>
 <h2 id="http-endpoints">HTTP Endpoints<a class="headerlink" href="#http-endpoints" title="Permanent link">&para;</a></h2>
 <p>Interactive OpenAPI docs are served at <code>/docs</code>.</p>
 <table>
@@ -2807,10 +2878,6 @@ non-loopback bind.</p>
 <tr>
 <td><code>kpi_query</code></td>
 <td>Return a KPI card's value, comparison delta, period, and sparkline</td>
-</tr>
-<tr>
-<td><code>chat</code></td>
-<td>Plan and answer a natural-language question (requires a configured model)</td>
 </tr>
 <tr>
 <td><code>dimension_values_tool</code></td>
@@ -3006,8 +3073,10 @@ Pagination does not pin a snapshot across ingestion or catalog edits.</p>
 page). The chart tool renders its returned page; the authored tile tool renders
 the full tile while limiting response rows. These query tools publish typed
 output schemas, and enum/limit constraints appear in their input schemas.
-Tool annotations identify read-only queries, additive rendering operations,
-and the external LLM call made by <code>chat</code>.</p>
+Tool annotations identify read-only queries and additive rendering operations.
+MCP exposes no built-in <code>chat</code> or server-side LLM planner. The calling client
+interprets free-form questions and invokes the deterministic analytics tools;
+MCP tools do not require an LLM model or API key in the workspace.</p>
 <h2 id="query-criteria-semantics">Query Criteria Semantics<a class="headerlink" href="#query-criteria-semantics" title="Permanent link">&para;</a></h2>
 <p>Both <code>metric_query</code>-style tools and <code>POST /metrics/{name}/query</code> accept the
 same intent fields:</p>
@@ -3024,6 +3093,10 @@ same intent fields:</p>
 <li><code>quantiles: true</code> adds the Median/p25/p75/p90/p95 suite for digest metrics.</li>
 <li>Grain selection is deterministic inside Value Stream: clients supply query
   criteria (time axis, dimensions, date bounds), never a physical grain.</li>
+<li>Explicit chart requests infer the logical grain from a temporal axis such as
+  <code>x="Day"</code>, <code>Month</code>, <code>Quarter</code>, or <code>Year</code> when the default summary hint is used.
+  A daily line chart therefore retains <code>Day</code> in its query rows without requiring
+  the client to choose a grain. Non-temporal charts retain summary grouping.</li>
 <li>Returned rows are capped; authored tile rendering retains the full tile.</li>
 </ul>
 <h2 id="provenance-envelope">Provenance Envelope<a class="headerlink" href="#provenance-envelope" title="Permanent link">&para;</a></h2>

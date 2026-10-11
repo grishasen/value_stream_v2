@@ -1907,6 +1907,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0009-single-workspace-http-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0009 Single-workspace HTTP MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2826,7 +2854,7 @@ queries return the same envelope.</p>
 <li>Chat With Data</li>
 <li>Python SDK helpers</li>
 <li>DuckDB metric export</li>
-<li>Local stdio MCP</li>
+<li>Local stdio and bearer-protected HTTP MCP</li>
 <li>Read-only FastAPI HTTP API</li>
 </ul>
 <h2 id="ui-architecture">UI Architecture<a class="headerlink" href="#ui-architecture" title="Permanent link">&para;</a></h2>
@@ -2926,10 +2954,13 @@ popover so operational pages can prioritize business and run status.</p>
 </table>
 <h2 id="headless-and-deferred-surfaces">Headless and Deferred Surfaces<a class="headerlink" href="#headless-and-deferred-surfaces" title="Permanent link">&para;</a></h2>
 <p><code>valuestream serve-api</code> exposes the read-only FastAPI surface and
-<code>valuestream serve-mcp</code> exposes local stdio MCP. Both preserve the aggregate-only
+<code>valuestream serve-mcp</code> exposes local stdio MCP by default or Streamable HTTP
+with <code>--transport http</code>, serving one fixed workspace at <code>/mcp</code>. Both preserve the aggregate-only
 contract and reuse the same query layer; SQL is absent unless <code>--enable-sql</code> is
-passed. The API CLI requires a bearer token for non-loopback binds. Remote HTTP
-MCP, OIDC, and multi-user service deployment remain deferred.</p>
+passed. The API CLI requires a bearer token for non-loopback binds. HTTP MCP requires
+a bearer token for all binds and validates Host/Origin headers. OAuth/OIDC and
+multi-user service deployment remain deferred; see
+<a href="../adr/0009-single-workspace-http-mcp/">ADR 0009</a>.</p>
 <h2 id="verification">Verification<a class="headerlink" href="#verification" title="Permanent link">&para;</a></h2>
 <p>Use these checks before merging behavior or documentation changes:</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>validate<span class="w"> </span>examples/demo

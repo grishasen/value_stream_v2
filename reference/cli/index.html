@@ -11,7 +11,7 @@
       
       
       
-        <link rel="prev" href="../../concepts/adr/0008-bounded-rolling-duckdb-state/">
+        <link rel="prev" href="../../concepts/adr/0009-single-workspace-http-mcp/">
       
       
         <link rel="next" href="../expression-dsl/">
@@ -1742,6 +1742,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0009-single-workspace-http-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0009 Single-workspace HTTP MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2806,10 +2834,56 @@ alone is intentionally non-destructive.</p>
 <h2 id="serve-mcp">serve-mcp<a class="headerlink" href="#serve-mcp" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-mcp<span class="w"> </span>WORKSPACE<span class="w"> </span><span class="o">[</span>--enable-sql<span class="o">]</span>
 </code></pre></div>
-<p>Starts the read-only MCP server over stdio. Requires the <code>ai</code> extra
-(<code>uv sync --extra ai</code>). <code>--enable-sql</code> exposes the governed aggregate SQL
-tools, which are disabled by default. Tools are listed in the
-<a href="../api-and-mcp/">API &amp; MCP reference</a>.</p>
+<p>Starts MCP for one fixed workspace. Requires the <code>ai</code> extra
+(<code>uv sync --extra ai</code>). Both transports expose the same tools, resources, and
+prompts. Governed SQL is absent unless <code>--enable-sql</code> is passed.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default / behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--transport stdio\|http</code></td>
+<td><code>stdio</code>; <code>http</code> serves Streamable HTTP at <code>/mcp</code></td>
+</tr>
+<tr>
+<td><code>--host</code></td>
+<td>HTTP bind address, <code>127.0.0.1</code></td>
+</tr>
+<tr>
+<td><code>--port</code></td>
+<td>HTTP port, <code>8001</code> (1–65535)</td>
+</tr>
+<tr>
+<td><code>--token</code></td>
+<td>HTTP token; otherwise <code>VALUESTREAM_MCP_TOKEN</code>. Required even on localhost; empty/whitespace-containing tokens are rejected</td>
+</tr>
+<tr>
+<td><code>--allowed-host</code></td>
+<td>Repeatable extra Host header value, e.g. <code>metrics.example.com</code> or <code>metrics.example.com:443</code>. Loopback and a concrete bind host are allowed automatically, with or without a port; wildcard binds (<code>0.0.0.0</code>, <code>::</code>) require an explicit allowed host</td>
+</tr>
+<tr>
+<td><code>--allowed-origin</code></td>
+<td>Repeatable allowed Origin value, e.g. <code>https://client.example.com</code> (the SDK also supports an explicit <code>:*</code> port suffix). Origins are rejected unless listed; requests without Origin are accepted</td>
+</tr>
+<tr>
+<td><code>--enable-sql</code></td>
+<td>Off; enables bounded read-only aggregate SQL tools</td>
+</tr>
+<tr>
+<td><code>--render-dir</code></td>
+<td>HTML render output directory; defaults to the system temp directory</td>
+</tr>
+</tbody>
+</table>
+<p>HTTP options require <code>--transport http</code>. The MCP token environment variable
+does not change stdio behavior. HTTP is a single Uvicorn worker with SDK
+stateless handling and JSON responses. It is separate from <code>serve-api</code>.
+Tools are listed in the <a href="../api-and-mcp/">API &amp; MCP reference</a>; launch and
+connection instructions are in <a href="../../guides/users/mcp-clients/">MCP clients</a>.</p>
 <h2 id="serve-api">serve-api<a class="headerlink" href="#serve-api" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-api<span class="w"> </span>WORKSPACE<span class="w"> </span><span class="o">[</span>--host<span class="w"> </span>H<span class="o">]</span><span class="w"> </span><span class="o">[</span>--port<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--token<span class="w"> </span>T<span class="o">]</span><span class="w"> </span><span class="o">[</span>--enable-sql<span class="o">]</span>
 </code></pre></div>

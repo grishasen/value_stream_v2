@@ -1895,6 +1895,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adr/0009-single-workspace-http-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0009 Single-workspace HTTP MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2614,7 +2642,7 @@
 <p>Value Stream currently targets <strong>single-host deployment</strong>: one machine (or
 container) runs ingestion, the Streamlit UI, and optionally the read-only API
 and MCP surfaces against workspace directories on local or mounted storage.
-Distributed execution, multi-user auth, and remote HTTP MCP are out of scope
+Distributed execution and multi-user auth are out of scope
 or deferred — see <a href="../../../concepts/product-overview/">Product overview</a>.</p>
 <h2 id="host-requirements">Host Requirements<a class="headerlink" href="#host-requirements" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2659,13 +2687,16 @@ uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w">
 <li>Prefer a loopback bind with a reverse proxy in front; a non-loopback bind
   requires a bearer token (see <a href="../security/">Security</a>).</li>
 <li>Add <code>--enable-sql</code> only when governed SQL is genuinely needed.</li>
-<li>MCP is stdio-based and intended for local clients (e.g. Claude Code) on the
-  same host.</li>
+<li>MCP defaults to stdio for local clients on the same host. Use
+  <code>--transport http</code> for a separately supervised server with a mandatory
+  <code>VALUESTREAM_MCP_TOKEN</code>, one workspace, and endpoint <code>/mcp</code>. Follow the
+  <a href="../../users/mcp-clients/#5-http">HTTP connection guide</a> for
+  launch, HTTPS proxy, and client verification.</li>
 </ul>
 <p>Long-lived API/MCP servers reload the catalog automatically when its YAML
 files change on disk, so catalog deploys do not require a restart.</p>
 <h2 id="process-supervision">Process Supervision<a class="headerlink" href="#process-supervision" title="Permanent link">&para;</a></h2>
-<p>Run <code>serve</code>/<code>serve-api</code> under a supervisor (systemd, supervisor, or a
+<p>Run <code>serve</code>, <code>serve-api</code>, or <code>serve-mcp --transport http</code> under a supervisor (systemd, supervisor, or a
 container orchestrator) with restart-on-failure. A minimal systemd unit:</p>
 <div class="highlight"><pre><span></span><code><span class="k">[Unit]</span>
 <span class="na">Description</span><span class="o">=</span><span class="s">Value Stream UI</span>
@@ -2687,9 +2718,9 @@ uv<span class="w"> </span>run<span class="w"> </span>mkdocs<span class="w"> </sp
 <p>CI deploys the MkDocs site via the <code>docs.yml</code> GitHub Actions workflow on
 pushes to <code>main</code>.</p>
 <h2 id="deferred">Deferred<a class="headerlink" href="#deferred" title="Permanent link">&para;</a></h2>
-<p>Remote HTTP MCP, OIDC/multi-user deployment, and hosted service operation are
-deferred. When they land, this page gains the corresponding sections; until
-then, treat every deployment as single-tenant and network-restricted.</p>
+<p>OIDC/multi-user permissions and managed hosted service operation are deferred.
+HTTP MCP is available for one workspace with a shared bearer token. Treat
+every deployment as single-tenant; use the HTTPS and access rules above.</p>
 
 
 

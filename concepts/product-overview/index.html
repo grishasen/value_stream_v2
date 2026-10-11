@@ -1885,6 +1885,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0009-single-workspace-http-mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0009 Single-workspace HTTP MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2692,7 +2720,7 @@ snapshot counts.</p>
   and Pipelines / Ops pages.</li>
 <li>Python SDK helpers for workspace and query access.</li>
 <li>DuckDB metric export for downstream SQL tools.</li>
-<li>Local read-only stdio MCP tools and a read-only FastAPI HTTP API over the
+<li>Read-only stdio and bearer-protected HTTP MCP tools and a read-only FastAPI HTTP API over the
   governed aggregate query layer.</li>
 <li>MkDocs documentation site.</li>
 </ul>
@@ -2747,7 +2775,11 @@ reporting workflow.</p>
 <td>In scope. Aggregate-safe tools are implemented; SQL tools require <code>--enable-sql</code>.</td>
 </tr>
 <tr>
-<td>Remote HTTP MCP and OIDC</td>
+<td>Remote HTTP MCP</td>
+<td>In scope. One workspace per process, bearer token, same aggregate-safe tools.</td>
+</tr>
+<tr>
+<td>OIDC and multi-user permissions</td>
 <td>Deferred.</td>
 </tr>
 </tbody>
