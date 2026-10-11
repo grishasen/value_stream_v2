@@ -15,6 +15,7 @@ new decisions get a new numbered file in this folder.
 | [0006](0006-strict-catalog-v2.md) | Strict versioned catalog with no compatibility translation | Accepted |
 | [0007](0007-bounded-lookback-processors.md) | Bounded lookback with optional rebuildable sharded checkpoints | Accepted |
 | [0008](0008-bounded-rolling-duckdb-state.md) | Bounded rolling DuckDB processor state with transactional reconciliation | Accepted |
+| [0009](0009-single-workspace-http-mcp.md) | Single-workspace HTTP MCP with bearer authentication and shared stdio tools | Accepted |
 
 ## Writing a New ADR
 

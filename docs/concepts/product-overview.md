@@ -47,7 +47,7 @@ snapshot counts.
   and Pipelines / Ops pages.
 - Python SDK helpers for workspace and query access.
 - DuckDB metric export for downstream SQL tools.
-- Local read-only stdio MCP tools and a read-only FastAPI HTTP API over the
+- Read-only stdio and bearer-protected HTTP MCP tools and a read-only FastAPI HTTP API over the
   governed aggregate query layer.
 - MkDocs documentation site.
 
@@ -80,7 +80,8 @@ reporting workflow.
 | Arbitrary SQL over raw data | Out of scope by design. |
 | Read-only HTTP API | In scope. Metric/chart/freshness/chat endpoints are implemented; SQL endpoints require `--enable-sql`. |
 | Local stdio MCP | In scope. Aggregate-safe tools are implemented; SQL tools require `--enable-sql`. |
-| Remote HTTP MCP and OIDC | Deferred. |
+| Remote HTTP MCP | In scope. One workspace per process, bearer token, same aggregate-safe tools. |
+| OIDC and multi-user permissions | Deferred. |
 
 ## Product Success Criteria
 

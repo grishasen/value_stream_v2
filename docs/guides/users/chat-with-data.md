@@ -64,7 +64,7 @@ ai:
 ```
 
 The Chat page also lets you override these values for the current Streamlit
-session. MCP clients such as Claude Code should use the local stdio MCP server
+session. MCP clients such as Claude Code can use the stdio or bearer-protected HTTP MCP server
 instead of the Chat page; registration steps are in the
 [API & MCP reference](../../reference/api-and-mcp.md).
 

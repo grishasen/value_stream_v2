@@ -300,6 +300,26 @@ def test_chart_spec_warnings_are_empty_when_nothing_was_substituted() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("axis", "grain"),
+    [("Day", "daily"), ("Month", "monthly"), ("Quarter", "quarterly"), ("Year", "yearly")],
+)
+def test_explicit_chart_infers_temporal_grain_without_grain_hint(axis: str, grain: str) -> None:
+    intent = chart_intent_from_parameters(
+        load(Path("examples/demo")),
+        metric="VS_Engagement_Rate",
+        chart_kind="line",
+        x=axis,
+        y="VS_Engagement_Rate",
+        group_by=[axis, "Channel"],
+        color="Channel",
+    )
+    assert intent.grain == grain
+    assert intent.chart is not None
+    assert intent.chart.x == axis
+
+
+@pytest.mark.unit
 def test_strict_chart_rejects_a_kind_the_metric_cannot_render() -> None:
     # An explicit tool caller named the kind, so a silent substitution would
     # have them describe a funnel while looking at a bar chart.

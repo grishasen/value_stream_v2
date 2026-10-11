@@ -1,6 +1,6 @@
 # API and MCP Reference
 
-The read-only HTTP API and the local stdio MCP server expose the same
+The read-only HTTP API and the stdio/Streamable HTTP MCP server expose the same
 governed tool layer over the aggregate query path. Neither surface mutates the
 catalog or aggregate store, and neither exposes raw source rows. LLM provider
 setup for the in-app planner is in
@@ -8,10 +8,10 @@ setup for the in-app planner is in
 is summarized in [Security](../guides/operations/security.md).
 
 ```text
-Streamlit Chat page      MCP client (stdio)          HTTP API client
+Streamlit Chat page      MCP client (stdio/HTTP)     HTTP API client
         |                          |                          |
         v                          v                          v
-LLM intent planner          stdio MCP tools           FastAPI endpoints
+LLM intent planner          shared MCP tools          FastAPI endpoints
         |                          |                          |
         +----------- governed tool layer (one implementation) +
                          |
@@ -25,7 +25,7 @@ edits without a restart.
 
 ## Starting the Servers
 
-For desktop client setup and connection checks, see
+For local and remote client setup and connection checks, see
 [Connect Codex and Claude Desktop (Russian)](../guides/users/mcp-clients.md).
 
 ```sh
@@ -33,6 +33,7 @@ uv sync --extra ai    # MCP dependency
 uv sync --extra api   # FastAPI dependency
 
 uv run valuestream serve-mcp WORKSPACE [--enable-sql]
+uv run valuestream serve-mcp WORKSPACE --transport http [--enable-sql]
 uv run valuestream serve-api WORKSPACE --host 127.0.0.1 --port 8000 [--enable-sql]
 ```
 
@@ -42,6 +43,31 @@ Claude Code:
 ```sh
 claude mcp add valuestream -- uv run valuestream serve-mcp /absolute/path/to/workspace
 ```
+
+## MCP Transports
+
+`stdio` remains the default: the client owns a local subprocess. HTTP serves
+the SDK Streamable HTTP protocol at `/mcp` in one Uvicorn worker, with stateless
+request handling and JSON responses. The tools, resources, prompts, SQL opt-in,
+query layer, catalog reload, bounded outputs, and provenance are shared.
+
+HTTP requires `Authorization: Bearer <token>` on **every request**. Set the
+token with `--token` or `VALUESTREAM_MCP_TOKEN`; unlike REST, there is no open
+localhost mode or unauthenticated health endpoint. Missing, incorrect, or
+duplicate Authorization headers return 401 with `WWW-Authenticate: Bearer`.
+Host and Origin validation stays enabled; see the
+[CLI options](cli.md#serve-mcp) and [security guide](../guides/operations/security.md#http-mcp-authentication).
+
+One process serves one workspace fixed at startup. All holders of the token
+have the same access to that workspace. HTTP MCP does not implement OAuth
+discovery, user accounts, workspace selection, or per-user permissions.
+Clients must support Streamable HTTP and sending a configured bearer header.
+The REST URL from `serve-api` is not an MCP endpoint.
+
+PNG image blocks and Plotly `render="spec"` are carried in MCP responses over
+either transport. HTML modes retain the existing server-local `render.path`
+contract: HTTP does not publish those files. Use PNG/spec for a remote client,
+or retrieve HTML separately through your deployment's authorized file access.
 
 ## HTTP Endpoints
 
@@ -82,7 +108,6 @@ non-loopback bind.
 | `dashboard_list` | List authored dashboards, pages, page filters, and tiles with their chart specs |
 | `tile_query` | Run one authored tile exactly as the report page runs it |
 | `kpi_query` | Return a KPI card's value, comparison delta, period, and sparkline |
-| `chat` | Plan and answer a natural-language question (requires a configured model) |
 | `dimension_values_tool` | Return aggregate-backed dimension values |
 | `workspace_status_tool` | Per-processor aggregate readiness, recent runs, and unfinished runs |
 | `freshness_get` | Return metric freshness metadata |
@@ -234,8 +259,10 @@ Row responses expose the total `row_count` before pagination, `returned_rows`,
 page). The chart tool renders its returned page; the authored tile tool renders
 the full tile while limiting response rows. These query tools publish typed
 output schemas, and enum/limit constraints appear in their input schemas.
-Tool annotations identify read-only queries, additive rendering operations,
-and the external LLM call made by `chat`.
+Tool annotations identify read-only queries and additive rendering operations.
+MCP exposes no built-in `chat` or server-side LLM planner. The calling client
+interprets free-form questions and invokes the deterministic analytics tools;
+MCP tools do not require an LLM model or API key in the workspace.
 
 ## Query Criteria Semantics
 
@@ -254,6 +281,10 @@ same intent fields:
 - `quantiles: true` adds the Median/p25/p75/p90/p95 suite for digest metrics.
 - Grain selection is deterministic inside Value Stream: clients supply query
   criteria (time axis, dimensions, date bounds), never a physical grain.
+- Explicit chart requests infer the logical grain from a temporal axis such as
+  `x="Day"`, `Month`, `Quarter`, or `Year` when the default summary hint is used.
+  A daily line chart therefore retains `Day` in its query rows without requiring
+  the client to choose a grain. Non-temporal charts retain summary grouping.
 - Returned rows are capped; authored tile rendering retains the full tile.
 
 ## Provenance Envelope

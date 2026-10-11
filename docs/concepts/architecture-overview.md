@@ -149,7 +149,7 @@ All current read surfaces use this path:
 - Chat With Data
 - Python SDK helpers
 - DuckDB metric export
-- Local stdio MCP
+- Local stdio and bearer-protected HTTP MCP
 - Read-only FastAPI HTTP API
 
 ## UI Architecture
@@ -192,10 +192,13 @@ popover so operational pages can prioritize business and run status.
 ## Headless and Deferred Surfaces
 
 `valuestream serve-api` exposes the read-only FastAPI surface and
-`valuestream serve-mcp` exposes local stdio MCP. Both preserve the aggregate-only
+`valuestream serve-mcp` exposes local stdio MCP by default or Streamable HTTP
+with `--transport http`, serving one fixed workspace at `/mcp`. Both preserve the aggregate-only
 contract and reuse the same query layer; SQL is absent unless `--enable-sql` is
-passed. The API CLI requires a bearer token for non-loopback binds. Remote HTTP
-MCP, OIDC, and multi-user service deployment remain deferred.
+passed. The API CLI requires a bearer token for non-loopback binds. HTTP MCP requires
+a bearer token for all binds and validates Host/Origin headers. OAuth/OIDC and
+multi-user service deployment remain deferred; see
+[ADR 0009](adr/0009-single-workspace-http-mcp.md).
 
 ## Verification
 

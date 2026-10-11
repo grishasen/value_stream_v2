@@ -19,9 +19,7 @@ def test_serve_accepts_missing_workspace(monkeypatch: pytest.MonkeyPatch, tmp_pa
     class Completed:
         returncode = 0
 
-    def fake_run(
-        args: list[str], *, check: bool, env: dict[str, str], cwd: Path
-    ) -> Completed:
+    def fake_run(args: list[str], *, check: bool, env: dict[str, str], cwd: Path) -> Completed:
         captured["args"] = args
         captured["check"] = check
         captured["env"] = env
@@ -53,9 +51,7 @@ def test_serve_preserves_operator_memory_pool_override(
     class Completed:
         returncode = 0
 
-    def fake_run(
-        args: list[str], *, check: bool, env: dict[str, str], cwd: Path
-    ) -> Completed:
+    def fake_run(args: list[str], *, check: bool, env: dict[str, str], cwd: Path) -> Completed:
         captured["env"] = env
         return Completed()
 
@@ -144,3 +140,66 @@ def test_serve_api_passes_environment_token_and_sql_flag(
     assert captured["api_token"] == "environment-secret"
     assert captured["enable_sql"] is True
     assert captured["host"] == "0.0.0.0"
+
+
+@pytest.mark.unit
+def test_serve_mcp_http_passes_transport_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_http(path: str, **options: Any) -> None:
+        captured.update(path=path, **options)
+
+    monkeypatch.setattr("valuestream.mcp.http.run_http", fake_run_http)
+    result = CliRunner().invoke(
+        main,
+        [
+            "serve-mcp",
+            str(tmp_path),
+            "--transport",
+            "http",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9000",
+            "--token",
+            "secret",
+            "--allowed-host",
+            "metrics.example.com",
+            "--allowed-origin",
+            "https://client.example.com",
+            "--enable-sql",
+            "--render-dir",
+            str(tmp_path / "renders"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "path": str(tmp_path),
+        "host": "0.0.0.0",
+        "port": 9000,
+        "token": "secret",
+        "allowed_hosts": ("metrics.example.com",),
+        "allowed_origins": ("https://client.example.com",),
+        "enable_sql": True,
+        "render_dir": str(tmp_path / "renders"),
+    }
+
+
+@pytest.mark.unit
+def test_serve_mcp_http_without_token_fails_before_startup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("VALUESTREAM_MCP_TOKEN", raising=False)
+    result = CliRunner().invoke(main, ["serve-mcp", str(tmp_path), "--transport", "http"])
+    assert result.exit_code == 1
+    assert "VALUESTREAM_MCP_TOKEN" in result.output
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("option", [["--token", "secret"], ["--port", "9000"]])
+def test_serve_mcp_rejects_http_options_for_stdio(tmp_path: Path, option: list[str]) -> None:
+    result = CliRunner().invoke(main, ["serve-mcp", str(tmp_path), *option])
+    assert result.exit_code == 1
+    assert "require --transport http" in result.output

@@ -23,16 +23,8 @@ from valuestream.ai.chat import (
     deterministic_chat_starters,
     dimension_values,
     execute_chat_intent,
-    narrate_chat_result,
-    plan_chat_intent,
-)
-from valuestream.ai.settings import (
-    configured_api_key,
-    load_chat_with_data_config,
-    load_llm_settings_config,
 )
 from valuestream.ai.sql_tool import list_sql_tables, run_sql_query
-from valuestream.ai.studio import AICallSettings
 from valuestream.config.watch import CatalogCache
 from valuestream.mcp.contracts import (
     ChartPayload,
@@ -177,13 +169,13 @@ def _mcp_result(payload: dict[str, Any], *, is_error: bool = False, image: Any =
     return types.CallToolResult(content=content, structuredContent=data, isError=is_error)
 
 
-def run_stdio(  # noqa: PLR0915 - one function body per registered tool
+def create_server(  # noqa: PLR0915 - one function body per registered tool
     workspace_path: str | Path,
     *,
     enable_sql: bool = False,
     render_dir: str | Path | None = None,
-) -> None:
-    """Run the Value Stream MCP server over stdio for one workspace.
+) -> Any:
+    """Build the shared MCP tool/resource/prompt surface for one workspace.
 
     ``render_dir`` is where interactive chart HTML is written. It defaults to a
     ``valuestream-renders`` folder under the system temp directory; the server
@@ -202,9 +194,8 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
     annotations = import_module("mcp.types").ToolAnnotations
     read_only = annotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
     rendering = annotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
-    llm_call = annotations(readOnlyHint=True, openWorldHint=True)
     logger.info(
-        "Starting Value Stream MCP server: workspace=%s render_dir=%s png=%s",
+        "Creating Value Stream MCP server: workspace=%s render_dir=%s png=%s",
         workspace,
         renders,
         png_available(),
@@ -727,70 +718,6 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
 
         return cast(KpiPayload, _guarded("kpi_query", run))
 
-    @mcp.tool(annotations=llm_call)
-    def chat(question: str, narrate: bool = False) -> dict[str, Any]:
-        """Answer a natural-language question by planning a governed query.
-
-        This is the same planner the app's Chat page and the HTTP API use: it
-        picks the metric, dimensions, grain, and chart, then runs the query.
-        It needs an LLM model configured in the workspace ai.yaml. Prefer the
-        explicit tools when you already know the metric or tile.
-        """
-
-        logger.info("MCP chat: question_length=%s narrate=%s", len(question), narrate)
-
-        def run() -> dict[str, Any]:
-            settings = _settings_from_workspace(workspace)
-            if settings is None:
-                raise ValueError(
-                    "no LLM model is configured for this workspace; set ai.llm.model in its "
-                    "ai.yaml, or use metric_query/tile_query directly"
-                )
-            catalog = catalog_cache.get()
-            _config_path, chat_config = load_chat_with_data_config(workspace)
-            intent, _raw = plan_chat_intent(
-                settings,
-                catalog,
-                question,
-                chat_config=chat_config,
-            )
-            if intent.response == "clarify":
-                return {"response": "clarify", "clarify": intent.clarify}
-            if intent.response == "sql":
-                raise ValueError(
-                    "the planner asked for governed SQL; call sql_query directly instead"
-                )
-            result = execute_chat_intent(workspace, catalog, intent)
-            rows, masked = _without_state_blobs(result.rows.head(100))
-            payload: dict[str, Any] = {
-                "response": intent.response,
-                "question": question,
-                "metric": intent.metric,
-                "grain": intent.grain,
-                "group_by": intent.group_by,
-                "filters": intent.filters,
-                "query": result.query_summary,
-                "freshness": result.freshness,
-                **_page_metadata(result.row_count, rows.height, 0),
-                "columns": rows.columns,
-                "masked_columns": masked,
-                "rows": rows.to_dicts(),
-            }
-            if intent.chart is not None:
-                payload["chart"] = {
-                    "kind": intent.chart.kind,
-                    "x": intent.chart.x,
-                    "y": intent.chart.y,
-                    "color": intent.chart.color,
-                    "facet_col": intent.chart.facet_col,
-                    "value_format": intent.chart.value_format,
-                }
-            if narrate and not result.rows.is_empty():
-                payload["narrative"] = narrate_chat_result(settings, result)
-            return payload
-
-        return cast(dict[str, Any], _guarded("chat", run))
-
     @mcp.tool(annotations=read_only)
     def dimension_values_tool(
         metric: str,
@@ -991,7 +918,18 @@ def run_stdio(  # noqa: PLR0915 - one function body per registered tool
             )
         return "\n".join(lines)
 
-    mcp.run()
+    return mcp
+
+
+def run_stdio(
+    workspace_path: str | Path,
+    *,
+    enable_sql: bool = False,
+    render_dir: str | Path | None = None,
+) -> None:
+    """Run the shared MCP surface over the SDK's default stdio transport."""
+
+    create_server(workspace_path, enable_sql=enable_sql, render_dir=render_dir).run()
 
 
 _EXTENDED_CHART_FIELDS = (
@@ -1118,28 +1056,6 @@ def _select_metric_names(
     return names
 
 
-def _settings_from_workspace(workspace: Path) -> AICallSettings | None:
-    """Build LLM call settings from the workspace ai.yaml, or None if unset."""
-
-    _path, config = load_llm_settings_config(workspace)
-    model_name = str(config.get("model") or "").strip()
-    if not model_name:
-        return None
-    temperature = config.get("temperature")
-    return AICallSettings(
-        model=model_name,
-        api_key=configured_api_key(config),
-        api_base=str(config.get("api_base") or ""),
-        custom_llm_provider=str(
-            config.get("custom_provider") or config.get("custom_llm_provider") or ""
-        ),
-        temperature=float(temperature) if temperature is not None else None,
-        reasoning_effort=str(config.get("reasoning_effort") or ""),
-        verbosity=str(config.get("verbosity") or ""),
-        timeout_seconds=int(config.get("timeout_seconds") or 90),
-    )
-
-
 def _without_state_blobs(rows: pl.DataFrame) -> tuple[pl.DataFrame, list[str]]:
     """Drop sketch/state blob columns before a tile's rows are serialized.
 
@@ -1237,4 +1153,4 @@ def _provenance_payload(provenance: Any, mode: str) -> dict[str, Any]:
     return payload
 
 
-__all__ = ["run_stdio"]
+__all__ = ["create_server", "run_stdio"]

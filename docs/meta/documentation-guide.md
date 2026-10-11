@@ -134,4 +134,4 @@ Update the docs when any of the following changes:
 - Public Python SDK reference generated from docstrings.
 - Screenshot-based report guide after the UI stabilizes further.
 - Workspace template guide for production onboarding.
-- Security and access-control updates when remote MCP/OIDC land.
+- Security and access-control updates when OIDC/multi-user permissions land.

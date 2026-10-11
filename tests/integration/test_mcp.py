@@ -28,6 +28,7 @@ async def test_stdio_discovery_errors_and_stateful_rendering(
             async with ClientSession(read, write, read_timeout_seconds=30) as client:
                 await client.initialize()
                 listing = await client.list_tools()
+                assert "chat" not in {tool.name for tool in listing.tools}
                 assert "sql_query" not in {tool.name for tool in listing.tools}
                 assert len((await client.list_resources()).resources) == 2
                 assert len((await client.list_prompts()).prompts) == 2

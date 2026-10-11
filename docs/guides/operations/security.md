@@ -78,8 +78,31 @@ uv run valuestream serve-api examples/demo --host 127.0.0.1 --port 8000
   `127.0.0.1`, `localhost`, or `::1`) unless a token is set.
 - The API never mutates the catalog or aggregate store.
 
-Remote HTTP MCP, OAuth/OIDC, and hosted multi-user auth are deferred; the
-current surfaces are designed for trusted local or single-team use.
+## HTTP MCP Authentication
+
+HTTP MCP requires a non-empty bearer token on every HTTP request, including
+localhost, and returns 401 for missing/invalid credentials. Set `--token` or
+`VALUESTREAM_MCP_TOKEN`; the separate REST token is not used. Prefer the
+environment variable over command-line secrets in process arguments. The
+server compares token bytes with `hmac.compare_digest` and does not log them.
+
+Host checks stay enabled for every bind. Loopback names and a concrete bind
+address are allowed automatically; add the public hostname with
+`--allowed-host` when using a reverse proxy. A wildcard bind requires an
+explicit host allowlist. Origin headers are rejected unless the origin
+is added with `--allowed-origin`; requests without Origin are accepted.
+These checks do not enable browser CORS access.
+
+Use HTTPS for remote connections, normally terminated by a reverse proxy, and
+keep the backend listener on loopback. The proxy must forward Authorization
+and preserve a Host value in the server's allowlist. MCP HTTP is a separate
+SDK application; REST authentication dependencies do not protect it.
+
+One process is bound to one workspace. All token holders have the same
+aggregate tools and optional SQL access. The token also grants access to the
+catalog and dashboard resources, so treat catalog contents as shared data.
+`stdio` continues to run under the host process identity. OAuth/OIDC and
+per-user permissions remain deferred; current deployments are single-team.
 
 ## Governed SQL Is Opt-In
 

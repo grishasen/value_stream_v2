@@ -1466,6 +1466,9 @@ def chart_intent_from_parameters(
     ``upper_output``, a treemap or Sankey ``path``, ``facet_row`` and so on.
     With ``strict`` the caller gets an error naming what is missing rather than
     a substituted chart.
+
+    The default summary hint leaves temporal axes to infer their logical grain;
+    otherwise a Day chart would retain its axis but lose Day from query output.
     """
 
     payload = {
@@ -1479,7 +1482,7 @@ def chart_intent_from_parameters(
         "top_n_by": top_n_by,
         "compare": compare,
         "quantiles": quantiles,
-        "grain": grain,
+        "grain": None if grain == "summary" else grain,
         "start": start,
         "end": end,
         "chart": {

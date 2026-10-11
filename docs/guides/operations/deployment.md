@@ -3,7 +3,7 @@
 Value Stream currently targets **single-host deployment**: one machine (or
 container) runs ingestion, the Streamlit UI, and optionally the read-only API
 and MCP surfaces against workspace directories on local or mounted storage.
-Distributed execution, multi-user auth, and remote HTTP MCP are out of scope
+Distributed execution and multi-user auth are out of scope
 or deferred — see [Product overview](../../concepts/product-overview.md).
 
 ## Host Requirements
@@ -67,15 +67,18 @@ uv run valuestream serve-mcp /data/valuestream/prod
 - Prefer a loopback bind with a reverse proxy in front; a non-loopback bind
   requires a bearer token (see [Security](security.md)).
 - Add `--enable-sql` only when governed SQL is genuinely needed.
-- MCP is stdio-based and intended for local clients (e.g. Claude Code) on the
-  same host.
+- MCP defaults to stdio for local clients on the same host. Use
+  `--transport http` for a separately supervised server with a mandatory
+  `VALUESTREAM_MCP_TOKEN`, one workspace, and endpoint `/mcp`. Follow the
+  [HTTP connection guide](../users/mcp-clients.md#5-http) for
+  launch, HTTPS proxy, and client verification.
 
 Long-lived API/MCP servers reload the catalog automatically when its YAML
 files change on disk, so catalog deploys do not require a restart.
 
 ## Process Supervision
 
-Run `serve`/`serve-api` under a supervisor (systemd, supervisor, or a
+Run `serve`, `serve-api`, or `serve-mcp --transport http` under a supervisor (systemd, supervisor, or a
 container orchestrator) with restart-on-failure. A minimal systemd unit:
 
 ```ini
@@ -105,6 +108,6 @@ pushes to `main`.
 
 ## Deferred
 
-Remote HTTP MCP, OIDC/multi-user deployment, and hosted service operation are
-deferred. When they land, this page gains the corresponding sections; until
-then, treat every deployment as single-tenant and network-restricted.
+OIDC/multi-user permissions and managed hosted service operation are deferred.
+HTTP MCP is available for one workspace with a shared bearer token. Treat
+every deployment as single-tenant; use the HTTPS and access rules above.

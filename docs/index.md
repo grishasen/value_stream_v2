@@ -43,8 +43,8 @@ than through per-role copies of the same content.
 | Reports | Streamlit dashboards, report filters, chart rendering, inspection mode, and freshness metadata |
 | Configuration | YAML catalog, validation, direct editors, shared KPI recipe library, deterministic builder, and AI-assisted draft flow |
 | Operations | Validation, data load, run history, chunk detail, vacuum, and DuckDB export |
-| Headless access | Local read-only stdio MCP and read-only FastAPI HTTP API; governed SQL is opt-in |
-| Deferred | Remote HTTP MCP and multi-user/OIDC service deployment |
+| Headless access | Read-only stdio/HTTP MCP and FastAPI HTTP API; governed SQL is opt-in |
+| Deferred | Multi-user/OIDC service deployment |
 
 ## Articles
 

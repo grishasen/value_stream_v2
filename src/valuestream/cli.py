@@ -402,13 +402,21 @@ def serve(workspace_dir: str, *, port: int, browser: bool) -> None:
     # Streamlit discovers project configuration from its working directory.
     # Run beside app.py so the packaged .streamlit theme and static webfonts
     # are active even when `valuestream serve` is invoked elsewhere.
-    raise SystemExit(
-        subprocess.run(args, check=False, env=env, cwd=app_path.parent).returncode
-    )
+    raise SystemExit(subprocess.run(args, check=False, env=env, cwd=app_path.parent).returncode)
 
 
 @main.command("serve-mcp")
 @click.argument("workspace_dir", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--transport", type=click.Choice(["stdio", "http"]), default="stdio", show_default=True
+)
+@click.option("--host", default="127.0.0.1", show_default=True, help="HTTP bind address.")
+@click.option("--port", default=8001, type=click.IntRange(1, 65535), show_default=True)
+@click.option("--token", default=None, help="HTTP bearer token; defaults to VALUESTREAM_MCP_TOKEN.")
+@click.option(
+    "--allowed-host", multiple=True, help="Additional allowed HTTP Host header (repeatable)."
+)
+@click.option("--allowed-origin", multiple=True, help="Allowed HTTP Origin header (repeatable).")
 @click.option(
     "--enable-sql",
     is_flag=True,
@@ -420,11 +428,44 @@ def serve(workspace_dir: str, *, port: int, browser: bool) -> None:
     default=None,
     help="Where rendered chart HTML is written. Defaults to a temp directory.",
 )
-def serve_mcp(workspace_dir: str, *, enable_sql: bool, render_dir: str | None) -> None:
-    """Start the read-only MCP server over stdio for a workspace."""
+def serve_mcp(
+    workspace_dir: str,
+    *,
+    transport: str,
+    host: str,
+    port: int,
+    token: str | None,
+    allowed_host: tuple[str, ...],
+    allowed_origin: tuple[str, ...],
+    enable_sql: bool,
+    render_dir: str | None,
+) -> None:
+    """Start MCP for one workspace over stdio or bearer-protected HTTP."""
 
     try:
-        run_mcp_stdio(workspace_dir, enable_sql=enable_sql, render_dir=render_dir)
+        if transport == "stdio":
+            if (
+                token is not None
+                or allowed_host
+                or allowed_origin
+                or host != "127.0.0.1"
+                or port != 8001
+            ):
+                raise ValueError("--host, --port, --token and allowlists require --transport http")
+            run_mcp_stdio(workspace_dir, enable_sql=enable_sql, render_dir=render_dir)
+        else:
+            from valuestream.mcp.http import run_http  # noqa: PLC0415 — HTTP dependencies are lazy
+
+            run_http(
+                workspace_dir,
+                token=token,
+                host=host,
+                port=port,
+                allowed_hosts=allowed_host,
+                allowed_origins=allowed_origin,
+                enable_sql=enable_sql,
+                render_dir=render_dir,
+            )
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 

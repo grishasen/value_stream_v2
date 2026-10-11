@@ -103,10 +103,26 @@ Starts the Streamlit dashboard UI for a workspace.
 uv run valuestream serve-mcp WORKSPACE [--enable-sql]
 ```
 
-Starts the read-only MCP server over stdio. Requires the `ai` extra
-(`uv sync --extra ai`). `--enable-sql` exposes the governed aggregate SQL
-tools, which are disabled by default. Tools are listed in the
-[API & MCP reference](api-and-mcp.md).
+Starts MCP for one fixed workspace. Requires the `ai` extra
+(`uv sync --extra ai`). Both transports expose the same tools, resources, and
+prompts. Governed SQL is absent unless `--enable-sql` is passed.
+
+| Option | Default / behavior |
+|---|---|
+| `--transport stdio\|http` | `stdio`; `http` serves Streamable HTTP at `/mcp` |
+| `--host` | HTTP bind address, `127.0.0.1` |
+| `--port` | HTTP port, `8001` (1–65535) |
+| `--token` | HTTP token; otherwise `VALUESTREAM_MCP_TOKEN`. Required even on localhost; empty/whitespace-containing tokens are rejected |
+| `--allowed-host` | Repeatable extra Host header value, e.g. `metrics.example.com` or `metrics.example.com:443`. Loopback and a concrete bind host are allowed automatically, with or without a port; wildcard binds (`0.0.0.0`, `::`) require an explicit allowed host |
+| `--allowed-origin` | Repeatable allowed Origin value, e.g. `https://client.example.com` (the SDK also supports an explicit `:*` port suffix). Origins are rejected unless listed; requests without Origin are accepted |
+| `--enable-sql` | Off; enables bounded read-only aggregate SQL tools |
+| `--render-dir` | HTML render output directory; defaults to the system temp directory |
+
+HTTP options require `--transport http`. The MCP token environment variable
+does not change stdio behavior. HTTP is a single Uvicorn worker with SDK
+stateless handling and JSON responses. It is separate from `serve-api`.
+Tools are listed in the [API & MCP reference](api-and-mcp.md); launch and
+connection instructions are in [MCP clients](../guides/users/mcp-clients.md).
 
 ## serve-api
 

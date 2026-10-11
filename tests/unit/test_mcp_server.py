@@ -11,7 +11,7 @@ import datetime as dt
 import json
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 import pytest
@@ -31,7 +31,6 @@ BASE_TOOLS = {
     "dashboard_list",
     "tile_query",
     "kpi_query",
-    "chat",
     "workspace_status_tool",
     "dimension_values_tool",
     "freshness_get",
@@ -50,18 +49,18 @@ def _build(workspace: Path, *, enable_sql: bool = False, render_dir: Path | None
             captured["server"] = self
 
     original = mcp_server._server_class
-    mcp_server._server_class = lambda: Captured  # type: ignore[assignment]
+    mcp_server._server_class = lambda: Captured
     try:
         mcp_server.run_stdio(workspace, enable_sql=enable_sql, render_dir=render_dir)
     finally:
-        mcp_server._server_class = original  # type: ignore[assignment]
+        mcp_server._server_class = original
     return captured["server"]
 
 
 def _error(result: Any) -> dict[str, Any]:
     wire = result.model_dump(by_alias=True)
     assert wire["isError"] is True
-    return wire["structuredContent"]["error"]
+    return cast(dict[str, Any], wire["structuredContent"]["error"])
 
 
 def _first_tile_ids(server: Any) -> tuple[str, str, str]:
@@ -340,16 +339,16 @@ def test_metric_list_reports_truncation_rather_than_silently_cutting() -> None:
 
 
 @pytest.mark.unit
-def test_chat_explains_itself_when_no_model_is_configured(tmp_path: Path) -> None:
+def test_mcp_has_no_chat_tool_and_does_not_load_llm_settings(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     shutil.copytree(DEMO_WS, workspace)
-    (workspace / "ai.yaml").write_text("ai:\n  llm:\n    model: ''\n")
+    # Broken provider configuration must not affect deterministic MCP analytics.
+    (workspace / "ai.yaml").write_text("ai: [invalid provider config")
     server = _build(workspace)
 
-    result = server._tool_manager.get_tool("chat").fn(question="what is the click rate?")
-
-    assert _error(result)["kind"] == "invalid_request"
-    assert "ai.yaml" in _error(result)["message"]
+    assert "chat" not in _tool_names(server)
+    assert _tool_names(server) == BASE_TOOLS
+    assert server._tool_manager.get_tool("metric_list").fn()["metrics"]
 
 
 @pytest.mark.unit
@@ -661,7 +660,7 @@ async def test_tool_schemas_describe_results_constraints_and_side_effects() -> N
     assert tools["metric_query"]["annotations"]["readOnlyHint"] is True
     assert tools["tile_query"]["annotations"]["destructiveHint"] is False
     assert tools["tile_query"]["annotations"]["readOnlyHint"] is False
-    assert tools["chat"]["annotations"]["openWorldHint"] is True
+    assert all(not tool["annotations"]["openWorldHint"] for tool in tools.values())
 
 
 @pytest.mark.unit

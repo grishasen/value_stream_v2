@@ -6,8 +6,8 @@
 | Companion docs | design/replacement-design.md (detailed), concepts/domain-model.md, reference/processors.md, reference/algorithms.md, reference/readers-and-formats.md, reference/expression-dsl.md, reference/chart-catalog.md, reference/faq.md |
 | Audience | Engineers, architects, and senior stakeholders |
 | Current stack | Polars · DuckDB · Streamlit · Plotly · Apache DataSketches · PyArrow Parquet |
-| Current headless surfaces | Read-only FastAPI HTTP API · local stdio MCP |
-| Deferred surfaces | Remote HTTP MCP · OIDC/multi-user service deployment |
+| Current headless surfaces | Read-only FastAPI HTTP API · stdio/HTTP MCP |
+| Deferred surfaces | OIDC/multi-user service deployment |
 
 ---
 
@@ -68,8 +68,8 @@ Non-goals: streaming/CDC, distributed compute, ad-hoc warehouse SQL on raw event
                        +-------------+                  |  export     |
                                                         +------+------+
                                                                |
-                                                 local MCP + read-only HTTP API;
-                                                 remote HTTP MCP deferred
+                                                 stdio/HTTP MCP + read-only HTTP API;
+                                                 OIDC/multi-user deferred
 ```
 
 ## 5. C4 — Containers (logical)
@@ -103,9 +103,9 @@ Non-goals: streaming/CDC, distributed compute, ad-hoc warehouse SQL on raw event
       |                         |  - Streamlit UI         |
       |                         |  - Python SDK           |
 |                         |  - SQL via DuckDB views |
-|                         |  - local MCP tools      |
+|                         |  - stdio/HTTP MCP tools |
 |                         |  - read-only HTTP API   |
-|                         |  - remote MCP deferred  |
+|                         |  - OIDC deferred        |
       |                         +-------------------------+
       |
       |
@@ -126,7 +126,7 @@ Container responsibilities:
 3. **Metadata store** — small DuckDB databases tracking chunks, runs, config versions, lineage. Single-writer per database file; readers can be many.
 4. **Ingestion engine** — turns files into aggregates. Reads files lazily via Polars, applies transforms, fans out to processors, writes Parquet partials, runs compactions, updates the chunks ledger.
 5. **Query layer** — turns metric requests into reads from the aggregate store. Plans, scans Parquet via DuckDB, materializes Polars frames, applies derived metric DSL, returns rows.
-6. **Surfaces** — current read clients on top of the same query layer are Streamlit UI, Python SDK, DuckDB export, Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API. Remote HTTP MCP and multi-user/OIDC deployment are deferred.
+6. **Surfaces** — current read clients on top of the same query layer are Streamlit UI, Python SDK, DuckDB export, Chat With Data, stdio and bearer-protected HTTP MCP, and a read-only FastAPI HTTP API. HTTP MCP serves one fixed workspace per process. Multi-user/OIDC deployment is deferred; see [ADR 0009](adr/0009-single-workspace-http-mcp.md).
 7. **CLI** — operator entry point: `run`, `validate`, `backfill`, `vacuum`, `serve`.
 
 The Streamlit reports surface reads typed page-filter definitions from
@@ -677,9 +677,9 @@ Value Stream runs as one process per workspace by default:
 |                                           |
 |   ├── Streamlit on :8501                 |
 |   ├── ingestion runner (CLI / cron)      |
-|   ├── optional local stdio MCP           |
+|   ├── optional stdio/HTTP MCP             |
 |   ├── optional read-only FastAPI         |
-|   └── deferred: remote HTTP MCP/OIDC     |
+|   └── deferred: OIDC/multi-user           |
 |                                           |
 |   $WORKSPACE_DIR -> /data/valuestream/bdt    |
 +-------------------------------------------+

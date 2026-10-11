@@ -69,3 +69,4 @@ site/
 /.agents/
 /examples/fat/
 /.codegraph/
+/outputs/

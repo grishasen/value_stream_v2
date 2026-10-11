@@ -7,9 +7,9 @@
 | Author | Generated for grigoriy.sen@pega.com |
 | Date | 2026-05-08 |
 | Current stack | Polars · DuckDB · Streamlit · Plotly |
-| Current headless surfaces | Read-only FastAPI HTTP API · local stdio MCP |
-| Deferred surfaces | Remote HTTP MCP · OIDC/multi-user deployment |
-| Status | Target design with implemented Chat MLP1, local stdio MCP, and read-only HTTP API |
+| Current headless surfaces | Read-only FastAPI HTTP API · stdio/HTTP MCP |
+| Deferred surfaces | OIDC/multi-user deployment |
+| Status | Target design with implemented Chat MLP1, stdio/HTTP MCP, and read-only HTTP API |
 | Source review | Local repo, GitHub repo & wiki, local `wiki/` notes |
 
 ---
@@ -18,7 +18,7 @@
 
 The existing **CDH Value Dashboard** is a Streamlit application that ingests Pega Customer Decision Hub Interaction History (IH) and Product Holdings exports, computes a fixed catalogue of marketing/ML/CLV metrics, and renders Plotly dashboards. It already implements *part* of the desired architecture: a chunked, file-group-based pipeline that emits **mergeable sufficient statistics** (counts, sums, t-digests, HLL sketches) into per-metric DuckDB tables.
 
-The replacement, codenamed **Value Stream**, takes the chunked-aggregate idea and elevates it to the centerpiece of the architecture, while keeping the same core engineering stack (**Polars + DuckDB + Streamlit + Plotly**). Streamlit Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API share one governed aggregate tool layer; remote HTTP MCP and multi-user/OIDC deployment remain deferred. Value Stream is rethought from first principles around three invariants:
+The replacement, codenamed **Value Stream**, takes the chunked-aggregate idea and elevates it to the centerpiece of the architecture, while keeping the same core engineering stack (**Polars + DuckDB + Streamlit + Plotly**). Streamlit Chat With Data, stdio and bearer-protected HTTP MCP, and a read-only FastAPI HTTP API share one governed aggregate tool layer; multi-user/OIDC deployment remains deferred. Value Stream is rethought from first principles around three invariants:
 
 1. **Aggregates are the durable business/query contract.** Reports never scan
    raw events or identity-level state. A bounded processor may persist minimal,
@@ -83,7 +83,7 @@ These observations shape Value Stream's component boundaries below.
    aggregate is physically stored.
 4. **Mergeable state catalog.** Sum, min, max, weighted mean, pooled variance, t-digest, KLL, CPC, HLL, Theta sketches — and explicit rules for when each is correct.
 5. **Snapshot support.** Periodic and accumulating snapshot tables for state KPIs (current pipeline, open tickets, subscription state).
-6. **Programmable.** Current capabilities are reachable via CLI, Streamlit, Python SDK, DuckDB export, Chat With Data, local stdio MCP, and a read-only FastAPI HTTP API. Remote HTTP MCP and multi-user/OIDC deployment are deferred.
+6. **Programmable.** Current capabilities are reachable via CLI, Streamlit, Python SDK, DuckDB export, Chat With Data, stdio and bearer-protected HTTP MCP, and a read-only FastAPI HTTP API. Multi-user/OIDC deployment is deferred.
 7. **Same stack.** Polars + DuckDB + Streamlit + Plotly stay; PyArrow Parquet is used for the long-term aggregate store and FastAPI supplies the read-only HTTP boundary.
 8. **Provenance.** Every aggregate row carries refresh metadata (which chunk, which pipeline run, when, with what config hash).
 
@@ -164,7 +164,7 @@ These observations shape Value Stream's component boundaries below.
 - **Aggregate store** — Parquet files partitioned by `source × grain × period_key`, with DuckDB views over them and a small set of metadata tables.
 - **Processor catalog** — pluggable classes that define how chunk partials look and merge.
 - **Query layer** — planner picks the right physical aggregate, executor runs metric formulas / sketch queries / variant tests.
-- **Surfaces** — Streamlit UI (interactive), Python SDK (in-process), DuckDB export, Chat With Data, local stdio MCP, and read-only FastAPI are current. Remote HTTP MCP and multi-user/OIDC deployment are deferred.
+- **Surfaces** — Streamlit UI (interactive), Python SDK (in-process), DuckDB export, Chat With Data, stdio/HTTP MCP, and read-only FastAPI are current. Multi-user/OIDC deployment is deferred.
 
 ---
 
@@ -1005,8 +1005,9 @@ responses include catalog/computation hashes, chosen physical grain,
 contributing run/chunk IDs, aggregate scan count, and latest aggregate time.
 The CLI refuses non-loopback binding without a bearer token.
 
-Source-run triggers, config mutation, dashboard mutation, remote HTTP MCP, and
-OIDC are still target architecture rather than current product behavior.
+Source-run triggers, config mutation, dashboard mutation, and OIDC are still
+target architecture rather than current product behavior. HTTP MCP is now
+implemented separately from REST; see section 11.3 and ADR 0009.
 
 OpenAPI sketch:
 
@@ -1483,16 +1484,18 @@ Chat With Data reads optional prompt guidance from `ai.yaml` under
 change catalog metric definitions, persisted aggregates, or query execution.
 Governed planner rules override chat guidance when there is any conflict.
 
-The MLP1 MCP surface is local stdio only and exposes a small read-only tool
-set for Claude Code and similar MCP clients:
+The MCP surface supports local stdio and bearer-protected Streamable HTTP at
+`/mcp`, with one fixed workspace per server process. Both transports register
+the same metric, chart, dashboard tile, KPI, readiness, and freshness
+tools, resources, and prompts; governed SQL remains opt-in. HTTP uses the
+SDK stateless transport with JSON responses, mandatory token authentication on
+every request, and explicit Host/Origin checks. MCP exposes no built-in chat
+or server-side LLM planner: free-form questions are interpreted by the client,
+which calls deterministic analytics tools without workspace LLM credentials. See
+[ADR 0009](../concepts/adr/0009-single-workspace-http-mcp.md).
 
-- `metric_list`
-- `metric_query`
-- `dimension_values_tool`
-- `freshness_get`
-
-REST, remote HTTP MCP, OAuth/OIDC auth, dashboard tile tools, lineage drilldown,
-and generated-code analysis remain later surfaces. See
+The read-only REST API is also implemented. OAuth/OIDC auth, multi-user
+permissions, lineage drilldown, and generated-code analysis remain later surfaces. See
 `docs/guides/users/chat-with-data.md` for provider setup and
 `docs/reference/api-and-mcp.md` for the MCP and HTTP API runbooks.
 
@@ -1567,7 +1570,7 @@ For one release, the legacy Streamlit app and the new one can read the same work
    source.
 2. **No `eval`** — all dynamic expressions are parsed AST. The migration tool flags any expression it can't translate.
 3. **Workspace isolation** — variants are isolated workspaces, each with its own `catalog/`, `aggregates/`, `.valuestream/state/`, `meta/`, and `duckdb/` roots.
-4. **Headless auth** — the read-only HTTP API supports a bearer token and requires one for non-loopback CLI binds. In-process SDK and local stdio MCP run under the host process identity; OIDC/SSO and remote HTTP MCP remain deferred.
+4. **Headless auth** — the read-only HTTP API supports a bearer token and requires one for non-loopback CLI binds. In-process SDK and local stdio MCP run under the host process identity; HTTP MCP requires a bearer token for every request and serves one fixed workspace. OIDC/SSO and multi-user permissions remain deferred.
 5. **Config provenance** — every aggregate row is tied to a `config_hash` and YAML body in `config_versions`. A reviewer can reconstruct the exact config that produced any number on a dashboard.
 6. **Cardinality-sketch caveat** — CPC is the generated distinct-count default and HLL remains supported. Theta also answers distinct count and should be selected when the same persisted state needs intersection/difference. Hashing inside a sketch is not a substitute for governed upstream tokenization.
 7. **Checkpoint-shard caveat** — the persisted logical customer shard routes
@@ -1619,11 +1622,12 @@ For one release, the legacy Streamlit app and the new one can read the same work
 
 - Metric/dashboard authoring with live preview against the aggregate store.
 - Chat With Data MLP1: LiteLLM JSON intent planner, deterministic chart
-  rendering, and local stdio MCP tools over aggregate metrics.
+  rendering, and stdio/HTTP MCP tools over aggregate metrics.
 - Implemented read-only HTTP API: health, metric list/query, chart query,
-  dimension values, freshness, optional chat, and opt-in governed SQL. Remote
-  HTTP MCP, dashboard mutation, source-run triggers, and OIDC service auth
-  remain deferred.
+  dimension values, freshness, optional chat, and opt-in governed SQL.
+  Streamable HTTP MCP is implemented for one workspace with mandatory bearer
+  authentication. Dashboard mutation, source-run triggers, and OIDC service
+  auth remain deferred.
 
 ### Phase 6 — Snapshots and set algebra (2 weeks)
 

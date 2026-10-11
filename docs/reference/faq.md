@@ -314,9 +314,9 @@ One process per workspace.
 ```bash
 valuestream serve --workspace bdt
 # starts Streamlit :8501 for the current product
-# optional: local stdio MCP through valuestream serve-mcp
+# optional: stdio or HTTP MCP through valuestream serve-mcp
 # optional: read-only FastAPI through valuestream serve-api
-# deferred: remote HTTP MCP and OIDC/multi-user deployment
+# deferred: OIDC/multi-user deployment
 # pointed at /data/valuestream/bdt
 ```
 
@@ -374,7 +374,7 @@ provenance lets an auditor reconstruct the exact config that produced any
 number.
 
 **F2. How does authentication work?**
-Current product: SDK and local stdio MCP run under the host process identity; UI auth is handled by Streamlit/basic auth or an upstream proxy; per-workspace filesystem permissions enforce hard isolation. The read-only HTTP API supports a single bearer token and the CLI refuses non-loopback binding without one. Remote HTTP MCP and OIDC/multi-user auth remain deferred.
+Current product: SDK and local stdio MCP run under the host process identity; UI auth is handled by Streamlit/basic auth or an upstream proxy; per-workspace filesystem permissions enforce hard isolation. The read-only HTTP API supports a single bearer token and the CLI refuses non-loopback binding without one. HTTP MCP serves one fixed workspace and requires a bearer token on every request, with Host/Origin checks. OIDC/multi-user auth remains deferred.
 
 **F3. How do I redact a customer?**
 Remove or redact the customer's records in the authoritative source, delete or
