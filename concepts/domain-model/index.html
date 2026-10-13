@@ -2137,6 +2137,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#sample-backed-authoring-revisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sample-backed authoring revisions
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2468,6 +2479,34 @@
     
   
     0009 Single-workspace HTTP MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0010-sample-backed-mcp-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0010 Sample-backed MCP authoring
   
 
     
@@ -3747,6 +3786,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#sample-backed-authoring-revisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sample-backed authoring revisions
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4545,6 +4595,16 @@ dashboards.yaml:
 </tbody>
 </table>
 <p>This table is the contract between docs and code: any data structure or API must respect these cardinalities.</p>
+<h2 id="sample-backed-authoring-revisions">Sample-backed authoring revisions<a class="headerlink" href="#sample-backed-authoring-revisions" title="Permanent link">&para;</a></h2>
+<p>MCP authoring drafts, like Studio proposals, are configuration candidates rather
+than published aggregates. A draft holds a complete catalog, its workspace base
+fingerprint, approved source fields, and a sample-file fingerprint. Validation
+and preview produce an exact-revision review token; updates clear that review,
+and changed workspace/sample inputs reject stale apply. Apply writes YAML
+through the shared Studio transaction and returns the computation-change handoff.
+Ingestion alone publishes aggregates with provenance and computation hashes.
+MCP drafts expire after an hour or process restart and retain no sample rows.
+See <a href="../adr/0010-sample-backed-mcp-authoring/">ADR 0010</a>.</p>
 
 
 

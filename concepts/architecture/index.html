@@ -2062,6 +2062,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/0010-sample-backed-mcp-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0010 Sample-backed MCP authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2953,7 +2981,7 @@
 </tr>
 <tr>
 <td>Current headless surfaces</td>
-<td>Read-only FastAPI HTTP API · stdio/HTTP MCP</td>
+<td>Read-only FastAPI HTTP API · stdio/HTTP MCP with opt-in catalog authoring</td>
 </tr>
 <tr>
 <td>Deferred surfaces</td>
@@ -3114,7 +3142,11 @@
 <li><strong>Metadata store</strong> — small DuckDB databases tracking chunks, runs, config versions, lineage. Single-writer per database file; readers can be many.</li>
 <li><strong>Ingestion engine</strong> — turns files into aggregates. Reads files lazily via Polars, applies transforms, fans out to processors, writes Parquet partials, runs compactions, updates the chunks ledger.</li>
 <li><strong>Query layer</strong> — turns metric requests into reads from the aggregate store. Plans, scans Parquet via DuckDB, materializes Polars frames, applies derived metric DSL, returns rows.</li>
-<li><strong>Surfaces</strong> — current read clients on top of the same query layer are Streamlit UI, Python SDK, DuckDB export, Chat With Data, stdio and bearer-protected HTTP MCP, and a read-only FastAPI HTTP API. HTTP MCP serves one fixed workspace per process. Multi-user/OIDC deployment is deferred; see <a href="../adr/0009-single-workspace-http-mcp/">ADR 0009</a>.</li>
+<li><strong>Surfaces</strong> — current read clients on top of the same query layer are Streamlit UI, Python SDK, DuckDB export, Chat With Data, stdio and bearer-protected HTTP MCP, and a read-only FastAPI HTTP API. MCP query tools remain aggregate-only. Opt-in <code>--enable-authoring</code> adds bounded
+sample profiling and catalog draft/review/apply, including an absent catalog;
+this authoring boundary reuses Studio validation and rollback-protected writes
+without running ingestion. See <a href="../adr/0010-sample-backed-mcp-authoring/">ADR 0010</a>.
+HTTP MCP serves one fixed workspace per process. Multi-user/OIDC deployment is deferred; see <a href="../adr/0009-single-workspace-http-mcp/">ADR 0009</a>.</li>
 <li><strong>CLI</strong> — operator entry point: <code>run</code>, <code>validate</code>, <code>backfill</code>, <code>vacuum</code>, <code>serve</code>.</li>
 </ol>
 <p>The Streamlit reports surface reads typed page-filter definitions from

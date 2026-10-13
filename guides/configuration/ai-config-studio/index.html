@@ -1995,6 +1995,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adr/0010-sample-backed-mcp-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0010 Sample-backed MCP authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2788,6 +2816,10 @@ source sample and a business goal into YAML-backed sources, processors, metrics,
 reports, and chat settings. The workspace catalog remains authoritative: model
 output is only a proposal, and no proposal can write configuration or run data
 without separate user actions.</p>
+<p>Catalog application and atomic rollback writes are shared with the optional
+<a href="../../../reference/api-and-mcp/#optional-catalog-authoring">MCP authoring workflow</a>.
+CSV/Parquet workspace previews also use the same bounded reader. Studio keeps
+its existing UI review, data-sharing, and apply gates.</p>
 <p>The Studio uses a compact <strong>Data / Draft / Review / Apply</strong> phase rail. Every
 phase names its state as <strong>Complete</strong>, <strong>Attention</strong>, or <strong>Not started</strong>, so the
 rail never relies on color alone. The step selector is scoped to the active

@@ -1142,6 +1142,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Создайте каталог по семплу
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2068,6 +2079,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adr/0010-sample-backed-mcp-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0010 Sample-backed MCP authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2911,6 +2950,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Создайте каталог по семплу
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3309,6 +3359,56 @@ Authorization и передавать Host <code>metrics.example.com</code>. Е�
 пример результата конкретного набора, а не обязательное значение проверки.</p>
 <p>Шаги Claude Desktop сверены с официальной документацией; запуск именно
 в Claude Desktop в этой проверке не выполнялся.</p>
+<h2 id="7">7. Создайте каталог по семплу<a class="headerlink" href="#7" title="Permanent link">&para;</a></h2>
+<p>Для создания каталога агрегаты заранее не нужны. Включите авторинг при запуске
+сервера; аргумент workspace может указывать на ещё не существующий каталог:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-mcp<span class="w"> </span>/absolute/path/new-workspace<span class="w"> </span>--enable-authoring
+</code></pre></div>
+<p>Добавьте <code>--enable-authoring</code> в <code>args</code> записи MCP-клиента и переподключите его.
+Для HTTP тот же флаг добавляется к команде запуска из раздела 5; все обладатели
+токена получают доступ к применению конфигурации. Без флага набор инструментов
+остаётся прежним. REST API не получает операций записи.</p>
+<p>Разместите CSV или Parquet в <code>new-workspace/data/</code>, например <code>data/events.csv</code>.
+MCP не загружает и не копирует исходные файлы. Затем попросите клиента:</p>
+<blockquote>
+<p>Создай каталог по data/events.csv. Нужно считать объём событий по региону.
+Покажи предложенные источники, процессоры, метрики и отчёт до применения.</p>
+</blockquote>
+<p>Клиент выполняет следующую последовательность:</p>
+<ol>
+<li><code>sample_profile(sample_path="data/events.csv", limit=1000)</code> возвращает схему
+   и статистику. <code>approved_fields</code> ограничивает доступные поля; значения не
+   возвращаются, если не указать <code>example_fields</code> отдельно.</li>
+<li><code>catalog_draft_create(sample_path="data/events.csv", source_id="events",
+   user_goals="Объём событий по региону")</code> создаёт черновик всех четырёх файлов.
+   Минимальный вариант считает все строки. Ответ содержит общий со Studio
+   промпт и словари; модель клиента уточняет бизнес-смысл и предлагает аналитику.</li>
+<li><code>catalog_draft_update</code> принимает <code>draft_id</code>, текущий <code>expected_revision</code> и
+   полные секции <code>sections</code>. Можно добавить преобразования источника,
+   процессоры, метрики, графики; исходный reader менять нельзя. Неоднозначные
+   исходы и форматы дат клиент уточняет у пользователя.</li>
+<li><code>catalog_draft_validate(draft_id=...)</code> проверяет ссылки, выражения, поля
+   семпла и выполнение на ограниченном числе строк. Ошибки исправляются новым
+   обновлением черновика; конфигурация на диске ещё не меняется.</li>
+<li><code>catalog_draft_preview(draft_id=...)</code> показывает полный каталог, diff и
+   списки объектов. Только валидный вариант получает <code>review_token</code>.</li>
+<li>После разрешения пользователя <code>catalog_draft_apply(draft_id=...,
+   review_token=...)</code> записывает каталог. Повторный вызов с тем же токеном
+   возвращает квитанцию. Изменение черновика, семпла или файлов конфигурации
+   блокирует применение старой ревизии.</li>
+</ol>
+<p>После применения проверьте <code>valuestream://catalog</code> и <code>metric_list</code>. Квитанция
+содержит <code>requires_data_run</code> и список источников. Запустите обработку через
+<a href="../../configuration/workspaces-and-catalog/#load-data">обычный процесс загрузки</a>,
+затем проверьте <code>workspace_status_tool</code> и выполните <code>metric_query</code>.
+Применение само по себе не создаёт агрегаты и не запускает ingestion.</p>
+<p>Черновики хранятся в памяти час и теряются при перезапуске сервера. Одновременно
+допускается 32 черновика; <code>catalog_draft_discard</code> освобождает ненужный.
+CSV/Parquet читаются с ограничением строк, образцы не сохраняются в черновике.
+JSON и архивы остаются доступны через Studio, но в MCP-авторинге пока не
+поддерживаются. Проверка семпла не гарантирует одинаковую схему всех будущих
+файлов. При наличии каталога новые источники добавляются без изменения
+несэмплированных источников и их зависимостей.</p>
 
 
 

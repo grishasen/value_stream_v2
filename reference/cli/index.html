@@ -11,7 +11,7 @@
       
       
       
-        <link rel="prev" href="../../concepts/adr/0009-single-workspace-http-mcp/">
+        <link rel="prev" href="../../concepts/adr/0010-sample-backed-mcp-authoring/">
       
       
         <link rel="next" href="../expression-dsl/">
@@ -1770,6 +1770,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/adr/0010-sample-backed-mcp-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    0010 Sample-backed MCP authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2832,7 +2860,7 @@ alone is intentionally non-destructive.</p>
 </tbody>
 </table>
 <h2 id="serve-mcp">serve-mcp<a class="headerlink" href="#serve-mcp" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-mcp<span class="w"> </span>WORKSPACE<span class="w"> </span><span class="o">[</span>--enable-sql<span class="o">]</span>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>valuestream<span class="w"> </span>serve-mcp<span class="w"> </span>WORKSPACE<span class="w"> </span><span class="o">[</span>--enable-sql<span class="o">]</span><span class="w"> </span><span class="o">[</span>--enable-authoring<span class="o">]</span>
 </code></pre></div>
 <p>Starts MCP for one fixed workspace. Requires the <code>ai</code> extra
 (<code>uv sync --extra ai</code>). Both transports expose the same tools, resources, and
@@ -2872,6 +2900,10 @@ prompts. Governed SQL is absent unless <code>--enable-sql</code> is passed.</p>
 <tr>
 <td><code>--enable-sql</code></td>
 <td>Off; enables bounded read-only aggregate SQL tools</td>
+</tr>
+<tr>
+<td><code>--enable-authoring</code></td>
+<td>Off; enables sample-backed catalog draft/review/apply tools and startup in an absent/empty workspace</td>
 </tr>
 <tr>
 <td><code>--render-dir</code></td>
