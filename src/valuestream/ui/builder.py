@@ -5,10 +5,8 @@ from __future__ import annotations
 import ast as py_ast
 import copy
 import math
-import os
 import re
 import secrets
-import tempfile
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from contextlib import contextmanager
@@ -49,6 +47,12 @@ from valuestream.config.report_fields import (
     report_field_options,
 )
 from valuestream.config.validate import validate_catalog
+from valuestream.config.writing import (
+    workspace_configuration_transaction,
+)
+from valuestream.config.writing import (
+    write_yaml as _write_yaml,
+)
 from valuestream.expr import parser as expr_parser
 from valuestream.expr import translator as expr_translator
 from valuestream.ui.presentation import chart_field_label
@@ -3589,19 +3593,6 @@ def validated_catalog_transaction(
 
 
 @contextmanager
-def workspace_configuration_transaction(workspace: str | Path) -> Iterator[None]:
-    """Restore catalog and workspace AI config when a complete apply fails."""
-
-    root = Path(workspace)
-    paths = [
-        *(root / "catalog" / filename for filename in CATALOG_FILENAMES),
-        root / "ai.yaml",
-    ]
-    with _configuration_file_transaction(paths):
-        yield
-
-
-@contextmanager
 def _configuration_file_transaction(paths: Iterable[Path]) -> Iterator[None]:
     """Restore ``paths`` to their exact pre-write contents on any exception."""
 
@@ -4136,31 +4127,6 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"{path.name} must contain a mapping")
     return data
-
-
-def _write_yaml(path: Path, data: dict[str, Any]) -> None:
-    """Atomically replace one YAML file after serializing it completely."""
-
-    payload = yaml.safe_dump(data, sort_keys=False)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-            temporary_path = Path(handle.name)
-        os.replace(temporary_path, path)
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
 
 
 def _catalog_file(workspace: str | Path, filename: str) -> Path:

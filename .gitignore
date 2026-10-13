@@ -37,6 +37,7 @@ coverage.xml
 docs/.obsidian/workspace.json
 
 # Project transient
+.catalog-authoring.lock
 *.duckdb
 *.duckdb.wal
 .valuestream/

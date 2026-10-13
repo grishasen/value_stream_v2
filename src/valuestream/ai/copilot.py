@@ -2142,6 +2142,15 @@ def _processor_state_source_fields(processor: model.Processor) -> set[str]:
         *sketch_state_types,
     }
     for name, state in model.effective_processor_states(processor).items():
+        if (
+            isinstance(processor, model.ScoreDistributionProcessor)
+            and isinstance(state, model.PooledMeanState)
+            and state.recipe
+        ):
+            references.update({"CustomerID", "Name"})
+            if state.recipe == "novelty":
+                references.add("InteractionID")
+            continue
         source_column = getattr(state, "source_column", None)
         if source_column:
             references.add(str(source_column))

@@ -1898,3 +1898,17 @@ Response:
 | (none today) — current open subscriptions | `subscription_state` (snapshot, periodic) | `ActiveSubs`, `MRR`, `ChurnedSubs` |
 
 ---
+
+
+## Current MCP catalog-authoring extension
+
+The aggregate query contract remains unchanged. The opt-in `--enable-authoring`
+MCP surface supports starting without catalog files, profiling a bounded
+CSV/Parquet under workspace `data/`, and creating/revising/validating/previewing
+and applying a complete catalog. Client-side intelligence uses Studio prompt
+dictionaries; validation and rollback-protected YAML writes reuse Studio's
+shared authoring layer. Drafts retain configuration and sample metadata only;
+apply checks an exact-revision review token and workspace base hash and does
+not ingest data. See [ADR 0010](../concepts/adr/0010-sample-backed-mcp-authoring.md)
+and the [API & MCP reference](../reference/api-and-mcp.md#optional-catalog-authoring)
+for the executable contract.

@@ -53,6 +53,7 @@ def create_http_app(
     allowed_hosts: tuple[str, ...] = (),
     allowed_origins: tuple[str, ...] = (),
     enable_sql: bool = False,
+    enable_authoring: bool = False,
     render_dir: str | Path | None = None,
 ) -> Starlette:
     """Build /mcp with mandatory token auth and explicit Host/Origin checks.
@@ -79,7 +80,12 @@ def create_http_app(
         ),
         allowed_origins=list(allowed_origins),
     )
-    server = create_server(workspace_path, enable_sql=enable_sql, render_dir=render_dir)
+    server = create_server(
+        workspace_path,
+        enable_sql=enable_sql,
+        enable_authoring=enable_authoring,
+        render_dir=render_dir,
+    )
     # These options are the MCP SDK 2.x API pinned by the project's ai extra.
     app: Starlette = server.streamable_http_app(
         streamable_http_path="/mcp",
@@ -101,6 +107,7 @@ def run_http(
     allowed_hosts: tuple[str, ...] = (),
     allowed_origins: tuple[str, ...] = (),
     enable_sql: bool = False,
+    enable_authoring: bool = False,
     render_dir: str | Path | None = None,
 ) -> None:
     """Serve the SDK ASGI app in one Uvicorn worker."""
@@ -112,6 +119,7 @@ def run_http(
         allowed_hosts=allowed_hosts,
         allowed_origins=allowed_origins,
         enable_sql=enable_sql,
+        enable_authoring=enable_authoring,
         render_dir=render_dir,
     )
     import_module("uvicorn").run(app, host=host, port=port, workers=1)

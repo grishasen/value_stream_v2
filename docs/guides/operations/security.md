@@ -8,7 +8,7 @@ assessing exposure.
 ## The Aggregate-Only Contract
 
 Every read surface — Reports, Chat With Data, CLI `query`, the Python SDK,
-DuckDB export, MCP, and the HTTP API — reads through the same governed
+DuckDB export, MCP query tools, and the HTTP API — reads through the same governed
 aggregate query layer. None of them expose raw source rows, raw aggregate
 parquet paths, or filesystem access. Raw source rows never enter the governed
 query store; it contains only mergeable aggregate statistics with provenance
@@ -19,6 +19,24 @@ a claim that every ingestion implementation is stateless. A bounded processor
 may persist a minimal internal checkpoint when necessary for efficient exact
 aggregation. That namespace is not registered with the query planner, DuckDB
 views, SQL allowlist, API, MCP, Chat, SDK, or Reports.
+
+## Opt-in MCP Catalog Authoring
+
+`--enable-authoring` exposes bounded CSV/Parquet profiling under the fixed
+workspace's `data/` directory and catalog draft/review/apply tools. This is an
+authoring exception to aggregate-only serving; it does not create a raw-row
+query surface. Profiles share column names/types and counts by default; example
+values are returned only for explicit approved `example_fields`. MCP does not
+stage samples or retain raw frames in drafts. Paths and configuration targets
+cannot escape the workspace through traversal or symlinks.
+
+All holders of the HTTP token can use enabled authoring tools; draft identifiers
+and review tokens identify configuration revisions, not users. A review token
+requires a successful preview, but user authorization is still the client's
+responsibility. Updating a draft clears review; changes to source-file metadata
+or exact catalog/AI bytes reject stale apply. Writes share a workspace lock and
+rollback boundary with Studio; ingestion remains a separate operation. The
+REST API and aggregate/SQL query contracts remain read-only.
 
 ## Processor Checkpoint Boundary
 

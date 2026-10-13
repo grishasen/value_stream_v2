@@ -17,6 +17,8 @@ new decisions get a new numbered file in this folder.
 | [0008](0008-bounded-rolling-duckdb-state.md) | Bounded rolling DuckDB processor state with transactional reconciliation | Accepted |
 | [0009](0009-single-workspace-http-mcp.md) | Single-workspace HTTP MCP with bearer authentication and shared stdio tools | Accepted |
 
+| [0010](0010-sample-backed-mcp-authoring.md) | Opt-in sample-backed MCP catalog authoring shared with Studio | Accepted |
+
 ## Writing a New ADR
 
 Copy the section structure of any existing record (Status, Context, Decision,

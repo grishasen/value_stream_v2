@@ -1,8 +1,11 @@
 # API and MCP Reference
 
-The read-only HTTP API and the stdio/Streamable HTTP MCP server expose the same
-governed tool layer over the aggregate query path. Neither surface mutates the
-catalog or aggregate store, and neither exposes raw source rows. LLM provider
+The read-only HTTP API and the stdio/Streamable HTTP MCP server share the
+governed aggregate query path. Query tools never expose raw source rows or
+mutate the catalog/store. MCP additionally supports opt-in catalog authoring
+with `--enable-authoring`: bounded sample profiling, process-local drafts,
+validation, change preview, and explicit transactional apply. The REST API
+remains read-only. LLM provider
 setup for the in-app planner is in
 [Chat with data](../guides/users/chat-with-data.md); the security posture
 is summarized in [Security](../guides/operations/security.md).
@@ -113,6 +116,59 @@ non-loopback bind.
 | `freshness_get` | Return metric freshness metadata |
 | `sql_schema` | List governed DuckDB tables/views and their non-masked columns (only with `--enable-sql`) |
 | `sql_query` | Run one governed read-only SELECT over aggregate views and metric exports (only with `--enable-sql`) |
+
+### Optional catalog authoring
+
+These tools are registered only with `--enable-authoring`, on both transports.
+An absent workspace or an existing directory without catalog files can start
+in this mode without creating any files. Partial/invalid existing catalogs still
+fail at startup. Query tools report an error until a catalog exists, and report
+aggregate readiness separately after apply. See the [bootstrap workflow](../guides/users/mcp-clients.md#7).
+
+| Tool | Contract |
+|---|---|
+| `sample_profile` | CSV/Parquet under workspace `data/`; 1–100,000 rows (default 1,000). Returns selected column names, types, null/unique counts; no raw rows. Up to eight distinct values per explicitly selected `example_fields` column |
+| `catalog_draft_create` | Sample path, new `source_id`, optional approved fields and business goals; returns a complete rows-count baseline, profile, revision, and shared Studio generation prompt. The client model proposes richer analytics |
+| `catalog_draft_update` | Complete replacement sections plus `expected_revision`; structural errors leave the previous draft intact. Successful updates invalidate review |
+| `catalog_draft_validate` | Catalog/expression/chart validation, Studio sample-field contract, then bounded transform/processor execution without publishing aggregates |
+| `catalog_draft_preview` | Full draft, object additions/changes/removals and YAML diff. Returns `review_token` only for a valid revision; present this review before applying |
+| `catalog_draft_apply` | Requires that review token and user authorization. Rechecks validation, sample fingerprint, and catalog/AI file hash; writes all catalog sections in the shared rollback-protected workspace transaction. Returns provenance config hash and `requires_data_run`; never starts ingestion |
+| `catalog_draft_discard` | Releases the in-memory draft without altering workspace files |
+
+Drafts live only in the server process: at most 32, each expiring after one hour
+or restart. They retain configuration, approved field names, and a sample file
+fingerprint, not frames, sample values, or generation prompts. All authenticated
+HTTP clients have the same authoring access; draft ids are opaque handles, not
+per-user permissions. Successful apply retries return the original receipt until
+the draft expires. To inspect the resulting catalog, use `valuestream://catalog`.
+
+Samples must be existing CSV or Parquet files under `data/`; absolute paths are
+accepted only if they resolve there. Traversal and symlinks escaping the fixed
+workspace are rejected, including configuration write targets. MCP does not
+upload or stage raw samples. Reader settings remain bound to the exact sample
+file; source transforms and analytics can be edited. Existing unsampled sources
+and their artifacts must remain unchanged. The deterministic baseline counts
+all records at summary grain and makes no inferred conversion/date assumptions.
+
+Semantic validation issues are editable and prevent a review token. Structural
+errors are rejected by update. Previewed removals require `confirm_removals=true`
+in addition to review; inactive-source mutation guards still apply. Apply locks
+the workspace, compares its exact base configuration, atomically replaces each
+YAML file, validates the saved result, and restores original bytes on an exception.
+This is rollback protection, not a filesystem-wide atomic snapshot for concurrent
+readers or a guarantee against unrelated manual edits during commit.
+
+Approved physical fields are mapped through `rename_capitalize` before the
+shared Studio field-contract check. Hidden fields remain unapproved after the
+rename. Score-distribution pooled-mean recipes validate their actual runtime
+inputs (`CustomerID`, `Name`, and `InteractionID` for novelty), not the names of
+their derived aggregate states.
+
+Studio and MCP use `ai.catalog_authoring.apply_catalog_draft`, the Studio
+validators and prompt dictionaries, `ai.samples.read_tabular_sample`, and
+`config.writing` transactions. No MCP tool calls an LLM provider. Business query
+and SQL tools continue to read through the aggregate layer. Sample-backed
+validation cannot prove that unseen production rows satisfy the same contract.
 
 The server also publishes two resources — `valuestream://catalog` (the
 catalog YAML) and `valuestream://dashboards` (the dashboard manifest as

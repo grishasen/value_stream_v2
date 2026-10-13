@@ -640,3 +640,16 @@ Transforms define the user-facing schema. If a nicer business name is needed, cr
 | Aggregate | Run | tagged with | N : 1 |
 
 This table is the contract between docs and code: any data structure or API must respect these cardinalities.
+
+
+## Sample-backed authoring revisions
+
+MCP authoring drafts, like Studio proposals, are configuration candidates rather
+than published aggregates. A draft holds a complete catalog, its workspace base
+fingerprint, approved source fields, and a sample-file fingerprint. Validation
+and preview produce an exact-revision review token; updates clear that review,
+and changed workspace/sample inputs reject stale apply. Apply writes YAML
+through the shared Studio transaction and returns the computation-change handoff.
+Ingestion alone publishes aggregates with provenance and computation hashes.
+MCP drafts expire after an hour or process restart and retain no sample rows.
+See [ADR 0010](adr/0010-sample-backed-mcp-authoring.md).

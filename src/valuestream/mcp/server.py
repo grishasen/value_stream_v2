@@ -1,4 +1,4 @@
-"""Minimal MCP server for read-only Value Stream aggregate tools."""
+"""Value Stream aggregate tools with optional sample-backed catalog authoring."""
 
 from __future__ import annotations
 
@@ -98,6 +98,17 @@ _SQL_TOOLS = frozenset({"sql_query", "sql_schema"})
 
 _SQL_REMEDIATION = "Call sql_schema for the exact table names and the governed-SQL rules."
 _METRIC_REMEDIATION = "Call metric_list to check the metric name, dimensions, and grains."
+_AUTHORING_TOOLS = frozenset(
+    {
+        "sample_profile",
+        "catalog_draft_create",
+        "catalog_draft_update",
+        "catalog_draft_validate",
+        "catalog_draft_preview",
+        "catalog_draft_apply",
+        "catalog_draft_discard",
+    }
+)
 
 
 def _image_class() -> Any:
@@ -136,6 +147,9 @@ def _error_payload(tool: str, exc: Exception) -> dict[str, Any]:
         remediation = str(exc)
     elif isinstance(exc, duckdb.Error) or tool in _SQL_TOOLS:
         kind = "sql_rejected"
+    if tool in _AUTHORING_TOOLS:
+        kind = "authoring_rejected"
+        remediation = "Correct the sample or draft using the reported issues; preview the valid revision before apply. Stale drafts must be recreated."
     return {
         "error": {
             "kind": kind,
@@ -153,8 +167,18 @@ def _guarded(tool: str, call: Callable[[], Any]) -> Any:
 
     try:
         return call()
-    except (ValueError, FileNotFoundError, TimeoutError, RuntimeError, duckdb.Error) as exc:
-        logger.warning("MCP %s failed: %s: %s", tool, type(exc).__name__, exc)
+    except (
+        ValueError,
+        OSError,
+        TimeoutError,
+        RuntimeError,
+        duckdb.Error,
+        pl.exceptions.PolarsError,
+    ) as exc:
+        if tool in _AUTHORING_TOOLS:
+            logger.warning("MCP %s failed: %s", tool, type(exc).__name__)
+        else:
+            logger.warning("MCP %s failed: %s: %s", tool, type(exc).__name__, exc)
         return _mcp_result(_error_payload(tool, exc), is_error=True)
 
 
@@ -173,13 +197,14 @@ def create_server(  # noqa: PLR0915 - one function body per registered tool
     workspace_path: str | Path,
     *,
     enable_sql: bool = False,
+    enable_authoring: bool = False,
     render_dir: str | Path | None = None,
 ) -> Any:
     """Build the shared MCP tool/resource/prompt surface for one workspace.
 
     ``render_dir`` is where interactive chart HTML is written. It defaults to a
     ``valuestream-renders`` folder under the system temp directory; the server
-    never writes to the workspace itself.
+    writes configuration only when ``enable_authoring`` is explicitly enabled.
     """
 
     server_cls = _server_class()
@@ -189,11 +214,16 @@ def create_server(  # noqa: PLR0915 - one function body per registered tool
         Path(render_dir) if render_dir else Path(tempfile.gettempdir()) / "valuestream-renders"
     )
     catalog_cache = CatalogCache(workspace)
-    catalog_cache.get()  # fail fast if the catalog is invalid at startup
+    if not enable_authoring or any((workspace / "catalog").glob("*.yaml")):
+        catalog_cache.get()  # fail fast for partial/invalid catalogs
     mcp = server_cls("Value Stream")
     annotations = import_module("mcp.types").ToolAnnotations
     read_only = annotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
     rendering = annotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
+    if enable_authoring:
+        from valuestream.mcp.authoring import register_authoring_tools  # noqa: PLC0415
+
+        register_authoring_tools(mcp, workspace, annotations, _guarded)
     logger.info(
         "Creating Value Stream MCP server: workspace=%s render_dir=%s png=%s",
         workspace,
@@ -925,11 +955,17 @@ def run_stdio(
     workspace_path: str | Path,
     *,
     enable_sql: bool = False,
+    enable_authoring: bool = False,
     render_dir: str | Path | None = None,
 ) -> None:
     """Run the shared MCP surface over the SDK's default stdio transport."""
 
-    create_server(workspace_path, enable_sql=enable_sql, render_dir=render_dir).run()
+    create_server(
+        workspace_path,
+        enable_sql=enable_sql,
+        enable_authoring=enable_authoring,
+        render_dir=render_dir,
+    ).run()
 
 
 _EXTENDED_CHART_FIELDS = (

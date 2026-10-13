@@ -6,6 +6,11 @@ reports, and chat settings. The workspace catalog remains authoritative: model
 output is only a proposal, and no proposal can write configuration or run data
 without separate user actions.
 
+Catalog application and atomic rollback writes are shared with the optional
+[MCP authoring workflow](../../reference/api-and-mcp.md#optional-catalog-authoring).
+CSV/Parquet workspace previews also use the same bounded reader. Studio keeps
+its existing UI review, data-sharing, and apply gates.
+
 The Studio uses a compact **Data / Draft / Review / Apply** phase rail. Every
 phase names its state as **Complete**, **Attention**, or **Not started**, so the
 rail never relies on color alone. The step selector is scoped to the active

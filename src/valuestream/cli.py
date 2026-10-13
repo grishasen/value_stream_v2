@@ -406,7 +406,7 @@ def serve(workspace_dir: str, *, port: int, browser: bool) -> None:
 
 
 @main.command("serve-mcp")
-@click.argument("workspace_dir", type=click.Path(exists=True, file_okay=False))
+@click.argument("workspace_dir", type=click.Path(file_okay=False))
 @click.option(
     "--transport", type=click.Choice(["stdio", "http"]), default="stdio", show_default=True
 )
@@ -421,6 +421,11 @@ def serve(workspace_dir: str, *, port: int, browser: bool) -> None:
     "--enable-sql",
     is_flag=True,
     help="Expose governed aggregate SQL tools. Disabled by default.",
+)
+@click.option(
+    "--enable-authoring",
+    is_flag=True,
+    help="Enable sample profiling and catalog draft/review/apply tools, including empty workspaces.",
 )
 @click.option(
     "--render-dir",
@@ -438,11 +443,13 @@ def serve_mcp(
     allowed_host: tuple[str, ...],
     allowed_origin: tuple[str, ...],
     enable_sql: bool,
+    enable_authoring: bool,
     render_dir: str | None,
 ) -> None:
     """Start MCP for one workspace over stdio or bearer-protected HTTP."""
 
     try:
+        authoring_options = {"enable_authoring": True} if enable_authoring else {}
         if transport == "stdio":
             if (
                 token is not None
@@ -452,7 +459,9 @@ def serve_mcp(
                 or port != 8001
             ):
                 raise ValueError("--host, --port, --token and allowlists require --transport http")
-            run_mcp_stdio(workspace_dir, enable_sql=enable_sql, render_dir=render_dir)
+            run_mcp_stdio(
+                workspace_dir, enable_sql=enable_sql, render_dir=render_dir, **authoring_options
+            )
         else:
             from valuestream.mcp.http import run_http  # noqa: PLC0415 — HTTP dependencies are lazy
 
@@ -465,6 +474,7 @@ def serve_mcp(
                 allowed_origins=allowed_origin,
                 enable_sql=enable_sql,
                 render_dir=render_dir,
+                **authoring_options,
             )
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc

@@ -245,9 +245,7 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
     "score_distribution": {
         "purpose": "model score quality, ROC/PR curves, calibration, and score summaries",
         "key_fields": ["score_properties", "outcome", "states"],
-        "authoring": (
-            "declare score_properties, outcome, and every digest/count state explicitly"
-        ),
+        "authoring": ("declare score_properties, outcome, and every digest/count state explicitly"),
         "default_states": [
             "Count",
             "<ScoreProperty>_tdigest_positives",
@@ -1163,6 +1161,7 @@ def prompt_for_config_draft(
     hidden_fields: list[str],
     baseline_draft: dict[str, Any],
     user_goals: str = "",
+    allow_source_changes: bool = False,
 ) -> str:
     """Build the first-pass AI prompt for processors, metrics, and dashboards."""
 
@@ -1171,7 +1170,11 @@ def prompt_for_config_draft(
             "Create a richer Value Stream catalog draft from this approved schema. "
             "Create as many distinct valid processors as possible from the approved schema "
             "and business requirements. "
-            "Return only YAML for processors, metrics, dashboards, and optional chat_with_data."
+            + (
+                "Return only YAML for pipelines, processors, metrics, dashboards, and optional chat_with_data."
+                if allow_source_changes
+                else "Return only YAML for processors, metrics, dashboards, and optional chat_with_data."
+            )
         ),
         file_name=file_name,
         approved_schema=approved_schema,
@@ -1180,15 +1183,21 @@ def prompt_for_config_draft(
         current_draft=baseline_draft,
         user_goals=user_goals,
         extra_rules=[
-            "Keep source definitions from pipelines.yaml unchanged.",
+            (
+                "You may refine the sampled source transforms and schema in pipelines.yaml. Keep its id and reader configuration unchanged; preserve all unsampled sources and artifacts."
+                if allow_source_changes
+                else "Keep source definitions from pipelines.yaml unchanged."
+            ),
             "You may replace processors, metrics, and dashboards.",
             "You may add chat_with_data.agent_prompt and chat_with_data metric/dataset descriptions for Chat With Data guidance.",
             "Evaluate every analytics opportunity bundle against the approved field roles, "
             "effective dtypes, business requirements, and current source plan. For each supported "
             "bundle, create coherent processor, metric, and report coverage.",
-            "This task preserves pipelines: use preprocessing that already exists in the current "
-            "source plan, and never invent a missing transform or derived field. Step-aware "
-            "Copilot can offer required preprocessing separately.",
+            (
+                "Declare required parsing, casting, calendar, and derived-column transforms explicitly. Use only approved physical fields; ask the user about ambiguous business outcomes and time formats."
+                if allow_source_changes
+                else "This task preserves pipelines: use preprocessing that already exists in the current source plan, and never invent a missing transform or derived field. Step-aware Copilot can offer required preprocessing separately."
+            ),
             "Use only approved fields as source dimensions, filters, chart axes, or tile settings.",
             "Every metric.processor must reference a processor id in processors.yaml.",
             "Every dashboard tile.metric must reference a metric id in metrics.yaml.",

@@ -50,14 +50,15 @@ from valuestream.ai import (
     validate_draft_field_contract,
     validation_trace_for_repair,
 )
+from valuestream.ai.catalog_authoring import apply_catalog_draft
 from valuestream.ai.copilot import (
     draft_patch_bundles,
     merge_selected_draft_patch_bundles,
 )
+from valuestream.ai.samples import read_tabular_sample
 from valuestream.ai.settings import (
     DEFAULT_CHAT_AGENT_PROMPT,
     load_llm_settings_config,
-    write_chat_with_data_config,
 )
 from valuestream.ai.studio import (
     AI_PROVIDER_PREFLIGHT_MAX_TIMEOUT_SECONDS,
@@ -1806,13 +1807,8 @@ def _read_workspace_sample(
     """Read a bounded workspace preview with format-native pushdown when available."""
 
     lower = path.name.casefold()
-    if lower.endswith(".parquet"):
-        preview = pl.scan_parquet(path)
-        if columns is not None:
-            preview = preview.select(list(columns))
-        return preview.head(limit).collect()
-    if lower.endswith(".csv"):
-        return pl.read_csv(path, infer_schema_length=500, n_rows=limit)
+    if lower.endswith((".parquet", ".csv")):
+        return read_tabular_sample(path, limit=limit, columns=columns)
     _validate_buffered_preview_size(path.stat().st_size, source="Workspace JSON/archive files")
     return _read_sample_bytes(path.name, path.read_bytes(), limit=limit)
 
@@ -9506,32 +9502,12 @@ def _apply_draft(ctx: ValueStreamContext, draft: dict[str, Any]) -> None:
         details = "\n".join(f"- {issue}" for issue in snapshot.issues)
         raise ValueError(f"AI draft validation failed before apply:\n{details}")
 
-    with builder.workspace_configuration_transaction(ctx.workspace):
-        # Every accepted section is authoritative for this revision. Full-section
-        # replacement makes reviewed removals durable while the surrounding
-        # workspace transaction preserves all-or-nothing apply behavior.
-        builder.write_pipelines_definition(ctx.workspace, draft["pipelines"])
-        builder.write_processors_definition(ctx.workspace, draft["processors"])
-        builder.write_metrics_definition(ctx.workspace, draft["metrics"])
-        builder.write_dashboards_definition(ctx.workspace, draft["dashboards"])
-        chat_settings = draft.get("chat_with_data")
-        if isinstance(chat_settings, dict):
-            write_chat_with_data_config(
-                ctx.workspace,
-                agent_prompt=str(chat_settings.get("agent_prompt") or ""),
-                dataset_descriptions={
-                    str(key): str(value)
-                    for key, value in dict(chat_settings.get("dataset_descriptions") or {}).items()
-                },
-                metric_descriptions={
-                    str(key): str(value)
-                    for key, value in dict(chat_settings.get("metric_descriptions") or {}).items()
-                },
-            )
-        builder.require_valid_workspace(
-            ctx.workspace,
-            source_columns_by_id=_active_catalog_source_columns(),
-        )
+    apply_catalog_draft(
+        ctx.workspace,
+        draft,
+        source_columns_by_id=_active_catalog_source_columns(),
+        validate_written=builder.require_valid_workspace,
+    )
 
 
 def _draft_requires_data_run(ctx: ValueStreamContext, draft: dict[str, Any]) -> bool:

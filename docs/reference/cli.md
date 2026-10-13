@@ -100,7 +100,7 @@ Starts the Streamlit dashboard UI for a workspace.
 ## serve-mcp
 
 ```sh
-uv run valuestream serve-mcp WORKSPACE [--enable-sql]
+uv run valuestream serve-mcp WORKSPACE [--enable-sql] [--enable-authoring]
 ```
 
 Starts MCP for one fixed workspace. Requires the `ai` extra
@@ -116,6 +116,7 @@ prompts. Governed SQL is absent unless `--enable-sql` is passed.
 | `--allowed-host` | Repeatable extra Host header value, e.g. `metrics.example.com` or `metrics.example.com:443`. Loopback and a concrete bind host are allowed automatically, with or without a port; wildcard binds (`0.0.0.0`, `::`) require an explicit allowed host |
 | `--allowed-origin` | Repeatable allowed Origin value, e.g. `https://client.example.com` (the SDK also supports an explicit `:*` port suffix). Origins are rejected unless listed; requests without Origin are accepted |
 | `--enable-sql` | Off; enables bounded read-only aggregate SQL tools |
+| `--enable-authoring` | Off; enables sample-backed catalog draft/review/apply tools and startup in an absent/empty workspace |
 | `--render-dir` | HTML render output directory; defaults to the system temp directory |
 
 HTTP options require `--transport http`. The MCP token environment variable

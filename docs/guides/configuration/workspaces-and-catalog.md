@@ -102,10 +102,11 @@ transforms.
 | Remove a dimension from reports | Usually safe if no tile depends on it |
 | Change chart presentation settings | Affects rendering only, not stored aggregates |
 
-## Three Ways to Edit the Catalog
+## Ways to Edit the Catalog
 
 | Path | Best for |
 |---|---|
+| [MCP authoring](../users/mcp-clients.md#7) | Create a catalog from a CSV/Parquet sample through client-model drafts, validation, review, and apply |
 | YAML edits | Precise, reviewable changes in source control |
 | [Configuration Builder](builder.md) | Catalog-first source, processor, metric, tile, chat, and settings authoring inside the UI |
 | [AI Configuration Studio](ai-config-studio.md) | Drafting catalog YAML from an uploaded sample and LLM responses, then reviewing and applying it |
