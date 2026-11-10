@@ -312,8 +312,9 @@ Pagination does not pin a snapshot across ingestion or catalog edits.
 
 Row responses expose the total `row_count` before pagination, `returned_rows`,
 `offset`, `next_offset`, and `truncated` (whether more rows remain after this
-page). The chart tool renders its returned page; the authored tile tool renders
-the full tile while limiting response rows. These query tools publish typed
+page). Both chart tools render the full result while limiting response rows:
+`metric_chart_query` draws every row of the query and `tile_query` draws the
+full tile, so `limit` and `offset` never truncate a rendered chart. These query tools publish typed
 output schemas, and enum/limit constraints appear in their input schemas.
 Tool annotations identify read-only queries and additive rendering operations.
 MCP exposes no built-in `chat` or server-side LLM planner. The calling client
@@ -341,7 +342,8 @@ same intent fields:
   `x="Day"`, `Month`, `Quarter`, or `Year` when the default summary hint is used.
   A daily line chart therefore retains `Day` in its query rows without requiring
   the client to choose a grain. Non-temporal charts retain summary grouping.
-- Returned rows are capped; authored tile rendering retains the full tile.
+- Returned rows are capped; chart rendering (`metric_chart_query` and
+  `tile_query`) retains the full result.
 
 ## Provenance Envelope
 
