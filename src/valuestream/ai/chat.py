@@ -241,13 +241,25 @@ class ChatIntent:
 
 @dataclass(frozen=True)
 class ChatQueryResult:
-    """Executed chat intent with rows and provenance text."""
+    """Executed chat intent with rows and provenance text.
+
+    ``rows`` is the requested page (``offset``/``limit``); ``all_rows`` is the
+    complete aggregate result before paging, so a chart can draw every row
+    while the response stays bounded. ``None`` means ``rows`` is already whole.
+    """
 
     intent: ChatIntent
     rows: pl.DataFrame
     query_summary: str
     freshness: str
     row_count: int = 0
+    all_rows: pl.DataFrame | None = None
+
+    @property
+    def chart_rows(self) -> pl.DataFrame:
+        """Rows a chart of this result should draw: the full result, not the page."""
+
+        return self.rows if self.all_rows is None else self.all_rows
 
 
 @dataclass(frozen=True)
@@ -1642,14 +1654,16 @@ def execute_chat_intent(
             start=_as_optional_date(intent.start),
             end=_as_optional_date(intent.end),
         )
-    row_count = rows.height
-    rows = rows.slice(offset, intent.limit)
+    all_rows = rows
+    rows = all_rows.slice(offset, intent.limit)
     fresh = metric_freshness(workspace_path, catalog, intent.metric, grain=intent.grain)
     logger.info(
-        "Executed chat aggregate query: metric=%s grain=%s rows=%s column_count=%s freshness=%s",
+        "Executed chat aggregate query: metric=%s grain=%s rows=%s total_rows=%s "
+        "column_count=%s freshness=%s",
         intent.metric,
         intent.grain,
         rows.height,
+        all_rows.height,
         rows.width,
         freshness_label(fresh),
     )
@@ -1658,7 +1672,8 @@ def execute_chat_intent(
         rows=rows,
         query_summary=_query_summary(intent),
         freshness=freshness_label(fresh),
-        row_count=row_count,
+        row_count=all_rows.height,
+        all_rows=all_rows,
     )
 
 

@@ -425,7 +425,8 @@ def create_server(  # noqa: PLR0915 - one function body per registered tool
         Set `render` to see the chart itself: "png" attaches the rendered
         image, "html" writes a self-contained interactive page and returns its
         path, "html_cdn" writes the lighter CDN-backed variant, "spec" returns
-        the Plotly figure spec.
+        the Plotly figure spec. The chart draws every row of the result;
+        `limit` and `offset` only page the rows returned in the response.
         """
 
         logger.info(
@@ -533,9 +534,11 @@ def create_server(  # noqa: PLR0915 - one function body per registered tool
                     "requested; say so rather than describing the requested chart."
                 ),
             }
+            # Draw the whole result, as tile_query does: `limit`/`offset` bound
+            # the rows in the response, not what the chart shows.
             return _with_render(
                 payload,
-                rows=result.rows,
+                rows=result.chart_rows,
                 tile=chart_tile_from_intent(result.intent),
                 render=render,
                 stem=f"{result.intent.metric}-{chart_spec['kind']}",

@@ -650,6 +650,31 @@ async def test_query_pagination_preserves_total_count(demo_workspace: Path, char
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_chart_render_draws_the_full_result_not_the_response_page(
+    demo_workspace: Path,
+) -> None:
+    """`limit` bounds the response rows; the rendered chart must still show every row."""
+    arguments: dict[str, Any] = {
+        "metric": "VS_Engagement_Rate",
+        "chart_kind": "bar",
+        "x": "Channel",
+        "y": "VS_Engagement_Rate",
+        "group_by": ["Channel"],
+        "render": "spec",
+        "limit": 1,
+    }
+    result = (await _build(demo_workspace).call_tool("metric_chart_query", arguments)).model_dump(
+        by_alias=True
+    )["structuredContent"]
+    assert result["row_count"] > 1
+    assert result["returned_rows"] == 1
+    assert result["truncated"] is True
+    drawn = sum(len(trace.get("x") or []) for trace in result["render"]["spec"]["data"])
+    assert drawn == result["row_count"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_tool_schemas_describe_results_constraints_and_side_effects() -> None:
     tools = {
         tool.name: tool.model_dump(by_alias=True) for tool in await _build(DEMO_WS).list_tools()
