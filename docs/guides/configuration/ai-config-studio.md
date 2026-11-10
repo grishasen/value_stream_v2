@@ -21,6 +21,10 @@ signatures, or committed editor state. The final step is **Apply**. Validation,
 review, workspace apply, and data loading are distinct states; object counts
 alone never imply that a revision is reviewed or applied.
 
+For model-assisted drafting, install the optional LLM dependency as described in
+[Configure a Model](../users/chat-with-data.md#configure-a-model). The base
+installation supports deterministic drafting and sample previews.
+
 ## Start from a sample
 
 The cold start is in the main canvas. Choose one of three paths:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,23 @@ from valuestream.ai.studio import (
     call_litellm,
 )
 from valuestream.ui.pages import ai_config_studio as ai_config_studio_page
+from valuestream.ui.pages import chat as chat_page
+
+
+@pytest.mark.unit
+def test_missing_llm_extra_reports_install_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "litellm", None)
+    settings = AICallSettings(model="ollama/local")
+    with pytest.raises(AIProviderCallError, match="uv sync --extra llm") as raised:
+        ai_studio.preflight_ai_provider(settings)
+
+    failure = raised.value
+    assert failure.category is AIProviderFailureCategory.MISSING_DEPENDENCY
+    assert not failure.retryable
+    assert "uv sync --extra llm" in chat_page._chat_query_error_message(failure)
+    assert "uv sync --extra llm" in ai_config_studio_page._ai_operation_error_message(
+        failure, operation="draft"
+    )
 
 
 class _ProviderSignalError(RuntimeError):

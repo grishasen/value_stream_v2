@@ -3394,7 +3394,6 @@ dependencies = [
     { name = "datasketches" },
     { name = "duckdb" },
     { name = "jsonschema" },
-    { name = "litellm" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "plotly" },
@@ -3434,6 +3433,9 @@ dev = [
     { name = "types-jsonschema" },
     { name = "types-pyyaml" },
 ]
+llm = [
+    { name = "litellm" },
+]
 viz = [
     { name = "kaleido" },
 ]
@@ -3449,7 +3451,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.112" },
     { name = "jsonschema", specifier = ">=4" },
     { name = "kaleido", marker = "extra == 'viz'", specifier = ">=1" },
-    { name = "litellm", specifier = ">=1.104.1" },
+    { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.104.1" },
     { name = "mcp", marker = "extra == 'ai'", specifier = ">=2.3.0" },
     { name = "mkdocs", marker = "extra == 'dev'", specifier = ">=1.6" },
     { name = "mkdocs-material", marker = "extra == 'dev'", specifier = ">=9.5" },
@@ -3477,7 +3479,7 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.30" },
 ]
-provides-extras = ["ai", "api", "viz", "dev"]
+provides-extras = ["llm", "ai", "api", "viz", "dev"]
 
 [[package]]
 name = "virtualenv"

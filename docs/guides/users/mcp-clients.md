@@ -49,8 +49,6 @@ API, PNG и инструменты разработки, используйте 
 оболочки. `command` содержит только путь к программе, каждый аргумент задаётся
 отдельной строкой в `args`. Активация виртуального окружения не требуется.
 
-Переменная `LITELLM_LOCAL_MODEL_COST_MAP=True` в примерах отключает загрузку
-таблицы цен LiteLLM из сети при старте и позволяет избежать задержек без интернета.
 MCP-инструменты не требуют отдельного API-ключа модели или настройки LLM
 в workspace. Свободный вопрос разбирает AI-клиент: он выбирает метрику,
 параметры и вызывает инструменты аналитики. Встроенного инструмента `chat`
@@ -66,7 +64,6 @@ MCP-инструменты не требуют отдельного API-ключ
 
 ```sh
 codex mcp add valuestream \
-  --env LITELLM_LOCAL_MODEL_COST_MAP=True \
   -- /Users/yourname/projects/value_stream_public/.venv/bin/valuestream \
   serve-mcp /Users/yourname/projects/value_stream_public/examples/fat
 ```
@@ -87,9 +84,6 @@ codex mcp list
 command = "/Users/yourname/projects/value_stream_public/.venv/bin/valuestream"
 args = ["serve-mcp", "/Users/yourname/projects/value_stream_public/examples/fat"]
 startup_timeout_sec = 60
-
-[mcp_servers.valuestream.env]
-LITELLM_LOCAL_MODEL_COST_MAP = "True"
 ```
 
 Глобальная конфигурация используется desktop-приложением, CLI и IDE extension.
@@ -127,10 +121,7 @@ LITELLM_LOCAL_MODEL_COST_MAP = "True"
       "args": [
         "serve-mcp",
         "/Users/yourname/projects/value_stream_public/examples/fat"
-      ],
-      "env": {
-        "LITELLM_LOCAL_MODEL_COST_MAP": "True"
-      }
+      ]
     }
   }
 }
@@ -379,7 +370,7 @@ asyncio.run(main())
 |---|---|
 | `ENOENT`, программа не найдена | Абсолютный `command`, наличие executable, установка extra `ai` именно в этом окружении |
 | Сервер есть в настройках, но инструментов нет | Перезапуск клиента, включён ли сервер, журнал запуска; в управляемом Claude локальные MCP могут быть запрещены администратором |
-| Таймаут запуска | Переменная `LITELLM_LOCAL_MODEL_COST_MAP`, запуск executable напрямую; для Codex параметр `startup_timeout_sec` в примере |
+| Таймаут запуска | Запуск executable напрямую; для Codex параметр `startup_timeout_sec` в примере |
 | Ошибка JSON/TOML | Синтаксис, кавычки, повторные секции; не переносите JSON Claude в TOML Codex |
 | Метрики видны, но запрос не выполняется | `workspace_status_tool`; загрузите или пересчитайте агрегаты по [runbook](../operations/runbook.md) |
 | `unknown metric` | Имена из `metric_list` текущего workspace, включая регистр |

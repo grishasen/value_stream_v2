@@ -31,6 +31,10 @@ planner for anything outside the listed templates.
 
 ## Configure a Model
 
+Install model support with `uv sync --extra llm` from the project root, or
+`pip install 'valuestream[llm]'` for a package installation. Aggregate quick
+questions work with the base installation.
+
 Create `<workspace>/ai.yaml` with a LiteLLM model string. Keep secrets in
 environment variables, not in the file:
 

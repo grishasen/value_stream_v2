@@ -19,7 +19,6 @@ from typing import Any
 
 import polars as pl
 import yaml
-from litellm import completion as litellm_completion
 from pydantic import ValidationError
 
 from valuestream.charts.recipes import TILE_REQUIRED_ALTERNATIVES
@@ -877,6 +876,7 @@ class AICallSettings:
 class AIProviderFailureCategory(StrEnum):
     """Privacy-safe categories shared by AI provider call surfaces."""
 
+    MISSING_DEPENDENCY = "missing_dependency"
     CONFIGURATION = "configuration"
     AUTHENTICATION = "authentication"
     AUTHORIZATION = "authorization"
@@ -889,6 +889,7 @@ class AIProviderFailureCategory(StrEnum):
 
 
 _AI_PROVIDER_CATEGORY_RETRYABLE: dict[AIProviderFailureCategory, bool] = {
+    AIProviderFailureCategory.MISSING_DEPENDENCY: False,
     AIProviderFailureCategory.CONFIGURATION: False,
     AIProviderFailureCategory.AUTHENTICATION: False,
     AIProviderFailureCategory.AUTHORIZATION: False,
@@ -907,6 +908,9 @@ class AIProviderFailureClassification:
 
     category: AIProviderFailureCategory
     retryable: bool
+
+
+LLM_INSTALL_HINT = "Install model support with `uv sync --extra llm` or `pip install 'valuestream[llm]'`."
 
 
 class AIProviderCallError(RuntimeError):
@@ -929,7 +933,10 @@ class AIProviderCallError(RuntimeError):
         )
         self.retryable = _AI_PROVIDER_CATEGORY_RETRYABLE[self.category]
         detail = " due to insufficient permissions" if permission_denied else f" ({error_type})"
-        super().__init__(f"AI provider call failed{detail}. Reference: {call_id}.")
+        message = f"AI provider call failed{detail}. Reference: {call_id}."
+        if self.category is AIProviderFailureCategory.MISSING_DEPENDENCY:
+            message = f"{message} {LLM_INSTALL_HINT}"
+        super().__init__(message)
 
 
 class AIProviderResponseValidationError(ValueError):
@@ -1757,6 +1764,12 @@ def tile_keys(draft: dict[str, Any]) -> list[str]:
     return list(_tiles_by_key(draft))
 
 
+def litellm_completion(**kwargs: Any) -> Any:
+    from litellm import completion  # noqa: PLC0415 — optional provider dependency
+
+    return completion(**kwargs)
+
+
 def call_litellm(
     settings: AICallSettings,
     prompt: str,
@@ -1917,6 +1930,9 @@ def _safe_error_type_for_log(exc: Exception) -> str:
 
 def classify_ai_provider_failure(exc: Exception) -> AIProviderFailureClassification:
     """Classify a failure without inspecting provider-controlled message text."""
+
+    if isinstance(exc, ModuleNotFoundError) and exc.name == "litellm":
+        return AIProviderFailureClassification(AIProviderFailureCategory.MISSING_DEPENDENCY, False)
 
     status_code = _provider_failure_status_code(exc)
     error_code = _provider_failure_code(exc)

@@ -26,10 +26,12 @@ dependencies = [
     "scipy>=1.18.1",
     "streamlit>=1.65.0",
     "starlette>=1.7.0",
-    "litellm>=1.104.1",
 ]
 
 [project.optional-dependencies]
+llm = [
+    "litellm>=1.104.1",
+]
 ai = [
     "mcp>=2.3.0",
 ]

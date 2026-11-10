@@ -62,6 +62,7 @@ from valuestream.ai.settings import (
 )
 from valuestream.ai.studio import (
     AI_PROVIDER_PREFLIGHT_MAX_TIMEOUT_SECONDS,
+    LLM_INSTALL_HINT,
     AIProviderCallError,
     DraftAttemptDiagnostic,
     DraftCandidateResult,
@@ -8215,6 +8216,7 @@ def _ai_operation_error_message(exc: Exception, *, operation: str) -> str:
     if isinstance(exc, AIProviderCallError):
         category = str(exc.category)
         remediation = {
+            "missing_dependency": LLM_INSTALL_HINT,
             "configuration": "Check the provider, model, credential, and endpoint settings.",
             "authentication": "Replace or refresh the configured API credential.",
             "authorization": "Grant this project access to the selected model or operation.",

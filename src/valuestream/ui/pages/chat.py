@@ -35,6 +35,7 @@ from valuestream.ai.settings import (
 )
 from valuestream.ai.sql_tool import run_sql_query, sql_schema_summary
 from valuestream.ai.studio import (
+    LLM_INSTALL_HINT,
     AIProviderCallError,
     ai_provider_preflight_cache_key,
     ai_provider_settings_configured,
@@ -327,6 +328,7 @@ def _chat_query_error_message(exc: Exception) -> str:
     if isinstance(exc, AIProviderCallError):
         category = str(exc.category)
         remediation = {
+            "missing_dependency": LLM_INSTALL_HINT,
             "configuration": "Add a model plus an API key or custom endpoint in Chat Settings.",
             "authentication": "Replace or refresh the configured API credential.",
             "authorization": "Check project and model permissions for this credential.",
