@@ -20,10 +20,8 @@ jobs:
         with:
           fetch-depth: 0 # gh-deploy pushes to the gh-pages branch
       - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.14"
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --locked --extra dev
       - name: Build docs (strict)
         run: uv run mkdocs build --strict
       - name: Deploy to GitHub Pages
