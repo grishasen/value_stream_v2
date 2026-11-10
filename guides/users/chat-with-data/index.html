@@ -2671,6 +2671,9 @@ configured and the planner is enabled. If a configured provider is
 unreachable, the quick-question buttons remain usable; enable or restore the
 planner for anything outside the listed templates.</p>
 <h2 id="configure-a-model">Configure a Model<a class="headerlink" href="#configure-a-model" title="Permanent link">&para;</a></h2>
+<p>Install model support with <code>uv sync --extra llm</code> from the project root, or
+<code>pip install 'valuestream[llm]'</code> for a package installation. Aggregate quick
+questions work with the base installation.</p>
 <p>Create <code>&lt;workspace&gt;/ai.yaml</code> with a LiteLLM model string. Keep secrets in
 environment variables, not in the file:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">ai</span><span class="p">:</span>

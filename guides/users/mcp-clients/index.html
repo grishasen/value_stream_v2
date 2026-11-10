@@ -3028,9 +3028,7 @@ API, PNG и инструменты разработки, используйте 
 <p>В конфигурациях используйте абсолютные пути без <code>~</code>, <code>$HOME</code> или переменных
 оболочки. <code>command</code> содержит только путь к программе, каждый аргумент задаётся
 отдельной строкой в <code>args</code>. Активация виртуального окружения не требуется.</p>
-<p>Переменная <code>LITELLM_LOCAL_MODEL_COST_MAP=True</code> в примерах отключает загрузку
-таблицы цен LiteLLM из сети при старте и позволяет избежать задержек без интернета.
-MCP-инструменты не требуют отдельного API-ключа модели или настройки LLM
+<p>MCP-инструменты не требуют отдельного API-ключа модели или настройки LLM
 в workspace. Свободный вопрос разбирает AI-клиент: он выбирает метрику,
 параметры и вызывает инструменты аналитики. Встроенного инструмента <code>chat</code>
 в MCP нет; графики выдаются через <code>metric_chart_query</code> или <code>tile_query</code>.</p>
@@ -3039,7 +3037,6 @@ MCP-инструменты не требуют отдельного API-ключ
 <h3 id="cli">Через CLI<a class="headerlink" href="#cli" title="Permanent link">&para;</a></h3>
 <p>Если <code>codex</code> доступен в терминале:</p>
 <div class="highlight"><pre><span></span><code>codex<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>valuestream<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--env<span class="w"> </span><span class="nv">LITELLM_LOCAL_MODEL_COST_MAP</span><span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--<span class="w"> </span>/Users/yourname/projects/value_stream_public/.venv/bin/valuestream<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>serve-mcp<span class="w"> </span>/Users/yourname/projects/value_stream_public/examples/fat
 </code></pre></div>
@@ -3053,9 +3050,6 @@ MCP-инструменты не требуют отдельного API-ключ
 <span class="n">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/Users/yourname/projects/value_stream_public/.venv/bin/valuestream"</span>
 <span class="n">args</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"serve-mcp"</span><span class="p">,</span><span class="w"> </span><span class="s2">"/Users/yourname/projects/value_stream_public/examples/fat"</span><span class="p">]</span>
 <span class="n">startup_timeout_sec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">60</span>
-
-<span class="k">[mcp_servers.valuestream.env]</span>
-<span class="n">LITELLM_LOCAL_MODEL_COST_MAP</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"True"</span>
 </code></pre></div>
 <p>Глобальная конфигурация используется desktop-приложением, CLI и IDE extension.
 Для настройки только одного доверенного проекта можно использовать его
@@ -3097,10 +3091,7 @@ MCP-инструменты не требуют отдельного API-ключ
 <span class="w">      </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">        </span><span class="s2">"serve-mcp"</span><span class="p">,</span>
 <span class="w">        </span><span class="s2">"/Users/yourname/projects/value_stream_public/examples/fat"</span>
-<span class="w">      </span><span class="p">],</span>
-<span class="w">      </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">        </span><span class="nt">"LITELLM_LOCAL_MODEL_COST_MAP"</span><span class="p">:</span><span class="w"> </span><span class="s2">"True"</span>
-<span class="w">      </span><span class="p">}</span>
+<span class="w">      </span><span class="p">]</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
@@ -3307,7 +3298,7 @@ Authorization и передавать Host <code>metrics.example.com</code>. Е�
 </tr>
 <tr>
 <td>Таймаут запуска</td>
-<td>Переменная <code>LITELLM_LOCAL_MODEL_COST_MAP</code>, запуск executable напрямую; для Codex параметр <code>startup_timeout_sec</code> в примере</td>
+<td>Запуск executable напрямую; для Codex параметр <code>startup_timeout_sec</code> в примере</td>
 </tr>
 <tr>
 <td>Ошибка JSON/TOML</td>
