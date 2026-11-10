@@ -3209,8 +3209,9 @@ keep filters, ordering, and the underlying workspace unchanged between calls.
 Pagination does not pin a snapshot across ingestion or catalog edits.</p>
 <p>Row responses expose the total <code>row_count</code> before pagination, <code>returned_rows</code>,
 <code>offset</code>, <code>next_offset</code>, and <code>truncated</code> (whether more rows remain after this
-page). The chart tool renders its returned page; the authored tile tool renders
-the full tile while limiting response rows. These query tools publish typed
+page). Both chart tools render the full result while limiting response rows:
+<code>metric_chart_query</code> draws every row of the query and <code>tile_query</code> draws the
+full tile, so <code>limit</code> and <code>offset</code> never truncate a rendered chart. These query tools publish typed
 output schemas, and enum/limit constraints appear in their input schemas.
 Tool annotations identify read-only queries and additive rendering operations.
 MCP exposes no built-in <code>chat</code> or server-side LLM planner. The calling client
@@ -3236,7 +3237,8 @@ same intent fields:</p>
   <code>x="Day"</code>, <code>Month</code>, <code>Quarter</code>, or <code>Year</code> when the default summary hint is used.
   A daily line chart therefore retains <code>Day</code> in its query rows without requiring
   the client to choose a grain. Non-temporal charts retain summary grouping.</li>
-<li>Returned rows are capped; authored tile rendering retains the full tile.</li>
+<li>Returned rows are capped; chart rendering (<code>metric_chart_query</code> and
+  <code>tile_query</code>) retains the full result.</li>
 </ul>
 <h2 id="provenance-envelope">Provenance Envelope<a class="headerlink" href="#provenance-envelope" title="Permanent link">&para;</a></h2>
 <p>Metric-query responses include a provenance object: catalog and computation
