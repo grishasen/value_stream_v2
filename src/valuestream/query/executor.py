@@ -17,6 +17,7 @@ from valuestream.algorithms.curves import calibration_from_digests, curve_from_d
 from valuestream.config import model
 from valuestream.config.canonical import catalog_config_hash, processor_computation_hash
 from valuestream.config.loader import load
+from valuestream.config.report_fields import frequency_threshold_share_outputs
 from valuestream.engine.ledger import aggregate_lineage_paths, successful_chunk_keys
 from valuestream.expr.translator import translate
 from valuestream.processors import (
@@ -942,7 +943,7 @@ def _metric_output_columns(  # noqa: PLR0911
     include_curve_columns: bool,
 ) -> list[str]:
     if isinstance(metric, model.FrequencyThresholdShareMetric):
-        return [metric_name, "PositiveShareAboveThreshold"]
+        return frequency_threshold_share_outputs(metric_name)
     if isinstance(metric, model.LifecycleSummaryMetric):
         configured = [column for column in metric.outputs if column in frame.columns]
         return configured or [

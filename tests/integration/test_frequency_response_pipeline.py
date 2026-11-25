@@ -9,6 +9,8 @@ import duckdb
 import polars as pl
 import pytest
 
+from valuestream.ai.chat import catalog_chat_manifest
+from valuestream.config.loader import load
 from valuestream.engine import run_source
 from valuestream.query import query_metric_result
 from valuestream.store.parquet import scan_aggregate
@@ -253,6 +255,8 @@ def test_frequency_response_pipeline_replays_bounded_dependencies_and_hides_empt
     cap = query_metric_result(tmp_path, "HistoricalCapCost", grain="summary")
     assert cap.rows["HistoricalCapCost"].item() == pytest.approx(6 / 9)
     assert cap.rows["PositiveShareAboveThreshold"].item() == pytest.approx(3 / 4)
+    manifest = catalog_chat_manifest(load(tmp_path), metric_names={"HistoricalCapCost"})
+    assert manifest["metrics"][0]["outputs"] == cap.rows.columns
     assert cap.provenance.chunk_ids == repeat.provenance.chunk_ids
     with pytest.raises(ValueError, match="needs all frequency buckets"):
         query_metric_result(

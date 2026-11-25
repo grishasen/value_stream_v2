@@ -151,6 +151,7 @@ _TIME_COLUMNS = {
 }
 _MAX_CHAT_ROWS = 500
 _METRIC_KIND_EXPLANATIONS = {
+    "frequency_threshold_share": "Shares of impressions and positive outcomes above the configured frequency threshold.",
     "formula": "Derived from aggregate state columns or dependency metrics using the expression AST.",
     "approx_distinct_count": ("Approximate distinct count from a CPC, HLL, or Theta sketch state."),
     "topk_items": "Top-K items from a processor top-k state.",
@@ -648,7 +649,7 @@ def metric_output_columns(metric_name: str, metric: model.Metric) -> list[str]:
         return outputs or configured_output_defaults[kind]
     if kind == "curve_from_digests":
         return [getattr(metric, "output", metric_name), "fpr", "tpr", "precision", "recall"]
-    return static_outputs.get(kind, [metric_name])
+    return static_outputs.get(kind) or report_output_columns(metric_name, metric)
 
 
 def allowed_chart_kinds(catalog: model.Catalog, metric_name: str) -> list[str]:

@@ -27,6 +27,7 @@ from valuestream.ai.settings import write_chat_with_data_config
 from valuestream.ai.studio import (
     draft_object_counts,
     generate_schema_preview,
+    preserve_metric_descriptions,
     prompt_for_config_draft,
     section_name_diff,
     validate_draft_catalog,
@@ -346,6 +347,12 @@ class CatalogAuthoring:
             if not sections or set(sections) - {*SECTIONS, "chat_with_data"}:
                 raise ValueError("Supply complete catalog sections or chat_with_data")
             payload = {**copy.deepcopy(draft.payload), **copy.deepcopy(sections)}
+            if "metrics" in sections and isinstance(payload["metrics"], dict):
+                proposed_metrics = payload["metrics"].get("metrics")
+                if isinstance(proposed_metrics, dict):
+                    preserve_metric_descriptions(
+                        draft.payload["metrics"]["metrics"], proposed_metrics
+                    )
             if len(yaml.safe_dump(payload).encode()) > MAX_DRAFT_BYTES:
                 raise ValueError("Draft exceeds the 2 MiB configuration budget")
             # Structural shape is required for a meaningful diff; semantic errors
@@ -576,6 +583,7 @@ def _sample_baseline(
     payload["metrics"]["metrics"][metric_name] = {
         "processor": processor_id,
         "kind": "formula",
+        "description": f"Number of records from the {source_id} source in the selected scope.",
         "expression": {"col": "Count"},
         "display": {"label": "Rows", "value_format": "integer"},
     }

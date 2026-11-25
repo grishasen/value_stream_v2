@@ -5227,7 +5227,7 @@ def _preserve_untouched_metric_definition(
     seed_metric_def: dict[str, Any],
     metric_def: dict[str, Any],
 ) -> dict[str, Any]:
-    """Keep the exact authored metric when the visual form is semantically unchanged."""
+    """Preserve the authored definition and recipe binding for description-only edits."""
 
     try:
         baseline = model.Metrics.model_validate(
@@ -5238,12 +5238,29 @@ def _preserve_untouched_metric_definition(
         ).metrics["metric"]
     except ValueError:
         return metric_def
+    # The visual form omits the recipe binding. A wording change alone leaves
+    # the configured calculation and its binding intact.
+    comparable = candidate.model_copy(
+        update={
+            "description": baseline.description,
+            "recipe": candidate.recipe if "recipe" in metric_def else baseline.recipe,
+        }
+    )
     status = builder.builder_draft_status(
         "metric-editor:metric",
         baseline.model_dump(mode="json", by_alias=True, exclude_none=True),
-        candidate.model_dump(mode="json", by_alias=True, exclude_none=True),
+        comparable.model_dump(mode="json", by_alias=True, exclude_none=True),
     )
-    return seed_metric_def if not status.dirty else metric_def
+    if status.dirty:
+        return metric_def
+    if baseline.description == candidate.description:
+        return seed_metric_def
+    edited = dict(seed_metric_def)
+    if "description" in metric_def:
+        edited["description"] = candidate.description
+    else:
+        edited.pop("description", None)
+    return edited
 
 
 def _processor_index_by_id(processors: list[model.Processor], processor_id: str) -> int:

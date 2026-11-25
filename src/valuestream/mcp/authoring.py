@@ -79,8 +79,8 @@ def register_authoring_tools(
         """Create an in-memory baseline catalog and Studio generation prompt from a sample.
 
         Works without an existing catalog. Returns a valid rows-count baseline,
-        schema, and the shared Studio prompt. Use the client model to propose richer
-        analytics, update the draft, validate, preview changes, and apply separately.
+        schema, and the shared Studio prompt. Use the client model to propose metrics
+        with business descriptions, update the draft, validate, preview, and apply separately.
         No server-side LLM credentials are required. Drafts expire after one hour
         or restart; no raw rows, examples, or prompts are retained by the server.
         """
@@ -110,6 +110,8 @@ def register_authoring_tools(
     ) -> dict[str, Any]:
         """Replace selected draft sections and invalidate the previous review token.
 
+        Include a business description for each new metric. For an existing metric,
+        omitting description keeps its text. An explicit string edits or clears it.
         Preserve unsampled sources. Structural errors return an MCP error without
         modifying the draft; semantic issues remain editable via validation.
         """

@@ -662,8 +662,10 @@ def test_generate_validated_candidate_repairs_before_returning(
         return (bool(candidate.get("metrics", {}).get("metrics")), ["missing metric"])
 
     monkeypatch.setattr(ai_studio, "validate_draft_catalog", validate)
+    base = _base_draft()
+    base["metrics"]["metrics"]["CTR"]["description"] = "Share of eligible outcomes with a click."
     result = ai_studio.generate_validated_candidate(
-        base_draft=_base_draft(),
+        base_draft=base,
         prompt="first",
         call=lambda prompt: (prompts.append(prompt), next(responses))[1],
         repair_prompt=lambda _draft, issues, _trace: f"repair: {issues[0]}",
@@ -671,6 +673,11 @@ def test_generate_validated_candidate_repairs_before_returning(
     )
 
     assert result.ok
+    assert result.draft is not None
+    assert (
+        result.draft["metrics"]["metrics"]["CTR"]["description"]
+        == "Share of eligible outcomes with a click."
+    )
     assert result.attempts == 2
     assert prompts == ["first", "repair: missing metric"]
 
@@ -1462,6 +1469,7 @@ def test_default_group_by_includes_derived_calendar_dimensions(
 @pytest.mark.unit
 def test_missing_kind_specific_metric_fields_are_repairable_draft_issues() -> None:
     issues = [
+        "metrics.metrics.repeat_share.frequency_threshold_share.threshold: Field required",
         "metrics.metrics.customer_reach.approx_distinct_count.state: Field required",
         "metrics.metrics.response_p50.quantile.state: Field required",
         "metrics.metrics.calibration.calibration_from_digests.positive_state: Field required",
@@ -1476,7 +1484,7 @@ def test_missing_kind_specific_metric_fields_are_repairable_draft_issues() -> No
     assert blocking == [
         "dashboards[overview].pages[main].tiles[bad].metric: unknown metric 'Missing'"
     ]
-    assert repairable == issues[:6]
+    assert repairable == issues[:-1]
 
 
 @pytest.mark.unit
@@ -1579,6 +1587,12 @@ def test_analytics_opportunity_playbook_covers_fat_workspace_patterns() -> None:
     } <= set(reports)
     assert "Never subtract String fields" in " ".join(preprocessing["datetime_safety"])
     assert dictionaries["metric_kinds"]["topk_items"]["state_type"] == "topk"
+    frequency_processor = dictionaries["processor_kinds"]["frequency_response"]
+    assert "frequency_threshold_share" in frequency_processor["compatible_metrics"]
+    assert dictionaries["metric_kinds"]["frequency_threshold_share"]["outputs"] == [
+        "metric_id",
+        "PositiveShareAboveThreshold",
+    ]
     metric_union = get_args(model.Metric)[0]
     supported_metric_kinds = {
         kind
@@ -4341,7 +4355,7 @@ def test_processor_parameter_editor_renders_builder_parity_controls() -> None:
     assert "Dedup Keys" in labels
     dedup = next(widget for widget in at.multiselect if widget.label == "Dedup Keys")
     assert dedup.value == ["InteractionID"]
-    session_keys = list(at.session_state.filtered_state)
+    session_keys = at.session_state.keys()
     # The sketch grid session rows carry the Builder's Parameters and
     # Derived From columns seeded from the draft's state contract.
     state_rows_key = next(
@@ -4401,6 +4415,7 @@ def test_metric_parameter_editor_shows_outputs_and_preserves_untouched_metric() 
                     "Volume": {
                         "processor": "engagement",
                         "kind": "formula",
+                        "description": "Number of recorded outcomes.",
                         "expression": {"col": "Count"},
                         "recipe": {"id": "volume", "version": 1},
                     }
@@ -4408,8 +4423,7 @@ def test_metric_parameter_editor_shows_outputs_and_preserves_untouched_metric() 
             },
             "dashboards": {"catalog_version": 2, "theme": {}, "dashboards": []},
         }
-        st.session_state["ai_studio_draft"] = draft
-        page._render_metric_parameter_editor(draft)
+        page._render_metric_parameter_editor(st.session_state.setdefault("ai_studio_draft", draft))
 
     at = AppTest.from_function(app).run()
 
@@ -4426,6 +4440,18 @@ def test_metric_parameter_editor_shows_outputs_and_preserves_untouched_metric() 
     # recipe provenance the visual form does not manage.
     metric = at.session_state["ai_studio_draft"]["metrics"]["metrics"]["Volume"]
     assert metric.get("recipe") == {"id": "volume", "version": 1}
+    refreshed = copy.deepcopy(at.session_state["ai_studio_draft"])
+    refreshed["metrics"]["metrics"]["Volume"]["description"] = "Number of eligible outcomes."
+    at.session_state["ai_studio_draft"] = refreshed
+    at.run()
+    description = next(widget for widget in at.text_area if widget.label == "Description")
+    assert description.value == "Number of eligible outcomes."
+    description.set_value("Recorded positive and negative outcomes.").run()
+    next(button for button in at.button if button.label == "Update Metric In Draft").click().run()
+    assert not at.exception
+    edited = at.session_state["ai_studio_draft"]["metrics"]["metrics"]["Volume"]
+    assert edited["description"] == "Recorded positive and negative outcomes."
+    assert edited["recipe"] == metric["recipe"]
 
 
 @pytest.mark.unit

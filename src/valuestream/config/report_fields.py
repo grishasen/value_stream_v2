@@ -70,11 +70,18 @@ _CONTINGENCY_OUTPUT_COLUMNS = (
 )
 
 
+def frequency_threshold_share_outputs(metric_name: str) -> list[str]:
+    """Return the impression share followed by the positive-outcome share."""
+    return [metric_name, "PositiveShareAboveThreshold"]
+
+
 def metric_output_columns(  # noqa: PLR0911
     metric_name: str, metric: model.Metric
 ) -> list[str]:
     """Return the user-facing columns produced by one metric."""
 
+    if isinstance(metric, model.FrequencyThresholdShareMetric):
+        return frequency_threshold_share_outputs(metric_name)
     if isinstance(metric, model.LifecycleSummaryMetric):
         return list(metric.outputs or _LIFECYCLE_OUTPUT_COLUMNS)
     if isinstance(metric, model.VariantCompareMetric):
@@ -238,6 +245,7 @@ __all__ = [
     "SCALAR_STATE_TYPES",
     "descriptive_properties",
     "distribution_property_metrics",
+    "frequency_threshold_share_outputs",
     "metric_output_columns",
     "report_axis_options",
     "report_field_options",

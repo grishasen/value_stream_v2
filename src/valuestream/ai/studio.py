@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 from valuestream.charts.recipes import TILE_REQUIRED_ALTERNATIVES
 from valuestream.config import model
+from valuestream.config.report_fields import frequency_threshold_share_outputs
 from valuestream.config.validate import validate_catalog
 from valuestream.utils.logger import get_logger
 
@@ -30,6 +31,7 @@ _CATALOG_SECTION_KEYS = ("pipelines", "processors", "metrics", "dashboards")
 _SECTION_KEYS = ("processors", "metrics", "dashboards", "chat_with_data")
 _FENCED_BLOCK_RE = re.compile(r"```(?:yaml|yml)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _REPAIRABLE_MISSING_METRIC_FIELDS = {
+    "frequency_threshold_share": {"threshold"},
     "approx_distinct_count": {"state"},
     "distribution": {"state"},
     "quantile": {"state", "quantile"},
@@ -127,7 +129,14 @@ _CATALOG_SCHEMA_DICTIONARY: dict[str, Any] = {
         "metric_fields": {
             "processor": "existing processor id",
             "kind": "one metric kind from metric_kind_dictionary",
-            "description": "optional short business description",
+            "description": (
+                "For each new metric, write one or two plain-language sentences in the metric's "
+                "own description field in metrics.yaml. Explain what is measured and for which "
+                "population, using the user's business terms and the configured calculation. "
+                "Use the recipe's metric description when applicable. Leave unsupported details "
+                "such as currency or tax treatment unspecified. Keep existing descriptions verbatim "
+                "unless the user requests an edit."
+            ),
             "depends_on": "optional list of existing metric ids used by formula expressions",
             "display": {
                 "label": "optional friendly business label",
@@ -221,7 +230,7 @@ _PROCESSOR_KIND_DICTIONARY: dict[str, Any] = {
             "states are canonical for this kind: declare Positives and Negatives exactly as "
             "{type: count, outcome: positive|negative}; never invent or rename one"
         ),
-        "compatible_metrics": ["formula"],
+        "compatible_metrics": ["formula", "frequency_threshold_share"],
     },
     "numeric_distribution": {
         "purpose": "descriptive distributions and percentiles for approved numeric properties",
@@ -285,6 +294,23 @@ _METRIC_KIND_DICTIONARY: dict[str, Any] = {
         "requires": ["expression"],
         "expression_columns": "processor scalar state columns plus depends_on metric ids",
         "outputs": ["metric_id"],
+    },
+    "frequency_threshold_share": {
+        "purpose": "Historical shares of impressions and positive outcomes above a frequency threshold.",
+        "requires": ["threshold"],
+        "threshold_range": "integer, 1 <= threshold < processor.max_frequency",
+        "processor_needs": ["frequency_response", "positive and negative count states"],
+        "optional": {
+            "frequency_column": "must match the processor's frequency column; default ExposureBucket",
+            "positive_state": "positive outcome count; default Positives",
+            "negative_state": "negative outcome count; default Negatives",
+        },
+        "query_rules": (
+            "Both shares require all frequency buckets. Omit the frequency column from query "
+            "filters and grouping."
+        ),
+        "dependencies": "Omit depends_on and do not use this metric as a dependency.",
+        "outputs": frequency_threshold_share_outputs("metric_id"),
     },
     "approx_distinct_count": {
         "requires": ["state"],
@@ -1360,6 +1386,14 @@ def merge_draft_sections(base_draft: dict[str, Any], sections: dict[str, Any]) -
     return merged
 
 
+def preserve_metric_descriptions(previous: dict[str, Any], proposed: dict[str, Any]) -> None:
+    """Carry omitted descriptions into agent proposals. An explicit string is an edit."""
+    for name, metric in proposed.items():
+        existing = previous.get(name)
+        if isinstance(metric, dict) and isinstance(existing, dict) and existing.get("description"):
+            metric.setdefault("description", existing["description"])
+
+
 def generate_validated_candidate(
     *,
     base_draft: dict[str, Any],
@@ -1425,6 +1459,9 @@ def generate_validated_candidate(
             attempt_diagnostics.append(diagnostic)
             _log_draft_attempt(reference, safe_operation, diagnostic)
         else:
+            if "metrics" in sections:
+                previous = _metrics_by_name(base_draft) | _metrics_by_name(repair_base)
+                preserve_metric_descriptions(previous, sections["metrics"]["metrics"])
             candidate = merge_draft_sections(repair_base, sections)
             ok, issues = candidate_validator(candidate)
             if ok:

@@ -85,6 +85,9 @@ def test_revision_review_apply_and_idempotent_receipt(service: authoring.Catalog
     created = service.create("data/sample.csv")
     draft_id = created["draft_id"]
     assert "Processor kind dictionary" in created["generation_prompt"]
+    assert "For each new metric" in created["generation_prompt"]
+    baseline_description = created["catalog"]["metrics"]["metrics"]["sample_Rows"]["description"]
+    assert "records" in baseline_description
     assert service.validate(draft_id)["ok"]
     with pytest.raises(ValueError, match="Preview"):
         service.apply(draft_id, "unreviewed")
@@ -96,7 +99,9 @@ def test_revision_review_apply_and_idempotent_receipt(service: authoring.Catalog
     assert receipt["requires_data_run"]
     assert receipt["ingestion_started"] is False
     assert service.apply(draft_id, reviewed["review_token"]) == receipt
-    assert "sample_Rows" in load(service.workspace).metrics.metrics
+    assert (
+        load(service.workspace).metrics.metrics["sample_Rows"].description == baseline_description
+    )
     assert not (service.workspace / "aggregates").exists()
     assert not (service.workspace / "meta").exists()
     assert all(
@@ -125,6 +130,32 @@ def test_noop_update_also_advances_revision(service: authoring.CatalogAuthoring)
         created["draft_id"], {"metrics": created["catalog"]["metrics"]}, created["revision"]
     )
     assert updated["revision"] != created["revision"]
+
+
+def test_metric_descriptions_survive_replacement_and_review(
+    service: authoring.CatalogAuthoring,
+) -> None:
+    created = service.create("data/sample.csv")
+    draft_id = created["draft_id"]
+    section = copy.deepcopy(created["catalog"]["metrics"])
+    existing = section["metrics"]["sample_Rows"]
+    original = existing.pop("description")
+    generated_text = "Number of records received from this source."
+    section["metrics"]["RecordsReceived"] = {**existing, "description": generated_text}
+    update = service.update(draft_id, {"metrics": section}, created["revision"])
+    assert update["catalog"]["metrics"]["metrics"]["sample_Rows"]["description"] == original
+    assert generated_text in service.preview(draft_id)["changes"]["yaml_diff"]
+
+    edited_text = "Count of records in the source export."
+    existing["description"] = ""
+    section["metrics"]["RecordsReceived"]["description"] = edited_text
+    service.update(draft_id, {"metrics": section}, update["revision"])
+    preview = service.preview(draft_id)
+    assert edited_text in preview["changes"]["yaml_diff"]
+    service.apply(draft_id, preview["review_token"])
+    metrics = load(service.workspace).metrics.metrics
+    assert metrics["RecordsReceived"].description == edited_text
+    assert metrics["sample_Rows"].description == ""
 
 
 def test_structurally_invalid_update_leaves_draft_intact(

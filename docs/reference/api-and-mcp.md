@@ -135,6 +135,13 @@ aggregate readiness separately after apply. See the [bootstrap workflow](../guid
 | `catalog_draft_apply` | Requires that review token and user authorization. Rechecks validation, sample fingerprint, and catalog/AI file hash; writes all catalog sections in the shared rollback-protected workspace transaction. Returns provenance config hash and `requires_data_run`; never starts ingestion |
 | `catalog_draft_discard` | Releases the in-memory draft without altering workspace files |
 
+The generation prompt asks the client to write a short business description in
+`metrics.metrics.<id>.description` for every new metric. The preview includes
+the proposed wording. For an existing metric with the same ID, omitting
+`description` in a replacement keeps the previous text. Supply a new string
+to edit it or an empty string to clear it. Hand-authored catalogs can still
+omit the field.
+
 Drafts live only in the server process: at most 32, each expiring after one hour
 or restart. They retain configuration, approved field names, and a sample file
 fingerprint, not frames, sample values, or generation prompts. All authenticated

@@ -139,8 +139,12 @@ authoring capability is equivalent in both tools:
   draft update action instead of silently dropping rows.
 - The **Metric Parameter Editor** leads with the metric label, shows the
   kind definition, the read-only **Outputs** contract, and the plain-language
-  metric review. An incomplete kind form disables the draft update, and a
-  no-op update preserves the exact authored definition.
+  metric review. The agent drafts a short business **Description** for each
+  new metric using your requirements and its configured calculation. Review
+  that text here and edit it before applying the draft. Existing descriptions
+  carry forward when an agent update omits the field. An incomplete kind form
+  disables the draft update, and a no-op update preserves the exact authored
+  definition.
 - **Reports Review** includes the Builder-parity **Report Tile Editor**:
   create, duplicate, edit, or delete one tile with Visual or Raw YAML modes,
   the purpose-grouped chart library for new tiles, metric- and chart-aware
@@ -296,6 +300,12 @@ source plan, and business requirements before offering:
   audience/reach, funnel, and lifecycle processor/metric bundles;
 - executive, engagement/conversion, descriptive/latency, model-quality,
   experiment, audience, and funnel report-page patterns.
+
+For a contact-frequency question, Studio can propose `frequency_threshold_share`
+on a `frequency_response` processor. For example, a threshold of 3 measures
+the share of impressions after the third and the share of positive outcomes
+after the third. Both calculations use all frequency buckets in the selected
+population. [Frequency metric rules](../../reference/processors.md#10-frequency_response-processor)
 
 Each selected pattern must be dependency-complete from preprocessing through
 report tiles. A pipelines-preserving draft may use only preprocessing already

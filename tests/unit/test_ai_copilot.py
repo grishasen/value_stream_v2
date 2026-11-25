@@ -208,6 +208,20 @@ def test_apply_operations_upserts_metric_and_tile() -> None:
 
 
 @pytest.mark.unit
+def test_metric_rename_preserves_omitted_description() -> None:
+    draft = _base_draft()
+    metric = draft["metrics"]["metrics"]["CTR"]
+    proposed = dict(metric)
+    metric["description"] = "Clicks as a share of eligible outcomes."
+    updated, _ = apply_draft_operations(
+        draft,
+        [{"op": "set_metric", "previous_name": "CTR", "name": "ClickRate", "metric": proposed}],
+    )
+    assert updated["metrics"]["metrics"]["ClickRate"]["description"] == metric["description"]
+    assert "description" not in proposed
+
+
+@pytest.mark.unit
 def test_apply_operations_set_tile_creates_dashboard_and_page() -> None:
     updated, summaries = apply_draft_operations(
         _base_draft(),
@@ -2566,6 +2580,7 @@ def test_prompt_for_copilot_includes_step_goals_history_and_contract() -> None:
     assert "User message:\nAdd average revenue per customer." in prompt
     assert '"reply": str' in prompt
     assert "set_metric" in prompt
+    assert "For each new metric" in prompt
     assert "set_source_default" in prompt
     assert "set_calculated_field" in prompt
     assert "Never invent an input field" in prompt

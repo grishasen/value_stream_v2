@@ -22,6 +22,7 @@ import yaml
 from valuestream.ai.studio import (
     catalog_prompt_dictionaries,
     filter_draft_by_selection,
+    preserve_metric_descriptions,
     prompt_draft_sections,
     redact_hidden_field_mentions,
     tile_keys,
@@ -892,6 +893,8 @@ def _apply_set_metric(draft: dict[str, Any], op: dict[str, Any]) -> tuple[dict[s
         raise ValueError("Draft metrics section is not a mapping")
     previous_name = str(op.get("previous_name") or name).strip()
     verb = "Updated" if previous_name in metrics else "Added"
+    metric = metric.copy()
+    preserve_metric_descriptions(metrics, {previous_name: metric})
     updated = update_metric_definition(draft, previous_name, name, metric)
     suffix = f" (renamed from '{previous_name}')" if previous_name != name else ""
     return updated, f"{verb} metric '{name}'{suffix}"
