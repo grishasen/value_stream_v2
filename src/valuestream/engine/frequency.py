@@ -106,7 +106,8 @@ class DuckDBFrequencySession:
         """Return exact focal rows for one persisted customer-hash shard."""
 
         relation = self.connection.sql(self._focal_shard_sql(shard_id))
-        return relation.pl(lazy=True, batch_size=self.batch_size)
+        focal_rows: pl.LazyFrame = relation.pl(lazy=True, batch_size=self.batch_size)
+        return focal_rows
 
     def focal_table(self, shard_id: int) -> pa.Table:
         """Materialize one shard's exact focal rows as an Arrow table.

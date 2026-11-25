@@ -2,60 +2,27 @@
 
 from __future__ import annotations
 
-import asyncio
-import gzip
-
 import pytest
-from starlette.types import Message, Receive, Scope, Send
-from streamlit.web.server.starlette.starlette_gzip_middleware import (
-    MediaAwareGZipMiddleware,
-)
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
+from starlette.testclient import TestClient
+from streamlit.web.server.starlette.starlette_app import create_streamlit_middleware
 
 
 @pytest.mark.unit
 def test_streamlit_gzip_middleware_handles_gzip_request() -> None:
-    """Exercise the ASGI path that broke when Starlette 1.4 changed its responder API."""
-    payload = b"healthy" * 128
-    messages: list[Message] = []
+    """Exercise HTTP compression with the middleware stack used by the Streamlit server."""
+    payload = "healthy" * 2048
 
-    async def app(_scope: Scope, _receive: Receive, send: Send) -> None:
-        await send(
-            {
-                "type": "http.response.start",
-                "status": 200,
-                "headers": [
-                    (b"content-type", b"text/plain"),
-                    (b"content-length", str(len(payload)).encode()),
-                ],
-            }
-        )
-        await send({"type": "http.response.body", "body": payload})
+    async def health(_request: Request) -> PlainTextResponse:
+        return PlainTextResponse(payload)
 
-    async def receive() -> Message:
-        return {"type": "http.request", "body": b"", "more_body": False}
+    app = Starlette(routes=[Route("/healthz", health)], middleware=create_streamlit_middleware())
+    with TestClient(app) as client:
+        response = client.get("/healthz", headers={"Accept-Encoding": "gzip"})
 
-    async def send(message: Message) -> None:
-        messages.append(message)
-
-    scope: Scope = {
-        "type": "http",
-        "asgi": {"version": "3.0", "spec_version": "2.3"},
-        "http_version": "1.1",
-        "server": ("testserver", 80),
-        "client": ("testclient", 50000),
-        "scheme": "http",
-        "method": "GET",
-        "root_path": "",
-        "path": "/healthz",
-        "raw_path": b"/healthz",
-        "query_string": b"",
-        "headers": [(b"accept-encoding", b"gzip")],
-        "state": {},
-    }
-
-    middleware = MediaAwareGZipMiddleware(app, minimum_size=1)
-    asyncio.run(middleware(scope, receive, send))
-
-    response_headers = dict(messages[0]["headers"])
-    assert response_headers[b"content-encoding"] == b"gzip"
-    assert gzip.decompress(messages[1]["body"]) == payload
+    assert response.status_code == 200
+    assert response.headers["content-encoding"] == "gzip"
+    assert response.text == payload

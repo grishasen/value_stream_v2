@@ -75,3 +75,22 @@ def test_rfm_helper_adds_segment_columns() -> None:
     ]
     assert out["rfm_score"].min() >= 1.0
     assert out["rfm_score"].max() <= 4.0
+
+
+@pytest.mark.unit
+def test_rfm_quartiles_keep_ties_and_exclude_nan_from_monetary_breakpoints() -> None:
+    frame = pl.DataFrame(
+        {
+            "unique_holdings": [2] * 6,
+            "lifetime_value": [float("nan"), 2.0, 4.0, 4.0, 4.0, 8.0],
+            "MinPurchasedDate": [dt.date(2024, 1, 1)] * 6,
+            "MaxPurchasedDate": [dt.date(2024, 1, 2)] * 6,
+        }
+    )
+
+    scored = rfm.with_rfm(frame)
+
+    assert scored["m_quartile"].to_list() == [None, "1", "1", "1", "1", "4"]
+    assert scored["f_quartile"].to_list() == ["1"] * 6
+    assert scored["r_quartile"].to_list() == ["4"] * 6
+    assert scored["rfm_score"][0] is None

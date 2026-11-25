@@ -675,7 +675,7 @@ def test_history_schema_promotes_non_customer_columns_across_chunks(tmp_path: Pa
         _stage_and_commit(checkpoint, "2026-07-28", _fingerprint(1), first)
         _stage_and_commit(checkpoint, "2026-07-29", _fingerprint(2), second)
         schema = pl.from_arrow(
-            checkpoint.connection.execute(
+            checkpoint.connection.sql(
                 f'SELECT "ActionName" FROM "{HISTORY_TABLE}" LIMIT 0'
             ).to_arrow_table()
         ).schema
@@ -688,7 +688,7 @@ def test_history_schema_promotes_non_customer_columns_across_chunks(tmp_path: Pa
 
         _stage_and_commit(checkpoint, "2026-07-31", _fingerprint(4), third)
         recovered = pl.from_arrow(
-            checkpoint.connection.execute(
+            checkpoint.connection.sql(
                 f'SELECT "ActionName" FROM "{HISTORY_TABLE}" ORDER BY "{CHUNK_ID_COLUMN}"'
             ).to_arrow_table()
         )
@@ -716,12 +716,12 @@ def test_dictionary_customer_type_keeps_logical_and_physical_types_separate(
     )
     with _rolling(tmp_path, customer_dtype=logical_dtype) as checkpoint:
         _stage_and_commit(checkpoint, "2026-07-29", _fingerprint(1), frame)
-        metadata = checkpoint.connection.execute(
+        (metadata,) = checkpoint.connection.execute(
             f'SELECT customer_dtype, customer_storage_dtype FROM "{METADATA_TABLE}"'
-        ).fetchone()
+        ).fetchall()
         assert metadata == (logical_dtype, "String")
         persisted = pl.from_arrow(
-            checkpoint.connection.execute(
+            checkpoint.connection.sql(
                 f'SELECT "CustomerID", "{SHARD_COLUMN}" FROM "{HISTORY_TABLE}" '
                 'ORDER BY "CustomerID"'
             ).to_arrow_table()
@@ -1051,7 +1051,7 @@ def test_timestamp_round_trip_is_pinned_to_utc(tmp_path: Path) -> None:
     )
     with _rolling(tmp_path) as checkpoint:
         _stage_and_commit(checkpoint, "2026-07-31", _fingerprint(1), frame)
-        arrow = checkpoint.connection.execute(
+        arrow = checkpoint.connection.sql(
             f'SELECT "DecisionTime" FROM "{HISTORY_TABLE}"'
         ).to_arrow_table()
         recovered = pl.from_arrow(arrow)

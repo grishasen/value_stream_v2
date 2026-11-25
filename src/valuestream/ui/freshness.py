@@ -202,7 +202,7 @@ def recent_runs(workspace_path: str | Path, *, limit: int = 20) -> pl.DataFrame:
     if not db_path.exists():
         return pl.DataFrame()
     with duckdb.connect(str(db_path), read_only=True) as conn:
-        return conn.execute(
+        runs: pl.DataFrame = conn.sql(
             """
             SELECT id, source_id, status, started_at, finished_at, rows_in, rows_kept,
                    chunks_total, chunks_ok, chunks_failed
@@ -210,8 +210,9 @@ def recent_runs(workspace_path: str | Path, *, limit: int = 20) -> pl.DataFrame:
             ORDER BY COALESCE(finished_at, started_at) DESC, started_at DESC
             LIMIT ?
             """,
-            (limit,),
+            params=(limit,),
         ).pl()
+        return runs
 
 
 def latest_run(workspace_path: str | Path, *, source_id: str | None = None) -> dict[str, Any]:

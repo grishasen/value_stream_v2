@@ -8,14 +8,14 @@ or deferred — see [Product overview](../../concepts/product-overview.md).
 
 ## Host Requirements
 
-- Python 3.11+ and [`uv`](https://docs.astral.sh/uv/).
+- Python 3.13+ and [`uv`](https://docs.astral.sh/uv/).
 - Disk for workspace directories (source files, aggregates, metadata). The
   aggregate store is compact relative to raw data, but source files dominate
   until they are archived.
 - Install with all extras (`ai` for MCP, `api` for FastAPI):
 
 ```sh
-uv sync --all-extras
+uv sync --locked --all-extras
 ```
 
 ## Workspace Placement

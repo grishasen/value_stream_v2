@@ -1063,8 +1063,7 @@ def _tile_grid(
             )
             idx += 1
             continue
-        cols = st.columns(2)
-        for col in cols:
+        for col in st.columns(2):
             with col:
                 paired_tile = normal_tiles[idx]
                 _tile_card(

@@ -133,7 +133,7 @@ def chunks_for_run(ctx: ValueStreamContext, run_id: str) -> pl.DataFrame:
     if not db_path.exists():
         return pl.DataFrame()
     with duckdb.connect(str(db_path), read_only=True) as conn:
-        return conn.execute(
+        chunks: pl.DataFrame = conn.sql(
             """
             SELECT source_id, chunk_id, status, rows_in, rows_kept, started_at,
                    finished_at, error, files
@@ -141,8 +141,9 @@ def chunks_for_run(ctx: ValueStreamContext, run_id: str) -> pl.DataFrame:
             WHERE CAST(pipeline_run_id AS VARCHAR) = ?
             ORDER BY started_at DESC
             """,
-            (str(run_id),),
+            params=(str(run_id),),
         ).pl()
+        return chunks
 
 
 def catalog_counts(ctx: ValueStreamContext) -> dict[str, int]:

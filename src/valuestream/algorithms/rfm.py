@@ -93,15 +93,16 @@ def with_rfm(
     )
     out = out.with_columns(
         pl.col("frequency")
-        .qcut(4, labels=["1", "2", "3", "4"], allow_duplicates=True)
+        .bin_quantiles(4, labels=["1", "2", "3", "4"], right_closed=True)
         .cast(pl.String)
         .alias("f_quartile"),
         pl.col("monetary_value")
-        .qcut(4, labels=["1", "2", "3", "4"], allow_duplicates=True)
+        .fill_nan(None)
+        .bin_quantiles(4, labels=["1", "2", "3", "4"], right_closed=True)
         .cast(pl.String)
         .alias("m_quartile"),
         pl.col("recency")
-        .qcut(4, labels=["4", "3", "2", "1"], allow_duplicates=True)
+        .bin_quantiles(4, labels=["4", "3", "2", "1"], right_closed=True)
         .cast(pl.String)
         .alias("r_quartile"),
     )

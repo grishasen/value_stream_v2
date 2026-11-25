@@ -724,9 +724,9 @@ labels    = ["1","2","3","4"]
 labels_r  = ["4","3","2","1"]    # reversed for recency
 
 S = S.with_columns(
-    f_quartile = qcut(frequency,      4, labels  ),
-    m_quartile = qcut(monetary_value, 4, labels  ),
-    r_quartile = qcut(recency,        4, labels_r),
+    f_quartile = bin_quantiles(frequency,                  4, labels,   right_closed=True),
+    m_quartile = bin_quantiles(monetary_value.fill_nan(null), 4, labels, right_closed=True),
+    r_quartile = bin_quantiles(recency,                    4, labels_r, right_closed=True),
 )
 
 S = S.with_columns(
@@ -743,7 +743,7 @@ OUTPUT S
 ### 6.6 Edge cases
 
 - `unique_holdings` of 0 or 1 implies `frequency = 0` and forces `monetary_value = 0`.
-- `qcut` with all-equal values: enable `allow_duplicates=true` to fall back to fewer buckets without error.
+- Customers with equal values receive the same quartile label. Repeated boundaries can leave bins empty.
 - Customers with a single purchase get `recency = 0` (so `tenure - recency_raw = tenure`).
 
 ---

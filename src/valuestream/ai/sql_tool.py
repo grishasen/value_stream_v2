@@ -157,7 +157,7 @@ def run_sql_query(
         timer = threading.Timer(max(1.0, float(timeout_seconds)), conn.interrupt)
         timer.start()
         try:
-            frame = conn.execute(wrapped).pl()
+            frame = conn.sql(wrapped).pl()
         except duckdb.InterruptException as exc:
             raise TimeoutError(
                 f"governed SQL query exceeded {timeout_seconds:.0f}s and was interrupted"

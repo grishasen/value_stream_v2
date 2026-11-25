@@ -790,7 +790,7 @@ class RollingCheckpoint:
         customer = _quote_identifier(self.customer_column)
         chunk = _quote_identifier(CHUNK_ID_COLUMN)
         shard = _quote_identifier(SHARD_COLUMN)
-        validation = connection.execute(
+        (validation,) = connection.execute(
             "SELECT count(*), "
             f"coalesce(count_if(history.{customer} IS NULL), 0), "
             f"coalesce(count_if(history.{chunk} IS NULL), 0), "
@@ -801,9 +801,7 @@ class RollingCheckpoint:
             f"LEFT JOIN {_quote_identifier(JOURNAL_TABLE)} AS journal "
             f"ON history.{chunk} = journal.chunk_id",
             [self.shard_count],
-        ).fetchone()
-        if validation is None:  # pragma: no cover - aggregate always returns one row
-            raise RuntimeError("checkpoint history validation query returned no row")
+        ).fetchall()
         (
             rows,
             null_customers,
@@ -848,16 +846,14 @@ class RollingCheckpoint:
         connection: duckdb.DuckDBPyConnection,
     ) -> None:
         required_columns = self.history_projection.columns
-        column_nulls = connection.execute(
+        (column_nulls,) = connection.execute(
             "SELECT "
             + ", ".join(
                 f"coalesce(count_if({_quote_identifier(column)} IS NULL), 0)"
                 for column in required_columns
             )
             + f" FROM {_quote_identifier(HISTORY_TABLE)}"
-        ).fetchone()
-        if column_nulls is None:  # pragma: no cover - aggregate always returns one row
-            raise RuntimeError("checkpoint normalized-column validation query returned no row")
+        ).fetchall()
         null_columns = [
             column
             for column, null_count in zip(required_columns, column_nulls, strict=True)
@@ -871,14 +867,14 @@ class RollingCheckpoint:
         normalized_keys = self.history_projection.key_columns
         unique_columns = [*normalized_keys, CHUNK_ID_COLUMN, SHARD_COLUMN]
         quoted_unique_columns = ", ".join(_quote_identifier(column) for column in unique_columns)
-        duplicate = connection.execute(
+        duplicates = connection.execute(
             "SELECT 1 FROM "
             f"(SELECT {quoted_unique_columns} "
             f"FROM {_quote_identifier(HISTORY_TABLE)} "
             f"GROUP BY {quoted_unique_columns} HAVING count(*) > 1) "
             "AS duplicate_normalized_history LIMIT 1"
-        ).fetchone()
-        if duplicate is not None:
+        ).fetchall()
+        if duplicates:
             raise CheckpointValidationError(
                 "rolling checkpoint history contains duplicate normalized key rows"
             )
@@ -1190,7 +1186,7 @@ def _empty_polars_select(
     table: str,
     columns: Sequence[str],
 ) -> pl.DataFrame:
-    arrow = connection.execute(
+    arrow = connection.sql(
         f"SELECT {_identifier_csv(columns)} FROM {_quote_identifier(table)} LIMIT 0"
     ).to_arrow_table()
     return cast(pl.DataFrame, pl.from_arrow(arrow))
@@ -1237,19 +1233,17 @@ def _persistent_table_names(connection: duckdb.DuckDBPyConnection) -> set[str]:
 
 
 def _table_exists(connection: duckdb.DuckDBPyConnection, table: str) -> bool:
-    row = connection.execute(
+    (row,) = connection.execute(
         "SELECT count(*) FROM information_schema.tables "
         "WHERE table_catalog = current_database() AND table_schema = 'main' "
         "AND table_name = ?",
         [table],
-    ).fetchone()
-    return row is not None and int(row[0]) == 1
+    ).fetchall()
+    return int(row[0]) == 1
 
 
 def _table_row_count(connection: duckdb.DuckDBPyConnection, table: str) -> int:
-    row = connection.execute(f"SELECT count(*) FROM {_quote_identifier(table)}").fetchone()
-    if row is None:  # pragma: no cover - aggregate always returns one row
-        raise RuntimeError(f"checkpoint table {table!r} row-count query returned no row")
+    (row,) = connection.execute(f"SELECT count(*) FROM {_quote_identifier(table)}").fetchall()
     return int(row[0])
 
 
@@ -1283,11 +1277,9 @@ def _null_count(
     table: str,
     column: str,
 ) -> int:
-    row = connection.execute(
+    (row,) = connection.execute(
         f"SELECT count(*) FROM {_quote_identifier(table)} WHERE {_quote_identifier(column)} IS NULL"
-    ).fetchone()
-    if row is None:  # pragma: no cover - aggregate always returns one row
-        raise RuntimeError("checkpoint null-count query returned no row")
+    ).fetchall()
     return int(row[0])
 
 
@@ -1296,7 +1288,7 @@ def _polars_dtype_for_column(
     table: str,
     column: str,
 ) -> str:
-    arrow = connection.execute(
+    arrow = connection.sql(
         f"SELECT {_quote_identifier(column)} FROM {_quote_identifier(table)} LIMIT 0"
     ).to_arrow_table()
     frame = cast(pl.DataFrame, pl.from_arrow(arrow))

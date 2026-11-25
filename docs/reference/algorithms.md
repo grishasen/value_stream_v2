@@ -641,10 +641,12 @@ monetary_value = lifetime_value / unique_holdings
 F: f_quartile in {1,2,3,4}             # higher = more frequent
 M: m_quartile in {1,2,3,4}             # higher = more monetary
 R: r_quartile in {1,2,3,4}             # higher = MORE RECENT
-                                         (use reversed labels in qcut)
+                                         (use reversed quartile labels)
 ```
 
-Polars helper: `pl.col(x).qcut(4, labels=labels, allow_duplicates=true)`.
+Polars uses `pl.col(x).bin_quantiles(4, labels=labels, right_closed=True)`.
+Equal values share a label, including values on a quartile boundary. Monetary
+`NaN` values are excluded from the quartiles and receive a null label.
 
 ### 7.3 Segment code
 
@@ -801,7 +803,7 @@ Implementers should add tests for these edge cases per algorithm:
 | Lift | `ControlCTR == 0` | `Lift = 0`, `Lift_P_Val` from z-test |
 | Z-test proportions | any zero count | `{z_score: 0, z_p_val: 0}` |
 | Skew (Bowley) | `p75 == p25` | NULL |
-| qcut | all values equal | `allow_duplicates=true`, fewer buckets |
+| RFM quartiles | all values equal | all customers receive the first bin's label |
 
 ---
 
