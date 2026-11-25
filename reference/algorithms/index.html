@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -29,10 +29,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -4083,9 +4083,11 @@ monetary_value = lifetime_value / unique_holdings
 <div class="highlight"><pre><span></span><code>F: f_quartile in {1,2,3,4}             # higher = more frequent
 M: m_quartile in {1,2,3,4}             # higher = more monetary
 R: r_quartile in {1,2,3,4}             # higher = MORE RECENT
-                                         (use reversed labels in qcut)
+                                         (use reversed quartile labels)
 </code></pre></div>
-<p>Polars helper: <code>pl.col(x).qcut(4, labels=labels, allow_duplicates=true)</code>.</p>
+<p>Polars uses <code>pl.col(x).bin_quantiles(4, labels=labels, right_closed=True)</code>.
+Equal values share a label, including values on a quartile boundary. Monetary
+<code>NaN</code> values are excluded from the quartiles and receive a null label.</p>
 <h3 id="73-segment-code">7.3 Segment code<a class="headerlink" href="#73-segment-code" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>rfm_seg = concat(r_quartile, f_quartile, m_quartile)    # e.g. "344"
 </code></pre></div>
@@ -4288,9 +4290,9 @@ return { g_test_stat: G, g_p_val: p }
 <td>NULL</td>
 </tr>
 <tr>
-<td>qcut</td>
+<td>RFM quartiles</td>
 <td>all values equal</td>
-<td><code>allow_duplicates=true</code>, fewer buckets</td>
+<td>all customers receive the first bin's label</td>
 </tr>
 </tbody>
 </table>
@@ -4368,10 +4370,10 @@ return { g_test_stat: G, g_p_val: p }
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

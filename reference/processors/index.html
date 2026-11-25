@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -29,10 +29,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -4767,9 +4767,9 @@ labels    = ["1","2","3","4"]
 labels_r  = ["4","3","2","1"]    # reversed for recency
 
 S = S.with_columns(
-    f_quartile = qcut(frequency,      4, labels  ),
-    m_quartile = qcut(monetary_value, 4, labels  ),
-    r_quartile = qcut(recency,        4, labels_r),
+    f_quartile = bin_quantiles(frequency,                  4, labels,   right_closed=True),
+    m_quartile = bin_quantiles(monetary_value.fill_nan(null), 4, labels, right_closed=True),
+    r_quartile = bin_quantiles(recency,                    4, labels_r, right_closed=True),
 )
 
 S = S.with_columns(
@@ -4784,7 +4784,7 @@ OUTPUT S
 <h3 id="66-edge-cases">6.6 Edge cases<a class="headerlink" href="#66-edge-cases" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>unique_holdings</code> of 0 or 1 implies <code>frequency = 0</code> and forces <code>monetary_value = 0</code>.</li>
-<li><code>qcut</code> with all-equal values: enable <code>allow_duplicates=true</code> to fall back to fewer buckets without error.</li>
+<li>Customers with equal values receive the same quartile label. Repeated boundaries can leave bins empty.</li>
 <li>Customers with a single purchase get <code>recency = 0</code> (so <code>tenure - recency_raw = tenure</code>).</li>
 </ul>
 <hr />
@@ -5477,10 +5477,10 @@ event in the source and a separately defined state contract.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

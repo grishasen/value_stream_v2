@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -29,10 +29,10 @@
       
     
     
-      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -2674,13 +2674,13 @@ Distributed execution and multi-user auth are out of scope
 or deferred — see <a href="../../../concepts/product-overview/">Product overview</a>.</p>
 <h2 id="host-requirements">Host Requirements<a class="headerlink" href="#host-requirements" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Python 3.11+ and <a href="https://docs.astral.sh/uv/"><code>uv</code></a>.</li>
+<li>Python 3.13+ and <a href="https://docs.astral.sh/uv/"><code>uv</code></a>.</li>
 <li>Disk for workspace directories (source files, aggregates, metadata). The
   aggregate store is compact relative to raw data, but source files dominate
   until they are archived.</li>
 <li>Install with all extras (<code>ai</code> for MCP, <code>api</code> for FastAPI):</li>
 </ul>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync<span class="w"> </span>--locked<span class="w"> </span>--all-extras
 </code></pre></div>
 <h2 id="workspace-placement">Workspace Placement<a class="headerlink" href="#workspace-placement" title="Permanent link">&para;</a></h2>
 <p>Place each workspace on storage the host can read and write, e.g.
@@ -2798,10 +2798,10 @@ every deployment as single-tenant; use the HTTPS and access rules above.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

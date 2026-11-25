@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -29,10 +29,10 @@
       
     
     
-      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -2969,8 +2969,12 @@ authoring capability is equivalent in both tools:</p>
   draft update action instead of silently dropping rows.</li>
 <li>The <strong>Metric Parameter Editor</strong> leads with the metric label, shows the
   kind definition, the read-only <strong>Outputs</strong> contract, and the plain-language
-  metric review. An incomplete kind form disables the draft update, and a
-  no-op update preserves the exact authored definition.</li>
+  metric review. The agent drafts a short business <strong>Description</strong> for each
+  new metric using your requirements and its configured calculation. Review
+  that text here and edit it before applying the draft. Existing descriptions
+  carry forward when an agent update omits the field. An incomplete kind form
+  disables the draft update, and a no-op update preserves the exact authored
+  definition.</li>
 <li><strong>Reports Review</strong> includes the Builder-parity <strong>Report Tile Editor</strong>:
   create, duplicate, edit, or delete one tile with Visual or Raw YAML modes,
   the purpose-grouped chart library for new tiles, metric- and chart-aware
@@ -3107,6 +3111,11 @@ source plan, and business requirements before offering:</p>
 <li>executive, engagement/conversion, descriptive/latency, model-quality,
   experiment, audience, and funnel report-page patterns.</li>
 </ul>
+<p>For a contact-frequency question, Studio can propose <code>frequency_threshold_share</code>
+on a <code>frequency_response</code> processor. For example, a threshold of 3 measures
+the share of impressions after the third and the share of positive outcomes
+after the third. Both calculations use all frequency buckets in the selected
+population. <a href="../../../reference/processors/#10-frequency_response-processor">Frequency metric rules</a></p>
 <p>Each selected pattern must be dependency-complete from preprocessing through
 report tiles. A pipelines-preserving draft may use only preprocessing already
 present in the source plan. Copilot may apply only operations in its operation
@@ -3324,10 +3333,10 @@ payload.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
