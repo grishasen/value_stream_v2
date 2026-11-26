@@ -2560,7 +2560,9 @@ using the same configuration contracts as AI Configuration Studio.</p>
   <code>--enable-authoring</code> on the shared stdio/HTTP factory. The REST API stays
   read-only. Authoring can start with an absent workspace/catalog, without
   writing anything at startup; partial/invalid existing catalogs still fail.</li>
-<li>Let the MCP client model generate proposals using Studio prompt dictionaries.
+<li>Let the MCP client model generate proposals using on-demand help from the catalog
+  models, Studio dictionaries, operations and KPI recipes. Return concise creation
+  instructions by default and provide the full Studio prompt on request.
   The server makes no provider calls and requires no model credentials.</li>
 <li>Share bounded CSV/Parquet reads, Studio catalog/sample-field validators,
   object diff, and rollback-protected application. Studio retains its UI gates.</li>

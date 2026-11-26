@@ -2985,8 +2985,16 @@ aggregate readiness separately after apply. See the <a href="../../guides/users/
 <td>CSV/Parquet under workspace <code>data/</code>; 1–100,000 rows (default 1,000). Returns selected column names, types, null/unique counts; no raw rows. Up to eight distinct values per explicitly selected <code>example_fields</code> column</td>
 </tr>
 <tr>
+<td><code>catalog_authoring_help</code></td>
+<td>Read-only live reference. Omit <code>name</code> to list choices for a topic, then request one kind, operation, example or KPI recipe. For a nested schema reference pass its <code>$defs</code> name as <code>definition</code></td>
+</tr>
+<tr>
 <td><code>catalog_draft_create</code></td>
-<td>Sample path, new <code>source_id</code>, optional approved fields and business goals; returns a complete rows-count baseline, profile, revision, and shared Studio generation prompt. The client model proposes richer analytics</td>
+<td>Sample path, new <code>source_id</code>, optional approved fields and business goals. Returns a complete rows-count baseline, profile, revision, compact generation instructions and a callable <code>help_call</code>. Set <code>include_studio_prompt=true</code> to request the full Studio prompt</td>
+</tr>
+<tr>
+<td><code>catalog_draft_apply_operations</code></td>
+<td>Edit a draft with 1–100 ordered Studio operations using its <code>expected_revision</code>. A batch can set processors, metrics and tiles or install a bound recipe. Successful batches return the new revision, operation summaries and the validation call. Use preview for the full edited catalog. Failure preserves the previous revision and review token</td>
 </tr>
 <tr>
 <td><code>catalog_draft_update</code></td>
@@ -3010,6 +3018,20 @@ aggregate readiness separately after apply. See the <a href="../../guides/users/
 </tr>
 </tbody>
 </table>
+<p>When authoring is enabled, MCP initialization directs clients to the live help tool.
+The <code>workflow</code> topic describes the edit and review sequence. Use <code>transform</code>,
+<code>processor</code>, <code>state</code>, <code>metric</code> or <code>chart</code> for the corresponding discriminator's
+validation schema. Use <code>expression</code>, <code>operation</code> or <code>recipe</code> for exact DSL shapes,
+batch operations and installed KPI templates. The <code>example</code> topic includes a
+daily row count and an Interaction History bundle covering rates, ROC AUC and
+distinct counts. Bind their example field names and outcome rules to the
+user's requirements. Sample values come only from explicit profile requests.</p>
+<p>The response <code>stage</code> distinguishes an unedited <code>baseline</code> from an <code>edited</code>
+revision. Check the requested objects in preview even after successful
+validation. Authoring failures and unsuccessful validate/preview results carry
+a <code>help_call</code> with a tool name and arguments. Approved fields belong to the
+draft; creating a wider profile alone does not expand them. Recreate the draft
+with the newly approved fields when the task expands.</p>
 <p>The generation prompt asks the client to write a short business description in
 <code>metrics.metrics.&lt;id&gt;.description</code> for every new metric. The preview includes
 the proposed wording. For an existing metric with the same ID, omitting
