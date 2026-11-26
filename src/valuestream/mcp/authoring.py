@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from valuestream.ai.catalog_authoring import CatalogAuthoring
+from valuestream.mcp.authoring_help import HelpTopic, authoring_help, help_call
 
 
 def register_authoring_tools(
@@ -22,6 +23,25 @@ def register_authoring_tools(
     apply_write = annotations(
         readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
     )
+
+    @mcp.tool(annotations=read_only)
+    def catalog_authoring_help(
+        topic: HelpTopic = "workflow",
+        name: Annotated[
+            str,
+            Field(description="Exact kind, operation, operator or recipe ID. Omit to list names."),
+        ] = "",
+        definition: Annotated[
+            str, Field(description="For a schema $ref, the name following #/$defs/.")
+        ] = "",
+    ) -> dict[str, Any]:
+        """Look up the live catalog contract before guessing or reading repository files.
+
+        Start with workflow for the editing sequence. For example request topic=metric
+        and name=curve_from_digests for ROC AUC, or topic=chart and name=line.
+        Examples use sample field names; bind them to the approved fields of your draft.
+        """
+        return guarded("catalog_authoring_help", lambda: authoring_help(topic, name, definition))
 
     @mcp.tool(annotations=read_only)
     def sample_profile(
@@ -75,14 +95,17 @@ def register_authoring_tools(
             list[str] | None,
             Field(description="Sample columns approved for authoring; defaults to all"),
         ] = None,
+        *,
+        include_studio_prompt: Annotated[
+            bool, Field(description="Request the full legacy Studio generation prompt.")
+        ] = False,
     ) -> dict[str, Any]:
-        """Create an in-memory baseline catalog and Studio generation prompt from a sample.
+        """Start a baseline draft, with the current catalog, approved schema and next help call.
 
-        Works without an existing catalog. Returns a valid rows-count baseline,
-        schema, and the shared Studio prompt. Use the client model to propose metrics
-        with business descriptions, update the draft, validate, preview, and apply separately.
-        No server-side LLM credentials are required. Drafts expire after one hour
-        or restart; no raw rows, examples, or prompts are retained by the server.
+        Use catalog_authoring_help to resolve schema and recipe questions directly
+        through MCP. Keep the sampled source id and reader; edit transforms and schema.
+        Approved fields are fixed for this draft. For additional fields create a new draft.
+        Drafts expire after one hour or server restart.
         """
         return guarded(
             "catalog_draft_create",
@@ -90,6 +113,7 @@ def register_authoring_tools(
                 sample_path,
                 source_id=source_id,
                 user_goals=user_goals,
+                include_studio_prompt=include_studio_prompt,
                 limit=limit,
                 approved_fields=approved_fields,
             ),
@@ -110,6 +134,7 @@ def register_authoring_tools(
     ) -> dict[str, Any]:
         """Replace selected draft sections and invalidate the previous review token.
 
+        Call catalog_authoring_help for the exact kind and a JSON example.
         Include a business description for each new metric. For an existing metric,
         omitting description keeps its text. An explicit string edits or clears it.
         Preserve unsampled sources. Structural errors return an MCP error without
@@ -119,6 +144,29 @@ def register_authoring_tools(
             "catalog_draft_update", lambda: authoring.update(draft_id, sections, expected_revision)
         )
 
+    @mcp.tool(annotations=draft_write)
+    def catalog_draft_apply_operations(
+        draft_id: str,
+        expected_revision: str,
+        operations: Annotated[list[dict[str, Any]], Field(min_length=1, max_length=100)],
+    ) -> dict[str, Any]:
+        """Edit the in-memory draft with one atomic batch of Studio operations.
+
+        Call catalog_authoring_help(topic="operation") for names, then request the
+        selected name for its argument shape. Recipes are under topic="recipe".
+        Operations run in order. A failed batch preserves the revision and review.
+        A successful batch requires validation and fresh review before catalog_draft_apply.
+        """
+        return guarded(
+            "catalog_draft_apply_operations",
+            lambda: authoring.apply_operations(draft_id, operations, expected_revision),
+        )
+
+    def with_issue_help(result: dict[str, Any]) -> dict[str, Any]:
+        if not result["ok"]:
+            result["help_call"] = help_call(" ".join(result["issues"]))
+        return result
+
     @mcp.tool(annotations=read_only)
     def catalog_draft_validate(
         draft_id: Annotated[str, Field(description="Draft identifier")],
@@ -127,7 +175,9 @@ def register_authoring_tools(
 
         Returns ok and actionable issues. Does not write catalog or aggregate files.
         """
-        return guarded("catalog_draft_validate", lambda: authoring.validate(draft_id))
+        return guarded(
+            "catalog_draft_validate", lambda: with_issue_help(authoring.validate(draft_id))
+        )
 
     @mcp.tool(annotations=draft_write)
     def catalog_draft_preview(
@@ -139,7 +189,9 @@ def register_authoring_tools(
         issued only for a valid draft. Changes to the draft, workspace config, or
         sample invalidate review. No catalog is written by preview.
         """
-        return guarded("catalog_draft_preview", lambda: authoring.preview(draft_id))
+        return guarded(
+            "catalog_draft_preview", lambda: with_issue_help(authoring.preview(draft_id))
+        )
 
     @mcp.tool(annotations=apply_write)
     def catalog_draft_apply(

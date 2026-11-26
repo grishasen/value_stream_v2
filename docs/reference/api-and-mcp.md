@@ -128,12 +128,30 @@ aggregate readiness separately after apply. See the [bootstrap workflow](../guid
 | Tool | Contract |
 |---|---|
 | `sample_profile` | CSV/Parquet under workspace `data/`; 1–100,000 rows (default 1,000). Returns selected column names, types, null/unique counts; no raw rows. Up to eight distinct values per explicitly selected `example_fields` column |
-| `catalog_draft_create` | Sample path, new `source_id`, optional approved fields and business goals; returns a complete rows-count baseline, profile, revision, and shared Studio generation prompt. The client model proposes richer analytics |
+| `catalog_authoring_help` | Read-only live reference. Omit `name` to list choices for a topic, then request one kind, operation, example or KPI recipe. For a nested schema reference pass its `$defs` name as `definition` |
+| `catalog_draft_create` | Sample path, new `source_id`, optional approved fields and business goals. Returns a complete rows-count baseline, profile, revision, compact generation instructions and a callable `help_call`. Set `include_studio_prompt=true` to request the full Studio prompt |
+| `catalog_draft_apply_operations` | Edit a draft with 1–100 ordered Studio operations using its `expected_revision`. A batch can set processors, metrics and tiles or install a bound recipe. Successful batches return the new revision, operation summaries and the validation call. Use preview for the full edited catalog. Failure preserves the previous revision and review token |
 | `catalog_draft_update` | Complete replacement sections plus `expected_revision`; structural errors leave the previous draft intact. Successful updates invalidate review |
 | `catalog_draft_validate` | Catalog/expression/chart validation, Studio sample-field contract, then bounded transform/processor execution without publishing aggregates |
 | `catalog_draft_preview` | Full draft, object additions/changes/removals and YAML diff. Returns `review_token` only for a valid revision; present this review before applying |
 | `catalog_draft_apply` | Requires that review token and user authorization. Rechecks validation, sample fingerprint, and catalog/AI file hash; writes all catalog sections in the shared rollback-protected workspace transaction. Returns provenance config hash and `requires_data_run`; never starts ingestion |
 | `catalog_draft_discard` | Releases the in-memory draft without altering workspace files |
+
+When authoring is enabled, MCP initialization directs clients to the live help tool.
+The `workflow` topic describes the edit and review sequence. Use `transform`,
+`processor`, `state`, `metric` or `chart` for the corresponding discriminator's
+validation schema. Use `expression`, `operation` or `recipe` for exact DSL shapes,
+batch operations and installed KPI templates. The `example` topic includes a
+daily row count and an Interaction History bundle covering rates, ROC AUC and
+distinct counts. Bind their example field names and outcome rules to the
+user's requirements. Sample values come only from explicit profile requests.
+
+The response `stage` distinguishes an unedited `baseline` from an `edited`
+revision. Check the requested objects in preview even after successful
+validation. Authoring failures and unsuccessful validate/preview results carry
+a `help_call` with a tool name and arguments. Approved fields belong to the
+draft; creating a wider profile alone does not expand them. Recreate the draft
+with the newly approved fields when the task expands.
 
 The generation prompt asks the client to write a short business description in
 `metrics.metrics.<id>.description` for every new metric. The preview includes

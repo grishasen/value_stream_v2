@@ -21,7 +21,7 @@ from typing import Any
 import polars as pl
 import yaml
 
-from valuestream.ai.copilot import validate_draft_field_contract
+from valuestream.ai.copilot import apply_draft_operations, validate_draft_field_contract
 from valuestream.ai.samples import read_tabular_sample
 from valuestream.ai.settings import write_chat_with_data_config
 from valuestream.ai.studio import (
@@ -282,6 +282,7 @@ class CatalogAuthoring:
         *,
         source_id: str = "sample",
         user_goals: str = "",
+        include_studio_prompt: bool = False,
         limit: int = 1000,
         approved_fields: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -321,10 +322,16 @@ class CatalogAuthoring:
             )
             self._assert_current(draft)
             self.drafts[draft_id] = draft
-            return {
-                **self._response(draft_id, draft),
-                "profile": profile,
-                "generation_prompt": prompt_for_config_draft(
+            instructions = (
+                "The baseline counts rows only. Build the requested metrics and tiles. "
+                "Call catalog_authoring_help for the exact JSON shape or a KPI recipe, then "
+                "use catalog_draft_update or catalog_draft_apply_operations. Use the returned "
+                "revision as expected_revision. Include a business description for each metric. "
+                "Validate, preview the requested objects, then await approval to apply."
+            )
+            prompt = f"{instructions}\nBusiness requirements: {user_goals}"
+            if include_studio_prompt:
+                prompt = prompt_for_config_draft(
                     file_name=path.name,
                     approved_schema=profile["schema"],
                     approved_fields=columns,
@@ -332,18 +339,27 @@ class CatalogAuthoring:
                     baseline_draft=payload,
                     user_goals=user_goals,
                     allow_source_changes=True,
-                ),
-                "instructions": "Use the client model to refine the baseline. Submit complete sections with catalog_draft_update; validate, preview, then apply the review token.",
+                )
+            return {
+                **self._response(draft_id, draft),
+                "profile": profile,
+                "generation_prompt": prompt,
+                "instructions": instructions,
+                "help_call": {"tool": "catalog_authoring_help", "arguments": {"topic": "workflow"}},
             }
+
+    def _editable(self, draft_id: str, expected_revision: str) -> CatalogDraft:
+        draft = self._get(draft_id)
+        self._assert_current(draft)
+        if draft.applied or expected_revision != draft.revision:
+            raise ValueError("Draft revision changed or was applied; fetch or create a draft")
+        return draft
 
     def update(
         self, draft_id: str, sections: dict[str, Any], expected_revision: str
     ) -> dict[str, Any]:
         with self.lock:
-            draft = self._get(draft_id)
-            self._assert_current(draft)
-            if draft.applied or expected_revision != draft.revision:
-                raise ValueError("Draft revision changed or was applied; fetch or create a draft")
+            draft = self._editable(draft_id, expected_revision)
             if not sections or set(sections) - {*SECTIONS, "chat_with_data"}:
                 raise ValueError("Supply complete catalog sections or chat_with_data")
             payload = {**copy.deepcopy(draft.payload), **copy.deepcopy(sections)}
@@ -353,23 +369,54 @@ class CatalogAuthoring:
                     preserve_metric_descriptions(
                         draft.payload["metrics"]["metrics"], proposed_metrics
                     )
-            if len(yaml.safe_dump(payload).encode()) > MAX_DRAFT_BYTES:
-                raise ValueError("Draft exceeds the 2 MiB configuration budget")
-            # Structural shape is required for a meaningful diff; semantic errors
-            # remain editable and are returned by validate rather than auto-applied.
-            model.Catalog.model_validate({key: payload[key] for key in SECTIONS})
-            _validate_chat(payload.get("chat_with_data"))
-            draft.payload = payload
-            draft.sequence += 1
-            draft.review_token = None
-            return self._response(draft_id, draft)
+            return self._save_revision(draft_id, draft, payload)
+
+    def apply_operations(
+        self, draft_id: str, operations: list[dict[str, Any]], expected_revision: str
+    ) -> dict[str, Any]:
+        with self.lock:
+            draft = self._editable(draft_id, expected_revision)
+            if not operations:
+                raise ValueError("Supply at least one catalog operation")
+            payload, changes = apply_draft_operations(draft.payload, operations)
+            return {
+                **self._save_revision(draft_id, draft, payload, include_catalog=False),
+                "operation_changes": changes,
+                "next_call": {
+                    "tool": "catalog_draft_validate",
+                    "arguments": {"draft_id": draft_id},
+                },
+            }
+
+    def _save_revision(
+        self,
+        draft_id: str,
+        draft: CatalogDraft,
+        payload: dict[str, Any],
+        *,
+        include_catalog: bool = True,
+    ) -> dict[str, Any]:
+        if len(yaml.safe_dump(payload).encode()) > MAX_DRAFT_BYTES:
+            raise ValueError("Draft exceeds the 2 MiB configuration budget")
+        model.Catalog.model_validate({key: payload[key] for key in SECTIONS})
+        _validate_chat(payload.get("chat_with_data"))
+        draft.payload = payload
+        draft.sequence += 1
+        draft.review_token = None
+        return self._response(draft_id, draft, include_catalog=include_catalog)
 
     def validate(self, draft_id: str) -> dict[str, Any]:
         with self.lock:
             draft = self._get(draft_id)
             self._assert_current(draft)
             ok, issues = self._validate(draft)
-            return {"draft_id": draft_id, "revision": draft.revision, "ok": ok, "issues": issues}
+            return {
+                "draft_id": draft_id,
+                "revision": draft.revision,
+                "ok": ok,
+                "issues": issues,
+                "stage": "edited" if draft.sequence else "baseline",
+            }
 
     def preview(self, draft_id: str) -> dict[str, Any]:
         with self.lock:
@@ -488,12 +535,16 @@ class CatalogAuthoring:
         if _sample_signature(self.sample_path(draft.sample_path)) != draft.sample_signature:
             raise ValueError("Sample changed; create a new draft from the current sample")
 
-    def _response(self, draft_id: str, draft: CatalogDraft) -> dict[str, Any]:
+    def _response(
+        self, draft_id: str, draft: CatalogDraft, *, include_catalog: bool = True
+    ) -> dict[str, Any]:
         return {
             "draft_id": draft_id,
             "revision": draft.revision,
             "base_hash": draft.base_hash,
-            "catalog": copy.deepcopy(draft.payload),
+            "stage": "edited" if draft.sequence else "baseline",
+            "approved_fields": list(draft.columns),
+            **({"catalog": copy.deepcopy(draft.payload)} if include_catalog else {}),
             "counts": draft_object_counts(draft.payload),
             "expires_in_seconds": max(
                 0, int(DRAFT_TTL_SECONDS - (time.monotonic() - draft.created_at))
