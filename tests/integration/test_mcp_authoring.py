@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import socket
 import subprocess
@@ -19,13 +20,17 @@ import pytest
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import ReadResourceRequestParams, Request, RequestParams, TextResourceContents
+from pydantic import TypeAdapter
 
 from valuestream.config.loader import load
 from valuestream.engine.runner import run_workspace
 
 
 @asynccontextmanager
-async def _client(transport: str, workspace: Path, log_path: Path) -> AsyncIterator[ClientSession]:
+async def _client(
+    transport: str, workspace: Path, log_path: Path, *, discover: bool = False
+) -> AsyncIterator[ClientSession]:
     args = [
         "-c",
         "from valuestream.cli import main; main()",
@@ -45,7 +50,7 @@ async def _client(transport: str, workspace: Path, log_path: Path) -> AsyncItera
                 stdio_client(parameters, errlog=log) as (read, write),
                 ClientSession(read, write, read_timeout_seconds=20) as client,
             ):
-                initialized = await client.initialize()
+                initialized = await client.discover() if discover else await client.initialize()
                 assert "catalog_authoring_help" in (initialized.instructions or "")
                 yield client
             return
@@ -77,7 +82,7 @@ async def _client(transport: str, workspace: Path, log_path: Path) -> AsyncItera
                 ),
                 ClientSession(read, write, read_timeout_seconds=20) as client,
             ):
-                initialized = await client.initialize()
+                initialized = await client.discover() if discover else await client.initialize()
                 assert "catalog_authoring_help" in (initialized.instructions or "")
                 yield client
         finally:
@@ -297,3 +302,116 @@ async def test_client_builds_ih_dashboard_from_mcp_help(tmp_path: Path) -> None:
         for name, value in expected.items():
             response = await _call(client, "metric_query", {"metric": name})
             assert response["rows"][0][name] == pytest.approx(value, abs=0.02)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["stdio", "http"])
+async def test_skill_discovery_and_bound_template(tmp_path: Path, transport: str) -> None:
+    workspace = tmp_path / "workspace"
+    data = workspace / "data"
+    data.mkdir(parents=True)
+    pl.DataFrame(
+        {
+            "at": ["2026-10-01"] * 4,
+            "via": ["App"] * 4,
+            "label": ["visit", "sale", "lost", "lost"],
+            "prediction": [0.8, 0.9, 0.2, 0.1],
+            "person": ["A", "B", "A", "B"],
+            "offer": ["offer1", "offer2", "offer3", "offer1"],
+        }
+    ).write_parquet(data / "events.parquet")
+    async with _client(transport, workspace, tmp_path / "mcp.log", discover=True) as client:
+        discovery = client.discover_result
+        assert discovery is not None
+        assert "io.modelcontextprotocol/skills" in (discovery.capabilities.extensions or {})
+        result_type = TypeAdapter(dict[str, Any])
+        listing = await client.send_request(
+            Request(method="skills/list", params=RequestParams()), result_type
+        )
+        (entry,) = listing["skills"]
+        name = entry["frontmatter"]["name"]
+        assert name == "valuestream-catalog-authoring"
+        lookup = await client.send_request(
+            Request[ReadResourceRequestParams, str](
+                method="skills/get", params=ReadResourceRequestParams(uri=entry["uri"])
+            ),
+            result_type,
+        )
+        assert lookup["skill"] == entry
+        resource = await client.read_resource(entry["uri"])
+        text = resource.contents[0]
+        assert isinstance(text, TextResourceContents)
+        content = text.text.encode()
+        local = Path(__file__).resolve().parents[2] / ".opencode" / "skills" / name / "SKILL.md"
+        assert local.read_bytes() == content
+        assert entry["resources"] == [
+            {
+                "uri": entry["uri"],
+                "size": len(content),
+                "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+            }
+        ]
+        draft = await _call(
+            client,
+            "catalog_draft_create",
+            {"sample_path": "data/events.parquet", "source_id": "events"},
+        )
+        handle = {"draft_id": draft["draft_id"]}
+        expected_metrics = ["CTR", "ConversionRate", "RocAuc", "UniqueVisitors", "UniqueActions"]
+        expected_tiles = [f"events_overview/overview/{metric}_day" for metric in expected_metrics]
+        expectations = {"expected_metrics": expected_metrics, "expected_tiles": expected_tiles}
+        baseline = await _call(client, "catalog_draft_preview", {**handle, **expectations})
+        assert not baseline["ok"]
+        assert baseline["review_token"] is None
+        arguments = {
+            **handle,
+            "expected_revision": draft["revision"],
+            "template": "interaction_metrics",
+            "timestamp_format": "%Y-%m-%d",
+            "dashboard_title": "October engagement",
+            "bindings": {
+                "timestamp": "at",
+                "channel": "via",
+                "outcome": "label",
+                "visitor": "person",
+                "action": "offer",
+                "score": "prediction",
+            },
+            "outcomes": {
+                "positive": ["visit", "sale"],
+                "conversion": ["sale"],
+                "negative": ["lost"],
+            },
+        }
+        bad = await client.call_tool("catalog_draft_apply_template", {**arguments, "bindings": {}})
+        assert bad.is_error
+        invalid_time = await client.call_tool(
+            "catalog_draft_apply_template", {**arguments, "timestamp_format": "%d/%m/%Y"}
+        )
+        assert invalid_time.is_error
+        changed = await _call(client, "catalog_draft_apply_template", arguments)
+        assert set(changed["changes"]["metrics"]["added"]) == set(expected_metrics)
+        assert set(expected_tiles) <= set(changed["next_call"]["arguments"]["expected_tiles"])
+        assert set(expected_metrics) <= set(changed["outputs"]["metrics"])
+        assert set(expected_tiles) <= set(changed["outputs"]["tiles"])
+        invalidated = await _call(
+            client,
+            "catalog_draft_preview",
+            {**handle, "expected_tiles": ["events_overview/overview/absent"]},
+        )
+        assert invalidated["review_token"] is None
+        assert not invalidated["ok"]
+        reviewed = await _call(
+            client, changed["next_call"]["tool"], changed["next_call"]["arguments"]
+        )
+        assert reviewed["ok"], reviewed["issues"]
+        assert reviewed["catalog"]["dashboards"]["dashboards"][0]["title"] == "October engagement"
+        assert not (workspace / "catalog").exists()
+        await _call(
+            client, "catalog_draft_apply", {**handle, "review_token": reviewed["review_token"]}
+        )
+        assert run_workspace(workspace).status == "ok"
+        for name, value in zip(expected_metrics, [0.5, 0.25, 1, 2, 3], strict=True):
+            query = await _call(client, "metric_query", {"metric": name})
+            assert query["rows"][0][name] == pytest.approx(value, abs=0.02)

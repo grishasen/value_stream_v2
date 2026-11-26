@@ -1,0 +1,1 @@
+../../../src/valuestream/mcp/skills/valuestream-catalog-authoring/SKILL.md

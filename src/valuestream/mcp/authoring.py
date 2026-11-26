@@ -9,6 +9,12 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from valuestream.ai.catalog_authoring import CatalogAuthoring
+from valuestream.ai.catalog_templates import (
+    PEGA_TIMESTAMP_FORMAT,
+    OutcomeRules,
+    TemplateBindings,
+    TemplateName,
+)
 from valuestream.mcp.authoring_help import HelpTopic, authoring_help, help_call
 
 
@@ -162,6 +168,41 @@ def register_authoring_tools(
             lambda: authoring.apply_operations(draft_id, operations, expected_revision),
         )
 
+    @mcp.tool(annotations=draft_write)
+    def catalog_draft_apply_template(
+        draft_id: str,
+        expected_revision: str,
+        template: TemplateName,
+        *,
+        bindings: TemplateBindings | None = None,
+        outcomes: OutcomeRules | None = None,
+        timestamp_format: Annotated[
+            str | None,
+            Field(description="Confirmed timestamp format. Use null for temporal columns."),
+        ] = PEGA_TIMESTAMP_FORMAT,
+        dashboard_title: str | None = None,
+    ) -> dict[str, Any]:
+        """Build and validate a complete dashboard in the draft in one call.
+
+        daily_rows counts rows by day and channel. interaction_metrics includes daily_rows,
+        five KPIs and their daily trends (CTR, ConversionRate, RocAuc, UniqueVisitors,
+        UniqueActions) plus channel volume. Default field names match Pega IH. Rate
+        denominators include rows with classified outcomes. Supply confirmed classes and
+        field bindings when they differ. Compare outputs with the request before preview.
+        """
+        return guarded(
+            "catalog_draft_apply_template",
+            lambda: authoring.apply_template(
+                draft_id,
+                expected_revision,
+                template,
+                bindings=bindings or TemplateBindings(),
+                outcomes=outcomes or OutcomeRules(),
+                timestamp_format=timestamp_format,
+                dashboard_title=dashboard_title,
+            ),
+        )
+
     def with_issue_help(result: dict[str, Any]) -> dict[str, Any]:
         if not result["ok"]:
             result["help_call"] = help_call(" ".join(result["issues"]))
@@ -182,6 +223,13 @@ def register_authoring_tools(
     @mcp.tool(annotations=draft_write)
     def catalog_draft_preview(
         draft_id: Annotated[str, Field(description="Draft identifier")],
+        expected_metrics: Annotated[
+            list[str] | None, Field(description="Required metric names for the sampled source.")
+        ] = None,
+        expected_tiles: Annotated[
+            list[str] | None,
+            Field(description="Required dashboard/page/tile IDs for the sampled source."),
+        ] = None,
     ) -> dict[str, Any]:
         """Return the full draft, object changes, YAML diff, and exact-revision review token.
 
@@ -190,7 +238,12 @@ def register_authoring_tools(
         sample invalidate review. No catalog is written by preview.
         """
         return guarded(
-            "catalog_draft_preview", lambda: with_issue_help(authoring.preview(draft_id))
+            "catalog_draft_preview",
+            lambda: with_issue_help(
+                authoring.preview(
+                    draft_id, expected_metrics=expected_metrics, expected_tiles=expected_tiles
+                )
+            ),
         )
 
     @mcp.tool(annotations=apply_write)

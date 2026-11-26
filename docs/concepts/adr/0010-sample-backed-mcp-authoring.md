@@ -18,6 +18,13 @@ using the same configuration contracts as AI Configuration Studio.
   models, Studio dictionaries, operations and KPI recipes. Return concise creation
   instructions by default and provide the full Studio prompt on request.
   The server makes no provider calls and requires no model credentials.
+- Publish one versioned authoring skill in the server package. The MCP Skills
+  extension serves its manifest and Markdown, and the OpenCode project entry
+  points to the same content. Clients can also follow tool-based workflow help.
+- Materialize named templates on the server from the same catalog fragments
+  as the examples. Require approved bindings and validate the entire candidate
+  on the bounded sample before advancing its revision. Preview can check the
+  metric and tile IDs required by the client before issuing its review token.
 - Share bounded CSV/Parquet reads, Studio catalog/sample-field validators,
   object diff, and rollback-protected application. Studio retains its UI gates.
 - Constrain MCP samples to existing files inside workspace `data/`. Return

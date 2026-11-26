@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from click.testing import CliRunner
 from pydantic import ValidationError
 
 from valuestream.ai import catalog_authoring as authoring
+from valuestream.ai.catalog_templates import OutcomeRules, TemplateBindings
 from valuestream.ai.copilot import _processor_state_source_fields
 from valuestream.cli import main
 from valuestream.config import model
@@ -62,6 +64,7 @@ def test_empty_workspace_starts_only_with_authoring_and_without_writes(tmp_path:
     assert {
         "catalog_authoring_help",
         "catalog_draft_apply_operations",
+        "catalog_draft_apply_template",
         "sample_profile",
         "catalog_draft_create",
         "catalog_draft_update",
@@ -74,6 +77,33 @@ def test_empty_workspace_starts_only_with_authoring_and_without_writes(tmp_path:
     apply = server._tool_manager.get_tool("catalog_draft_apply")
     assert apply.annotations.read_only_hint is False
     assert apply.annotations.destructive_hint is True
+
+
+def test_daily_template_on_temporal_region_column(service: authoring.CatalogAuthoring) -> None:
+    pl.DataFrame({"event_time": [date(2026, 10, 1)], "region": ["A"]}).write_parquet(
+        service.workspace / "data/events.parquet"
+    )
+    draft = service.create("data/events.parquet", source_id="events")
+    draft_id = draft["draft_id"]
+    fields = TemplateBindings(timestamp="event_time", channel="region")
+    for _ in range(2):
+        draft = service.apply_template(
+            draft_id,
+            draft["revision"],
+            "daily_rows",
+            bindings=fields,
+            outcomes=OutcomeRules(),
+            timestamp_format=None,
+            dashboard_title=None,
+        )
+    preview = service.preview(**draft["next_call"]["arguments"])
+    assert preview["ok"], preview["issues"]
+    assert preview["outputs"]["metrics"] == ["events_Rows"]
+    (source,) = preview["catalog"]["pipelines"]["sources"]
+    assert [step["kind"] for step in source["transforms"]] == ["derive_column", "derive_calendar"]
+    (page,) = preview["catalog"]["dashboards"]["dashboards"][0]["pages"]
+    lines = [tile for tile in page["tiles"] if tile["chart"] == "line"]
+    assert [(tile["id"], tile["color"]) for tile in lines] == [("daily_rows", "region")]
 
 
 def test_partial_catalog_is_not_silently_bootstrapped(tmp_path: Path) -> None:

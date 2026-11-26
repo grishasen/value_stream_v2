@@ -102,6 +102,7 @@ _AUTHORING_TOOLS = frozenset(
     {
         "catalog_authoring_help",
         "catalog_draft_apply_operations",
+        "catalog_draft_apply_template",
         "sample_profile",
         "catalog_draft_create",
         "catalog_draft_update",
@@ -229,12 +230,15 @@ def create_server(  # noqa: PLR0915 - one function body per registered tool
     catalog_cache = CatalogCache(workspace)
     if not enable_authoring or any((workspace / "catalog").glob("*.yaml")):
         catalog_cache.get()  # fail fast for partial/invalid catalogs
-    instructions = None
     if enable_authoring:
         from valuestream.mcp.authoring_help import AUTHORING_INSTRUCTIONS  # noqa: PLC0415
+        from valuestream.mcp.catalog_skill import CatalogSkill  # noqa: PLC0415
 
-        instructions = AUTHORING_INSTRUCTIONS
-    mcp = server_cls("Value Stream", instructions=instructions)
+        mcp = server_cls(
+            "Value Stream", instructions=AUTHORING_INSTRUCTIONS, extensions=[CatalogSkill()]
+        )
+    else:
+        mcp = server_cls("Value Stream")
     annotations = import_module("mcp.types").ToolAnnotations
     read_only = annotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
     rendering = annotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)

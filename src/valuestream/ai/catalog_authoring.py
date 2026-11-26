@@ -13,7 +13,7 @@ import hashlib
 import secrets
 import time
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -21,6 +21,12 @@ from typing import Any
 import polars as pl
 import yaml
 
+from valuestream.ai.catalog_templates import (
+    OutcomeRules,
+    TemplateBindings,
+    TemplateName,
+    template_edits,
+)
 from valuestream.ai.copilot import apply_draft_operations, validate_draft_field_contract
 from valuestream.ai.samples import read_tabular_sample
 from valuestream.ai.settings import write_chat_with_data_config
@@ -225,6 +231,26 @@ class CatalogDraft:
         return config_hash({"catalog": self.payload, "sequence": self.sequence})
 
 
+def _draft_outputs(draft: CatalogDraft) -> dict[str, list[str]]:
+    catalog = draft.payload
+    processors = {
+        p["id"] for p in catalog["processors"]["processors"] if p["source"] == draft.source_id
+    }
+    metrics = {
+        name
+        for name, metric in catalog["metrics"]["metrics"].items()
+        if metric["processor"] in processors
+    }
+    tiles = [
+        f"{dashboard['id']}/{page['id']}/{tile['id']}"
+        for dashboard in catalog["dashboards"]["dashboards"]
+        for page in dashboard["pages"]
+        for tile in page["tiles"]
+        if tile["metric"] in metrics
+    ]
+    return {"metrics": sorted(metrics), "tiles": sorted(tiles)}
+
+
 class CatalogAuthoring:
     """Bounded, process-local MCP drafts; retains configuration, never sample rows."""
 
@@ -324,7 +350,8 @@ class CatalogAuthoring:
             self.drafts[draft_id] = draft
             instructions = (
                 "The baseline counts rows only. Build the requested metrics and tiles. "
-                "Call catalog_authoring_help for the exact JSON shape or a KPI recipe, then "
+                "Use catalog_draft_apply_template for daily_rows or interaction_metrics. For custom edits "
+                "call catalog_authoring_help for the exact JSON shape or a KPI recipe, then "
                 "use catalog_draft_update or catalog_draft_apply_operations. Use the returned "
                 "revision as expected_revision. Include a business description for each metric. "
                 "Validate, preview the requested objects, then await approval to apply."
@@ -388,6 +415,79 @@ class CatalogAuthoring:
                 },
             }
 
+    def apply_template(
+        self,
+        draft_id: str,
+        expected_revision: str,
+        template: TemplateName,
+        *,
+        bindings: TemplateBindings,
+        outcomes: OutcomeRules,
+        timestamp_format: str | None,
+        dashboard_title: str | None,
+    ) -> dict[str, Any]:
+        with self.lock:
+            draft = self._editable(draft_id, expected_revision)
+            transforms, operations = template_edits(
+                draft.source_id,
+                template,
+                bindings,
+                outcomes,
+                timestamp_format=timestamp_format,
+                approved_fields=draft.columns,
+            )
+            # Work on a copy until the entire template passes the normal sample validation.
+            candidate, _ = apply_draft_operations(draft.payload, operations)
+            source = next(
+                (s for s in candidate["pipelines"]["sources"] if s["id"] == draft.source_id), None
+            )
+            if source is None:
+                raise ValueError("Restore the sampled source before applying a template")
+            source_transforms = source.setdefault("transforms", [])
+            for transform in source_transforms:
+                if (
+                    timestamp_format is not None
+                    and transform["kind"] == "parse_datetime"
+                    and bindings.timestamp in transform["columns"]
+                    and transform["format"] != timestamp_format
+                ):
+                    raise ValueError(
+                        f"Conflicting date formats for {bindings.timestamp}; edit its existing parse_datetime transform before retrying"
+                    )
+            source_transforms.extend(t for t in transforms if t not in source_transforms)
+            dashboard = next(
+                d
+                for d in candidate["dashboards"]["dashboards"]
+                if d["id"] == f"{draft.source_id}_overview"
+            )
+            if dashboard_title is not None:
+                dashboard["title"] = dashboard_title
+            ok, issues = self._validate(
+                replace(draft, payload=candidate),
+                template_time=bindings.timestamp,
+                template_processors={
+                    op["processor"]["id"] for op in operations if op["op"] == "set_processor"
+                },
+            )
+            if not ok:
+                raise ValueError("Template validation failed: " + " | ".join(issues))
+            self._assert_current(draft)
+            tiles = [op for op in operations if op["op"] == "set_tile"]
+            preview_args = {
+                "draft_id": draft_id,
+                "expected_metrics": sorted({op["tile"]["metric"] for op in tiles}),
+                "expected_tiles": [
+                    f"{op['dashboard']}/{op['page']}/{op['tile']['id']}" for op in tiles
+                ],
+            }
+            changes = section_name_diff(draft.payload, candidate)
+            result = self._save_revision(draft_id, draft, candidate, include_catalog=False)
+            return {
+                **result,
+                "changes": {section: changes[section] for section in ("metrics", "tiles")},
+                "next_call": {"tool": "catalog_draft_preview", "arguments": preview_args},
+            }
+
     def _save_revision(
         self,
         draft_id: str,
@@ -418,11 +518,23 @@ class CatalogAuthoring:
                 "stage": "edited" if draft.sequence else "baseline",
             }
 
-    def preview(self, draft_id: str) -> dict[str, Any]:
+    def preview(
+        self,
+        draft_id: str,
+        *,
+        expected_metrics: list[str] | None = None,
+        expected_tiles: list[str] | None = None,
+    ) -> dict[str, Any]:
         with self.lock:
             draft = self._get(draft_id)
             self._assert_current(draft)
             ok, issues = self._validate(draft)
+            outputs = _draft_outputs(draft)
+            for label, expected in (("metrics", expected_metrics), ("tiles", expected_tiles)):
+                missing = set(expected or []).difference(outputs[label])
+                if missing:
+                    issues.append(f"Missing requested {label}: {', '.join(sorted(missing))}")
+                    ok = False
             draft.review_token = secrets.token_urlsafe(32) if ok else None
             return {
                 **self._response(draft_id, draft),
@@ -478,7 +590,13 @@ class CatalogAuthoring:
             del self.drafts[draft_id]
             return {"draft_id": draft_id, "discarded": True}
 
-    def _validate(self, draft: CatalogDraft) -> tuple[bool, list[str]]:
+    def _validate(
+        self,
+        draft: CatalogDraft,
+        *,
+        template_time: str | None = None,
+        template_processors: set[str] | None = None,
+    ) -> tuple[bool, list[str]]:
         ok, issues = validate_draft_catalog(
             draft.payload, source_columns_by_id={draft.source_id: draft.columns}
         )
@@ -515,17 +633,31 @@ class CatalogAuthoring:
             if not contract_ok:
                 return False, issues
             prepared = apply_transforms(frame.lazy(), source).collect()
+            if template_time and prepared[template_time].count() == 0:
+                ok = False
+                issues.append(
+                    f"No usable timestamps in {template_time}; check timestamp_format against the sample"
+                )
             # Execute each processor over the bounded sample, then discard its
             # ephemeral aggregates; this catches dtype and required-column errors.
             context = ChunkContext("catalog-preview", "sample", dt.datetime.now(dt.UTC))
             for processor in catalog.processors.processors:
                 if processor.source == draft.source_id:
-                    create_processor(processor).chunk_aggregate(prepared.lazy(), context)
+                    result = create_processor(processor).chunk_aggregate(prepared.lazy(), context)
+                    if (
+                        template_processors
+                        and processor.id in template_processors
+                        and result.is_empty()
+                    ):
+                        ok = False
+                        issues.append(
+                            f"No sample groups for {processor.id}; check outcome classes and field bindings"
+                        )
         except (ValueError, TypeError, KeyError, pl.exceptions.PolarsError) as exc:
             return False, [
                 f"Sample execution failed ({type(exc).__name__}); check source transforms, field types, and processor bindings"
             ]
-        return True, issues
+        return ok, issues
 
     def _assert_current(self, draft: CatalogDraft) -> None:
         if workspace_configuration_hash(self.workspace) != draft.base_hash:
@@ -544,6 +676,7 @@ class CatalogAuthoring:
             "base_hash": draft.base_hash,
             "stage": "edited" if draft.sequence else "baseline",
             "approved_fields": list(draft.columns),
+            "outputs": _draft_outputs(draft),
             **({"catalog": copy.deepcopy(draft.payload)} if include_catalog else {}),
             "counts": draft_object_counts(draft.payload),
             "expires_in_seconds": max(
