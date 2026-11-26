@@ -9,12 +9,14 @@ from typing import Any
 import polars as pl
 import pytest
 from click.testing import CliRunner
+from pydantic import ValidationError
 
 from valuestream.ai import catalog_authoring as authoring
 from valuestream.ai.copilot import _processor_state_source_fields
 from valuestream.cli import main
 from valuestream.config import model
 from valuestream.config.loader import load
+from valuestream.mcp.authoring_help import authoring_help, help_call
 from valuestream.mcp.server import create_server
 
 
@@ -58,6 +60,8 @@ def test_empty_workspace_starts_only_with_authoring_and_without_writes(tmp_path:
     server = create_server(workspace, enable_authoring=True)
     tools = {tool.name for tool in server._tool_manager.list_tools()}
     assert {
+        "catalog_authoring_help",
+        "catalog_draft_apply_operations",
         "sample_profile",
         "catalog_draft_create",
         "catalog_draft_update",
@@ -84,8 +88,11 @@ def test_partial_catalog_is_not_silently_bootstrapped(tmp_path: Path) -> None:
 def test_revision_review_apply_and_idempotent_receipt(service: authoring.CatalogAuthoring) -> None:
     created = service.create("data/sample.csv")
     draft_id = created["draft_id"]
-    assert "Processor kind dictionary" in created["generation_prompt"]
-    assert "For each new metric" in created["generation_prompt"]
+    assert created["stage"] == "baseline"
+    assert "catalog_authoring_help" in created["generation_prompt"]
+    assert len(created["generation_prompt"]) < 1000
+    legacy = service.create("data/sample.csv", include_studio_prompt=True)
+    assert "Processor kind dictionary" in legacy["generation_prompt"]
     baseline_description = created["catalog"]["metrics"]["metrics"]["sample_Rows"]["description"]
     assert "records" in baseline_description
     assert service.validate(draft_id)["ok"]
@@ -389,3 +396,65 @@ def test_cli_passes_authoring_flag_for_missing_workspace(
     )
     assert result.exit_code == 0, result.output
     assert captured["enable_authoring"] is True
+
+
+def test_authoring_help_resolves_live_schema_references_and_repair_paths() -> None:
+    help_result = authoring_help("processor", "binary_outcome")
+    outcome = help_result["schema"]["properties"]["outcome"]["$ref"].split("/")[-1]
+    nested = authoring_help("processor", "binary_outcome", definition=outcome)
+    assert "positive_values" in nested["schema"]["required"]
+    with pytest.raises(ValidationError) as error:
+        model.Dashboards.model_validate(
+            {
+                "catalog_version": 2,
+                "dashboards": [
+                    {
+                        "id": "report",
+                        "title": "Report",
+                        "pages": [
+                            {
+                                "id": "page",
+                                "title": "Page",
+                                "tiles": [
+                                    {
+                                        "id": "trend",
+                                        "title": "Trend",
+                                        "metric": "CTR",
+                                        "chart": "line",
+                                    },
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+    assert help_call(error.value)["arguments"] == {"topic": "chart", "name": "line"}
+    assert help_call("Unknown operation 'mistyped'; expected one of: install_recipe")[
+        "arguments"
+    ] == {"topic": "operation"}
+    assert "model_quality.roc_auc" in authoring_help("recipe")["names"]
+    assert authoring_help("expression", "safe_div")["forms"]
+
+
+def test_batch_error_preserves_review_and_success_invalidates_it(
+    service: authoring.CatalogAuthoring,
+) -> None:
+    created = service.create("data/sample.csv")
+    draft_id = created["draft_id"]
+    reviewed = service.preview(draft_id)
+    metric = {
+        **created["catalog"]["metrics"]["metrics"]["sample_Rows"],
+        "description": "Rows counted",
+    }
+    edit = {"op": "set_metric", "name": "sample_Rows", "metric": metric}
+    with pytest.raises(ValueError, match="Unknown operation"):
+        service.apply_operations(draft_id, [edit, {"op": "unknown"}], reviewed["revision"])
+    assert service.drafts[draft_id].review_token == reviewed["review_token"]
+    result = service.apply_operations(draft_id, [edit], reviewed["revision"])
+    assert "catalog" not in result
+    assert service.drafts[draft_id].payload["metrics"]["metrics"]["sample_Rows"] == metric
+    with pytest.raises(ValueError, match="revision changed"):
+        service.apply_operations(draft_id, [edit], reviewed["revision"])
+    with pytest.raises(ValueError, match="Preview"):
+        service.apply(draft_id, reviewed["review_token"])

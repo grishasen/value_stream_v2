@@ -100,6 +100,8 @@ _SQL_REMEDIATION = "Call sql_schema for the exact table names and the governed-S
 _METRIC_REMEDIATION = "Call metric_list to check the metric name, dimensions, and grains."
 _AUTHORING_TOOLS = frozenset(
     {
+        "catalog_authoring_help",
+        "catalog_draft_apply_operations",
         "sample_profile",
         "catalog_draft_create",
         "catalog_draft_update",
@@ -148,8 +150,19 @@ def _error_payload(tool: str, exc: Exception) -> dict[str, Any]:
     elif isinstance(exc, duckdb.Error) or tool in _SQL_TOOLS:
         kind = "sql_rejected"
     if tool in _AUTHORING_TOOLS:
-        kind = "authoring_rejected"
-        remediation = "Correct the sample or draft using the reported issues; preview the valid revision before apply. Stale drafts must be recreated."
+        from valuestream.mcp.authoring_help import help_call  # noqa: PLC0415
+
+        error = {
+            "kind": "authoring_rejected",
+            "type": type(exc).__name__,
+            "message": str(exc),
+            "remediation": "Consult help_call for the catalog contract, correct the inputs and retry. Recreate expired drafts.",
+        }
+        reference = help_call(
+            exc,
+            fallback="operation" if tool == "catalog_draft_apply_operations" else "workflow",
+        )
+        return {"error": {**error, "help_call": reference}}
     return {
         "error": {
             "kind": kind,
@@ -216,7 +229,12 @@ def create_server(  # noqa: PLR0915 - one function body per registered tool
     catalog_cache = CatalogCache(workspace)
     if not enable_authoring or any((workspace / "catalog").glob("*.yaml")):
         catalog_cache.get()  # fail fast for partial/invalid catalogs
-    mcp = server_cls("Value Stream")
+    instructions = None
+    if enable_authoring:
+        from valuestream.mcp.authoring_help import AUTHORING_INSTRUCTIONS  # noqa: PLC0415
+
+        instructions = AUTHORING_INSTRUCTIONS
+    mcp = server_cls("Value Stream", instructions=instructions)
     annotations = import_module("mcp.types").ToolAnnotations
     read_only = annotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
     rendering = annotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)

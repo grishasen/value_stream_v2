@@ -45,7 +45,8 @@ async def _client(transport: str, workspace: Path, log_path: Path) -> AsyncItera
                 stdio_client(parameters, errlog=log) as (read, write),
                 ClientSession(read, write, read_timeout_seconds=20) as client,
             ):
-                await client.initialize()
+                initialized = await client.initialize()
+                assert "catalog_authoring_help" in (initialized.instructions or "")
                 yield client
             return
         with socket.socket() as reservation:
@@ -76,7 +77,8 @@ async def _client(transport: str, workspace: Path, log_path: Path) -> AsyncItera
                 ),
                 ClientSession(read, write, read_timeout_seconds=20) as client,
             ):
-                await client.initialize()
+                initialized = await client.initialize()
+                assert "catalog_authoring_help" in (initialized.instructions or "")
                 yield client
         finally:
             process.terminate()
@@ -189,3 +191,109 @@ async def test_sample_to_catalog_to_aggregate_query(
             {"draft_id": draft_id, "review_token": reviewed["review_token"]},
         )
         assert retry == receipt
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_client_builds_ih_dashboard_from_mcp_help(tmp_path: Path) -> None:
+    workspace = tmp_path / "ih"
+    data = workspace / "data"
+    data.mkdir(parents=True)
+    pl.DataFrame(
+        {
+            "pxOutcomeTime": ["20261001T120000.000 GMT"] * 4,
+            "pyChannel": ["Web"] * 4,
+            "pyOutcome": ["Clicked", "Conversion", "Impression", "Pending"],
+            "pySubjectID": ["C1", "C2", "C1", "C1"],
+            "pyName": ["A", "A", "A", "B"],
+            "pyPropensity": [0.9, 0.8, 0.2, 0.1],
+        }
+    ).write_parquet(data / "ih.parquet")
+    async with _client("stdio", workspace, tmp_path / "mcp.log") as client:
+        created = await _call(
+            client,
+            "catalog_draft_create",
+            {
+                "source_id": "ih",
+                "sample_path": "data/ih.parquet",
+            },
+        )
+        draft = {"draft_id": created["draft_id"]}
+        help_request = created["help_call"]
+        workflow = await _call(client, help_request["tool"], help_request["arguments"])
+        assert "daily_rows" in workflow["daily_count"]
+        daily = (
+            await _call(
+                client,
+                "catalog_authoring_help",
+                {
+                    "topic": "example",
+                    "name": "daily_rows",
+                },
+            )
+        )["contract"]
+        pipelines = created["catalog"]["pipelines"]
+        pipelines["sources"][0]["transforms"].extend(daily["append_transforms"])
+        updated = await _call(
+            client,
+            "catalog_draft_update",
+            {
+                **draft,
+                "expected_revision": created["revision"],
+                "sections": {"pipelines": pipelines},
+            },
+        )
+        metrics = (
+            await _call(
+                client,
+                "catalog_authoring_help",
+                {
+                    "topic": "example",
+                    "name": "interaction_metrics",
+                },
+            )
+        )["contract"]
+        operations = daily["operations"] + metrics["operations"]
+        arguments = {**draft, "expected_revision": updated["revision"]}
+        rejected = await client.call_tool(
+            "catalog_draft_apply_operations",
+            {
+                **arguments,
+                "operations": [operations[0], {"op": "set_metric"}],
+            },
+        )
+        assert rejected.is_error
+        recovery = rejected.structured_content["error"]["help_call"]
+        shape = await _call(client, recovery["tool"], recovery["arguments"])
+        assert shape["contract"]["shape"]["op"] == "set_metric"
+
+        changed = await _call(
+            client,
+            "catalog_draft_apply_operations",
+            {
+                **arguments,
+                "operations": operations,
+            },
+        )
+        assert changed["stage"] == "edited"
+        next_call = changed["next_call"]
+        checked = await _call(client, next_call["tool"], next_call["arguments"])
+        assert checked["ok"], checked["issues"]
+        reviewed = await _call(client, "catalog_draft_preview", draft)
+        expected = {
+            "ih_Rows": 4,
+            "CTR": 0.5,
+            "ConversionRate": 0.25,
+            "RocAuc": 1.0,
+            "UniqueVisitors": 2,
+            "UniqueActions": 2,
+        }
+        assert set(reviewed["changes"]["metrics"]["added"]) == expected.keys()
+        receipt = await _call(
+            client, "catalog_draft_apply", {**draft, "review_token": reviewed["review_token"]}
+        )
+        assert receipt["requires_data_run"]
+        assert run_workspace(workspace).status == "ok"
+        for name, value in expected.items():
+            response = await _call(client, "metric_query", {"metric": name})
+            assert response["rows"][0][name] == pytest.approx(value, abs=0.02)
