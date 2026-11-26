@@ -3362,9 +3362,14 @@ Authorization и передавать Host <code>metrics.example.com</code>. Е�
 <p>Разместите CSV или Parquet в <code>new-workspace/data/</code>, например <code>data/events.csv</code>.
 MCP не загружает и не копирует исходные файлы. Затем попросите клиента:</p>
 <blockquote>
-<p>Создай каталог по data/events.csv. Нужно считать объём событий по региону.
+<p>Создай каталог по data/events.csv. Посчитай события по дням и регионам.
+Время события в event_time, регион в region. Проверь поля по образцу.
 Покажи предложенные источники, процессоры, метрики и отчёт до применения.</p>
 </blockquote>
+<p>В OpenCode откройте проект с этим репозиторием. В новой сессии доступен навык
+<code>valuestream-catalog-authoring</code>. Другие клиенты с поддержкой MCP Skills получают
+те же инструкции от сервера. Справка доступна и обычным вызовом
+<code>catalog_authoring_help(topic="workflow")</code>.</p>
 <p>Клиент выполняет следующую последовательность:</p>
 <ol>
 <li><code>sample_profile(sample_path="data/events.csv", limit=1000)</code> возвращает схему
@@ -3375,19 +3380,24 @@ MCP не загружает и не копирует исходные файлы
    Минимальный вариант считает все строки. Ответ содержит схему, список
    разрешённых полей, ревизию и <code>help_call</code> для следующего запроса к серверу.
    Если нужны дополнительные поля, создайте черновик с расширенным списком.</li>
-<li><code>catalog_draft_update</code> принимает <code>draft_id</code>, текущий <code>expected_revision</code> и
-   полные секции <code>sections</code>. Можно добавить преобразования источника,
-   процессоры, метрики, графики; исходный reader менять нельзя. Для точечных правок
-   клиент может вызвать <code>catalog_draft_apply_operations</code> с текущей ревизией.
-   Справку по форме JSON он получает через <code>catalog_authoring_help</code>. Например,
-   <code>topic="example", name="daily_rows"</code> возвращает преобразования даты и график
-   по каналам, а <code>name="interaction_metrics"</code> — пакет правок для пяти метрик IH.
-   Значения полей и правила исходов в примерах нужно сверить с задачей.</li>
-<li><code>catalog_draft_validate(draft_id=...)</code> проверяет ссылки, выражения, поля
-   семпла и выполнение на ограниченном числе строк. Ошибки исправляются новым
-   обновлением черновика; конфигурация на диске ещё не меняется.</li>
-<li><code>catalog_draft_preview(draft_id=...)</code> показывает полный каталог, diff и
-   списки объектов. Только валидный вариант получает <code>review_token</code>.</li>
+<li>Для этого запроса вызовите <code>catalog_draft_apply_template</code> с именем
+   <code>daily_rows</code>, текущей ревизией и привязками
+   <code>{"timestamp": "event_time", "channel": "region"}</code>. Для строкового времени
+   укажите проверенный <code>timestamp_format</code>. Если столбец уже имеет тип даты или
+   времени, передайте <code>null</code>. Для CTR, ConversionRate, ROC AUC, уникальных
+   посетителей и Actions выберите <code>interaction_metrics</code>. В него входят
+   дневной объём, пять карточек и пять дневных графиков. Сверьте знаменатель,
+   классы исходов и поле с оценкой модели. Значения по умолчанию доступны
+   через <code>catalog_authoring_help(topic="template", name="interaction_metrics")</code>.</li>
+<li>Шаблон проверяет преобразования и процессоры на семпле. Для собственных
+   метрик и графиков используйте <code>catalog_draft_apply_operations</code>, а для
+   замены секций — <code>catalog_draft_update</code>. После таких правок можно отдельно
+   вызвать <code>catalog_draft_validate</code>. При ошибке выполните <code>help_call</code> из ответа.</li>
+<li>Сверьте названия метрик и идентификаторы графиков с запросом. Шаблон
+   возвращает готовый вызов <code>catalog_draft_preview</code> в поле <code>next_call</code>.
+   Дополните <code>expected_metrics</code> и <code>expected_tiles</code>, если добавляли свои объекты.
+   Если чего-то не хватает, сервер перечислит пропуски. Успешный просмотр
+   возвращает полный каталог, diff и <code>review_token</code>.</li>
 <li>После разрешения пользователя <code>catalog_draft_apply(draft_id=...,
    review_token=...)</code> записывает каталог. Повторный вызов с тем же токеном
    возвращает квитанцию. Изменение черновика, семпла или файлов конфигурации

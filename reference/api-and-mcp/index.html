@@ -2986,11 +2986,15 @@ aggregate readiness separately after apply. See the <a href="../../guides/users/
 </tr>
 <tr>
 <td><code>catalog_authoring_help</code></td>
-<td>Read-only live reference. Omit <code>name</code> to list choices for a topic, then request one kind, operation, example or KPI recipe. For a nested schema reference pass its <code>$defs</code> name as <code>definition</code></td>
+<td>Read-only live reference. Omit <code>name</code> to list choices for a topic, then request one kind, operation, executable template, example or KPI recipe. For a nested schema reference pass its <code>$defs</code> name as <code>definition</code></td>
 </tr>
 <tr>
 <td><code>catalog_draft_create</code></td>
 <td>Sample path, new <code>source_id</code>, optional approved fields and business goals. Returns a complete rows-count baseline, profile, revision, compact generation instructions and a callable <code>help_call</code>. Set <code>include_studio_prompt=true</code> to request the full Studio prompt</td>
+</tr>
+<tr>
+<td><code>catalog_draft_apply_template</code></td>
+<td>Apply <code>daily_rows</code> or <code>interaction_metrics</code> to the sampled source in one revision. Accepts <code>draft_id</code>, <code>expected_revision</code>, named column <code>bindings</code>, optional <code>outcomes</code>, <code>timestamp_format</code> and <code>dashboard_title</code>. Returns changed metric and tile IDs, current outputs and a ready-to-call preview after sample validation. A failed template preserves the previous draft and review token</td>
 </tr>
 <tr>
 <td><code>catalog_draft_apply_operations</code></td>
@@ -3006,7 +3010,7 @@ aggregate readiness separately after apply. See the <a href="../../guides/users/
 </tr>
 <tr>
 <td><code>catalog_draft_preview</code></td>
-<td>Full draft, object additions/changes/removals and YAML diff. Returns <code>review_token</code> only for a valid revision; present this review before applying</td>
+<td>Full draft, object additions/changes/removals and YAML diff. Optional <code>expected_metrics</code> and <code>expected_tiles</code> (full <code>dashboard/page/tile</code> IDs) verify coverage for the sampled source. Missing items appear in <code>issues</code> and invalidate the review token. Present a successful review before applying</td>
 </tr>
 <tr>
 <td><code>catalog_draft_apply</code></td>
@@ -3018,8 +3022,25 @@ aggregate readiness separately after apply. See the <a href="../../guides/users/
 </tr>
 </tbody>
 </table>
-<p>When authoring is enabled, MCP initialization directs clients to the live help tool.
-The <code>workflow</code> topic describes the edit and review sequence. Use <code>transform</code>,
+<p>The authoring server advertises <code>io.modelcontextprotocol/skills</code>. Discover
+<code>valuestream-catalog-authoring</code> with <code>skills/list</code>, retrieve its manifest with
+<code>skills/get</code>, and read its instructions with <code>resources/read</code> at
+<code>skill://valuestream-catalog-authoring/SKILL.md</code>. OpenCode can also load the
+same instructions from the repository's project skills. Clients supporting only
+MCP tools can follow server instructions and call <code>catalog_authoring_help</code>.</p>
+<p>Use help topic <code>template</code> to list named templates and inspect their default
+bindings. Both templates group by day and the column bound to <code>channel</code>, which
+can also be a region. For string dates supply the observed format (the default
+is the Pega timestamp format). Pass JSON <code>null</code> for an already temporal column.
+<code>interaction_metrics</code> includes <code>daily_rows</code>. Its default CTR counts Clicked and
+Conversion, and its conversion rate counts Conversion. Both use classified rows
+(Clicked, Conversion, Impression, Pending) as their denominator. The same CTR
+classes label the propensity scores for ROC AUC. Visitors and actions are
+approximate distinct counts over classified interactions. Volume counts all rows.
+Bind other labels using <code>outcomes.positive</code>, <code>negative</code> and <code>conversion</code>.
+The template's preview arguments cover its metrics and tiles. Extend them when
+the user's request includes custom objects.</p>
+<p>The <code>workflow</code> topic describes the edit and review sequence. Use <code>transform</code>,
 <code>processor</code>, <code>state</code>, <code>metric</code> or <code>chart</code> for the corresponding discriminator's
 validation schema. Use <code>expression</code>, <code>operation</code> or <code>recipe</code> for exact DSL shapes,
 batch operations and installed KPI templates. The <code>example</code> topic includes a
