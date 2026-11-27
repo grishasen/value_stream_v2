@@ -9,10 +9,12 @@ from typing import Any
 
 import polars as pl
 import pytest
+import yaml
 from click.testing import CliRunner
 from pydantic import ValidationError
 
 from valuestream.ai import catalog_authoring as authoring
+from valuestream.ai.catalog_review import OpenSourceError
 from valuestream.ai.catalog_templates import OutcomeRules, TemplateBindings
 from valuestream.ai.copilot import _processor_state_source_fields
 from valuestream.cli import main
@@ -488,3 +490,58 @@ def test_batch_error_preserves_review_and_success_invalidates_it(
         service.apply_operations(draft_id, [edit], reviewed["revision"])
     with pytest.raises(ValueError, match="Preview"):
         service.apply(draft_id, reviewed["review_token"])
+
+
+def test_foreign_operation_returns_owner_and_preserves_review(
+    service: authoring.CatalogAuthoring,
+) -> None:
+    first = service.create("data/sample.csv", source_id="first")
+    review = service.preview(first["draft_id"])
+    service.apply(first["draft_id"], review["review_token"])
+    other = service.create("data/sample.csv", source_id="second")
+    review = service.preview(other["draft_id"])
+    foreign = {
+        **first["catalog"]["metrics"]["metrics"]["first_Rows"],
+        "description": "wrong source",
+    }
+    with pytest.raises(OpenSourceError, match="metric 'first_Rows' belongs to first") as caught:
+        service.apply_operations(
+            other["draft_id"],
+            [{"op": "set_metric", "name": "first_Rows", "metric": foreign}],
+            other["revision"],
+        )
+    assert caught.value.next_call == {
+        "tool": "catalog_draft_open",
+        "arguments": {"source_id": "first"},
+    }
+    assert service.validate(other["draft_id"])["revision"] == other["revision"]
+    assert service.apply(other["draft_id"], review["review_token"])["applied"]
+
+
+def test_open_binds_wildcard_sample_and_honors_csv_reader(
+    service: authoring.CatalogAuthoring,
+) -> None:
+    draft = service.create("data/sample.csv", source_id="events")
+    service.apply(draft["draft_id"], service.preview(draft["draft_id"])["review_token"])
+    root = service.workspace
+    pipelines = root / "catalog/pipelines.yaml"
+    payload = yaml.safe_load(pipelines.read_text())
+    (source,) = payload["sources"]
+    source["reader"].update({"file_pattern": "batch-*.csv", "separator": "|"})
+    pipelines.write_text(yaml.safe_dump(payload))
+    (root / "data/batch-1.csv").write_text("region|value\nA|1\nB|2\n")
+    with pytest.raises(ValueError, match="Pass sample_path"):
+        service.open_existing("events")
+    with pytest.raises(ValueError, match="must match"):
+        service.open_existing("events", sample_path="data/sample.csv")
+    (root / "data/batch-[1].csv").write_text("literal|id\nY|4\n")
+    literal = service.open_existing("events", sample_path="data/batch-[1].csv", limit=1)
+    assert literal["approved_fields"] == ["literal", "id"]
+    opened = service.open_existing("events", sample_path="data/batch-1.csv", limit=1)
+    assert opened["approved_fields"] == ["region", "value"]
+    assert opened["profile"]["sample_rows"] == 1
+    token = service.preview(opened["draft_id"])["review_token"]
+    assert token
+    (root / "data/batch-1.csv").write_text("region|value\nC|100\n")
+    with pytest.raises(ValueError, match="Sample changed"):
+        service.apply(opened["draft_id"], token)

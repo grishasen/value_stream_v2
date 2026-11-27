@@ -106,7 +106,7 @@ def register_authoring_tools(
             bool, Field(description="Request the full legacy Studio generation prompt.")
         ] = False,
     ) -> dict[str, Any]:
-        """Start a baseline draft, with the current catalog, approved schema and next help call.
+        """Add a new sampled source to a draft. To change an existing source use catalog_draft_open.
 
         Use catalog_authoring_help to resolve schema and recipe questions directly
         through MCP. Keep the sampled source id and reader; edit transforms and schema.
@@ -122,6 +122,46 @@ def register_authoring_tools(
                 include_studio_prompt=include_studio_prompt,
                 limit=limit,
                 approved_fields=approved_fields,
+            ),
+        )
+
+    @mcp.tool(annotations=draft_write)
+    def catalog_draft_open(
+        source_id: Annotated[str, Field(description="Existing catalog source ID")],
+        metric: Annotated[
+            str | None,
+            Field(
+                description="Optional metric to inspect. Returns its processor, shared metrics and tiles, then a before/after sample review."
+            ),
+        ] = None,
+        sample_path: Annotated[
+            str | None,
+            Field(
+                description="Matching CSV/Parquet under data/. Inferred for a literal reader filename; required for a wildcard."
+            ),
+        ] = None,
+        approved_fields: Annotated[
+            list[str] | None,
+            Field(
+                description="Physical fields approved for this edit, including fields newly needed for grouping; defaults to all."
+            ),
+        ] = None,
+        limit: Annotated[int, Field(ge=1, le=100_000)] = 1000,
+    ) -> dict[str, Any]:
+        """Open the published source for an in-place edit in a fresh draft, including after reconnect.
+
+        Use for requests to change a metric or add a chart to an existing dashboard.
+        Pass metric for focused dependency inspection and count-ratio sample previews.
+        Edit with catalog_draft_apply_operations, preview, then obtain approval to apply.
+        """
+        return guarded(
+            "catalog_draft_open",
+            lambda: authoring.open_existing(
+                source_id,
+                metric=metric,
+                sample_path=sample_path,
+                approved_fields=approved_fields,
+                limit=limit,
             ),
         )
 
@@ -230,8 +270,15 @@ def register_authoring_tools(
             list[str] | None,
             Field(description="Required dashboard/page/tile IDs for the sampled source."),
         ] = None,
+        *,
+        compact: Annotated[
+            bool,
+            Field(
+                description="Show changed object IDs and focused metric review, omitting full catalog and YAML diff."
+            ),
+        ] = False,
     ) -> dict[str, Any]:
-        """Return the full draft, object changes, YAML diff, and exact-revision review token.
+        """Return the draft review and exact-revision review token.
 
         Present changes and validation issues to the user before apply. A token is
         issued only for a valid draft. Changes to the draft, workspace config, or
@@ -241,7 +288,10 @@ def register_authoring_tools(
             "catalog_draft_preview",
             lambda: with_issue_help(
                 authoring.preview(
-                    draft_id, expected_metrics=expected_metrics, expected_tiles=expected_tiles
+                    draft_id,
+                    expected_metrics=expected_metrics,
+                    expected_tiles=expected_tiles,
+                    compact=compact,
                 )
             ),
         )

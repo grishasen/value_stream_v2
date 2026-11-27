@@ -36,7 +36,8 @@ HelpTopic = Literal[
 
 AUTHORING_INSTRUCTIONS = (
     "Load the valuestream-catalog-authoring skill for requests to build catalogs or dashboards. "
-    "For daily counts or Interaction History KPIs call catalog_draft_apply_template after draft creation. "
+    "To change an existing metric or dashboard open its source using catalog_draft_open, with metric for dependencies and sample review. "
+    "For new daily counts or Interaction History KPIs call catalog_draft_apply_template after draft creation. "
     "Paths starting with data/ are relative to this server's workspace. "
     "Use sample_profile for sample inspection. When a field, shape, operation or KPI is "
     "unclear, call catalog_authoring_help for that topic before editing. "
@@ -142,6 +143,7 @@ def authoring_help(
             "instructions": AUTHORING_INSTRUCTIONS,
             "topics": [*_SCHEMA_TYPES, "expression", "operation", "recipe", "template", "example"],
             "scope": "Keep the sampled source id and reader. Edit its schema and transforms. Preserve unsampled sources and their dependent objects. Approved physical fields are fixed at creation; create a new draft if the goal needs more fields.",
+            "existing_source": "Call catalog_draft_open with the existing source_id and target metric. Verify newly needed fields and check processor_metrics for shared computations. Use apply_operations then preview(compact=true) for the before/after definitions and count-ratio sample.",
             "edit": "Use catalog_draft_update for complete changed JSON sections, including source transforms. For individual processors, metrics, tiles or KPI recipes use catalog_draft_apply_operations. Both take draft_id and expected_revision from the latest response.",
             "daily_count": "Use catalog_draft_apply_template with template=daily_rows. Bind timestamp and channel (the grouping field) and set the timestamp format. See topic=template, name=daily_rows for defaults.",
             "rates_and_auc": "Use catalog_draft_apply_template with template=interaction_metrics for five KPIs, daily trends and volume. Confirm outcome classes, score and denominator. See topic=template, name=interaction_metrics for bindings.",

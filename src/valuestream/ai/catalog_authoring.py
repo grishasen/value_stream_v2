@@ -14,6 +14,7 @@ import secrets
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
+from glob import has_magic
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -21,13 +22,18 @@ from typing import Any
 import polars as pl
 import yaml
 
+from valuestream.ai.catalog_review import OpenSourceError, metric_context, sample_rate, scope_error
 from valuestream.ai.catalog_templates import (
     OutcomeRules,
     TemplateBindings,
     TemplateName,
     template_edits,
 )
-from valuestream.ai.copilot import apply_draft_operations, validate_draft_field_contract
+from valuestream.ai.copilot import (
+    apply_draft_operations,
+    inactive_scope_mutation_issues,
+    validate_draft_field_contract,
+)
 from valuestream.ai.samples import read_tabular_sample
 from valuestream.ai.settings import write_chat_with_data_config
 from valuestream.ai.studio import (
@@ -52,6 +58,7 @@ from valuestream.config.writing import (
 )
 from valuestream.processors.binary_outcome import ChunkContext
 from valuestream.processors.registry import create_processor
+from valuestream.readers.io import read as read_source
 from valuestream.transforms.pipeline import apply_transforms
 from valuestream.utils.names import capitalize_fields
 
@@ -99,7 +106,9 @@ def read_catalog_draft(workspace: Path) -> dict[str, Any]:
     }
 
 
-def catalog_changes(base: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
+def catalog_changes(
+    base: dict[str, Any], draft: dict[str, Any], *, compact: bool = False
+) -> dict[str, Any]:
     """Return Studio's object diff plus source/dashboard/page changes and YAML diff."""
 
     changes: dict[str, Any] = section_name_diff(base, draft)
@@ -108,6 +117,11 @@ def catalog_changes(base: dict[str, Any], draft: dict[str, Any]) -> dict[str, An
         after = {item["id"]: item for item in draft[key][kind]}
         changes[kind] = _object_changes(before, after)
     changes["pages"] = _object_changes(_pages(base), _pages(draft))
+    if compact:
+        return {
+            key: {k: v for k, v in change.items() if k != "unchanged"}
+            for key, change in changes.items()
+        }
     changes["yaml_diff"] = "\n".join(
         difflib.unified_diff(
             yaml.safe_dump(base, sort_keys=False).splitlines(),
@@ -222,9 +236,15 @@ class CatalogDraft:
     reader: dict[str, Any]
     limit: int
     created_at: float
+    existing: bool = False
+    focus_metric: str | None = None
     sequence: int = 0
     review_token: str | None = None
     applied: dict[str, Any] | None = None
+
+    @property
+    def stage(self) -> str:
+        return "edited" if self.sequence else ("opened" if self.existing else "baseline")
 
     @property
     def revision(self) -> str:
@@ -249,6 +269,19 @@ def _draft_outputs(draft: CatalogDraft) -> dict[str, list[str]]:
         if tile["metric"] in metrics
     ]
     return {"metrics": sorted(metrics), "tiles": sorted(tiles)}
+
+
+def _read_sample(path: Path, limit: int, reader: model.Reader | None) -> pl.DataFrame:
+    if reader is None:
+        return read_tabular_sample(path, limit=limit)
+    if not 1 <= limit <= 100_000 or reader.kind not in {"csv", "parquet"}:
+        raise ValueError("Use a CSV or Parquet sample and a limit between 1 and 100000")
+    if reader.kind == "csv":
+        inference = reader.infer_schema_length
+        reader = reader.model_copy(
+            update={"infer_schema_length": min(10_000 if inference is None else inference, limit)}
+        )
+    return read_source(reader, [path], glob=False).head(limit).collect()
 
 
 class CatalogAuthoring:
@@ -277,10 +310,11 @@ class CatalogAuthoring:
         limit: int = 1000,
         approved_fields: list[str] | None = None,
         example_fields: list[str] | None = None,
+        reader: model.Reader | None = None,
     ) -> dict[str, Any]:
         path = self.sample_path(sample_path)
         try:
-            frame = read_tabular_sample(path, limit=limit)
+            frame = _read_sample(path, limit, reader)
         except pl.exceptions.PolarsError as exc:
             raise ValueError(
                 f"Sample parsing failed ({type(exc).__name__}); check the CSV/Parquet schema"
@@ -313,41 +347,9 @@ class CatalogAuthoring:
         approved_fields: list[str] | None = None,
     ) -> dict[str, Any]:
         with self.lock:
-            self._prune()
-            if len(self.drafts) >= MAX_DRAFTS:
-                raise ValueError("Too many active drafts; discard a draft before creating another")
-            if not source_id or not all(char.isalnum() or char in "_-" for char in source_id):
-                raise ValueError(
-                    "source_id must contain only letters, digits, underscores or hyphens"
-                )
-            path = self.sample_path(sample_path)
-            signature = _sample_signature(path)
-            profile = self.profile(sample_path, limit=limit, approved_fields=approved_fields)
-            columns = [item["column"] for item in profile["schema"]]
-            base_hash = workspace_configuration_hash(self.workspace)
-            base = read_catalog_draft(self.workspace)
-            payload = _sample_baseline(base, profile, source_id)
-            if len(yaml.safe_dump(payload).encode()) > MAX_DRAFT_BYTES:
-                raise ValueError("Draft exceeds the 2 MiB configuration budget")
-            draft_id = secrets.token_urlsafe(24)
-            draft = CatalogDraft(
-                payload=payload,
-                base=base,
-                base_hash=base_hash,
-                sample_path=profile["sample_path"],
-                sample_signature=signature,
-                source_id=source_id,
-                columns=columns,
-                reader=next(
-                    item["reader"]
-                    for item in payload["pipelines"]["sources"]
-                    if item["id"] == source_id
-                ),
-                limit=limit,
-                created_at=time.monotonic(),
+            draft_id, draft, profile = self._start_draft(
+                source_id, sample_path=sample_path, approved_fields=approved_fields, limit=limit
             )
-            self._assert_current(draft)
-            self.drafts[draft_id] = draft
             instructions = (
                 "The baseline counts rows only. Build the requested metrics and tiles. "
                 "Use catalog_draft_apply_template for daily_rows or interaction_metrics. For custom edits "
@@ -359,11 +361,11 @@ class CatalogAuthoring:
             prompt = f"{instructions}\nBusiness requirements: {user_goals}"
             if include_studio_prompt:
                 prompt = prompt_for_config_draft(
-                    file_name=path.name,
+                    file_name=Path(draft.sample_path).name,
                     approved_schema=profile["schema"],
-                    approved_fields=columns,
+                    approved_fields=draft.columns,
                     hidden_fields=[],
-                    baseline_draft=payload,
+                    baseline_draft=draft.payload,
                     user_goals=user_goals,
                     allow_source_changes=True,
                 )
@@ -375,11 +377,143 @@ class CatalogAuthoring:
                 "help_call": {"tool": "catalog_authoring_help", "arguments": {"topic": "workflow"}},
             }
 
+    def open_existing(
+        self,
+        source_id: str,
+        *,
+        sample_path: str | None = None,
+        approved_fields: list[str] | None = None,
+        limit: int = 1000,
+        metric: str | None = None,
+    ) -> dict[str, Any]:
+        with self.lock:
+            draft_id, draft, profile = self._start_draft(
+                source_id,
+                sample_path=sample_path,
+                approved_fields=approved_fields,
+                limit=limit,
+                existing=True,
+                metric=metric,
+            )
+            return {
+                **self._response(draft_id, draft, include_catalog=False),
+                "profile": profile,
+                "metric_context": metric_context(draft.payload, metric, source_id)
+                if metric
+                else None,
+                "instructions": "Use catalog_draft_apply_operations with this revision. Check processor_metrics before changing a shared processor. Preview the edited revision and obtain approval before apply.",
+            }
+
+    def _source_sample(self, source: model.Source, sample_path: str | None) -> Path:
+        reader = source.reader
+        if reader.kind not in {"csv", "parquet"}:
+            raise ValueError(
+                f"Opening a sampled draft requires a CSV or Parquet reader; source {source.id!r} uses {reader.kind}"
+            )
+        root = (self.workspace / (reader.root or ".")).resolve()
+        pattern = reader.file_pattern
+        if sample_path is None and has_magic(pattern):
+            raise ValueError(
+                f"Pass sample_path naming one data/ file matching {pattern!r} for source {source.id!r}"
+            )
+        path = self.sample_path(sample_path if sample_path is not None else str(root / pattern))
+        if (
+            not path.is_relative_to(root)
+            or not path.relative_to(root).full_match(pattern)
+            or path.suffix.lower() != f".{reader.kind}"
+        ):
+            raise ValueError(
+                f"sample_path must match the configured reader of source {source.id!r} ({pattern!r})"
+            )
+        return path
+
+    def _start_draft(
+        self,
+        source_id: str,
+        *,
+        sample_path: str | None,
+        approved_fields: list[str] | None,
+        limit: int,
+        existing: bool = False,
+        metric: str | None = None,
+    ) -> tuple[str, CatalogDraft, dict[str, Any]]:
+        self._prune()
+        if len(self.drafts) >= MAX_DRAFTS:
+            raise ValueError("Too many active drafts; discard a draft before creating another")
+        base_hash = workspace_configuration_hash(self.workspace)
+        base = read_catalog_draft(self.workspace)
+        sources = {s["id"]: s for s in base["pipelines"]["sources"]}
+        reader: model.Reader | None = None
+        if existing:
+            if source_id not in sources:
+                raise ValueError(f"Unknown source {source_id!r}. Available: {', '.join(sources)}")
+            source = model.Source.model_validate(sources[source_id])
+            path = self._source_sample(source, sample_path)
+            reader = source.reader
+            if metric and metric_context(base, metric, source_id) is None:
+                raise ValueError(f"Metric {metric!r} does not belong to source {source_id!r}")
+        else:
+            if source_id in sources:
+                args: dict[str, Any] = {"limit": limit}
+                if has_magic(sources[source_id]["reader"]["file_pattern"]):
+                    args["sample_path"] = sample_path
+                if approved_fields is not None:
+                    args["approved_fields"] = approved_fields
+                raise OpenSourceError(
+                    f"Source {source_id!r} already exists. Use catalog_draft_open to edit it.",
+                    source_id,
+                    **args,
+                )
+            if not source_id or not all(c.isalnum() or c in "_-" for c in source_id):
+                raise ValueError(
+                    "source_id must contain only letters, digits, underscores or hyphens"
+                )
+            if not sample_path:
+                raise ValueError("Pass sample_path for the new source")
+            path = self.sample_path(sample_path)
+        signature = _sample_signature(path)
+        profile = self.profile(
+            str(path), limit=limit, approved_fields=approved_fields, reader=reader
+        )
+        payload = copy.deepcopy(base) if existing else _sample_baseline(base, profile, source_id)
+        if len(yaml.safe_dump(payload).encode()) > MAX_DRAFT_BYTES:
+            raise ValueError("Draft exceeds the 2 MiB configuration budget")
+        draft = CatalogDraft(
+            payload=payload,
+            base=base,
+            base_hash=base_hash,
+            sample_path=profile["sample_path"],
+            sample_signature=signature,
+            source_id=source_id,
+            columns=[c["column"] for c in profile["schema"]],
+            reader=next(
+                s["reader"] for s in payload["pipelines"]["sources"] if s["id"] == source_id
+            ),
+            limit=limit,
+            created_at=time.monotonic(),
+            existing=existing,
+            focus_metric=metric,
+        )
+        self._assert_current(draft)
+        draft_id = secrets.token_urlsafe(24)
+        self.drafts[draft_id] = draft
+        return draft_id, draft, profile
+
     def _editable(self, draft_id: str, expected_revision: str) -> CatalogDraft:
         draft = self._get(draft_id)
+        if draft.applied:
+            raise OpenSourceError(
+                "Draft was already applied. Open the published source to make another edit.",
+                draft.source_id,
+                sample_path=draft.sample_path,
+                approved_fields=draft.columns,
+                limit=draft.limit,
+            )
         self._assert_current(draft)
-        if draft.applied or expected_revision != draft.revision:
-            raise ValueError("Draft revision changed or was applied; fetch or create a draft")
+        if expected_revision != draft.revision:
+            raise ValueError(
+                "Draft revision changed; use catalog_draft_preview to fetch the current revision"
+            )
         return draft
 
     def update(
@@ -407,11 +541,16 @@ class CatalogAuthoring:
                 raise ValueError("Supply at least one catalog operation")
             payload, changes = apply_draft_operations(draft.payload, operations)
             return {
-                **self._save_revision(draft_id, draft, payload, include_catalog=False),
+                **self._save_revision(
+                    draft_id, draft, payload, include_catalog=False, check_scope=True
+                ),
                 "operation_changes": changes,
                 "next_call": {
-                    "tool": "catalog_draft_validate",
-                    "arguments": {"draft_id": draft_id},
+                    "tool": "catalog_draft_preview" if draft.existing else "catalog_draft_validate",
+                    "arguments": {
+                        "draft_id": draft_id,
+                        **({"compact": True} if draft.focus_metric else {}),
+                    },
                 },
             }
 
@@ -495,11 +634,16 @@ class CatalogAuthoring:
         payload: dict[str, Any],
         *,
         include_catalog: bool = True,
+        check_scope: bool = False,
     ) -> dict[str, Any]:
         if len(yaml.safe_dump(payload).encode()) > MAX_DRAFT_BYTES:
             raise ValueError("Draft exceeds the 2 MiB configuration budget")
         model.Catalog.model_validate({key: payload[key] for key in SECTIONS})
         _validate_chat(payload.get("chat_with_data"))
+        if check_scope and (
+            issues := inactive_scope_mutation_issues(payload, draft.base, {draft.source_id})
+        ):
+            raise scope_error(draft.base, payload, draft.source_id, issues)
         draft.payload = payload
         draft.sequence += 1
         draft.review_token = None
@@ -515,7 +659,7 @@ class CatalogAuthoring:
                 "revision": draft.revision,
                 "ok": ok,
                 "issues": issues,
-                "stage": "edited" if draft.sequence else "baseline",
+                "stage": draft.stage,
             }
 
     def preview(
@@ -524,23 +668,41 @@ class CatalogAuthoring:
         *,
         expected_metrics: list[str] | None = None,
         expected_tiles: list[str] | None = None,
+        compact: bool = False,
     ) -> dict[str, Any]:
         with self.lock:
             draft = self._get(draft_id)
             self._assert_current(draft)
-            ok, issues = self._validate(draft)
+            sample: dict[str, Any] = {}
+            ok, issues = self._validate(draft, sample=sample)
             outputs = _draft_outputs(draft)
             for label, expected in (("metrics", expected_metrics), ("tiles", expected_tiles)):
                 missing = set(expected or []).difference(outputs[label])
                 if missing:
                     issues.append(f"Missing requested {label}: {', '.join(sorted(missing))}")
                     ok = False
+            self._assert_current(draft)
             draft.review_token = secrets.token_urlsafe(32) if ok else None
             return {
-                **self._response(draft_id, draft),
+                **self._response(draft_id, draft, include_catalog=not compact),
+                **(
+                    {
+                        "metric_review": {
+                            "before": metric_context(
+                                draft.base, draft.focus_metric, draft.source_id
+                            ),
+                            "after": metric_context(
+                                draft.payload, draft.focus_metric, draft.source_id
+                            ),
+                            "sample": sample or None,
+                        }
+                    }
+                    if draft.focus_metric
+                    else {}
+                ),
                 "ok": ok,
                 "issues": issues,
-                "changes": catalog_changes(draft.base, draft.payload),
+                "changes": catalog_changes(draft.base, draft.payload, compact=compact),
                 "review_token": draft.review_token,
             }
 
@@ -596,6 +758,7 @@ class CatalogAuthoring:
         *,
         template_time: str | None = None,
         template_processors: set[str] | None = None,
+        sample: dict[str, Any] | None = None,
     ) -> tuple[bool, list[str]]:
         ok, issues = validate_draft_catalog(
             draft.payload, source_columns_by_id={draft.source_id: draft.columns}
@@ -615,7 +778,7 @@ class CatalogAuthoring:
         if source.reader != original_reader:
             return False, ["Keep the sampled source reader configuration unchanged"]
         try:
-            frame = read_tabular_sample(path, limit=draft.limit)
+            frame = _read_sample(path, draft.limit, original_reader)
             effective_fields = list(draft.columns)
             if any(
                 isinstance(transform, model.RenameCapitalize) for transform in source.transforms
@@ -644,6 +807,10 @@ class CatalogAuthoring:
             for processor in catalog.processors.processors:
                 if processor.source == draft.source_id:
                     result = create_processor(processor).chunk_aggregate(prepared.lazy(), context)
+                    if sample is not None and draft.focus_metric:
+                        metric = catalog.metrics.metrics.get(draft.focus_metric)
+                        if metric and metric.processor == processor.id:
+                            sample.update(sample_rate(metric, processor, result, frame.height))
                     if (
                         template_processors
                         and processor.id in template_processors
@@ -674,7 +841,8 @@ class CatalogAuthoring:
             "draft_id": draft_id,
             "revision": draft.revision,
             "base_hash": draft.base_hash,
-            "stage": "edited" if draft.sequence else "baseline",
+            "source_id": draft.source_id,
+            "stage": draft.stage,
             "approved_fields": list(draft.columns),
             "outputs": _draft_outputs(draft),
             **({"catalog": copy.deepcopy(draft.payload)} if include_catalog else {}),
@@ -724,8 +892,6 @@ def _sample_baseline(
     base: dict[str, Any], profile: dict[str, Any], source_id: str
 ) -> dict[str, Any]:
     payload = copy.deepcopy(base)
-    if any(item["id"] == source_id for item in payload["pipelines"]["sources"]):
-        raise ValueError("source_id already exists; choose a new sampled-source id")
     path = Path(profile["sample_path"])
     fields = {row["column"] for row in profile["schema"]}
     scope = "SampleScope"

@@ -21,12 +21,15 @@ _TEMP_DIRS: list[Path] = []
 
 
 @timed
-def read(reader: model.Reader, files: list[Path] | tuple[Path, ...]) -> pl.LazyFrame:
+def read(
+    reader: model.Reader, files: list[Path] | tuple[Path, ...], *, glob: bool = True
+) -> pl.LazyFrame:
     """Read ``files`` according to ``reader.kind``."""
     paths = [str(p) for p in files]
     if reader.kind == "parquet":
         return pl.scan_parquet(
             paths,
+            glob=glob,
             hive_partitioning=bool(_extra(reader).get("hive_partitioning", False)),
             missing_columns="insert",
             extra_columns="ignore",
@@ -34,6 +37,7 @@ def read(reader: model.Reader, files: list[Path] | tuple[Path, ...]) -> pl.LazyF
     if reader.kind == "csv":
         return pl.scan_csv(
             paths,
+            glob=glob,
             separator=str(
                 _extra(reader).get("separator") or getattr(reader, "delimiter", None) or ","
             ),

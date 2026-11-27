@@ -1527,7 +1527,7 @@ def validate_draft_field_contract(  # noqa: PLR0912
             )
         )
     if baseline_draft is not None:
-        issues.extend(_inactive_scope_mutation_issues(draft, baseline_draft, source_ids))
+        issues.extend(inactive_scope_mutation_issues(draft, baseline_draft, source_ids))
     carry_unmodified_active_artifacts = bool(
         baseline_draft is not None
         and not _active_source_naming_contract_changed(draft, baseline_draft, source_ids)
@@ -1626,7 +1626,7 @@ def validate_draft_field_contract(  # noqa: PLR0912
     return not unique_issues, unique_issues
 
 
-def _inactive_scope_mutation_issues(
+def inactive_scope_mutation_issues(
     draft: dict[str, Any],
     baseline_draft: dict[str, Any],
     source_ids: set[str],

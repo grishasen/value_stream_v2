@@ -105,6 +105,7 @@ _AUTHORING_TOOLS = frozenset(
         "catalog_draft_apply_template",
         "sample_profile",
         "catalog_draft_create",
+        "catalog_draft_open",
         "catalog_draft_update",
         "catalog_draft_validate",
         "catalog_draft_preview",
@@ -151,8 +152,23 @@ def _error_payload(tool: str, exc: Exception) -> dict[str, Any]:
     elif isinstance(exc, duckdb.Error) or tool in _SQL_TOOLS:
         kind = "sql_rejected"
     if tool in _AUTHORING_TOOLS:
+        from valuestream.ai.catalog_review import OpenSourceError  # noqa: PLC0415
         from valuestream.mcp.authoring_help import help_call  # noqa: PLC0415
 
+        if isinstance(exc, OpenSourceError):
+            return {
+                "error": {
+                    "kind": exc.kind,
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                    "remediation": "For an existing source, follow next_call with the fields needed for your edit.",
+                    "next_call": exc.next_call,
+                    "help_call": {
+                        "tool": "catalog_authoring_help",
+                        "arguments": {"topic": "workflow"},
+                    },
+                }
+            }
         error = {
             "kind": "authoring_rejected",
             "type": type(exc).__name__,

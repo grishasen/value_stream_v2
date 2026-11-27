@@ -19,7 +19,7 @@ def read_tabular_sample(
     if not 1 <= limit <= 100_000:
         raise ValueError("sample limit must be between 1 and 100000")
     if path.suffix.casefold() == ".parquet":
-        preview = pl.scan_parquet(path)
+        preview = pl.scan_parquet(path, glob=False)
         if columns is not None:
             preview = preview.select(list(columns))
         return preview.head(limit).collect()
@@ -30,5 +30,6 @@ def read_tabular_sample(
             n_rows=limit,
             try_parse_dates=try_parse_dates,
             columns=list(columns) if columns is not None else None,
+            glob=False,
         ).head(limit)
     raise ValueError("MCP catalog authoring supports CSV and Parquet samples")

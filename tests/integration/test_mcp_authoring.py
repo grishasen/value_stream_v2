@@ -415,3 +415,193 @@ async def test_skill_discovery_and_bound_template(tmp_path: Path, transport: str
         for name, value in zip(expected_metrics, [0.5, 0.25, 1, 2, 3], strict=True):
             query = await _call(client, "metric_query", {"metric": name})
             assert query["rows"][0][name] == pytest.approx(value, abs=0.02)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["stdio", "http"])
+async def test_reopen_published_ctr_in_fresh_session(tmp_path: Path, transport: str) -> None:
+    workspace = tmp_path / "workspace"
+    data = workspace / "data"
+    data.mkdir(parents=True)
+    frame = pl.DataFrame(
+        {
+            "pxOutcomeTime": ["20261001T120000.000 GMT"] * 8,
+            "pyChannel": ["Web", "Web", "App", "App"] * 2,
+            "pyIssue": ["Sales", "Retention"] * 4,
+            "pyOutcome": [
+                "Clicked",
+                "Conversion",
+                "Impression",
+                "Impression",
+                "Pending",
+                "Clicked",
+                "Clicked",
+                "Pending",
+            ],
+            "pySubjectID": ["A", "B", "C", "A"] * 2,
+            "pyName": ["a", "b"] * 4,
+            "pyPropensity": [0.8, 0.9, 0.3, 0.1, 0.4, 0.9, 0.6, 0.5],
+        }
+    )
+    frame.write_parquet(data / "ih.parquet")
+    await _exercise_ctr_edit(transport, workspace, "data/ih.parquet", frame)
+
+
+async def _exercise_ctr_edit(
+    transport: str, workspace: Path, sample_path: str, frame: pl.DataFrame
+) -> None:
+    source = "interactions"
+    published_fields = [col for col in frame.columns if col != "pyIssue"]
+    async with _client(transport, workspace, workspace.parent / "create.log") as client:
+        draft = await _call(
+            client,
+            "catalog_draft_create",
+            {"sample_path": sample_path, "source_id": source, "approved_fields": published_fields},
+        )
+        built = await _call(
+            client,
+            "catalog_draft_apply_template",
+            {
+                "draft_id": draft["draft_id"],
+                "expected_revision": draft["revision"],
+                "template": "interaction_metrics",
+            },
+        )
+        preview = await _call(client, "catalog_draft_preview", built["next_call"]["arguments"])
+        assert preview["counts"]["Tiles"] == 13
+        await _call(
+            client,
+            "catalog_draft_apply",
+            {"draft_id": draft["draft_id"], "review_token": preview["review_token"]},
+        )
+    before = load(workspace)
+    async with _client(transport, workspace, workspace.parent / "edit.log") as client:
+        args = {"source_id": source, "sample_path": sample_path, "approved_fields": frame.columns}
+        duplicate = await client.call_tool("catalog_draft_create", args)
+        assert duplicate.is_error
+        recovery = duplicate.structured_content["error"]["next_call"]
+        assert recovery["tool"] == "catalog_draft_open"
+        assert recovery["arguments"]["approved_fields"] == frame.columns
+        opened = await _call(
+            client,
+            "catalog_draft_open",
+            {"source_id": source, "metric": "CTR", "approved_fields": frame.columns},
+        )
+        assert opened["stage"] == "opened"
+        assert "catalog" not in opened
+        old = opened["metric_context"]
+        assert set(old["processor_metrics"]) == {"CTR", "UniqueVisitors", "UniqueActions"}
+        handle = {"draft_id": opened["draft_id"]}
+        proc = {
+            **old["processor"],
+            "id": "interactions_ctr",
+            "group_by": ["Day", "pyChannel", "pyIssue"],
+            "outcome": {
+                "column": "pyOutcome",
+                "positive_values": ["Clicked"],
+                "negative_values": ["Impression"],
+            },
+            "states": {
+                "Clicks": {"type": "count", "outcome": "positive"},
+                "Impressions": {"type": "count", "outcome": "negative"},
+            },
+        }
+        metric = {
+            **old["metric"],
+            "processor": proc["id"],
+            "description": "Clicked divided by Impression.",
+            "expression": {
+                "op": "safe_div",
+                "num": {"col": "Clicks"},
+                "den": {"col": "Impressions"},
+            },
+        }
+        tile = {
+            "id": "CTR_by_channel_issue",
+            "title": "CTR by channel and issue",
+            "metric": "CTR",
+            "chart": "bar",
+            "x": "pyChannel",
+            "color": "pyIssue",
+        }
+        edits = [
+            {"op": "set_processor", "processor": proc},
+            {"op": "set_metric", "name": "CTR", "metric": metric},
+            {
+                "op": "set_tile",
+                "dashboard": "interactions_overview",
+                "page": "overview",
+                "tile": tile,
+            },
+        ]
+        changed = await _call(
+            client,
+            "catalog_draft_apply_operations",
+            {**handle, "expected_revision": opened["revision"], "operations": edits},
+        )
+        call = changed["next_call"]
+        review = await _call(
+            client,
+            call["tool"],
+            {
+                **call["arguments"],
+                "expected_metrics": ["CTR"],
+                "expected_tiles": ["interactions_overview/overview/CTR_by_channel_issue"],
+            },
+        )
+        assert review["ok"], review["issues"]
+        assert "catalog" not in review
+        assert "yaml_diff" not in review["changes"]
+        assert review["counts"] == {
+            **preview["counts"],
+            "Processors": preview["counts"]["Processors"] + 1,
+            "Tiles": 14,
+        }
+        focused = review["metric_review"]
+        assert focused["before"] == old
+        assert focused["after"]["metric"]["expression"] == metric["expression"]
+        assert {t["id"] for t in focused["after"]["tiles"]} == {
+            "CTR_day",
+            "CTR_total",
+            "CTR_by_channel_issue",
+        }
+        sample = frame.head(1000)
+        clicks = sample["pyOutcome"].eq("Clicked").sum()
+        impressions = sample["pyOutcome"].eq("Impression").sum()
+        assert focused["sample"] == {
+            "status": "ok",
+            "sample_rows": sample.height,
+            "numerator": {"state": "Clicks", "count": clicks},
+            "denominator": {"state": "Impressions", "count": impressions},
+            "value": pytest.approx(clicks / impressions if impressions else 0),
+        }
+        assert load(workspace) == before
+        receipt = await _call(
+            client, "catalog_draft_apply", {**handle, "review_token": review["review_token"]}
+        )
+        assert receipt["requires_data_run"]
+        assert not receipt["ingestion_started"]
+        after = load(workspace)
+        assert after.pipelines == before.pipelines
+        assert [
+            p for p in after.processors.processors if p.id != proc["id"]
+        ] == before.processors.processors
+        assert {k: v for k, v in after.metrics.metrics.items() if k != "CTR"} == {
+            k: v for k, v in before.metrics.metrics.items() if k != "CTR"
+        }
+        assert (
+            after.dashboards.dashboards[0].pages[0].tiles[:-1]
+            == before.dashboards.dashboards[0].pages[0].tiles
+        )
+        assert run_workspace(workspace).status == "ok"
+        result = await _call(
+            client, "metric_query", {"metric": "CTR", "group_by": ["pyChannel", "pyIssue"]}
+        )
+        for row in result["rows"]:
+            labels = frame.filter(
+                (pl.col("pyChannel") == row["pyChannel"]) & (pl.col("pyIssue") == row["pyIssue"])
+            )["pyOutcome"]
+            den = labels.eq("Impression").sum()
+            assert row["CTR"] == pytest.approx(labels.eq("Clicked").sum() / den if den else 0)
+        assert result["rows"]

@@ -130,11 +130,12 @@ aggregate readiness separately after apply. See the [bootstrap workflow](../guid
 | `sample_profile` | CSV/Parquet under workspace `data/`; 1–100,000 rows (default 1,000). Returns selected column names, types, null/unique counts; no raw rows. Up to eight distinct values per explicitly selected `example_fields` column |
 | `catalog_authoring_help` | Read-only live reference. Omit `name` to list choices for a topic, then request one kind, operation, executable template, example or KPI recipe. For a nested schema reference pass its `$defs` name as `definition` |
 | `catalog_draft_create` | Sample path, new `source_id`, optional approved fields and business goals. Returns a complete rows-count baseline, profile, revision, compact generation instructions and a callable `help_call`. Set `include_studio_prompt=true` to request the full Studio prompt |
+| `catalog_draft_open` | Start a fresh draft for a published `source_id`. An optional `metric` returns its definition, processor, metrics sharing the processor, direct dependent metrics and affected tiles. Reads the source's configured CSV/Parquet sample with its reader settings. A wildcard requires a matching `sample_path` under `data/`. Supply `approved_fields` to choose the physical fields available to this edit and `limit` to bound the sample (default 1,000) |
 | `catalog_draft_apply_template` | Apply `daily_rows` or `interaction_metrics` to the sampled source in one revision. Accepts `draft_id`, `expected_revision`, named column `bindings`, optional `outcomes`, `timestamp_format` and `dashboard_title`. Returns changed metric and tile IDs, current outputs and a ready-to-call preview after sample validation. A failed template preserves the previous draft and review token |
-| `catalog_draft_apply_operations` | Edit a draft with 1–100 ordered Studio operations using its `expected_revision`. A batch can set processors, metrics and tiles or install a bound recipe. Successful batches return the new revision, operation summaries and the validation call. Use preview for the full edited catalog. Failure preserves the previous revision and review token |
+| `catalog_draft_apply_operations` | Edit a draft with 1–100 ordered Studio operations using its `expected_revision`. A batch can set processors, metrics and tiles or install a bound recipe. Successful batches return the new revision, operation summaries and the suggested validation or preview call. A batch touching another source is rejected before the revision advances. Use preview for the full edited catalog. Failure preserves the previous revision and review token |
 | `catalog_draft_update` | Complete replacement sections plus `expected_revision`; structural errors leave the previous draft intact. Successful updates invalidate review |
 | `catalog_draft_validate` | Catalog/expression/chart validation, Studio sample-field contract, then bounded transform/processor execution without publishing aggregates |
-| `catalog_draft_preview` | Full draft, object additions/changes/removals and YAML diff. Optional `expected_metrics` and `expected_tiles` (full `dashboard/page/tile` IDs) verify coverage for the sampled source. Missing items appear in `issues` and invalidate the review token. Present a successful review before applying |
+| `catalog_draft_preview` | Full draft, object changes and YAML diff by default. With `compact=true`, returns changed object IDs and the focused metric review. Optional `expected_metrics` and `expected_tiles` (full `dashboard/page/tile` IDs) verify coverage for the sampled source. Missing items appear in `issues` and invalidate the review token. Present a successful review before applying |
 | `catalog_draft_apply` | Requires that review token and user authorization. Rechecks validation, sample fingerprint, and catalog/AI file hash; writes all catalog sections in the shared rollback-protected workspace transaction. Returns provenance config hash and `requires_data_run`; never starts ingestion |
 | `catalog_draft_discard` | Releases the in-memory draft without altering workspace files |
 
@@ -166,8 +167,20 @@ daily row count and an Interaction History bundle covering rates, ROC AUC and
 distinct counts. Bind their example field names and outcome rules to the
 user's requirements. Sample values come only from explicit profile requests.
 
-The response `stage` distinguishes an unedited `baseline` from an `edited`
-revision. Check the requested objects in preview even after successful
+Opening a published source returns `stage="opened"` and keeps its existing IDs.
+Creation returns `baseline`; successful edits return `edited`. A duplicate
+source on create returns a callable `next_call` for opening it. A batch
+touching objects owned by a different source reports their names and the
+active source. When there is a single owner it also returns the open call.
+
+For a focused edit, preview includes `metric_review.before` and `after`
+with the processor, formula and affected tiles. For a binary-outcome formula
+using `safe_div` on two count states, `metric_review.sample` reports the
+input sample size, both totals and the rate computed from their sums. The
+value uses the metric's normal zero-denominator behavior. An empty set of
+groups yields `no_groups`; other metric shapes return `unsupported` for
+this numeric check. These sample aggregates are computed in memory.
+ Check the requested objects in preview even after successful
 validation. Authoring failures and unsuccessful validate/preview results carry
 a `help_call` with a tool name and arguments. Approved fields belong to the
 draft; creating a wider profile alone does not expand them. Recreate the draft
