@@ -2993,12 +2993,16 @@ aggregate readiness separately after apply. See the <a href="../../guides/users/
 <td>Sample path, new <code>source_id</code>, optional approved fields and business goals. Returns a complete rows-count baseline, profile, revision, compact generation instructions and a callable <code>help_call</code>. Set <code>include_studio_prompt=true</code> to request the full Studio prompt</td>
 </tr>
 <tr>
+<td><code>catalog_draft_open</code></td>
+<td>Start a fresh draft for a published <code>source_id</code>. An optional <code>metric</code> returns its definition, processor, metrics sharing the processor, direct dependent metrics and affected tiles. Reads the source's configured CSV/Parquet sample with its reader settings. A wildcard requires a matching <code>sample_path</code> under <code>data/</code>. Supply <code>approved_fields</code> to choose the physical fields available to this edit and <code>limit</code> to bound the sample (default 1,000)</td>
+</tr>
+<tr>
 <td><code>catalog_draft_apply_template</code></td>
 <td>Apply <code>daily_rows</code> or <code>interaction_metrics</code> to the sampled source in one revision. Accepts <code>draft_id</code>, <code>expected_revision</code>, named column <code>bindings</code>, optional <code>outcomes</code>, <code>timestamp_format</code> and <code>dashboard_title</code>. Returns changed metric and tile IDs, current outputs and a ready-to-call preview after sample validation. A failed template preserves the previous draft and review token</td>
 </tr>
 <tr>
 <td><code>catalog_draft_apply_operations</code></td>
-<td>Edit a draft with 1–100 ordered Studio operations using its <code>expected_revision</code>. A batch can set processors, metrics and tiles or install a bound recipe. Successful batches return the new revision, operation summaries and the validation call. Use preview for the full edited catalog. Failure preserves the previous revision and review token</td>
+<td>Edit a draft with 1–100 ordered Studio operations using its <code>expected_revision</code>. A batch can set processors, metrics and tiles or install a bound recipe. Successful batches return the new revision, operation summaries and the suggested validation or preview call. A batch touching another source is rejected before the revision advances. Use preview for the full edited catalog. Failure preserves the previous revision and review token</td>
 </tr>
 <tr>
 <td><code>catalog_draft_update</code></td>
@@ -3010,7 +3014,7 @@ aggregate readiness separately after apply. See the <a href="../../guides/users/
 </tr>
 <tr>
 <td><code>catalog_draft_preview</code></td>
-<td>Full draft, object additions/changes/removals and YAML diff. Optional <code>expected_metrics</code> and <code>expected_tiles</code> (full <code>dashboard/page/tile</code> IDs) verify coverage for the sampled source. Missing items appear in <code>issues</code> and invalidate the review token. Present a successful review before applying</td>
+<td>Full draft, object changes and YAML diff by default. With <code>compact=true</code>, returns changed object IDs and the focused metric review. Optional <code>expected_metrics</code> and <code>expected_tiles</code> (full <code>dashboard/page/tile</code> IDs) verify coverage for the sampled source. Missing items appear in <code>issues</code> and invalidate the review token. Present a successful review before applying</td>
 </tr>
 <tr>
 <td><code>catalog_draft_apply</code></td>
@@ -3047,8 +3051,19 @@ batch operations and installed KPI templates. The <code>example</code> topic inc
 daily row count and an Interaction History bundle covering rates, ROC AUC and
 distinct counts. Bind their example field names and outcome rules to the
 user's requirements. Sample values come only from explicit profile requests.</p>
-<p>The response <code>stage</code> distinguishes an unedited <code>baseline</code> from an <code>edited</code>
-revision. Check the requested objects in preview even after successful
+<p>Opening a published source returns <code>stage="opened"</code> and keeps its existing IDs.
+Creation returns <code>baseline</code>; successful edits return <code>edited</code>. A duplicate
+source on create returns a callable <code>next_call</code> for opening it. A batch
+touching objects owned by a different source reports their names and the
+active source. When there is a single owner it also returns the open call.</p>
+<p>For a focused edit, preview includes <code>metric_review.before</code> and <code>after</code>
+with the processor, formula and affected tiles. For a binary-outcome formula
+using <code>safe_div</code> on two count states, <code>metric_review.sample</code> reports the
+input sample size, both totals and the rate computed from their sums. The
+value uses the metric's normal zero-denominator behavior. An empty set of
+groups yields <code>no_groups</code>; other metric shapes return <code>unsupported</code> for
+this numeric check. These sample aggregates are computed in memory.
+ Check the requested objects in preview even after successful
 validation. Authoring failures and unsuccessful validate/preview results carry
 a <code>help_call</code> with a tool name and arguments. Approved fields belong to the
 draft; creating a wider profile alone does not expand them. Recreate the draft

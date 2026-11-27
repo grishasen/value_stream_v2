@@ -2580,6 +2580,11 @@ using the same configuration contracts as AI Configuration Studio.</p>
 <li>Create a deterministic complete baseline that counts all records, with no
   inferred outcome or temporal semantics. Preserve existing unsampled sources
   and their artifacts when adding a new sampled source.</li>
+<li>Open existing sources against their published configuration and a matching
+  bounded CSV/Parquet sample. Keep the same source and dashboard IDs across
+  edit sessions. Reject cross-source operation batches before advancing the
+  draft. Focused review shows metric dependencies and can evaluate count ratios
+  on the sample through the configured processor and formula.</li>
 <li>Retain at most 32 process-local drafts, with a one-hour lifetime. Use opaque
   ids, compare revisions on update, and invalidate review after every update.
   These are not per-user sessions or permissions.</li>
